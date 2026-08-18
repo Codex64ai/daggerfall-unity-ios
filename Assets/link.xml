@@ -1,0 +1,45 @@
+<!--
+  Daggerfall Unity - IL2CPP preservation manifest for iOS.
+  Place at Assets/link.xml
+
+  Why this file exists:
+  iOS forces the IL2CPP backend, which AOT-compiles and strips managed code it
+  cannot see being used. Daggerfall Unity constructs and populates most of its
+  persistent state through reflection via FullSerializer ([fsObject] classes:
+  save games, quest state, KeyBinds.txt, mod settings). The linker sees no call
+  sites for those types, strips them, and the build then fails ONLY on device
+  with serialization errors that never reproduce in the editor.
+
+  Assembly names below were read from each DLL's CLI metadata, not guessed.
+  Note "FullSerializer - Unity" really is the assembly name, spaces and hyphen
+  included - "FullSerializer" would match nothing and silently preserve nothing.
+-->
+<linker>
+
+  <!-- All DFU game code. There are no asmdefs in the project, so every script
+       under Assets/Scripts compiles into Assembly-CSharp. Preserving the whole
+       assembly costs binary size but removes an entire class of device-only
+       failures; narrow this later once the build is known good. -->
+  <assembly fullname="Assembly-CSharp" preserve="all" />
+
+  <!-- Reflection-driven serializer behind every save game and keybind file.
+       Verified assembly name: "FullSerializer - Unity" (v0.0.0.0). -->
+  <assembly fullname="FullSerializer - Unity" preserve="all" />
+
+  <!-- settings.ini parser. Verified assembly name: "INIFileParser" (v2.2.2.0),
+       root namespace IniParser.* -->
+  <assembly fullname="INIFileParser" preserve="all" />
+
+  <!-- LINQ is used across the codebase (InputManager, WeaponManager and others).
+       Call sites are static so the linker normally keeps these, but preserving
+       System.Core is cheap insurance against generic instantiation stripping. -->
+  <assembly fullname="System.Core" preserve="all" />
+
+  <!-- Generic collections that FullSerializer instantiates reflectively when
+       rehydrating Dictionary/List fields in save data. -->
+  <assembly fullname="mscorlib">
+    <type fullname="System.Collections.Generic.Dictionary`2" preserve="all" />
+    <type fullname="System.Collections.Generic.List`1" preserve="all" />
+  </assembly>
+
+</linker>

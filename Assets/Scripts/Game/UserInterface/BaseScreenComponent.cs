@@ -723,7 +723,8 @@ namespace DaggerfallWorkshop.Game.UserInterface
             }
 
             // Handle mouse wheel
-            float mouseScroll = Input.GetAxis("Mouse ScrollWheel");
+            // MOBILE: routed through InputManager so two-finger scroll reaches the UI.
+            float mouseScroll = InputManager.Instance.MouseScroll;
             if (mouseOverComponent && mouseScroll != 0)
             {
                 if (mouseScroll > 0)

@@ -267,10 +267,29 @@ namespace DaggerfallWorkshop.Game
         {
             get
             {
+                // MOBILE: divert the classic UI to the touch-driven virtual cursor.
+                if (Mobile.MobileInput.VirtualCursorActive)
+                    return Mobile.MobileInput.CursorPosition;
+
                 if (UsingController)
                     return controllerCursorPosition;
                 else
                     return Input.mousePosition;
+            }
+        }
+
+        /// <summary>
+        /// MOBILE: scroll wheel value for the classic UI. Falls through to the real
+        /// wheel on desktop.
+        /// </summary>
+        public float MouseScroll
+        {
+            get
+            {
+                if (Mobile.MobileInput.VirtualCursorActive)
+                    return Mobile.MobileInput.MouseScroll;
+
+                return Input.GetAxis("Mouse ScrollWheel");
             }
         }
 
@@ -484,6 +503,11 @@ namespace DaggerfallWorkshop.Game
 
             UpdateControllerCursorPosition();
 
+            // MOBILE: tick virtual buttons and the touch cursor. Must run before the
+            // paused early-return below, because an open menu pauses the game and the
+            // cursor still has to work.
+            Mobile.MobileInput.PollCursorStage();
+
             // Do nothing if paused
             if (isPaused)
             {
@@ -539,6 +563,12 @@ namespace DaggerfallWorkshop.Game
                     mouseY *= -1;
             }
 
+            // MOBILE: overwrite mouseX/mouseY with touch drag and push joystick movement
+            // plus virtual button actions. Placed here so UpdateLook() and
+            // WeaponManager.TrackMouseAttack() both see the injected values, and so
+            // ApplyFriction() below still decelerates the movement axes correctly.
+            Mobile.MobileInput.PollGameplayStage(this);
+
             if (ToggleAutorun)
             {
                 ApplyVerticalForce(1);
@@ -557,6 +587,16 @@ namespace DaggerfallWorkshop.Game
 
         void OnGUI()
         {
+            // MOBILE: draw the virtual cursor in the same IMGUI layer as the classic UI
+            // so it composites correctly over every window.
+            if (Mobile.MobileInput.VirtualCursorActive && Mobile.MobileInput.CursorTexture != null)
+            {
+                Cursor.visible = false;
+                GUI.depth = 0;
+                GUI.DrawTexture(Mobile.MobileInput.CursorRect, Mobile.MobileInput.CursorTexture);
+                return;
+            }
+
             if (CursorVisible)
             {
                 if (UsingController)
@@ -610,6 +650,22 @@ namespace DaggerfallWorkshop.Game
         public void AddAction(Actions action)
         {
             currentActions.Add(action);
+        }
+
+        /// <summary>
+        /// MOBILE: overwrite the raw mouse axes with touch-drag deltas.
+        ///
+        /// These feed two consumers at once, exactly as the PC mouse does:
+        ///   UpdateLook()                     -> lookX/lookY -> PlayerMouseLook
+        ///   WeaponManager.TrackMouseAttack() -> gesture trail -> attack direction
+        ///
+        /// Call from PollGameplayStage only; anywhere else and UpdateLook() will
+        /// overwrite the values or miss them entirely.
+        /// </summary>
+        public void SetMobileMouseAxes(float x, float y)
+        {
+            mouseX = x;
+            mouseY = y;
         }
 
         /// <summary>
@@ -1049,31 +1105,52 @@ namespace DaggerfallWorkshop.Game
 
         public bool GetMouseButtonDown(int button)
         {
+            // MOBILE: virtual cursor taps and long-press drags.
+            if (Mobile.MobileInput.VirtualCursorActive)
+                return Mobile.MobileInput.GetMouseButtonDown(button);
+
             return Input.GetMouseButtonDown(button) || (EnableController && GetKeyDown(joystickUICache[button], false));
         }
 
         public bool GetMouseButtonUp(int button)
         {
+            if (Mobile.MobileInput.VirtualCursorActive)
+                return Mobile.MobileInput.GetMouseButtonUp(button);
+
             return Input.GetMouseButtonUp(button) || (EnableController && GetKeyUp(joystickUICache[button], false));
         }
 
         public bool GetMouseButton(int button)
         {
+            if (Mobile.MobileInput.VirtualCursorActive)
+                return Mobile.MobileInput.GetMouseButton(button);
+
             return Input.GetMouseButton(button) || (EnableController && GetKey(joystickUICache[button], false));
         }
 
         public bool GetBackButtonDown()
         {
+            // MOBILE: every classic window closes through this channel, not through
+            // Actions.Escape, so the on-screen back button must feed it here.
+            if (Mobile.MobileInput.Enabled && Mobile.MobileInput.GetBackButtonDown())
+                return true;
+
             return Input.GetKeyDown(KeyCode.Escape) || (EnableController && GetKeyDown(joystickUICache[3], false));
         }
 
         public bool GetBackButtonUp()
         {
+            if (Mobile.MobileInput.Enabled && Mobile.MobileInput.GetBackButtonUp())
+                return true;
+
             return Input.GetKeyUp(KeyCode.Escape) || (EnableController && GetKeyUp(joystickUICache[3], false));
         }
 
         public bool GetBackButton()
         {
+            if (Mobile.MobileInput.Enabled && Mobile.MobileInput.GetBackButton())
+                return true;
+
             return Input.GetKey(KeyCode.Escape) || (EnableController && GetKey(joystickUICache[3], false));
         }
 

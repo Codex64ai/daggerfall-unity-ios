@@ -157,7 +157,7 @@ namespace DaggerfallWorkshop.Game.UserInterface
         void DrawClassicGlyph(byte rawAscii, Rect targetRect, Color color)
         {
             Rect atlasRect = atlasRects[rawAscii - asciiStart];
-            if (SystemInfo.operatingSystemFamily == OperatingSystemFamily.MacOSX)
+            if (DaggerfallWorkshop.Game.Mobile.MobileInput.UseMetalUIPath /* MOBILE: Metal, not just macOS */)
             {
                 DaggerfallUI.Instance.PixelFontMaterial.SetColor(UIShaderParam._Color, color);
                 Graphics.DrawTexture(targetRect, atlasTexture, atlasRect, 0, 0, 0, 0, DaggerfallUI.Instance.PixelFontMaterial);
@@ -256,7 +256,7 @@ namespace DaggerfallWorkshop.Game.UserInterface
             Rect targetRect = new Rect(xpos, ypos, glyph.size.x * scalingRatio, glyph.size.y * scalingRatio);
 
             // Draw glyph
-            if (SystemInfo.operatingSystemFamily == OperatingSystemFamily.MacOSX)
+            if (DaggerfallWorkshop.Game.Mobile.MobileInput.UseMetalUIPath /* MOBILE: Metal, not just macOS */)
             {
                 DaggerfallUI.Instance.SDFFontMaterial.SetColor(UIShaderParam._Color, color);
                 Graphics.DrawTexture(targetRect, sdfFontInfo.Value.atlasTexture, glyph.rect, 0, 0, 0, 0, DaggerfallUI.Instance.SDFFontMaterial);

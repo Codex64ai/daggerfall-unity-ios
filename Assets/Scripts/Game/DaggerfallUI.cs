@@ -387,7 +387,7 @@ namespace DaggerfallWorkshop.Game
                 uiBlitMaterial = new Material(Shader.Find(MaterialReader._DaggerfallUIBlitShaderName));
 
             // Set shader platform keyword for MacOSX
-            if (SystemInfo.operatingSystemFamily == OperatingSystemFamily.MacOSX)
+            if (DaggerfallWorkshop.Game.Mobile.MobileInput.UseMetalUIPath /* MOBILE: Metal, not just macOS */)
             {
                 pixelFontMaterial.EnableKeyword(KeyWords.MacOSX);
                 sdfFontMaterial.EnableKeyword(KeyWords.MacOSX);
@@ -1426,7 +1426,7 @@ namespace DaggerfallWorkshop.Game
         /// <param name="color">A tint color to apply on the texture.</param>
         public static void DrawTexture(Rect position, Texture image, ScaleMode scaleMode, bool alphaBlend, Color color)
         {
-            if (SystemInfo.operatingSystemFamily == OperatingSystemFamily.MacOSX)
+            if (DaggerfallWorkshop.Game.Mobile.MobileInput.UseMetalUIPath /* MOBILE: Metal, not just macOS */)
             {
                 // Mac UI rendering to get correct linear output requires Graphics.DrawTexture with sRGB textures
                 // Using GUI.DrawTexture on Mac with sRGB textures results in improper colour space adjustment and they appear bright
@@ -1474,7 +1474,7 @@ namespace DaggerfallWorkshop.Game
         {
             // Mac UI rendering to get correct linear output requires Graphics.DrawTexture with sRGB textures
             // Using GUI.DrawTexture on Mac with sRGB textures results in improper colour space adjustment and they appear bright
-            if (SystemInfo.operatingSystemFamily == OperatingSystemFamily.MacOSX)
+            if (DaggerfallWorkshop.Game.Mobile.MobileInput.UseMetalUIPath /* MOBILE: Metal, not just macOS */)
             {
                 Material mat = (alphaBlend) ? DaggerfallUI.Instance.UIBlendMaterial : DaggerfallUI.Instance.UIBlitMaterial;
                 mat.SetColor(UIShaderParam._ColorTint, color);
