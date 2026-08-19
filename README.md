@@ -1,3 +1,14 @@
+# >> This fork: Daggerfall on iPhone & iPad <<
+
+**This is the iOS touchscreen port of Daggerfall Unity (pre-alpha).**
+Touch controls, install instructions, game-data setup, and the mods situation:
+**[README-iOS.md](README-iOS.md)** - grab builds from
+[Releases](https://github.com/Codex64ai/daggerfall-unity-ios/releases).
+
+Upstream project README follows below.
+
+---
+
 ![image](https://github.com/Interkarma/daggerfall-unity/assets/10426244/4f176f9d-6332-47b3-a4d7-317ed8d6b38b)
 
 # What is Daggerfall Unity?
