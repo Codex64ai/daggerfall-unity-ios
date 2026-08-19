@@ -137,9 +137,24 @@ distance in pixels.
 
 ## Known limitations
 
-- **Mods do not work.** iOS requires IL2CPP, which is ahead-of-time only. Daggerfall
-  Unity's mod system compiles C# at runtime, which is impossible without a JIT. Asset-only
-  mods may work if their AssetBundles are built for iOS.
+- **Mods do not work - and mostly cannot, ever, on iOS.** This deserves a proper
+  explanation because it is the biggest difference from desktop Daggerfall Unity:
+
+  Apple requires all iOS apps to use IL2CPP, Unity's ahead-of-time compiler. There is
+  no JIT on iOS - the OS forbids generating and executing new code at runtime.
+  Daggerfall Unity's mod system is built on exactly that: it ships a C# compiler
+  (`mcs`) inside the game and compiles mod scripts *while the game runs*. On iOS that
+  is a hard platform impossibility, not a missing feature:
+
+  | Mod type | Status on iOS | Why |
+  |---|---|---|
+  | Script mods (`.cs` in `.dfmod`) | **Never** | Runtime C# compilation requires a JIT; iOS forbids it |
+  | Precompiled `.dll` mods | **Never** | Loading new managed assemblies also requires the JIT infrastructure |
+  | Asset-only mods (textures, models, sounds) | **Possible, unsupported here** | AssetBundles must be *rebuilt for iOS* by the mod author; desktop bundles will not load |
+  | Loose-file texture replacements | **Untested** | DFU's StreamingAssets texture injection may work; nobody has tried on this port yet |
+
+  If a mod matters enough, its *features* can be ported into this fork as source code
+  and compiled in - that is the only true path for script mods on iOS. PRs welcome.
 - **Xcode/Unity pairing.** Unity 2022.3 predates current Xcode releases; the generated
   Xcode project may need manual fixes.
 - **Free Apple ID signing expires after 7 days**, after which you re-sign and redeploy.
