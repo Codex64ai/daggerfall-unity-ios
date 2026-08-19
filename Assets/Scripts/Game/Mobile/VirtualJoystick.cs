@@ -168,7 +168,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         static readonly List<UnityEngine.EventSystems.RaycastResult> raycastScratch =
             new List<UnityEngine.EventSystems.RaycastResult>();
 
-        static bool IsOverInteractive(Vector2 screenPos)
+        public static bool IsOverInteractive(Vector2 screenPos)
         {
             var es = UnityEngine.EventSystems.EventSystem.current;
             if (es == null)

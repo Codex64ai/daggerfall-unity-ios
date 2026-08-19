@@ -53,7 +53,18 @@ namespace DaggerfallWorkshop.Game.Mobile
         int activePointerId = pointerIdNone;
         bool combatMode;
 
-        public bool IsDragging { get { return activePointerId != pointerIdNone; } }
+        // Direct-touch tracking (device): UGUI OnDrag proved unreliable on this hardware
+        // (the sticks and layout editor both migrated for the same reason) - swipes were
+        // arming the swing but delivering no motion, so attacks never fired.
+        int directFingerId = -1;
+        Vector2 directLastPos;
+
+        bool DirectTouchActive
+        {
+            get { return Input.touchSupported && !Application.isEditor; }
+        }
+
+        public bool IsDragging { get { return activePointerId != pointerIdNone || directFingerId >= 0; } }
 
         public bool CombatMode { get { return combatMode; } }
 
@@ -67,16 +78,76 @@ namespace DaggerfallWorkshop.Game.Mobile
             ForceRelease();
         }
 
+        void Update()
+        {
+            if (!DirectTouchActive)
+                return;
+
+            if (directFingerId >= 0)
+            {
+                for (int i = 0; i < Input.touchCount; i++)
+                {
+                    Touch t = Input.GetTouch(i);
+                    if (t.fingerId != directFingerId)
+                        continue;
+
+                    // A stick's claim can land a frame after ours - one finger, one owner.
+                    if (VirtualJoystick.IsFingerClaimed(t.fingerId) ||
+                        t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)
+                    {
+                        directFingerId = -1;
+                        return;
+                    }
+
+                    Vector2 d = t.position - directLastPos;
+                    directLastPos = t.position;
+                    if (d.magnitude <= deltaSpikeLimit)
+                    {
+                        accumulated.x += d.x;
+                        accumulated.y += d.y * verticalScale * (invertY ? -1f : 1f);
+                    }
+                    return;
+                }
+                directFingerId = -1;                  // finger vanished
+                return;
+            }
+
+            for (int i = 0; i < Input.touchCount; i++)
+            {
+                Touch t = Input.GetTouch(i);
+                if (t.phase != TouchPhase.Began)
+                    continue;
+                if (VirtualJoystick.IsFingerClaimed(t.fingerId))
+                    continue;                          // a stick owns it
+                if (VirtualJoystick.IsOverInteractive(t.position))
+                    continue;                          // buttons win
+                if (IsInGripCorner(t.position))
+                    continue;                          // resting thumb
+                if (!combatMode && t.position.x < Screen.width * ignoreLeftFraction)
+                    continue;                          // left = move territory outside combat
+
+                directFingerId = t.fingerId;
+                directLastPos = t.position;
+                return;
+            }
+        }
+
         public void OnPointerDown(PointerEventData eventData)
         {
+            if (DirectTouchActive)
+                return;                                 // Update() owns touches on device
+
             if (activePointerId != pointerIdNone)
                 return;                                 // second finger ignored
 
             if (IsInGripCorner(eventData.position))
                 return;                                 // resting thumb, not a look drag
 
-            if (eventData.position.x < Screen.width * ignoreLeftFraction)
-                return;                                 // move-stick territory: camera is right-side only
+            // Outside combat, the left region never drives the camera (move-stick land).
+            // IN combat, a left-hand swipe is an attack - both thumbs fight: right aims
+            // on the stick, left swipes to strike.
+            if (!combatMode && eventData.position.x < Screen.width * ignoreLeftFraction)
+                return;
 
             if (VirtualJoystick.IsFingerClaimed(eventData.pointerId))
                 return;                                 // a stick owns this finger
@@ -139,6 +210,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         public void ForceRelease()
         {
             activePointerId = pointerIdNone;
+            directFingerId = -1;
             accumulated = Vector2.zero;
         }
 

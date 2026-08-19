@@ -94,6 +94,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         [Tooltip("Keep Actions.SwingWeapon held this long after the finger lifts, so short flicks still resolve and bows release.")]
         public float swingHoldExtension = 0.12f;
 
+
+
         [Header("Virtual Cursor")]
         [Tooltip("Classic-style cursor drawn by InputManager.OnGUI while a menu is open. " +
                  "REQUIRED - without it the menu cursor is invisible.")]
@@ -152,6 +154,79 @@ namespace DaggerfallWorkshop.Game.Mobile
         bool thresholdApplied;
         int appliedScreenWidth;
         int appliedScreenHeight;
+
+        // TEMP DIAGNOSTIC v3 (engine 2022.3.62f3): action lifecycle + raw input states.
+        int lifecycleFrames;
+        float nextIdleDump;
+
+        void LateUpdate()
+        {
+            if (!InputManager.HasInstance)
+                return;
+            InputManager im = InputManager.Instance;
+            const InputManager.Actions act = InputManager.Actions.ActivateCenterObject;
+
+            if (lifecycleFrames > 0)
+            {
+                lifecycleFrames--;
+
+                if (lifecycleFrames == 5)   // once per tap: census + binding introspection
+                {
+                    var controllers = FindObjectsOfType<MobileInputController>(true);
+                    var canvases = FindObjectsOfType<Canvas>(true);
+                    int activateButtons = 0;
+                    foreach (var b in FindObjectsOfType<MobileActionButton>(true))
+                        if (b.action == InputManager.Actions.ActivateCenterObject) activateButtons++;
+
+                    string bindingInfo = "?";
+                    try
+                    {
+                        var fld = typeof(InputManager).GetField("existingKeyDict",
+                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                        var dict = fld.GetValue(im) as System.Collections.Generic.Dictionary<KeyCode, InputManager.Actions>;
+                        var sb = new System.Text.StringBuilder();
+                        foreach (var kvp in dict)
+                            if (kvp.Value == InputManager.Actions.ActivateCenterObject)
+                                sb.Append(kvp.Key).Append("(down=").Append(Input.GetKey(kvp.Key)).Append(") ");
+                        bindingInfo = sb.Length > 0 ? sb.ToString() : "none";
+                    }
+                    catch (System.Exception ex) { bindingInfo = "reflect-fail:" + ex.Message; }
+
+                    Debug.Log(string.Format(
+                        "[Census] controllers={0} canvases={1} activateButtons={2} thisIsSingleton={3}\n  existingKeyDict->Activate: {4}",
+                        controllers.Length, canvases.Length, activateButtons, (Instance == this), bindingInfo));
+                }
+
+                var cur = new System.Text.StringBuilder();
+                foreach (InputManager.Actions a in im.CurrentActions)
+                    cur.Append(a).Append(' ');
+
+                var taps = new System.Text.StringBuilder();
+                foreach (var kvp in tapActions)
+                    taps.Append(kvp.Key).Append(':').Append(kvp.Value).Append(' ');
+
+                var helds = new System.Text.StringBuilder();
+                foreach (var a in heldActions)
+                    helds.Append(a).Append(' ');
+
+                Debug.Log(string.Format(
+                    "[LC f{0}] has={1} started={2} complete={3}\n  current=[{4}]\n  taps=[{5}] held=[{6}] touches={7}",
+                    5 - lifecycleFrames, im.HasAction(act), im.ActionStarted(act), im.ActionComplete(act),
+                    cur.ToString().TrimEnd(), taps.ToString().TrimEnd(), helds.ToString().TrimEnd(),
+                    Input.touchCount));
+            }
+
+            if (Input.touchCount == 0 && Time.unscaledTime >= nextIdleDump && !MobileInput.MenuMode)
+            {
+                nextIdleDump = Time.unscaledTime + 2f;
+                var names = new System.Text.StringBuilder();
+                foreach (InputManager.Actions a in im.CurrentActions)
+                    names.Append(a).Append(' ');
+                Debug.Log(string.Format("[Idle] m0key={0} m0btn={1} anyKey={2} actions=[{3}]",
+                    Input.GetKey(KeyCode.Mouse0), Input.GetMouseButton(0), Input.anyKey,
+                    names.ToString().TrimEnd()));
+            }
+        }
 
         // Virtual button taps held for 2 frames so both ActionStarted() and
         // ActionComplete() fire. PlayerActivate.cs:280 keys off ActionComplete, so a
@@ -232,14 +307,62 @@ namespace DaggerfallWorkshop.Game.Mobile
             // clear them for this session. KeyBinds.txt on disk is not modified.
             if (Input.touchSupported && !Application.isEditor && InputManager.HasInstance)
             {
-                InputManager im = InputManager.Instance;
-                foreach (KeyCode mouseKey in new[] { KeyCode.Mouse0, KeyCode.Mouse1, KeyCode.Mouse2 })
-                {
-                    im.ClearBinding(mouseKey, true);
-                    im.ClearBinding(mouseKey, false);
-                }
-                Debug.Log("[MobileInput] cleared Mouse0/1/2 keybinds - phantom held mouse button on iPadOS");
+                ClearPhantomProneBindings();
             }
+        }
+
+        /// <summary>
+        /// On touch devices, remove every mouse and joystick-button keybind, primary AND
+        /// secondary, then force the private binding cache to rebuild.
+        ///
+        /// Two device-proven reasons. First, iPadOS (Magic Keyboard attached) reports a
+        /// mouse button as permanently held. Second - the subtle one - severing only the
+        /// Mouse0 primary PROMOTED our own persisted gamepad secondary
+        /// (JoystickButton0 -> ActivateCenterObject, from MobileGamepadBindings) into the
+        /// merged dict, and iPadOS pulses joystick-button state during touches: the action
+        /// stayed pinned and doors remained unopenable. Pulled from the device's own
+        /// KeyBinds.txt. Real gamepads are unaffected: on connect,
+        /// MobileGamepadBindings.Apply() rebinds live; on disconnect we clear again.
+        /// KeyBinds.txt on disk is never modified here.
+        /// </summary>
+        void ClearPhantomProneBindings()
+        {
+            if (!InputManager.HasInstance)
+                return;
+
+            InputManager im = InputManager.Instance;
+
+            var prone = new List<KeyCode>
+            {
+                KeyCode.Mouse0, KeyCode.Mouse1, KeyCode.Mouse2,
+                KeyCode.Mouse3, KeyCode.Mouse4, KeyCode.Mouse5, KeyCode.Mouse6,
+            };
+            for (KeyCode k = KeyCode.JoystickButton0; k <= KeyCode.JoystickButton19; k++)
+                prone.Add(k);
+
+            foreach (KeyCode key in prone)
+            {
+                im.ClearBinding(key, true);
+                im.ClearBinding(key, false);
+            }
+
+                // ClearBinding edits the source dictionaries, but the input loop reads a
+                // CACHED merge (existingKeyDict) rebuilt only by the private
+                // UpdateBindingCache(). Without this, the stale Mouse0->Activate entry
+                // survives and the phantom-held button keeps the action pinned - the clear
+                // only ever appeared to work. Invoke the rebuild via reflection (safe under
+                // IL2CPP: link.xml preserves Assembly-CSharp wholesale).
+                var rebuild = typeof(InputManager).GetMethod("UpdateBindingCache",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (rebuild != null)
+                    rebuild.Invoke(im, null);
+                else
+                    Debug.LogError("[MobileInput] UpdateBindingCache not found - mouse-binding clear will not stick!");
+
+            // On-device verification: both slots must resolve to None.
+            Debug.Log("[MobileInput] cleared mouse+joystick keybinds; Activate primary=" +
+                      im.GetBinding(InputManager.Actions.ActivateCenterObject, true) +
+                      " secondary=" + im.GetBinding(InputManager.Actions.ActivateCenterObject, false));
         }
 
         void OnDisable()
@@ -365,6 +488,24 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             nextControllerPoll = Time.unscaledTime + Mathf.Max(controllerPollInterval, 0.1f);
 
+            // SELF-HEALING BINDING GUARD. Each scene carries an InputManager whose Start()
+            // loads KeyBinds.txt, and Unity does not order it against our Start() - so the
+            // phantom-prone mouse binding can resurrect AFTER our clear, nondeterministically
+            // per launch (which is why the door worked exactly once). Instead of winning an
+            // ordering race, detect any resurrection on this cadence and re-clear.
+            if (Input.touchSupported && !Application.isEditor && !controllerConnected &&
+                InputManager.HasInstance)
+            {
+                InputManager imGuard = InputManager.Instance;
+                if (imGuard.GetBinding(InputManager.Actions.ActivateCenterObject, true) != KeyCode.None ||
+                    imGuard.GetBinding(InputManager.Actions.ActivateCenterObject, false) != KeyCode.None ||
+                    imGuard.GetBinding(InputManager.Actions.SwingWeapon, true) == KeyCode.Mouse1)
+                {
+                    Debug.Log("[MobileInput] phantom-prone bindings RESURRECTED (scene InputManager reloaded keybinds) - re-clearing");
+                    ClearPhantomProneBindings();
+                }
+            }
+
             bool found = false;
             string[] names = Input.GetJoystickNames();
             for (int i = 0; i < names.Length; i++)
@@ -400,9 +541,12 @@ namespace DaggerfallWorkshop.Game.Mobile
                 InputManager.Instance.EnableController = found || DaggerfallUnity.Settings.EnableController;
 
             // DFU binds gamepad buttons for UI clicks only; gameplay actions default to
-            // keyboard. Apply sane gamepad defaults the first time one is actually seen.
+            // keyboard. Apply gamepad defaults while one is connected; strip them again on
+            // disconnect - leftover joystick bindings are phantom fuel on iPadOS.
             if (found)
-                MobileGamepadBindings.ApplyOnce();
+                MobileGamepadBindings.Apply();
+            else
+                ClearPhantomProneBindings();
 
             ApplyHudVisibility();
 
@@ -624,6 +768,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         public void QueueAction(InputManager.Actions action, int frames = 2)
         {
             tapActions[action] = Mathf.Max(frames, 2);
+            Debug.Log("[MobileInput] queued " + action);
+            if (action == InputManager.Actions.ActivateCenterObject)
+                lifecycleFrames = 6;
         }
 
         /// <summary>Hold or release an action for as long as a virtual button is pressed.</summary>
@@ -733,10 +880,18 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             Vector2 delta = lookZone.ConsumeDelta() * touchToMouseScale;
 
-            // Right stick: rate-based like a gamepad. Square the response so small
-            // deflections give fine aim and full tilt turns fast. Uses unscaled time so
-            // the turn rate is framerate-independent.
-            if (lookJoystick != null && lookJoystick.IsHeld)
+            // Swing state first, so the stick's look contribution can be gated on it.
+            // SWIPES ARE THE ONLY ATTACK INPUT - the right stick never swings. (Flick-to-
+            // swing existed briefly and device feedback was unanimous: the stick should
+            // only ever be a camera.)
+            bool combat = MobileInput.CombatMode;
+            if (combat && lookZone.IsDragging)
+                swingHoldUntil = Time.unscaledTime + swingHoldExtension;
+            bool swingWindow = combat && Time.unscaledTime < swingHoldUntil;
+
+            // Right stick: rate-based look, always and only. Excluded while a swipe-swing
+            // is live so the aiming thumb cannot contaminate the attack direction.
+            if (lookJoystick != null && lookJoystick.IsHeld && !swingWindow)
             {
                 Vector2 stick = lookJoystick.Value;
                 stick = new Vector2(stick.x * Mathf.Abs(stick.x), stick.y * Mathf.Abs(stick.y));
@@ -759,15 +914,9 @@ namespace DaggerfallWorkshop.Game.Mobile
             else if (delta.sqrMagnitude > 0f)
                 inputManager.SetMobileMouseAxes(delta.x, delta.y);
 
-            if (!MobileInput.CombatMode)
-                return;
-
-            if (lookZone.IsDragging)
-                swingHoldUntil = Time.unscaledTime + swingHoldExtension;
-
             // Holding SwingWeapon is what enables WeaponManager's gesture tracking.
             // Releasing it clears the gesture and, for bows, fires the arrow.
-            if (Time.unscaledTime < swingHoldUntil)
+            if (swingWindow)
                 inputManager.AddAction(InputManager.Actions.SwingWeapon);
         }
 

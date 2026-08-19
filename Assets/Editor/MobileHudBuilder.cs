@@ -37,11 +37,25 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             DestroyExisting(controllerName);
 
             // ---------------------------------------------------------- event system
-            if (Object.FindObjectOfType<EventSystem>() == null)
+            EventSystem eventSystem = Object.FindObjectOfType<EventSystem>();
+            if (eventSystem == null)
             {
                 GameObject es = new GameObject("EventSystem",
                     typeof(EventSystem), typeof(StandaloneInputModule));
                 Undo.RegisterCreatedObjectUndo(es, "Create EventSystem");
+                eventSystem = es.GetComponent<EventSystem>();
+            }
+
+            // Phantom-mouse kill switch: iPadOS trackpads present a held mouse button and
+            // mousePosition parks at the last touch, so UGUI's mouse path re-pressed
+            // whatever was last tapped. Deny the mouse on touch devices.
+            StandaloneInputModule module = eventSystem.GetComponent<StandaloneInputModule>();
+            if (module != null)
+            {
+                MobileUGUIInput uguiInput = eventSystem.GetComponent<MobileUGUIInput>();
+                if (uguiInput == null)
+                    uguiInput = eventSystem.gameObject.AddComponent<MobileUGUIInput>();
+                module.inputOverride = uguiInput;
             }
 
             // ---------------------------------------------------------- canvas
