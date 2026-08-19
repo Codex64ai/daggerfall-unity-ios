@@ -29,9 +29,10 @@ namespace DaggerfallWorkshop.Game.Mobile
         public TouchLookZone lookZone;
         public VirtualJoystick joystick;
         public CanvasGroup hudGroup;
+        public MobileLayoutEditor layoutEditor;
 
         [Header("Panel")]
-        public Vector2 panelSize = new Vector2(760f, 810f);
+        public Vector2 panelSize = new Vector2(760f, 930f);
 
         RectTransform panel;
         Text header;
@@ -130,10 +131,22 @@ namespace DaggerfallWorkshop.Game.Mobile
                 v => { if (lookZone != null) lookZone.invertY = v; },
                 "inverty");
 
+            AddToggle(panel, ref y, rowH, "Show diagnostics",
+                () => controller != null && controller.showGestureDebug,
+                v => { if (controller != null) controller.showGestureDebug = v; },
+                "debug");
+
             AddToggle(panel, ref y, rowH, "Floating joystick",
                 () => joystick != null && joystick.floating,
                 v => { if (joystick != null) joystick.floating = v; },
                 "floatstick");
+
+            AddButton(panel, ref y, rowH, "Edit layout (drag / resize / hide)", () =>
+            {
+                Close();
+                if (layoutEditor != null)
+                    layoutEditor.Enter();
+            });
 
             AddButton(panel, ref y, rowH, "Apply gamepad defaults", () =>
             {

@@ -99,6 +99,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
             VirtualJoystick joystick = joyGo.AddComponent<VirtualJoystick>();
             joystick.handle = knobRect;
+            // Left 40% x bottom 70% of the screen is movement territory: any grab there
+            // snaps this stick under the thumb. Pairs with TouchLookZone.ignoreLeftFraction
+            // so an off-ring grab can never yank the camera instead of walking.
+            joystick.screenClaimRegion = new Rect(0f, 0f, 0.40f, 0.70f);
 
             // ---------------------------------------------------------- look joystick
             // Twin-stick: right stick turns the camera at a rate set by deflection.
@@ -124,6 +128,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
             VirtualJoystick lookJoystick = lookJoyGo.AddComponent<VirtualJoystick>();
             lookJoystick.handle = lookKnobRect;
+            // Same territory treatment as the move stick - on device the exact-rect hit
+            // test proved unreliable (left stick only worked once IT had a region), so
+            // grabs in the lower-right quadrant snap this stick under the thumb. Upper
+            // screen stays with the drag-look/swipe zone.
+            lookJoystick.screenClaimRegion = new Rect(0.60f, 0f, 0.40f, 0.60f);
 
             // ---------------------------------------------------------- activate button
             GameObject activateGo = CreateActionButton(
@@ -253,6 +262,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // gameplay HUD is hidden behind a classic menu.
             GameObject panelHost = CreateFullScreenChild(canvasGo, "SettingsHost");
             MobileSettingsPanel settingsPanel = panelHost.AddComponent<MobileSettingsPanel>();
+            MobileLayoutEditor layoutEditor = panelHost.AddComponent<MobileLayoutEditor>();
 
             // ---------------------------------------------------------- controller
             GameObject controllerGo = new GameObject(controllerName);
@@ -292,6 +302,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             settingsPanel.lookZone = lookZone;
             settingsPanel.joystick = joystick;
             settingsPanel.hudGroup = hudGroup;
+            settingsPanel.layoutEditor = layoutEditor;
+            layoutEditor.layout = layout;
+            layoutEditor.canvas = canvas;
+            layoutEditor.gameplayLayer = gameplayLayer;
 
             UnityEditor.Events.UnityEventTools.AddPersistentListener(
                 gearButton.onClick, settingsPanel.Toggle);

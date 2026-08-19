@@ -81,6 +81,15 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             PlayerSettings.statusBarHidden = true;
             log.AppendLine("  status bar             = hidden");
 
+            // Touches that BEGIN near screen edges are delayed by iPadOS's own gesture
+            // recognizers (home indicator, control centre) unless the app defers them.
+            // The joysticks live in that bottom band, so without this their response is
+            // intermittent - the OS eats or delays the first touch samples.
+            PlayerSettings.iOS.deferSystemGesturesMode = UnityEngine.iOS.SystemGestureDeferMode.All;
+            PlayerSettings.iOS.hideHomeButton = true;
+            log.AppendLine("  system gestures        = deferred on all edges (joysticks live in the gesture band)");
+            log.AppendLine("  home indicator         = auto-hidden");
+
             // --- report -----------------------------------------------------------
             log.AppendLine("  api compat (verify)    = " +
                 PlayerSettings.GetApiCompatibilityLevel(BuildTargetGroup.iOS));
@@ -200,16 +209,25 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Debug.Log("[MobileBuildSetup] building iOS -> " + outPath + "\n  scenes:\n    " +
                       string.Join("\n    ", scenes));
 
+            // RELEASE by default. A Development build runs a debug transport plus
+            // player-connection multicast spam - sustained extra CPU that, stacked on
+            // combat rendering, starved iPadOS's thermalmonitord into a kernel watchdog
+            // panic (panic-full 2026-08-19: "no successful checkins from thermalmonitord
+            // in 180 seconds"). Set DFU_IOS_DEV=1 for a dev build when console debugging
+            // is actually needed; Debug.Log reaches the device console either way.
+            bool devBuild = System.Environment.GetEnvironmentVariable("DFU_IOS_DEV") == "1";
+
             BuildPlayerOptions opts = new BuildPlayerOptions
             {
                 scenes = scenes,
                 locationPathName = outPath,
                 target = BuildTarget.iOS,
                 targetGroup = BuildTargetGroup.iOS,
-                // Development build: symbols and better device logs, which is what a first
-                // hardware test actually needs.
-                options = BuildOptions.Development | BuildOptions.AllowDebugging,
+                options = devBuild
+                    ? BuildOptions.Development | BuildOptions.AllowDebugging
+                    : BuildOptions.None,
             };
+            Debug.Log("[MobileBuildSetup] build flavour = " + (devBuild ? "DEVELOPMENT" : "RELEASE"));
 
             UnityEditor.Build.Reporting.BuildReport report = BuildPipeline.BuildPlayer(opts);
             UnityEditor.Build.Reporting.BuildSummary summary = report.summary;

@@ -129,15 +129,25 @@ namespace DaggerfallWorkshop.Game.Mobile
                  "not run every frame.")]
         public float controllerPollInterval = 0.75f;
 
+        [Header("Cutscenes")]
+        [Tooltip("Holding a finger on the screen this long skips an intro/cutscene video. " +
+                 "The video window already exits on the UI back button; touch just needed a " +
+                 "way to press it.")]
+        public float holdToSkipVideoSeconds = 0.6f;
+
         [Header("Debug")]
-        [Tooltip("On-screen readout of gesture calibration. Use once to tune, then turn off.")]
+        [Tooltip("On-screen readout: live touch count, both sticks' state, gesture calibration. " +
+                 "Toggle from TUNE > Show diagnostics.")]
         public bool showGestureDebug = false;
 
         bool combatModeWanted;
         bool menuLayerWasActive;
         bool controllerConnected;
         float nextControllerPoll;
+        float nextTouchAssert;
         bool keyboardActive;
+        float vidHoldStart = -1f;
+        bool vidSkipQueued;
         float swingHoldUntil;
         bool thresholdApplied;
         int appliedScreenWidth;
@@ -211,6 +221,25 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
 
             ApplyAttackThreshold();
+
+            // DEVICE-PROVEN FIX: iPadOS (with a Magic Keyboard trackpad attached) reports
+            // KeyCode.Mouse0 / GetMouseButton(0) as PERMANENTLY HELD - captured in the
+            // idle probe with zero touches: "m0key=True m0btn=True". Since Mouse0 is
+            // Daggerfall's ActivateCenterObject binding, the engine re-added the action
+            // every frame, so the release edge PlayerActivate waits for never existed -
+            // doors could not be opened by any means. On touch devices the mouse-button
+            // bindings serve no purpose (the touch layer injects actions directly), so
+            // clear them for this session. KeyBinds.txt on disk is not modified.
+            if (Input.touchSupported && !Application.isEditor && InputManager.HasInstance)
+            {
+                InputManager im = InputManager.Instance;
+                foreach (KeyCode mouseKey in new[] { KeyCode.Mouse0, KeyCode.Mouse1, KeyCode.Mouse2 })
+                {
+                    im.ClearBinding(mouseKey, true);
+                    im.ClearBinding(mouseKey, false);
+                }
+                Debug.Log("[MobileInput] cleared Mouse0/1/2 keybinds - phantom held mouse button on iPadOS");
+            }
         }
 
         void OnDisable()
@@ -250,6 +279,17 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (!thresholdApplied || Screen.width != appliedScreenWidth || Screen.height != appliedScreenHeight)
                 ApplyAttackThreshold();
 
+            // Belt and braces: nothing in DFU touches these, but if any plugin or OS
+            // event ever resets them, sticks silently degrade to single-touch. Cheap.
+            if (Time.unscaledTime >= nextTouchAssert)
+            {
+                nextTouchAssert = Time.unscaledTime + 1f;
+                if (!Input.multiTouchEnabled)
+                    Input.multiTouchEnabled = true;
+                if (Input.simulateMouseWithTouches && !controllerConnected)
+                    Input.simulateMouseWithTouches = false;
+            }
+
             PollKeyboard();
             PollController();
 
@@ -278,15 +318,14 @@ namespace DaggerfallWorkshop.Game.Mobile
                 return;
             }
 
-            // Input.anyKeyDown includes mouse buttons, so filter those out.
-            if (!keyboardActive && Input.anyKeyDown)
-            {
-                bool mouseOnly = Input.GetMouseButtonDown(0) ||
-                                 Input.GetMouseButtonDown(1) ||
-                                 Input.GetMouseButtonDown(2);
-                if (!mouseOnly)
-                    SetKeyboardActive(true);
-            }
+            // DEVICE-PROVEN FIX: on iOS, Input.anyKeyDown fires for TOUCHES, and at
+            // frame boundaries between touches it latched keyboard mode with no keyboard
+            // attached - force-releasing both joysticks mid-grab. That was the entire
+            // "sticks are inconsistent" bug. Detect keyboards by the one signal only a
+            // real keyboard produces: typed characters. Touches, trackpads and styluses
+            // never populate Input.inputString.
+            if (!keyboardActive && Input.inputString.Length > 0)
+                SetKeyboardActive(true);
         }
 
         void SetKeyboardActive(bool value)
@@ -395,7 +434,30 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (GameManager.HasInstance && GameManager.Instance.WeaponManager != null)
                 threshold = GameManager.Instance.WeaponManager.AttackThreshold;
 
-            string text = string.Format(
+            string sticks = string.Format(
+                "touches {0}  multi {1}  kb {6}\nmove {2} {3}\nlook {4} {5}",
+                Input.touchCount, Input.multiTouchEnabled,
+                moveJoystick != null && moveJoystick.IsHeld ? "HELD" : "idle",
+                moveJoystick != null ? moveJoystick.Value.ToString("0.00") : "-",
+                lookJoystick != null && lookJoystick.IsHeld ? "HELD" : "idle",
+                lookJoystick != null ? lookJoystick.Value.ToString("0.00") : "-",
+                keyboardActive ? "ACTIVE" : "off");
+
+            string uiHit = "-";
+            var es = UnityEngine.EventSystems.EventSystem.current;
+            if (es == null)
+            {
+                uiHit = "NO EVENTSYSTEM";
+            }
+            else if (Input.touchCount > 0)
+            {
+                var pd = new UnityEngine.EventSystems.PointerEventData(es) { position = Input.GetTouch(0).position };
+                var hits = new System.Collections.Generic.List<UnityEngine.EventSystems.RaycastResult>();
+                es.RaycastAll(pd, hits);
+                uiHit = hits.Count > 0 ? hits[0].gameObject.name : "(nothing)";
+            }
+
+            string text = "ui hit: " + uiHit + "\n" + sticks + "\n" + string.Format(
                 "mode {0}  gamepad {6}\nswipe {1:0.00}in x scale {2:0.000}  dpi {7:0}\nAttackThreshold {3:0.0000}\nswinging {4}\nrequired swipe ~{5:0} px",
                 MobileInput.Mode, swipeDistanceInches, touchToMouseScale, threshold,
                 Time.unscaledTime < swingHoldUntil,
@@ -404,7 +466,7 @@ namespace DaggerfallWorkshop.Game.Mobile
                     : 0f,
                 controllerConnected, MobileInput.Dpi);
 
-            GUI.Label(new Rect(12f, 12f, 480f, 140f), text);
+            GUI.Label(new Rect(12f, 12f, 560f, 250f), text);
         }
 
         #endregion
@@ -588,12 +650,41 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             if (virtualMouse != null && MobileInput.MenuMode)
             {
+                PollVideoSkip();
                 virtualMouse.PollTouches();
 
                 // iOS soft keyboard for classic text fields (player name entry etc.).
                 // Without this, TextBoxes are untypeable on device - the soft keyboard
                 // only exists if something opens it.
                 MobileKeyboard.Poll();
+            }
+        }
+
+        /// <summary>
+        /// Hold-to-skip for intro and cutscene videos. DaggerfallVidPlayerWindow exits on
+        /// InputManager.GetBackButtonDown(), which touch had no way to press - keyboard
+        /// and gamepad players could skip, touch players sat through everything.
+        /// </summary>
+        void PollVideoSkip()
+        {
+            bool videoOnTop = DaggerfallUI.HasInstance && DaggerfallUI.UIManager != null &&
+                DaggerfallUI.UIManager.TopWindow is DaggerfallWorkshop.Game.UserInterfaceWindows.DaggerfallVidPlayerWindow;
+
+            if (!videoOnTop || Input.touchCount == 0)
+            {
+                vidHoldStart = -1f;
+                vidSkipQueued = false;
+                return;
+            }
+
+            if (vidHoldStart < 0f)
+                vidHoldStart = Time.unscaledTime;
+
+            if (!vidSkipQueued && Time.unscaledTime - vidHoldStart >= holdToSkipVideoSeconds)
+            {
+                vidSkipQueued = true;
+                MobileInput.QueueBack();
+                Debug.Log("[MobileInput] video skipped by touch hold");
             }
         }
 
@@ -656,10 +747,17 @@ namespace DaggerfallWorkshop.Game.Mobile
                 delta += stick * lookStickSpeed * Time.unscaledDeltaTime;
             }
 
-            if (delta.sqrMagnitude > 0f)
-            {
+            // ALWAYS overwrite on touch devices - including with zero. InputManager reads
+            // Input.GetAxisRaw("Mouse X/Y") every frame before this runs, and on iOS the
+            // primary touch's movement feeds those axes. Overwriting only when our own
+            // channel was non-zero let that raw delta survive, so dragging the MOVE stick
+            // turned the camera. (Device log proved the stick claims were clean - this
+            // was the only remaining feeder.) In the editor, keep the old conditional so
+            // mouse-look still works for desktop testing.
+            if (Input.touchSupported && !Application.isEditor)
                 inputManager.SetMobileMouseAxes(delta.x, delta.y);
-            }
+            else if (delta.sqrMagnitude > 0f)
+                inputManager.SetMobileMouseAxes(delta.x, delta.y);
 
             if (!MobileInput.CombatMode)
                 return;

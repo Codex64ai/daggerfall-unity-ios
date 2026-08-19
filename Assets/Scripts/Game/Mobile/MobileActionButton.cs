@@ -68,6 +68,15 @@ namespace DaggerfallWorkshop.Game.Mobile
                 idleColor = tintTarget.color;
         }
 
+        void Start()
+        {
+            // Player-hidden via the layout editor. MENU and TUNE are exempt - hiding
+            // them would lock the player out of the editor with no way back.
+            if (gameObject.name != "SettingsGear" &&
+                MobileHudLayout.GetHiddenOverride(gameObject.name))
+                gameObject.SetActive(false);
+        }
+
         void OnDisable()
         {
             // Never leave an action stuck down because the HUD layer got hidden.

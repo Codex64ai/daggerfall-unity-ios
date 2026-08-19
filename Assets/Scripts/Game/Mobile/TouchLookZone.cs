@@ -44,6 +44,11 @@ namespace DaggerfallWorkshop.Game.Mobile
         [Tooltip("Discard a single frame's delta larger than this many pixels. Filters the jump when a second finger becomes the primary pointer.")]
         public float deltaSpikeLimit = 300f;
 
+        [Tooltip("Touches beginning left of this screen fraction NEVER control the camera - " +
+                 "that territory belongs to the movement stick. Without it, a grab that lands " +
+                 "a few pixels off the stick ring falls through to this zone and yanks the view.")]
+        [Range(0f, 0.6f)] public float ignoreLeftFraction = 0.45f;
+
         Vector2 accumulated;
         int activePointerId = pointerIdNone;
         bool combatMode;
@@ -69,6 +74,12 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             if (IsInGripCorner(eventData.position))
                 return;                                 // resting thumb, not a look drag
+
+            if (eventData.position.x < Screen.width * ignoreLeftFraction)
+                return;                                 // move-stick territory: camera is right-side only
+
+            if (VirtualJoystick.IsFingerClaimed(eventData.pointerId))
+                return;                                 // a stick owns this finger
 
             activePointerId = eventData.pointerId;
         }
@@ -99,6 +110,14 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             if (eventData.pointerId != activePointerId)
                 return;
+
+            // The stick's claim can land a frame after our pointer-down (its Update vs
+            // the EventSystem). Yield immediately - one finger, one owner.
+            if (VirtualJoystick.IsFingerClaimed(eventData.pointerId))
+            {
+                activePointerId = pointerIdNone;
+                return;
+            }
 
             Vector2 delta = eventData.delta;
 
