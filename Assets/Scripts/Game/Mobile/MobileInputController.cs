@@ -155,79 +155,6 @@ namespace DaggerfallWorkshop.Game.Mobile
         int appliedScreenWidth;
         int appliedScreenHeight;
 
-        // TEMP DIAGNOSTIC v3 (engine 2022.3.62f3): action lifecycle + raw input states.
-        int lifecycleFrames;
-        float nextIdleDump;
-
-        void LateUpdate()
-        {
-            if (!InputManager.HasInstance)
-                return;
-            InputManager im = InputManager.Instance;
-            const InputManager.Actions act = InputManager.Actions.ActivateCenterObject;
-
-            if (lifecycleFrames > 0)
-            {
-                lifecycleFrames--;
-
-                if (lifecycleFrames == 5)   // once per tap: census + binding introspection
-                {
-                    var controllers = FindObjectsOfType<MobileInputController>(true);
-                    var canvases = FindObjectsOfType<Canvas>(true);
-                    int activateButtons = 0;
-                    foreach (var b in FindObjectsOfType<MobileActionButton>(true))
-                        if (b.action == InputManager.Actions.ActivateCenterObject) activateButtons++;
-
-                    string bindingInfo = "?";
-                    try
-                    {
-                        var fld = typeof(InputManager).GetField("existingKeyDict",
-                            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                        var dict = fld.GetValue(im) as System.Collections.Generic.Dictionary<KeyCode, InputManager.Actions>;
-                        var sb = new System.Text.StringBuilder();
-                        foreach (var kvp in dict)
-                            if (kvp.Value == InputManager.Actions.ActivateCenterObject)
-                                sb.Append(kvp.Key).Append("(down=").Append(Input.GetKey(kvp.Key)).Append(") ");
-                        bindingInfo = sb.Length > 0 ? sb.ToString() : "none";
-                    }
-                    catch (System.Exception ex) { bindingInfo = "reflect-fail:" + ex.Message; }
-
-                    Debug.Log(string.Format(
-                        "[Census] controllers={0} canvases={1} activateButtons={2} thisIsSingleton={3}\n  existingKeyDict->Activate: {4}",
-                        controllers.Length, canvases.Length, activateButtons, (Instance == this), bindingInfo));
-                }
-
-                var cur = new System.Text.StringBuilder();
-                foreach (InputManager.Actions a in im.CurrentActions)
-                    cur.Append(a).Append(' ');
-
-                var taps = new System.Text.StringBuilder();
-                foreach (var kvp in tapActions)
-                    taps.Append(kvp.Key).Append(':').Append(kvp.Value).Append(' ');
-
-                var helds = new System.Text.StringBuilder();
-                foreach (var a in heldActions)
-                    helds.Append(a).Append(' ');
-
-                Debug.Log(string.Format(
-                    "[LC f{0}] has={1} started={2} complete={3}\n  current=[{4}]\n  taps=[{5}] held=[{6}] touches={7}",
-                    5 - lifecycleFrames, im.HasAction(act), im.ActionStarted(act), im.ActionComplete(act),
-                    cur.ToString().TrimEnd(), taps.ToString().TrimEnd(), helds.ToString().TrimEnd(),
-                    Input.touchCount));
-            }
-
-            if (Input.touchCount == 0 && Time.unscaledTime >= nextIdleDump && !MobileInput.MenuMode)
-            {
-                nextIdleDump = Time.unscaledTime + 2f;
-                var names = new System.Text.StringBuilder();
-                foreach (InputManager.Actions a in im.CurrentActions)
-                    names.Append(a).Append(' ');
-                Debug.Log(string.Format("[Idle] m0key={0} m0btn={1} anyKey={2} actions=[{3}]",
-                    Input.GetKey(KeyCode.Mouse0), Input.GetMouseButton(0), Input.anyKey,
-                    names.ToString().TrimEnd()));
-            }
-        }
-
         // Virtual button taps held for 2 frames so both ActionStarted() and
         // ActionComplete() fire. PlayerActivate.cs:280 keys off ActionComplete, so a
         // single-frame injection would silently do nothing.
@@ -768,9 +695,6 @@ namespace DaggerfallWorkshop.Game.Mobile
         public void QueueAction(InputManager.Actions action, int frames = 2)
         {
             tapActions[action] = Mathf.Max(frames, 2);
-            Debug.Log("[MobileInput] queued " + action);
-            if (action == InputManager.Actions.ActivateCenterObject)
-                lifecycleFrames = 6;
         }
 
         /// <summary>Hold or release an action for as long as a virtual button is pressed.</summary>
