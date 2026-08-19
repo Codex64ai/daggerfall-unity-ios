@@ -76,8 +76,12 @@ freeware download notwithstanding. Upstream Daggerfall Unity does the same.
 
 1. Get Daggerfall (free from Bethesda, or GOG/Steam).
 2. Find the `arena2` folder inside the install.
-3. Connect your device, open **Finder > device > Files > Daggerfall Unity**, and copy the
-   whole `arena2` folder in. The Files app on iOS works too.
+3. Copy the whole `arena2` folder into the app:
+   - **With a Mac**: connect the device, open **Finder > device > Files > Daggerfall
+     Unity**, and drag `arena2` in. (iTunes file sharing on Windows.)
+   - **Without a computer**: get `arena2` into the Files app on the iPad itself (iCloud
+     Drive, Google Drive/Dropbox, a USB-C drive, or unzip a copy downloaded on-device),
+     then copy it to **On My iPad > Daggerfall Unity**.
 4. Relaunch.
 
 You should end up with `arena2/ARCH3D.BSA`, `arena2/BLOCKS.BSA`, `arena2/MAPS.BSA` and the

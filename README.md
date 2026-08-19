@@ -5,6 +5,10 @@ Touch controls, install instructions, and game-data setup:
 **[README-iOS.md](README-iOS.md)** - grab builds from
 [Releases](https://github.com/Codex64ai/daggerfall-unity-ios/releases).
 
+**The app alone will not run** - you must copy Daggerfall's `arena2` folder onto your
+iPad/iPhone yourself (the game is a free download from Bethesda, but its data is not
+bundled here). See [README-iOS.md](README-iOS.md) for the copy steps.
+
 Upstream project README follows below.
 
 ---
