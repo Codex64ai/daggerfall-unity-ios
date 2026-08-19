@@ -1,5 +1,10 @@
 # Daggerfall Unity - iOS touch port
 
+> **PRE-ALPHA.** This is an early, playable build - expect rough edges, missing
+> conveniences, and the occasional bug. Core gameplay (exploration, combat, doors,
+> menus, saving) is verified working on an iPad Pro 11" (M4), iPadOS 26. Feedback and
+> issue reports are very welcome.
+
 A complete touchscreen input layer for [Daggerfall Unity](https://github.com/Interkarma/daggerfall-unity),
 making the game playable on iPhone and iPad without a keyboard or mouse.
 
@@ -84,9 +89,30 @@ load in a way that looks like a bug.
 
 ## Controls
 
-**Touch:** left stick moves, right stick looks (drag on empty screen also looks), swipe
-to swing once a weapon is drawn, tap classic menu buttons directly. **MENU** holds the
-occasional actions and **TUNE**, the live settings panel.
+### The control system
+
+| Input | Does |
+|---|---|
+| **Left stick** | Move - walk, strafe; full tilt runs |
+| **Right stick** | Camera - always and only, in or out of combat |
+| **Swipe (weapon drawn)** | **Attack** - swipe direction picks the strike: down = chop, sideways = slash, up = thrust |
+| **Drag empty screen (sheathed)** | Camera look (right side of screen) |
+| **Hand-and-ring button** | Activate - doors, NPCs, loot (aims from the centre crosshair) |
+| **WEAPON / SPELL / JUMP / CROUCH** | Always-visible action row |
+| **MENU** | Drawer with Inventory, Status, Map, Rest, and TUNE |
+| **TUNE** | Live settings: sensitivity, swipe distance, control size/opacity, layout editor |
+| **Hold during videos** | Skip cutscene |
+| **Classic menus** | Direct touch - tap buttons; the on-screen keyboard appears for text fields |
+
+Two-handed combat is the intended style: circle with the left thumb, aim with the right
+stick, and slash with a left-thumb swipe - the aiming thumb never contaminates the
+attack direction. The view holds still for the quarter-second of each strike (classic
+Daggerfall behaviour); aim flows between swings.
+
+Everything on screen can be moved, resized, or hidden: **TUNE -> Edit layout**.
+
+Hardware keyboards and game controllers are supported - the touch HUD hides itself
+automatically while they're in use and returns at a touch.
 
 **Gamepad:** connect one and the touch HUD hides itself. Defaults are applied as
 *secondary* bindings so keyboard bindings are untouched:
