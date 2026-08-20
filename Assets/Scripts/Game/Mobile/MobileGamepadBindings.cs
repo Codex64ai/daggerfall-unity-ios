@@ -42,46 +42,63 @@ namespace DaggerfallWorkshop.Game.Mobile
         //
         // ================= PROBE-DISCOVERED CONTROLLER MAP =======================
         //
-        // These are the ONLY values that should need changing for a new controller.
-        // Capture them with MobileControllerProbe (build with DFU_IOS_PROBE=1): it names
-        // each control, records what Unity reported, and prints a summary on device.
+        // MEASURED on device 2026-08-20 with an Xbox Wireless Controller on iPadOS
+        // (iPad Pro 11-inch M4), using MobileControllerProbe. These are the ONLY values
+        // that should need changing for a different controller; re-run the probe
+        // (TUNE -> "Controller probe overlay") and edit this block.
         //
-        // Do not copy numbers from the internet. Unity's legacy-input joystick button
-        // numbering, and especially its trigger/d-pad AXIS numbering, differ per
-        // controller model AND per iOS version.
+        // Do not copy numbers from the internet, and do not assume the old 0-9 face-button
+        // convention: on this controller NOTHING useful lives below Btn4. That is precisely
+        // why the pre-0.1.2 layout felt scrambled - it bound Btn0-Btn9, which here lands on
+        // the d-pad and shoulders instead of the face buttons.
         //
-        // Btn(n)          = KeyCode.JoystickButton0 + n
-        // Axis(n, true)   = axis n pushed POSITIVE   (InputManager synthetic keycode)
-        // Axis(n, false)  = axis n pushed NEGATIVE
+        // Two things the probe established that shape the choices below:
         //
-        // A control reported as a button uses Btn(); one reported as an axis uses Axis().
-        // Both are plain KeyCodes to the engine, so either works anywhere below,
-        // including as the modifier.
+        // 1. Every control except L3/R3 reports BOTH a button and a duplicate axis
+        //    (Btn4 = Axis5, Btn5 = Axis6, ... Btn15 = Axis16 - a consistent +1 offset;
+        //    L3/R3 have no axis because theirs would be Axis18/19, past InputManager's
+        //    16-axis limit). Buttons are bound rather than axes: they need no
+        //    EnableController gate, they are polled before axis keycodes so they win the
+        //    heldKeys budget, and they sidestep resting-value ambiguity entirely.
+        //
+        // 2. Every axis rests at 0.00 on this controller - no trigger resting at -1 - so
+        //    there is no permanently-held phantom axis to design around here. Do not
+        //    assume that holds for the next controller; that is what the probe is for.
         //
 
-        static KeyCode A       { get { return Btn(0); } }
-        static KeyCode B       { get { return Btn(1); } }
-        static KeyCode X       { get { return Btn(2); } }
-        static KeyCode Y       { get { return Btn(3); } }
-        static KeyCode LB      { get { return Btn(4); } }
-        static KeyCode RB      { get { return Btn(5); } }
-        static KeyCode Select  { get { return Btn(6); } }
-        static KeyCode Start   { get { return Btn(7); } }
-        static KeyCode L3      { get { return Btn(8); } }
-        static KeyCode R3      { get { return Btn(9); } }
+        static KeyCode A       { get { return Btn(14); } }
+        static KeyCode B       { get { return Btn(13); } }
+        static KeyCode X       { get { return Btn(15); } }
+        static KeyCode Y       { get { return Btn(12); } }
+        static KeyCode LB      { get { return Btn(8);  } }
+        static KeyCode RB      { get { return Btn(9);  } }
+        static KeyCode LT      { get { return Btn(10); } }
+        static KeyCode RT      { get { return Btn(11); } }
+        static KeyCode Start   { get { return Btn(16); } }
+        static KeyCode L3      { get { return Btn(17); } }
+        static KeyCode R3      { get { return Btn(18); } }
+        static KeyCode DUp     { get { return Btn(4);  } }
+        static KeyCode DRight  { get { return Btn(5);  } }
+        static KeyCode DDown   { get { return Btn(6);  } }
+        static KeyCode DLeft   { get { return Btn(7);  } }
 
-        // Triggers. PROBE THESE - they are the single most controller-dependent inputs.
-        // MFi/Xbox/DualSense controllers on iPadOS variously report triggers as buttons,
-        // as an axis resting at 0 travelling to +1, or as an axis resting at -1.
-        static KeyCode LT      { get { return Axis(5, true); } }
-        static KeyCode RT      { get { return Axis(6, true); } }
-
-        // D-pad. Usually a pair of axes (one horizontal, one vertical) rather than four
-        // buttons, but not always, and the vertical sign is not consistent either.
-        static KeyCode DUp     { get { return Axis(7, true); } }
-        static KeyCode DDown   { get { return Axis(7, false); } }
-        static KeyCode DLeft   { get { return Axis(8, false); } }
-        static KeyCode DRight  { get { return Axis(8, true); } }
+        // SELECT / VIEW IS DELIBERATELY UNBOUND.
+        //
+        // The probe recorded Select as Btn0 and nothing else, and recorded Start as
+        // Btn0 + Btn16. Both readings point away from binding Btn0, whichever explains it:
+        //
+        //   - If Btn0 really is Select, then Start reports it too, so binding Btn0 to Rest
+        //     would fire Rest every time the player pauses.
+        //   - If Btn0 is the documented iPadOS phantom (this port has been bitten by
+        //     JoystickButton0 pulsing during touches before - see REVIEW.md and
+        //     MobileInputController.ClearPhantomProneBindings), then it is not a button at
+        //     all and binding it would pin an action on.
+        //
+        // Either way Btn0 is unusable, so Rest and QuickLoad live on LT combos instead
+        // (see BaseLayer/ModifierLayer). Select's real keycode is still unknown - the probe
+        // most likely advanced on a stray Btn0 before the button was pressed, so it may
+        // yet turn out to be Btn1, Btn2 or Btn3. If a re-probe pins it down, add it here
+        // and move Rest/QuickLoad back onto Select.
 
         // ================= END CONTROLLER MAP ====================================
 
@@ -136,7 +153,6 @@ namespace DaggerfallWorkshop.Game.Mobile
                 new Bind(DLeft,  InputManager.Actions.AutoMap,              "D-Left  -> Automap"),
                 new Bind(DRight, InputManager.Actions.TravelMap,            "D-Right -> Travel map"),
                 new Bind(Start,  InputManager.Actions.Escape,               "Start   -> Pause"),
-                new Bind(Select, InputManager.Actions.Rest,                 "Select  -> Rest"),
             };
         }
 
@@ -160,7 +176,13 @@ namespace DaggerfallWorkshop.Game.Mobile
                 new Bind(Combo(LT, DLeft),  InputManager.Actions.InfoMode,     "LT + D-Left  -> Info mode"),
                 new Bind(Combo(LT, DRight), InputManager.Actions.TalkMode,     "LT + D-Right -> Talk mode"),
                 new Bind(Combo(LT, Start),  InputManager.Actions.QuickSave,    "LT + Start   -> Quicksave"),
-                new Bind(Combo(LT, Select), InputManager.Actions.QuickLoad,    "LT + Select  -> Quickload"),
+
+                // Rest and QuickLoad were specified on Select and LT+Select. Select reports
+                // as Btn0, which is unusable on this controller (see the CONTROLLER MAP
+                // block), so they take the two free LT combos instead. RT and R3 are the
+                // only base-layer inputs with no LT variant of their own.
+                new Bind(Combo(LT, RT),     InputManager.Actions.Rest,         "LT + RT      -> Rest"),
+                new Bind(Combo(LT, R3),     InputManager.Actions.QuickLoad,    "LT + R3      -> Quickload"),
             };
         }
 

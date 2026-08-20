@@ -131,9 +131,8 @@ Base layer:
 | RT | Swing weapon | | D-Left | Automap |
 | B | Cast spell | | D-Right | Travel map |
 | Y | Jump | | Start | Pause |
-| RB | Switch hand | | Select | Rest |
-| LB | Autorun | | L3 (stick click) | Crouch |
-| | | | R3 (stick click) | Transport |
+| RB | Switch hand | | L3 (stick click) | Crouch |
+| LB | Autorun | | R3 (stick click) | Transport |
 
 Hold **LT** for the second layer:
 
@@ -144,13 +143,20 @@ Hold **LT** for the second layer:
 | LT + B | Use magic item | | LT + D-Left | Info mode |
 | LT + X | Notebook | | LT + D-Right | Talk mode |
 | LT + RB | Logbook | | LT + Start | Quicksave |
-| LT + LB | Run | | LT + Select | Quickload |
-| LT + L3 | Sneak | | | |
+| LT + LB | Run | | LT + RT | Rest |
+| LT + L3 | Sneak | | LT + R3 | Quickload |
 
 While LT is held, the base action of a button that has an LT variant does *not* also
 fire - LT+Y opens the inventory without jumping. That comes from Daggerfall Unity's own
 combo-keybind system rather than anything bolted on here, so combos also show up in
 **Settings > Controls > Joystick** and can be rebound like any other binding.
+
+**Select / View is not mapped.** On the Xbox controller this was measured against, that
+button reports as `JoystickButton0` - and so does Start, which also reports its own
+`JoystickButton16`. Binding button 0 would therefore either fire Select's action every time
+you paused, or bind the phantom button iPadOS pulses during touches. Rest and Quickload
+sit on `LT + RT` and `LT + R3` instead. If your controller reports Select as something
+distinct, you can bind it yourself in **Settings > Controls > Joystick**.
 
 Rebind anything that lands wrong in **Settings > Controls > Joystick**.
 
