@@ -16,8 +16,8 @@ making the game playable on iPhone and iPad without a keyboard or mouse.
   screen also looks
 - **Swipe-to-swing combat** mapped onto Daggerfall's own directional attack system;
   drawing a weapon enters combat automatically
-- **Action buttons** - Activate, Weapon, Spell, Jump, Crouch always visible; Inventory,
-  Status, Map, Rest and settings behind one MENU button
+- **Action buttons** - Activate, Weapon, Spell, Jump, Crouch always visible; Pause
+  (save/load), Inventory, Status, Map, Rest and settings behind one MENU button
 - **Direct touch in the classic menus** - tap a button to click it; the original 1996
   windows (inventory, spellbook, travel map, dialogue) were not rebuilt
 - **On-screen keyboard** appears automatically for text fields (character name etc.)
@@ -103,7 +103,7 @@ load in a way that looks like a bug.
 | **Drag empty screen (sheathed)** | Camera look (right side of screen) |
 | **Hand-and-ring button** | Activate - doors, NPCs, loot (aims from the centre crosshair) |
 | **WEAPON / SPELL / JUMP / CROUCH** | Always-visible action row |
-| **MENU** | Drawer with Inventory, Status, Map, Rest, and TUNE |
+| **MENU** | Drawer with Pause (save/load/exit), Inventory, Status, Map, Rest, and TUNE |
 | **TUNE** | Live settings: sensitivity, swipe distance, control size/opacity, layout editor |
 | **Hold during videos** | Skip cutscene |
 | **Classic menus** | Direct touch - tap buttons; the on-screen keyboard appears for text fields |
