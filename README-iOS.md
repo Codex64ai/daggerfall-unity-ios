@@ -118,19 +118,49 @@ Everything on screen can be moved, resized, or hidden: **TUNE -> Edit layout**.
 Hardware keyboards and game controllers are supported - the touch HUD hides itself
 automatically while they're in use and returns at a touch.
 
-**Gamepad:** connect one and the touch HUD hides itself. Defaults are applied as
-*secondary* bindings so keyboard bindings are untouched:
+**Gamepad:** connect one and the touch HUD hides itself. Two full layers are mapped -
+a base layer, and a second layer while the **left trigger (LT)** is held. Everything is
+applied as *secondary* bindings, so keyboard bindings are untouched.
 
-| Button | Action | | Button | Action |
+Base layer:
+
+| Input | Action | | Input | Action |
 |---|---|---|---|---|
-| A | Activate | | Back | Inventory |
-| B | Jump | | Start | Pause |
-| X | Ready Weapon | | L-Stick | Crouch |
-| Y | Cast Spell | | R-Stick | Sneak |
-| LB | Switch Hand | | RB | Attack |
+| A | Activate | | D-Up | Character sheet |
+| X | Ready weapon | | D-Down | Status |
+| RT | Swing weapon | | D-Left | Automap |
+| B | Cast spell | | D-Right | Travel map |
+| Y | Jump | | Start | Pause |
+| RB | Switch hand | | Select | Rest |
+| LB | Autorun | | L3 (stick click) | Crouch |
+| | | | R3 (stick click) | Transport |
 
-Unity's legacy joystick numbering is not consistent across controllers, so rebind in
-**Settings > Controls > Joystick** if these land wrong.
+Hold **LT** for the second layer:
+
+| Input | Action | | Input | Action |
+|---|---|---|---|---|
+| LT + Y | Inventory | | LT + D-Up | Steal mode |
+| LT + A | Recast spell | | LT + D-Down | Grab mode |
+| LT + B | Use magic item | | LT + D-Left | Info mode |
+| LT + X | Notebook | | LT + D-Right | Talk mode |
+| LT + RB | Logbook | | LT + Start | Quicksave |
+| LT + LB | Run | | LT + Select | Quickload |
+| LT + L3 | Sneak | | | |
+
+While LT is held, the base action of a button that has an LT variant does *not* also
+fire - LT+Y opens the inventory without jumping. That comes from Daggerfall Unity's own
+combo-keybind system rather than anything bolted on here, so combos also show up in
+**Settings > Controls > Joystick** and can be rebound like any other binding.
+
+Rebind anything that lands wrong in **Settings > Controls > Joystick**.
+
+**If your controller maps wrongly:** Unity's legacy joystick numbering - and especially
+its trigger and d-pad *axis* numbering - varies by controller model and by iOS version,
+so a controller this port has never seen may report different numbers. Turn on
+**TUNE -> Controller probe overlay** *before* connecting the controller (the touch HUD,
+and with it TUNE, hides itself once a gamepad is attached). The probe names each control
+in turn, records what Unity actually reported, and ends on a summary page - screenshot it
+and open an issue, and the defaults can be corrected for that controller.
 
 ## First run tuning
 

@@ -251,6 +251,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// KeyBinds.txt. Real gamepads are unaffected: on connect,
         /// MobileGamepadBindings.Apply() rebinds live; on disconnect we clear again.
         /// KeyBinds.txt on disk is never modified here.
+        ///
+        /// Scope note: this sweeps Mouse0-6 and JoystickButton0-19 only. The gamepad layout
+        /// also binds InputManager's synthetic axis keycodes (5000+) and combo keycodes
+        /// (65537+) for the trigger/d-pad and LT-modifier layers, which are outside that
+        /// range on purpose - they cannot resurrect from KeyBinds.txt because they are never
+        /// written to it, and they resolve to false while EnableController is off. They are
+        /// removed by MobileGamepadBindings.Clear() on disconnect instead.
         /// </summary>
         void ClearPhantomProneBindings()
         {
@@ -471,9 +478,17 @@ namespace DaggerfallWorkshop.Game.Mobile
             // keyboard. Apply gamepad defaults while one is connected; strip them again on
             // disconnect - leftover joystick bindings are phantom fuel on iPadOS.
             if (found)
+            {
                 MobileGamepadBindings.Apply();
+            }
             else
+            {
+                // Order matters: MobileGamepadBindings.Clear() knows the axis and combo
+                // keycodes it applied, which live outside the Mouse0-6 / JoystickButton0-19
+                // range ClearPhantomProneBindings() sweeps. Sweeping first would orphan them.
+                MobileGamepadBindings.Clear();
                 ClearPhantomProneBindings();
+            }
 
             ApplyHudVisibility();
 

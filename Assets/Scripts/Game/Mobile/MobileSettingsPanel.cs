@@ -47,6 +47,15 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         public bool IsOpen { get { return open; } }
 
+        /// <summary>
+        /// MobileHudBuilder puts MobileControllerProbe on the same object as the controller,
+        /// so this needs no separate wiring field.
+        /// </summary>
+        MobileControllerProbe Probe
+        {
+            get { return controller != null ? controller.GetComponent<MobileControllerProbe>() : null; }
+        }
+
         /// <summary>Wire to the gear button.</summary>
         public void Toggle()
         {
@@ -136,6 +145,16 @@ namespace DaggerfallWorkshop.Game.Mobile
                 v => { if (controller != null) controller.showGestureDebug = v; },
                 "debug");
 
+            // Escape hatch for a controller whose buttons report unexpected numbers: the
+            // player can run the probe from a shipping build and send back the summary,
+            // instead of needing a special build. Enable it BEFORE connecting the
+            // controller - this panel lives on the touch HUD, which hides itself as soon
+            // as a gamepad appears.
+            AddToggle(panel, ref y, rowH, "Controller probe overlay",
+                () => Probe != null && Probe.active,
+                v => { if (Probe != null) Probe.active = v; },
+                "ctrlprobe");
+
             AddToggle(panel, ref y, rowH, "Floating joystick",
                 () => joystick != null && joystick.floating,
                 v => { if (joystick != null) joystick.floating = v; },
@@ -150,7 +169,6 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             AddButton(panel, ref y, rowH, "Apply gamepad defaults", () =>
             {
-                MobileGamepadBindings.ClearAppliedFlag();
                 MobileGamepadBindings.Apply();
                 RefreshHeader();
             });

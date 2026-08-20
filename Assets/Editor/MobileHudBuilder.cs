@@ -290,6 +290,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             MobileInputController controller = controllerGo.AddComponent<MobileInputController>();
             VirtualMouseCursor cursor = controllerGo.AddComponent<VirtualMouseCursor>();
 
+            // Dormant unless the DFU_IOS_PROBE define is set (or it is switched on from the
+            // settings panel). Lives on the controller object so it survives with it and is
+            // drawn whether or not the touch HUD is visible - a probe that vanished when a
+            // controller connected would be useless.
+            controllerGo.AddComponent<MobileControllerProbe>();
+
             controller.moveJoystick = joystick;
             controller.lookJoystick = lookJoystick;
             controller.lookZone = lookZone;
