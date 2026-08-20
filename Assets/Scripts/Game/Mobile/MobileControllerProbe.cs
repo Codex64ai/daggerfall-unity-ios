@@ -142,13 +142,21 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (stage == Stage.Idle)
                 BeginCalibration();
 
-            // The engine only resolves axis-as-button keycodes while EnableController is on
-            // (InputManager.GetAxisKey early-returns otherwise). Input.GetAxisRaw itself is
-            // unconditional, so the probe reads fine either way - but the actual bindings we
-            // are about to write will not, and a probe that works where the real thing fails
-            // is worse than no probe. Surface it instead of hiding it.
-            if (InputManager.HasInstance && !InputManager.Instance.EnableController)
+            // The probe itself does not need EnableController - it reads Input.GetAxisRaw
+            // directly, which is unconditional. But the bindings this probe exists to
+            // produce DO need it (InputManager.GetAxisKey early-returns without it), so
+            // match the real conditions while a controller is actually attached.
+            //
+            // Only while attached, deliberately. EnableController also gates the
+            // joystick-button-to-mouse-click path (InputManager.GetMouseButtonDown and
+            // friends), and iPadOS pulses joystick-button state during touches - forcing it
+            // on with no controller present would put phantom clicks back into the classic
+            // UI, which is the exact bug this port already fought once.
+            if (InputManager.HasInstance && ControllerAttached() &&
+                !InputManager.Instance.EnableController)
+            {
                 InputManager.Instance.EnableController = true;
+            }
 
             TrackAxisExtremes();
             PollProbeTouchButtons();
@@ -357,6 +365,16 @@ namespace DaggerfallWorkshop.Game.Mobile
         public static string AxisKeyString(int axis, bool positive)
         {
             return string.Format("JoystickAxis{0}Button{1}", axis, positive ? 0 : 1);
+        }
+
+        static bool ControllerAttached()
+        {
+            string[] names = Input.GetJoystickNames();
+            for (int i = 0; i < names.Length; i++)
+                if (!string.IsNullOrEmpty(names[i]))
+                    return true;
+
+            return false;
         }
 
         static string DescribeJoysticks()
