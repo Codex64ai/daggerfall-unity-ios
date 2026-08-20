@@ -202,11 +202,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             RectTransform drawerRect = (RectTransform)drawerGo.transform;
             Anchor(drawerRect, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(1f, 0f));
             drawerRect.anchoredPosition = new Vector2(-720f, 230f);
-            drawerRect.sizeDelta = new Vector2(160f, 830f);
+            drawerRect.sizeDelta = new Vector2(160f, 920f);
 
             GridLayoutGroup drawerGrid = drawerGo.AddComponent<GridLayoutGroup>();
-            drawerGrid.cellSize = new Vector2(150f, 150f);
-            drawerGrid.spacing = new Vector2(14f, 14f);
+            // 140px cells: six buttons (incl. PAUSE and the settings gear) must stay
+            // below the ~1200-unit canvas top on iPad; 150px cells would clip.
+            drawerGrid.cellSize = new Vector2(140f, 140f);
+            drawerGrid.spacing = new Vector2(12f, 12f);
             drawerGrid.startCorner = GridLayoutGroup.Corner.LowerRight;
             drawerGrid.startAxis = GridLayoutGroup.Axis.Vertical;
             drawerGrid.childAlignment = TextAnchor.LowerCenter;
@@ -219,6 +221,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
             var secondary = new List<(string label, InputManager.Actions action)>
             {
+                // Escape during gameplay opens the pause options window (Save/Load/Exit) -
+                // without this the save menu is unreachable from the touch HUD.
+                ("PAUSE",     InputManager.Actions.Escape),
                 ("INVENTORY", InputManager.Actions.Inventory),
                 ("STATUS",    InputManager.Actions.Status),
                 ("MAP",       InputManager.Actions.TravelMap),
