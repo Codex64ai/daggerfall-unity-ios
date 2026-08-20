@@ -43,8 +43,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         const float axisIdle = 0.2f;                   // deviation below which we call it released
         const int calibrationFrames = 30;
 
-        [Tooltip("Draw the probe overlay. Set by the DFU_IOS_PROBE build define; can also be " +
-                 "switched on from the settings panel in a normal build.")]
+        [Tooltip("Draw the probe overlay. MobileHudBuilder serializes this as true when the " +
+                 "HUD is built with DFU_IOS_PROBE=1; otherwise toggle it from TUNE at runtime.")]
         public bool active;
 
         /// <summary>
@@ -117,10 +117,6 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             for (int i = 0; i < results.Length; i++)
                 results[i] = new List<string>();
-
-#if DFU_IOS_PROBE
-            active = true;
-#endif
         }
 
         void OnEnable()

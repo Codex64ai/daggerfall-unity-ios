@@ -290,11 +290,22 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             MobileInputController controller = controllerGo.AddComponent<MobileInputController>();
             VirtualMouseCursor cursor = controllerGo.AddComponent<VirtualMouseCursor>();
 
-            // Dormant unless the DFU_IOS_PROBE define is set (or it is switched on from the
-            // settings panel). Lives on the controller object so it survives with it and is
-            // drawn whether or not the touch HUD is visible - a probe that vanished when a
-            // controller connected would be useless.
-            controllerGo.AddComponent<MobileControllerProbe>();
+            // Lives on the controller object so it survives with it and is drawn whether or
+            // not the touch HUD is visible - a probe that vanished the moment a controller
+            // connected would be useless.
+            //
+            // Armed by SERIALIZING the field, not by a scripting define. A
+            // PlayerSettings.SetScriptingDefineSymbolsForGroup call from one batchmode
+            // session did not reach the player script compilation in the next one - the
+            // define landed in ProjectSettings.asset and was still ignored, silently
+            // producing a probe build with the probe switched off. A serialized field is
+            // plain scene data: it cannot be quietly dropped, and it can be verified by
+            // reading the scene file back.
+            MobileControllerProbe probe = controllerGo.AddComponent<MobileControllerProbe>();
+            probe.active = System.Environment.GetEnvironmentVariable("DFU_IOS_PROBE") == "1";
+            if (probe.active)
+                Debug.LogWarning("[MobileHudBuilder] *** CONTROLLER PROBE ARMED (DFU_IOS_PROBE=1) *** " +
+                                 "this scene is a diagnostic build - do NOT commit it or ship it.");
 
             controller.moveJoystick = joystick;
             controller.lookJoystick = lookJoystick;

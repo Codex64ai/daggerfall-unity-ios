@@ -90,25 +90,6 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             log.AppendLine("  system gestures        = deferred on all edges (joysticks live in the gesture band)");
             log.AppendLine("  home indicator         = auto-hidden");
 
-            // --- probe define -----------------------------------------------------
-            // DFU_IOS_PROBE=1 makes MobileControllerProbe self-activate, turning the build
-            // into a guided controller-mapping probe. Kept as a scripting define rather than
-            // a runtime toggle because the touch HUD - and with it the settings panel that
-            // would carry the toggle - is hidden the moment a controller connects, which is
-            // exactly when the probe is needed. Cleared on a normal build so a probe define
-            // cannot survive into a release by accident.
-            bool probeBuild = System.Environment.GetEnvironmentVariable("DFU_IOS_PROBE") == "1";
-            const string probeDefine = "DFU_IOS_PROBE";
-            string defines = PlayerSettings.GetScriptingDefineSymbolsForGroup(BuildTargetGroup.iOS);
-            var defineList = new System.Collections.Generic.List<string>(
-                defines.Split(new[] { ';' }, System.StringSplitOptions.RemoveEmptyEntries));
-            defineList.RemoveAll(d => d.Trim() == probeDefine);
-            if (probeBuild)
-                defineList.Add(probeDefine);
-            PlayerSettings.SetScriptingDefineSymbolsForGroup(BuildTargetGroup.iOS,
-                string.Join(";", defineList.ToArray()));
-            log.AppendLine("  controller probe       = " + (probeBuild ? "*** ENABLED (DFU_IOS_PROBE) ***" : "off"));
-
             // --- report -----------------------------------------------------------
             log.AppendLine("  api compat (verify)    = " +
                 PlayerSettings.GetApiCompatibilityLevel(BuildTargetGroup.iOS));
