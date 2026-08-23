@@ -43,6 +43,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         const float axisIdle = 0.2f;                   // deviation below which we call it released
         const int calibrationFrames = 30;
 
+        // A candidate must persist this many consecutive frames before it is recorded.
+        // iPadOS pulses joystick-button state during touches, and on the first device run a
+        // stray JoystickButton0 pulse consumed the Start and Select prompts before the real
+        // buttons were pressed - Select came back as Btn0 with no way to tell whether that was
+        // the button or the phantom. A real press lasts far longer than a pulse.
+        const int holdFramesToRecord = 8;
+
         [Tooltip("Draw the probe overlay. MobileHudBuilder serializes this as true when the " +
                  "HUD is built with DFU_IOS_PROBE=1; otherwise toggle it from TUNE at runtime.")]
         public bool active;
@@ -93,6 +100,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         readonly List<string>[] results = new List<string>[prompts.Length];
 
         bool waitingForIdle;
+        string candidateKey = "";
+        int candidateFrames;
         string liveHits = "";
         string joystickNames = "";
 
@@ -244,11 +253,31 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (waitingForIdle)
             {
                 if (hits.Count == 0)
+                {
                     waitingForIdle = false;
+                    candidateKey = "";
+                    candidateFrames = 0;
+                }
                 return;
             }
 
             if (hits.Count == 0)
+            {
+                candidateKey = "";
+                candidateFrames = 0;
+                return;
+            }
+
+            // Debounce: only record once the same set of inputs has been held steady.
+            string key = string.Join(" ", hits.ToArray());
+            if (key != candidateKey)
+            {
+                candidateKey = key;
+                candidateFrames = 1;
+                return;
+            }
+
+            if (++candidateFrames < holdFramesToRecord)
                 return;
 
             results[index].Clear();
@@ -258,6 +287,8 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             index++;
             waitingForIdle = true;
+            candidateKey = "";
+            candidateFrames = 0;
 
             if (index >= prompts.Length)
                 Finish();
@@ -556,7 +587,10 @@ namespace DaggerfallWorkshop.Game.Mobile
                 GUI.Label(new Rect(pad, y, w - pad * 2f, h), "release to continue...", bodyStyle);
             else
                 GUI.Label(new Rect(pad, y, w - pad * 2f, h),
-                          liveHits.Length > 0 ? "reading: " + liveHits : "waiting...", bodyStyle);
+                          liveHits.Length > 0
+                              ? "reading: " + liveHits + "   (hold " +
+                                Mathf.Max(0, holdFramesToRecord - candidateFrames) + ")"
+                              : "waiting...", bodyStyle);
             y += bodyStyle.fontSize * 2.2f;
 
             // Everything captured so far, so a wrong entry is obvious immediately.
