@@ -186,6 +186,29 @@ namespace DaggerfallWorkshop.Game.Mobile
             };
         }
 
+        /// <summary>
+        /// Menu / classic-UI pointer bindings. Separate table from the gameplay actions:
+        /// InputManager routes UI clicks through joystickUIDict (GetMouseButtonDown and
+        /// friends), not through the action system.
+        ///
+        /// DFU's stock defaults are JoystickButton0-3 - the conventional face-button
+        /// numbers. On the probed controller NOTHING useful lives below Btn4: Btn0 is the
+        /// Start co-fire (and the iPadOS phantom), Btn1-3 map to no physical control at
+        /// all. Device-reported result: Start "clicked" in menus, A did nothing, and
+        /// right-click/back were unreachable. Same bug as the old gameplay layout, one
+        /// table over.
+        /// </summary>
+        static (KeyCode code, InputManager.JoystickUIActions action, string label)[] UILayer()
+        {
+            return new (KeyCode, InputManager.JoystickUIActions, string)[]
+            {
+                (A, InputManager.JoystickUIActions.LeftClick,   "A       -> UI select (left click)"),
+                (X, InputManager.JoystickUIActions.RightClick,  "X       -> UI right click"),
+                (Y, InputManager.JoystickUIActions.MiddleClick, "Y       -> UI middle click"),
+                (B, InputManager.JoystickUIActions.Back,        "B       -> UI back / close window"),
+            };
+        }
+
         static KeyCode Combo(KeyCode modifier, KeyCode key)
         {
             if (!InputManager.HasInstance)
@@ -266,6 +289,13 @@ namespace DaggerfallWorkshop.Game.Mobile
                 log.AppendLine("   " + all[i].label);
             }
 
+            var ui = UILayer();
+            for (int i = 0; i < ui.Length; i++)
+            {
+                input.SetJoystickUIBinding(ui[i].code, ui[i].action);
+                log.AppendLine("   " + ui[i].label);
+            }
+
             RebuildBindingCache(input);
 
             log.AppendLine("Hold LT for the second layer. Rebind in Settings > Controls > Joystick.");
@@ -290,6 +320,15 @@ namespace DaggerfallWorkshop.Game.Mobile
                 input.ClearBinding(appliedCodes[i], false);
                 input.ClearBinding(appliedCodes[i], true);
             }
+
+            // Put the UI pointer table back to DFU's stock numbers. Live-only like
+            // everything else here; nothing is written to KeyBinds.txt, so a fresh launch
+            // is untouched either way - this just keeps the in-memory state honest for the
+            // rest of the session.
+            input.SetJoystickUIBinding(KeyCode.JoystickButton0, InputManager.JoystickUIActions.LeftClick);
+            input.SetJoystickUIBinding(KeyCode.JoystickButton3, InputManager.JoystickUIActions.RightClick);
+            input.SetJoystickUIBinding(KeyCode.JoystickButton2, InputManager.JoystickUIActions.MiddleClick);
+            input.SetJoystickUIBinding(KeyCode.JoystickButton1, InputManager.JoystickUIActions.Back);
 
             int count = appliedCodes.Count;
             appliedCodes.Clear();

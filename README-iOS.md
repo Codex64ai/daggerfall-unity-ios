@@ -134,6 +134,15 @@ Base layer:
 | RB | Switch hand | | L3 (stick click) | Crouch |
 | LB | Autorun | | R3 (stick click) | Transport |
 
+In menus, the classic UI pointer uses the face buttons:
+
+| Input | Menu action |
+|---|---|
+| A | Select (left click) |
+| B | Back / close window |
+| X | Right click |
+| Y | Middle click |
+
 Hold **LT** for the second layer:
 
 | Input | Action | | Input | Action |
