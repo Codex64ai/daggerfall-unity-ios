@@ -318,19 +318,28 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // ---------------------------------------------------------- inch-based layout
             // Sizes in PHYSICAL inches so controls stay thumb-sized from an iPhone mini to
             // a 13in iPad. Apple's minimum touch target is 44pt (~0.29in); these clear it.
+            //
+            // These defaults are Ikram's device-tuned layout (2026-08-23 screenshot,
+            // reconstructed by pixel measurement at 264ppi): the action bank runs along the
+            // bottom centre with COMBAT at its left and MENU at its right, ACTIVATE sits
+            // between the row and the look stick, and the drawer opens as a compact column
+            // tucked against the right edge. Controls are a step smaller than the original
+            // guesses - play showed the big sizes crowded the look/swipe area - but every
+            // target still clears 0.45in. Margins are from each element's own anchor corner;
+            // note action buttons pivot at that corner while the sticks pivot at centre.
             MobileHudLayout layout = gameplayLayer.AddComponent<MobileHudLayout>();
             layout.canvas = canvas;
             layout.elements = new[]
             {
-                Elem("Joystick",  joyRect,      1.60f, 0f, new Vector2(1.00f, 0.95f)),
-                Elem("Knob",      knobRect,     0.66f, 0f, Vector2.zero, false),
-                Elem("LookJoystick", lookJoyRect, 1.60f, 0f, new Vector2(1.00f, 0.95f)),
-                Elem("LookKnob",  lookKnobRect, 0.66f, 0f, Vector2.zero, false),
-                Elem("Activate",  (RectTransform)activateGo.transform, 1.00f, 0f, new Vector2(2.30f, 0.40f)),
-                Elem("Combat",    combatRect,   0.72f, 0f, new Vector2(2.45f, 1.60f)),
-                Elem("MenuToggle", menuToggleRect, 0.62f, 0f, new Vector2(3.55f, 0.40f)),
-                Bank("PrimaryBank",   bankRect,   new Vector2(0.35f, 2.05f), 0.62f, 0.07f),
-                Bank("SecondaryBank", drawerRect, new Vector2(3.55f, 1.15f), 0.62f, 0.07f),
+                Elem("Joystick",  joyRect,      1.10f, 0f, new Vector2(1.35f, 1.30f)),
+                Elem("Knob",      knobRect,     0.45f, 0f, Vector2.zero, false),
+                Elem("LookJoystick", lookJoyRect, 1.10f, 0f, new Vector2(1.80f, 1.15f)),
+                Elem("LookKnob",  lookKnobRect, 0.45f, 0f, Vector2.zero, false),
+                Elem("Activate",  (RectTransform)activateGo.transform, 0.80f, 0f, new Vector2(2.40f, 0.65f)),
+                Elem("Combat",    combatRect,   0.55f, 0f, new Vector2(5.95f, 0.10f)),
+                Elem("MenuToggle", menuToggleRect, 0.50f, 0f, new Vector2(2.60f, 0.10f)),
+                Bank("PrimaryBank",   bankRect,   new Vector2(3.35f, 0.10f), 0.50f, 0.07f),
+                Bank("SecondaryBank", drawerRect, new Vector2(0.20f, 1.75f), 0.48f, 0.05f),
             };
 
             settingsPanel.controller = controller;
