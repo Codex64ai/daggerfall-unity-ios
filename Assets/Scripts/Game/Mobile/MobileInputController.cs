@@ -731,6 +731,22 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public void PollCursorStage()
         {
+            // iOS soft keyboard for classic text fields (player name entry, the travel map's
+            // city search, and so on). Without this, TextBoxes are untypeable on device - the
+            // soft keyboard only exists if something opens it.
+            //
+            // NOT part of the touch-only block below. This was previously skipped whenever a
+            // controller was connected, which made every text field in the game unusable with
+            // a pad: a gamepad cannot type, so suppressing the soft keyboard leaves no input
+            // method at all. Device-reported by Ikram.
+            //
+            // Still suppressed for a HARDWARE keyboard, which genuinely can type - putting a
+            // soft keyboard over the screen there would be an obstruction, not a feature.
+            if (!keyboardActive && MobileInput.MenuMode)
+                MobileKeyboard.Poll();
+
+            // Touch-only from here. The virtual cursor must stand down for a controller
+            // (InputManager drives its own cursor instead) and video-skip needs live touches.
             if (controllerConnected || keyboardActive)
                 return;
 
@@ -738,11 +754,6 @@ namespace DaggerfallWorkshop.Game.Mobile
             {
                 PollVideoSkip();
                 virtualMouse.PollTouches();
-
-                // iOS soft keyboard for classic text fields (player name entry etc.).
-                // Without this, TextBoxes are untypeable on device - the soft keyboard
-                // only exists if something opens it.
-                MobileKeyboard.Poll();
             }
         }
 
