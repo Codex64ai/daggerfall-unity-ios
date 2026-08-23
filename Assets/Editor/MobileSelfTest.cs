@@ -16,6 +16,9 @@
 //
 // Place in Assets/Editor/
 
+using DaggerfallWorkshop.Game.Mobile;
+using DaggerfallWorkshop.Utility.AssetInjection;
+using System.IO;
 using System.Text;
 using UnityEngine;
 using UnityEditor;
@@ -47,6 +50,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestThresholdRoundTrip();
             TestDeviceIndependence();
             TestRelinquish();
+            TestContentPathRemap();
+            TestWavDecoder();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -60,6 +65,141 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             {
                 Debug.Log(log.ToString());
             }
+        }
+
+        /// <summary>
+        /// The user-content path arithmetic. Exercised with injected roots because on desktop
+        /// MobileContentPath.Active is false and Override() is a deliberate no-op - otherwise
+        /// the prefix matching and separator handling would never be tested anywhere.
+        /// </summary>
+        static void TestContentPathRemap()
+        {
+            const string shipped = "/app/Data/Raw";
+            const string user = "/docs";
+
+            // Player has the file: the user copy wins.
+            Check(MobileContentPath.Remap(shipped + "/Textures/180_0-0.png", shipped, user,
+                      p => p == "/docs/Textures/180_0-0.png") == "/docs/Textures/180_0-0.png",
+                  "remap prefers an existing user file");
+
+            // Player does not have it: falls back to the shipped file. This is the case that
+            // matters most - 265 shipped quests must stay reachable.
+            Check(MobileContentPath.Remap(shipped + "/Quests/S0000977.txt", shipped, user,
+                      p => false) == shipped + "/Quests/S0000977.txt",
+                  "remap falls back to the shipped file");
+
+            // Paths outside the shipped root are left alone.
+            Check(MobileContentPath.Remap("/somewhere/else/x.png", shipped, user, p => true)
+                      == "/somewhere/else/x.png",
+                  "remap ignores paths outside the shipped root");
+
+            // The root itself must not remap to the user root wholesale.
+            Check(MobileContentPath.Remap(shipped, shipped, user, p => true) == shipped,
+                  "remap leaves the root itself alone");
+
+            Check(MobileContentPath.Remap(null, shipped, user, p => true) == null,
+                  "remap tolerates null");
+
+            // A leading separator must not defeat Path.Combine.
+            Check(MobileContentPath.Remap(shipped + "/Sound/a.wav", shipped, user,
+                      p => p == "/docs/Sound/a.wav") == "/docs/Sound/a.wav",
+                  "remap strips the leading separator");
+        }
+
+        /// <summary>
+        /// The hand-rolled RIFF/WAVE decoder that replaces the legacy WWW("file://") path on
+        /// iOS. Written by hand, so it gets tested rather than trusted: a real file is built
+        /// on disk with known sample values and decoded back.
+        /// </summary>
+        static void TestWavDecoder()
+        {
+            string path = Path.Combine(Path.GetTempPath(), "dfu_selftest.wav");
+
+            const int rate = 22050;
+            const int channels = 1;
+            const int frames = 512;
+
+            // 16-bit PCM mono, with a deliberate LIST chunk before 'data' so the decoder has
+            // to walk the chunk list instead of assuming a 44-byte header.
+            var pcm = new byte[frames * 2];
+            for (int i = 0; i < frames; i++)
+            {
+                short v = (short)(i == 0 ? 0 : (i == 1 ? 32767 : (i == 2 ? -32768 : 1000)));
+                pcm[i * 2] = (byte)(v & 0xff);
+                pcm[i * 2 + 1] = (byte)((v >> 8) & 0xff);
+            }
+
+            byte[] junk = System.Text.Encoding.ASCII.GetBytes("INFOhello!!!");
+
+            using (var ms = new MemoryStream())
+            using (var w = new BinaryWriter(ms))
+            {
+                w.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));
+                w.Write(0);                                       // patched below
+                w.Write(System.Text.Encoding.ASCII.GetBytes("WAVE"));
+
+                w.Write(System.Text.Encoding.ASCII.GetBytes("fmt "));
+                w.Write(16);
+                w.Write((short)1);                                 // PCM
+                w.Write((short)channels);
+                w.Write(rate);
+                w.Write(rate * channels * 2);                      // byte rate
+                w.Write((short)(channels * 2));                    // block align
+                w.Write((short)16);                                // bits
+
+                w.Write(System.Text.Encoding.ASCII.GetBytes("LIST"));
+                w.Write(junk.Length);
+                w.Write(junk);
+
+                w.Write(System.Text.Encoding.ASCII.GetBytes("data"));
+                w.Write(pcm.Length);
+                w.Write(pcm);
+
+                w.Flush();
+                byte[] all = ms.ToArray();
+                int riffSize = all.Length - 8;
+                all[4] = (byte)(riffSize & 0xff);
+                all[5] = (byte)((riffSize >> 8) & 0xff);
+                all[6] = (byte)((riffSize >> 16) & 0xff);
+                all[7] = (byte)((riffSize >> 24) & 0xff);
+                File.WriteAllBytes(path, all);
+            }
+
+            AudioClip clip;
+            bool ok = SoundReplacement.TryDecodeWavFromDisk(path, "selftest", out clip);
+
+            Check(ok && clip != null, "wav decodes to a clip");
+            if (ok && clip != null)
+            {
+                Check(clip.channels == channels, "wav channel count", "got " + clip.channels);
+                Check(clip.frequency == rate, "wav sample rate", "got " + clip.frequency);
+                Check(clip.samples == frames, "wav sample count (chunk walk found data)",
+                      "got " + clip.samples);
+
+                var got = new float[frames];
+                clip.GetData(got, 0);
+                Near(got[0], 0f, 0.001f, "wav sample 0 is silence");
+                Near(got[1], 1f, 0.001f, "wav sample 1 is full positive");
+                Near(got[2], -1f, 0.001f, "wav sample 2 is full negative");
+            }
+
+            // Malformed input must be refused, not throw - a bad file in a mod folder should
+            // fall back to the original sound, not take the game down.
+            string bad = Path.Combine(Path.GetTempPath(), "dfu_selftest_bad.wav");
+            File.WriteAllBytes(bad, new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 });
+            AudioClip badClip;
+            bool badOk;
+            try
+            {
+                badOk = SoundReplacement.TryDecodeWavFromDisk(bad, "bad", out badClip);
+                Check(!badOk, "malformed wav is refused without throwing");
+            }
+            catch (System.Exception ex)
+            {
+                Check(false, "malformed wav is refused without throwing", ex.GetType().Name);
+            }
+
+            try { File.Delete(path); File.Delete(bad); } catch { }
         }
 
         #region Assertions

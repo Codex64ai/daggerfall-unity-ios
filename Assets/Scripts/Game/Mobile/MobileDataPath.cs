@@ -63,6 +63,12 @@ namespace DaggerfallWorkshop.Game.Mobile
 #if UNITY_IOS && !UNITY_EDITOR
             DaggerfallUnity.OnSetArena2Source += OnSetArena2Source;
             EnsureDropTarget();
+
+            // Create the loose-content folders too. Without them the capability is invisible:
+            // an empty Documents folder gives no hint that textures, sounds, quests or mods
+            // can be added at all. Runs before scene load, so the folders exist by the time
+            // the asset-injection loaders first look for them.
+            MobileContentPath.EnsureUserFolders();
 #endif
         }
 

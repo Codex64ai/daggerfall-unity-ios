@@ -14,6 +14,7 @@ using System.IO;
 using UnityEngine;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
 using DaggerfallWorkshop.Game.Entity;
+using DaggerfallWorkshop.Game.Mobile;
 
 namespace DaggerfallWorkshop.Game.Questing
 {
@@ -107,6 +108,18 @@ namespace DaggerfallWorkshop.Game.Questing
         public void DiscoverQuestPackLists()
         {
             string[] listFiles = Directory.GetFiles(QuestPacksFolder, QuestListPattern, SearchOption.AllDirectories);
+
+            // Quest packs a player installed under Documents are MERGED with the shipped
+            // ones - this is a recursive scan, so overriding the folder would hide whatever
+            // ships. Each pack keeps its own absolute path, so its quests load from wherever
+            // it actually lives. No-op off iOS.
+            string[] userLists = MobileContentPath.UserFiles("QuestPacks", QuestListPattern, true);
+            if (userLists.Length > 0)
+            {
+                var merged = new List<string>(listFiles);
+                merged.AddRange(userLists);
+                listFiles = merged.ToArray();
+            }
             foreach (string listFile in listFiles)
                 if (!RegisterQuestList(listFile))
                     Debug.LogErrorFormat("QuestList already registered. {0}", listFile);
@@ -280,6 +293,14 @@ namespace DaggerfallWorkshop.Game.Questing
         {
             // First check QuestSourceFolder containing classic quests.
             string questFileName = questName + QExt;
+
+            // A quest pack the player installed takes precedence, so a pack can override a
+            // classic quest by name without touching the shipped copy.
+            string userQuestFolder = MobileContentPath.Override(QuestMachine.QuestSourceFolder);
+            if (userQuestFolder != QuestMachine.QuestSourceFolder &&
+                File.Exists(Path.Combine(userQuestFolder, questFileName)))
+                return LoadQuest(questName, userQuestFolder, factionId);
+
             string questFile = Path.Combine(QuestMachine.QuestSourceFolder, questFileName);
             if (File.Exists(questFile))
                 return LoadQuest(questName, QuestMachine.QuestSourceFolder, factionId);

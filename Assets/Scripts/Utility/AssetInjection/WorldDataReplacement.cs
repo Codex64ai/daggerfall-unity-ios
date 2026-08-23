@@ -14,6 +14,7 @@ using DaggerfallWorkshop.Game.Serialization;
 using System.Collections.Generic;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
 using DaggerfallConnect.Arena2;
+using DaggerfallWorkshop.Game.Mobile;
 
 namespace DaggerfallWorkshop.Utility.AssetInjection
 {
@@ -45,6 +46,22 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
         const int noReplacementIndicator = -1;
         const string worldData = "WorldData";
         static readonly string worldDataPath = Path.Combine(Application.streamingAssetsPath, worldData);
+
+        /// <summary>
+        /// Append any matching world-data files the player added under Documents to the ones
+        /// shipped in the build. Merged rather than overridden because this is a directory
+        /// scan: a player adding one region must not hide the rest. No-op off iOS.
+        /// </summary>
+        static string[] MergeWithUserFiles(string[] shippedFiles, string pattern)
+        {
+            string[] extra = MobileContentPath.UserFiles(worldData, pattern);
+            if (extra.Length == 0)
+                return shippedFiles;
+
+            var merged = new List<string>(shippedFiles);
+            merged.AddRange(extra);
+            return merged.ToArray();
+        }
 
         // No replacement found indicator structures.
         static readonly DFRegion noReplacementRegion = new DFRegion() { LocationCount = 0 };    // Use 0 as it's a uint, and loc count should always be > 0
@@ -145,7 +162,8 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
 
                 // Seek from loose files
                 string locationPattern = string.Format("locationnew-*-{0}.json", regionIndex);
-                string[] fileNames = Directory.GetFiles(worldDataPath, locationPattern);
+                string[] fileNames = MergeWithUserFiles(
+                    Directory.GetFiles(worldDataPath, locationPattern), locationPattern);
                 foreach (string fileName in fileNames)
                 {
                     string locationReplacementJson = File.ReadAllText(Path.Combine(worldDataPath, fileName));
@@ -225,9 +243,10 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
                 TextAsset locationReplacementJsonAsset;
 
                 // Seek from loose files
-                if (File.Exists(Path.Combine(worldDataPath, fileName)))
+                if (File.Exists(MobileContentPath.Override(Path.Combine(worldDataPath, fileName))))
                 {
-                    string locationReplacementJson = File.ReadAllText(Path.Combine(worldDataPath, fileName));
+                    string locationReplacementJson = File.ReadAllText(
+                        MobileContentPath.Override(Path.Combine(worldDataPath, fileName)));
                     dfLocation = (DFLocation)SaveLoadManager.Deserialize(typeof(DFLocation), locationReplacementJson);
                 }
                 // Seek from mods
@@ -270,7 +289,8 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
                 {
                     // Seek from loose files
                     string locationPattern = string.Format("locationnew-*-{0}{1}.json", regionIndex, variant);
-                    string[] fileNames = Directory.GetFiles(worldDataPath, locationPattern);
+                    string[] fileNames = MergeWithUserFiles(
+                        Directory.GetFiles(worldDataPath, locationPattern), locationPattern);
                     foreach (string fileName in fileNames)
                     {
                         string locationReplacementJson = File.ReadAllText(Path.Combine(worldDataPath, fileName));
@@ -355,9 +375,10 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
                 TextAsset blockReplacementJsonAsset;
 
                 // Seek from loose files
-                if (File.Exists(Path.Combine(worldDataPath, fileName)))
+                if (File.Exists(MobileContentPath.Override(Path.Combine(worldDataPath, fileName))))
                 {
-                    string blockReplacementJson = File.ReadAllText(Path.Combine(worldDataPath, fileName));
+                    string blockReplacementJson = File.ReadAllText(
+                        MobileContentPath.Override(Path.Combine(worldDataPath, fileName)));
                     dfBlock = (DFBlock)SaveLoadManager.Deserialize(typeof(DFBlock), blockReplacementJson);
                 }
                 // Seek from mods

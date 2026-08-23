@@ -28,6 +28,7 @@ using DaggerfallConnect.Arena2;
 using DaggerfallWorkshop.Game.Items;
 using DaggerfallWorkshop.Game.UserInterface;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
+using DaggerfallWorkshop.Game.Mobile;
 
 namespace DaggerfallWorkshop.Utility.AssetInjection
 {
@@ -104,9 +105,18 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
         {
             get
             {
+#if UNITY_IOS && !UNITY_EDITOR
+                // iOS GPUs do not implement DXT/BC. `new Texture2D(.., DXT5, ..)` fails there
+                // and the following LoadImage throws ArgumentNullException(paramName: "tex") -
+                // measured on device, where a 128x128 PNG imported fine (under the 256px retro
+                // threshold, so ARGB32) while an identical 2048x2048 one threw.
+                // ARGB32 rather than ASTC because LoadImage cannot compress at runtime.
+                return TextureFormat.ARGB32;
+#else
                 return DaggerfallUnity.Instance.MaterialReader.CompressModdedTextures ?
                     TextureFormat.DXT5 :
                     TextureFormat.ARGB32;
+#endif
             }
         }
 
@@ -1044,6 +1054,9 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
 
             if (!path.EndsWith(extension))
                 path += extension;
+
+            // Prefer a copy the player added under Documents (iOS only; no-op elsewhere).
+            path = MobileContentPath.Override(path);
 
             if (File.Exists(path))
             {

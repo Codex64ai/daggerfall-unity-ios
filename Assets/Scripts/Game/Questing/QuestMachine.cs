@@ -22,6 +22,7 @@ using DaggerfallWorkshop.Game.Serialization;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
 using UnityEngine.Localization.Settings;
 using System.Globalization;
+using DaggerfallWorkshop.Game.Mobile;
 
 namespace DaggerfallWorkshop.Game.Questing
 {
@@ -567,8 +568,10 @@ namespace DaggerfallWorkshop.Game.Questing
             if (!questName.EndsWith(".txt"))
                 questName += ".txt";
 
-            // Attempt to load quest source file
-            string path = Path.Combine(QuestSourceFolder, questName);
+            // Attempt to load quest source file. A quest the player dropped into Documents
+            // wins; the 265 quests shipped inside the app remain reachable (see
+            // MobileContentPath - this is additive, never a replacement).
+            string path = MobileContentPath.Override(Path.Combine(QuestSourceFolder, questName));
             if (!File.Exists(path))
             {
                 LogFormat(questName, "Quest filename path {0} not found.", path);
@@ -1670,7 +1673,8 @@ namespace DaggerfallWorkshop.Game.Questing
             if (lines == null)
             {
                 // Get path to localized quest file and check it exists
-                string path = Path.Combine(Application.streamingAssetsPath, textFolderName, questsFolderName, filename);
+                string path = MobileContentPath.Override(
+                    Path.Combine(Application.streamingAssetsPath, textFolderName, questsFolderName, filename));
                 if (!File.Exists(path))
                     return false;
 

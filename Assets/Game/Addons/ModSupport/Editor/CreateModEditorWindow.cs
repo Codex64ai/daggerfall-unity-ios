@@ -54,8 +54,17 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
             BuildTarget.StandaloneWindows,
             BuildTarget.StandaloneOSX,
             BuildTarget.StandaloneLinux64,
+            // iOS added for the touch port. Asset bundles are platform specific - textures
+            // are re-encoded to the target's GPU formats and shaders compiled for its
+            // graphics API - so a bundle built for a desktop target is refused outright by
+            // an iOS build. Without a target here no iOS-compatible .dfmod could be produced
+            // at all, which is why no existing mod works on iOS.
+            //
+            // Off by default: it roughly doubles build time for mod authors who do not care
+            // about iOS, and an unused platform folder in the output is just confusing.
+            BuildTarget.iOS,
         };
-        readonly bool[] buildTargetsToggles = new bool[] { true, true, true };
+        readonly bool[] buildTargetsToggles = new bool[] { true, true, true, false };
         ModCompressionOptions compressionOption = ModCompressionOptions.LZ4;
         bool ModInfoReady { get { return ModInfoReadyTowrite(); } }
         List<string> Assets { get { return modInfo.Files; } set { modInfo.Files = value; } }         //list of assets to be added

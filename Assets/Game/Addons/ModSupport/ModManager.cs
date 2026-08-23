@@ -19,6 +19,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using FullSerializer;
+using DaggerfallWorkshop.Game.Mobile;
 
 namespace DaggerfallWorkshop.Game.Utility.ModSupport
 {
@@ -132,7 +133,16 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
         void Awake()
         {
             if (string.IsNullOrEmpty(ModDirectory))
-                ModDirectory = Path.Combine(Application.streamingAssetsPath, "Mods");
+            {
+                // On iOS the shipped Mods folder is inside the read-only app bundle, so a
+                // player can never put a .dfmod there and the mod system is enabled but
+                // permanently empty. Point it at Documents instead. Unlike the loose-content
+                // lookups this is a straight redirect rather than additive, because the
+                // shipped folder holds nothing but a readme.
+                ModDirectory = MobileContentPath.Active
+                    ? MobileContentPath.UserFolder("Mods")
+                    : Path.Combine(Application.streamingAssetsPath, "Mods");
+            }
         }
 
         void Start()

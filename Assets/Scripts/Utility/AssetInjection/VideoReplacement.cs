@@ -14,6 +14,7 @@ using UnityEngine;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
 using UnityEngine.Video;
 using DaggerfallWorkshop.Game.UserInterface;
+using DaggerfallWorkshop.Game.Mobile;
 
 namespace DaggerfallWorkshop.Utility.AssetInjection
 {
@@ -56,7 +57,7 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
                     name = name.Substring(0, index);
 
                 // Seek from loose files
-                string path = Path.Combine(moviePath, name + videoExtension);
+                string path = MobileContentPath.Override(Path.Combine(moviePath, name + videoExtension));
                 if (File.Exists(path))
                 {
                     videoPlayerDrawer = new VideoPlayerDrawer(path);

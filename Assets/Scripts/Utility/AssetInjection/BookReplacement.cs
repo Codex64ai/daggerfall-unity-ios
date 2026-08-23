@@ -18,6 +18,7 @@ using DaggerfallConnect.Arena2;
 using DaggerfallWorkshop.Game;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
 using FullSerializer;
+using DaggerfallWorkshop.Game.Mobile;
 
 namespace DaggerfallWorkshop.Utility.AssetInjection
 {
@@ -169,7 +170,7 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
             if (DaggerfallUnity.Settings.AssetInjection)
             {
                 // Seek from loose files
-                string path = Path.Combine(booksPath, name);
+                string path = MobileContentPath.Override(Path.Combine(booksPath, name));
                 if (File.Exists(path))
                 {
                     if (book.OpenBook(File.ReadAllBytes(path), name))

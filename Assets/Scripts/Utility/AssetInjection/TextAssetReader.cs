@@ -17,6 +17,7 @@ using UnityEngine;
 using DaggerfallWorkshop.Game.Serialization;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
 using FullSerializer;
+using DaggerfallWorkshop.Game.Mobile;
 
 namespace DaggerfallWorkshop.Utility.AssetInjection
 {
@@ -37,7 +38,8 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
             if (relativePath == null)
                 throw new ArgumentNullException("relativePath");
 
-            string path = Path.Combine(Application.streamingAssetsPath, relativePath);
+            string path = MobileContentPath.Override(
+                Path.Combine(Application.streamingAssetsPath, relativePath));
             if (File.Exists(path))
             {
                 content = File.ReadAllText(path);
@@ -95,6 +97,12 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
                 foreach (string path in extension != null ? Directory.GetFiles(dirPath, string.Format("*.{0}", extension)) : Directory.GetFiles(dirPath))
                     content.Add(File.ReadAllText(path));
             }
+
+            // MERGED, not overridden: this call concatenates a whole directory, so player
+            // files are appended to the shipped ones rather than replacing the folder.
+            foreach (string path in MobileContentPath.UserFiles(
+                         relativeDirectory, extension != null ? string.Format("*.{0}", extension) : "*"))
+                content.Add(File.ReadAllText(path));
 
             if (ModManager.Instance)
             {

@@ -175,10 +175,49 @@ Open **TUNE** and adjust **Swipe to attack** and **Look sensitivity** first - th
 most. Enable `showGestureDebug` on the `MobileInput` object to see the required swipe
 distance in pixels.
 
+## Mods and loose files
+
+Partly supported, and the boundary is sharp. Everything below was measured on device
+rather than inferred.
+
+Drop content into the app's **Documents** folder (Finder > your device > Files >
+Daggerfall Unity, the same place `arena2` goes). The folders are created for you on first
+launch, with a note explaining each one. Anything you add takes precedence over the copy
+inside the app, and anything you leave out falls back to it - so partial packs are fine.
+
+| Folder | Content | Status |
+|---|---|---|
+| `Textures/` | loose `.png`, named like `180_0-0.png` | works |
+| `Textures/Img/` | loose `.png` for UI images | works |
+| `Sound/` | loose `.wav` sound effects | works |
+| `Quests/` | quest scripts as plain `.txt` | works |
+| `Books/` | loose book text | works |
+| `WorldData/` | loose location / block `.json` | works |
+| `Sound/` (`.ogg`) | replacement music | first play uses the original, then swaps |
+| `Mods/` | `.dfmod` packages **built for iOS** | works |
+
+**What cannot work, ever: mods containing C# code.** iOS compiles ahead of time, so there
+is no way to execute mod code that was not built into the app, and Apple forbids
+downloading executable code. On device this fails while constructing `CompilerParameters`,
+before any compilation is attempted. This rules out most popular gameplay mods - Roleplay
+Realism, Travel Options, Archaeologists Guild, Basic Roads and Roleplay Realism: Items all
+use a C# entry point.
+
+**What cannot work as distributed: `.dfmod` packages from Nexus.** Asset bundles are built
+per platform and DFU's mod builder targets Windows, macOS and Linux only. A macOS-built
+bundle is refused by iOS. They must be rebuilt against an iOS target, which needs the
+mod's original source assets - re-targeting an existing `.dfmod` is not possible.
+
+**Music replacement is deliberately delayed by one play.** A replacement `.ogg` is decoded
+in the background while the original track plays, and takes over the next time that song
+starts. Handing over a still-loading clip would leave the game waiting on it forever, so
+every failure here falls back to the original music rather than to silence.
+
+Loose textures import uncompressed, because the runtime PNG loader cannot compress. A
+large texture pack will use considerably more memory on iOS than it does on desktop.
+
 ## Known limitations
 
-- **Mods are not supported.** iOS forbids the runtime code compilation DFU's mod
-  system relies on; asset-only mods would need iOS-specific rebuilds. Untested either way.
 - **Xcode/Unity pairing.** Unity 2022.3 predates current Xcode releases; the generated
   Xcode project may need manual fixes.
 - **Free Apple ID signing expires after 7 days**, after which you re-sign and redeploy.
