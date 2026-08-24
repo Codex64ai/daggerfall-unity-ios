@@ -358,6 +358,89 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         #endregion
 
+        #region Passive unknown-button watch
+
+        // Buttons this layout binds. Anything else that fires is worth recording: on the
+        // probed controller Btn0-3 map to no known control, and Select/View is still
+        // unidentified because a phantom Btn0 pulse consumed its probe prompt.
+        static readonly System.Collections.Generic.HashSet<int> mappedButtons =
+            new System.Collections.Generic.HashSet<int>
+            { 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 };
+
+        static readonly System.Collections.Generic.HashSet<int> alreadyLogged =
+            new System.Collections.Generic.HashSet<int>();
+
+        const string watchFileName = "controller-unknown-buttons.txt";
+        const int maxWatchLines = 60;
+        static int watchLinesWritten;
+
+        /// <summary>
+        /// Record any joystick button that fires but is not part of the layout, along with
+        /// the context needed to interpret it. Passive: the player just plays, and the file
+        /// answers the question - no dedicated probe session, which is why Select/View has
+        /// stayed unknown through several releases.
+        ///
+        /// The two context flags are the whole point. iPadOS pulses JoystickButton0 during
+        /// touches, so a press logged with touches active is probably that phantom; and
+        /// Start co-fires Btn0 alongside its own Btn16, so a Btn0 seen WITHOUT Btn16 and
+        /// WITHOUT touches is very likely the real Select/View.
+        /// </summary>
+        public static void WatchUnknownButtons()
+        {
+            if (!MobileInput.Enabled || watchLinesWritten >= maxWatchLines)
+                return;
+
+            for (int n = 0; n <= 19; n++)
+            {
+                if (mappedButtons.Contains(n) || !Input.GetKeyDown(Btn(n)))
+                    continue;
+
+                bool touching = Input.touchCount > 0;
+                bool startHeld = Input.GetKey(Start);
+
+                // One line per distinct (button, context) combination - enough to answer
+                // the question without filling the file during normal play.
+                int signature = n * 4 + (touching ? 2 : 0) + (startHeld ? 1 : 0);
+                if (!alreadyLogged.Add(signature))
+                    continue;
+
+                Append(string.Format(
+                    "Btn{0,-2} touchesActive={1,-5} startHeld={2,-5} t={3:0.0}s{4}",
+                    n, touching, startHeld, Time.unscaledTime,
+                    (n == 0 && !touching && !startHeld)
+                        ? "   <== LIKELY Select/View (no touch, no Start)" : ""));
+            }
+        }
+
+        static void Append(string line)
+        {
+            try
+            {
+                string path = System.IO.Path.Combine(Application.persistentDataPath, watchFileName);
+
+                if (watchLinesWritten == 0 && !System.IO.File.Exists(path))
+                {
+                    System.IO.File.WriteAllText(path,
+                        "Unmapped controller buttons seen during play.\n" +
+                        "Btn0-3 are unmapped on the reference controller; Select/View is still\n" +
+                        "unidentified. touchesActive=True suggests the iPadOS phantom pulse;\n" +
+                        "startHeld=True means Start co-fired it. A Btn0 with both False is\n" +
+                        "very likely the real Select/View button.\n\n");
+                }
+
+                System.IO.File.AppendAllText(path, line + "\n");
+                watchLinesWritten++;
+                Debug.Log("[MobileGamepadBindings] unmapped button: " + line);
+            }
+            catch (System.Exception ex)
+            {
+                watchLinesWritten = maxWatchLines;   // stop trying
+                Debug.LogWarning("[MobileGamepadBindings] could not write button watch: " + ex.Message);
+            }
+        }
+
+        #endregion
+
         #region Reporting
 
         /// <summary>Human-readable dump of the layout, for the settings panel and logs.</summary>
