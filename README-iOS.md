@@ -113,7 +113,36 @@ stick, and slash with a left-thumb swipe - the aiming thumb never contaminates t
 attack direction. The view holds still for the quarter-second of each strike (classic
 Daggerfall behaviour); aim flows between swings.
 
-Everything on screen can be moved, resized, or hidden: **TUNE -> Edit layout**.
+Everything on screen can be moved, resized, or hidden individually: **TUNE -> Edit
+layout**, tap a control, then drag it, scale it with **-**/**+**, or **Hide/Show** it.
+Every icon is its own control - the action row and the menu drawer are not fixed blocks.
+**Reset all** returns to the shipped defaults.
+
+### Two layouts, one per HUD mode
+
+The touch layout is saved **separately for fullscreen and for classic mode** (see below).
+Arrange each however suits it; switching between them restores each one's own
+arrangement, and **Reset all** only resets the mode you are currently in.
+
+### Classic interface bar
+
+Daggerfall's original bottom HUD - **Settings > Interface > Large HUD**, docked - is fully
+touch-driven here. Tap any icon on the bar: inventory, map, rest, options, spellbook, use
+magic item, transport, sheathe weapon, the interaction-mode icon (cycles
+steal/talk/grab/info), or the portrait for the character sheet. **This works with a
+controller connected too**, when the rest of the touch overlay has stood down.
+
+Taps are distinguished from drags, so sliding a finger across the bar to look around does
+not press anything, and a tap on the bar never grabs a joystick.
+
+With the bar docked, the touch controls lift above it automatically and the ones the bar
+already provides start hidden. That is only a **default** - anything can be shown or
+hidden in either mode. The overlay's MAP button jumps straight to the travel map, for
+instance, so it is reasonable to keep it alongside the bar's own map icon.
+
+Classic mode ships a deliberately minimal default layout: compact sticks above the bar,
+activate/crouch/jump under the right thumb, menu beside them, settings and travel map top
+right. The bar does the rest.
 
 Hardware keyboards and game controllers are supported - the touch HUD hides itself
 automatically while they're in use and returns at a touch.
@@ -224,6 +253,19 @@ every failure here falls back to the original music rather than to silence.
 
 Loose textures import uncompressed, because the runtime PNG loader cannot compress. A
 large texture pack will use considerably more memory on iOS than it does on desktop.
+
+## Diagnostics
+
+Two small logs are written into the app's Documents folder, alongside `arena2`. Both are
+plain text and safe to delete.
+
+- `session-log.csv` - one row per 30 seconds: frame time, fps, battery, managed memory
+  and where you were. Useful for answering "does it stay healthy over a long session";
+  sustained frame-time growth at a steady battery drain is what thermal throttling looks
+  like from inside the app (iOS does not report thermal state to Unity).
+- `controller-unknown-buttons.txt` - only appears if a gamepad sends a button this port
+  does not recognise. If your controller has a button that does nothing, this file will
+  name it. Sending it in is the fastest way to get that controller supported properly.
 
 ## Known limitations
 
