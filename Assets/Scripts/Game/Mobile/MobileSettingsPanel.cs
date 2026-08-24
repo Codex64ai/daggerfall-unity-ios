@@ -56,6 +56,10 @@ namespace DaggerfallWorkshop.Game.Mobile
             get { return controller != null ? controller.GetComponent<MobileControllerProbe>() : null; }
         }
 
+        // Whether we turned the classic bar off for this panel, so Close restores exactly
+        // what we changed and nothing else.
+        bool suppressedLargeHud;
+
         /// <summary>Wire to the gear button.</summary>
         public void Toggle()
         {
@@ -64,6 +68,21 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             open = !open;
             panel.gameObject.SetActive(open);
+
+            // The classic bar draws through DFU's own GUI pass, which renders ON TOP of
+            // this UGUI panel - in docked mode it covered the bottom rows of settings with
+            // no way to reach them (device report). Stand the bar down while the panel is
+            // open. In-memory settings flip only; nothing calls SaveSettings, so the
+            // player's real preference is untouched.
+            if (open && DaggerfallUnity.Settings.LargeHUD)
+            {
+                DaggerfallUnity.Settings.LargeHUD = false;
+                suppressedLargeHud = true;
+            }
+            else if (!open)
+            {
+                RestoreLargeHud();
+            }
 
             if (open)
                 RefreshHeader();
@@ -76,6 +95,17 @@ namespace DaggerfallWorkshop.Game.Mobile
                 open = false;
                 panel.gameObject.SetActive(false);
             }
+
+            RestoreLargeHud();
+        }
+
+        void RestoreLargeHud()
+        {
+            if (!suppressedLargeHud)
+                return;
+
+            DaggerfallUnity.Settings.LargeHUD = true;
+            suppressedLargeHud = false;
         }
 
         #region Build

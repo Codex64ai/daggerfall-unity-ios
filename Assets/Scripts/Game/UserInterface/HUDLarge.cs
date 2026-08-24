@@ -387,7 +387,48 @@ namespace DaggerfallWorkshop.Game.UserInterface
 
         private bool IsLargeHUDInteractable()
         {
+            // MOBILE (not upstream): on a touch device there is no cursorActive mode -
+            // that is the desktop "release the mouse" concept - so requiring it made every
+            // icon on this bar pure decoration. A finger on an icon IS the cursor.
+            if (Mobile.MobileInput.Enabled)
+                return !GameManager.IsGamePaused;
+
             return GameManager.Instance.PlayerMouseLook.cursorActive && !GameManager.IsGamePaused;
+        }
+
+        /// <summary>
+        /// MOBILE (not upstream): route a screen tap to whichever icon panel it landed on.
+        /// The classic UI's own click pump runs off the real mouse, which touch gameplay
+        /// deliberately does not feed (see MobileInputController) - so the touch layer
+        /// hit-tests here and triggers the same handlers the mouse would have.
+        /// </summary>
+        /// <param name="uiScreenPosition">Screen pixels, TOP-left origin (classic UI space).</param>
+        /// <returns>True if the tap hit an interactive panel.</returns>
+        public bool TriggerTap(Vector2 uiScreenPosition)
+        {
+            if (!Enabled || !IsLargeHUDInteractable())
+                return false;
+
+            // Order matters only for overlap, and these rects do not overlap; the array is
+            // just every panel that has a click handler wired in Setup().
+            Panel[] tappable =
+            {
+                optionsPanel, spellbookPanel, inventoryPanel, sheathPanel,
+                useMagicItemPanel, transportModePanel, mapPanel, restPanel,
+                interactionModePanel, headPanel, compassPanel,
+            };
+
+            for (int i = 0; i < tappable.Length; i++)
+            {
+                Panel panel = tappable[i];
+                if (panel != null && panel.Enabled && panel.Rectangle.Contains(uiScreenPosition))
+                {
+                    panel.TriggerMouseClick();
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void InteractionModePanel_OnMouseClick(BaseScreenComponent sender, Vector2 position)

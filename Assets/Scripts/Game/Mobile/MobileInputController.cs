@@ -350,6 +350,10 @@ namespace DaggerfallWorkshop.Game.Mobile
             PollKeyboard();
             PollController();
 
+            // Classic bottom-bar touch routing. Runs even with a controller connected -
+            // the bar stays tappable when the rest of the touch overlay has stood down.
+            MobileClassicHud.Poll();
+
             MobileControlMode desired = ResolveMode();
             if (desired != MobileInput.Mode)
                 EnterMode(desired);

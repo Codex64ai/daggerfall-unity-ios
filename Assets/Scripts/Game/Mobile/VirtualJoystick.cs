@@ -117,6 +117,10 @@ namespace DaggerfallWorkshop.Game.Mobile
                 for (int i = 0; i < Input.touchCount; i++)
                 {
                     Touch t = Input.GetTouch(i);
+                    // Touches on the classic bottom bar belong to its icons, never to a stick.
+                    if (t.phase == TouchPhase.Began && MobileClassicHud.ContainsScreenPoint(t.position))
+                        continue;
+
                     if (t.phase != TouchPhase.Began || claimedFingers.Contains(t.fingerId))
                         continue;
 

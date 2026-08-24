@@ -121,6 +121,8 @@ namespace DaggerfallWorkshop.Game.Mobile
                     continue;                          // a stick owns it
                 if (VirtualJoystick.IsOverInteractive(t.position))
                     continue;                          // buttons win
+                if (MobileClassicHud.ContainsScreenPoint(t.position))
+                    continue;                          // classic bar icons win too
                 if (IsInGripCorner(t.position))
                     continue;                          // resting thumb
                 if (!combatMode && t.position.x < Screen.width * ignoreLeftFraction)
