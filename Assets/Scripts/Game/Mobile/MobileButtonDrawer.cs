@@ -41,7 +41,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         bool open;
         float lastInteraction;
 
-        public bool IsOpen { get { return open; } }
+        // The layout editor forces the drawer open while arranging: its icons are layout
+        // elements the player must be able to SEE to drag, and the auto-close timer would
+        // otherwise shut them mid-edit (device report: "they're invisible when I'm editing
+        // ... but I could move them still").
+        [System.NonSerialized] public bool forceOpen;
+
+        public bool IsOpen { get { return open || forceOpen; } }
 
         void Start()
         {
@@ -58,7 +64,10 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         void Update()
         {
-            if (!open || autoCloseSeconds <= 0f)
+            if (forceOpen && panel != null && !panel.activeSelf)
+                Apply();
+
+            if (!open || forceOpen || autoCloseSeconds <= 0f)
                 return;
 
             if (Time.unscaledTime - lastInteraction >= autoCloseSeconds)
@@ -96,11 +105,13 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         void Apply()
         {
-            if (panel != null && panel.activeSelf != open)
-                panel.SetActive(open);
+            bool shown = open || forceOpen;
+
+            if (panel != null && panel.activeSelf != shown)
+                panel.SetActive(shown);
 
             if (toggleGraphic != null)
-                toggleGraphic.color = open ? openColor : closedColor;
+                toggleGraphic.color = shown ? openColor : closedColor;
         }
     }
 }

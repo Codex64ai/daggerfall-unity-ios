@@ -29,7 +29,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         public Canvas canvas;
         public GameObject gameplayLayer;
 
-        static readonly HashSet<string> neverHide = new HashSet<string> { "MenuToggle", "SettingsGear" };
+        // MenuToggle is the way back into the drawer; Tune is the way back into settings
+        // (and this editor). Hiding either would strand the player.
+        static readonly HashSet<string> neverHide = new HashSet<string> { "MenuToggle", "Tune" };
 
         RectTransform overlay;
         RectTransform highlight;
@@ -62,9 +64,19 @@ namespace DaggerfallWorkshop.Game.Mobile
             foreach (var e in layout.elements)
                 if (e != null && e.target != null)
                     e.target.gameObject.SetActive(true);
-            foreach (var b in AllButtons(true))
-                if (MobileHudLayout.GetHiddenOverride(b.name))
-                    b.SetActive(true);
+
+            // The drawer icons are elements too, but they live inside the drawer panel -
+            // activating the buttons does nothing while their CONTAINER is closed. Hold it
+            // open for the whole edit session.
+            MobileButtonDrawer drawer =
+                gameplayLayer != null ? gameplayLayer.GetComponent<MobileButtonDrawer>() : null;
+            if (drawer != null)
+                drawer.forceOpen = true;
+
+            // Keep elements clear of the editor toolbar so nothing sits underneath it
+            // where it cannot be grabbed.
+            layout.topReserveInches = 0.7f;
+            layout.Apply();
 
             if (overlay == null)
                 Build();
@@ -133,12 +145,18 @@ namespace DaggerfallWorkshop.Game.Mobile
             editFingerId = -1;
             VirtualJoystick.SuppressDirectTouch = false;
 
-            layout.suppressHiding = false;
-            layout.Apply();                                 // re-applies element hiding
+            MobileButtonDrawer exitDrawer =
+                gameplayLayer != null ? gameplayLayer.GetComponent<MobileButtonDrawer>() : null;
+            if (exitDrawer != null)
+                exitDrawer.forceOpen = false;
 
-            foreach (var b in AllButtons(true))             // apply per-button hiding
-                if (!neverHide.Contains(b.name))
-                    b.SetActive(!MobileHudLayout.GetHiddenOverride(b.name));
+            layout.topReserveInches = 0f;
+            layout.suppressHiding = false;
+            layout.Apply();                                 // the ONE authority on element visibility
+
+            // (A per-button SetActive pass used to run here, keyed on grid-era button names
+            // that no longer match any override - worse, it re-showed buttons the classic
+            // bar had legitimately hidden. Apply() owns visibility now.)
 
             PlayerPrefs.Save();
         }
@@ -172,7 +190,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
             else
             {
-                bool hidden = MobileHudLayout.GetHiddenOverride(name);
+                bool hidden = layout.EffectiveHiddenByName(name);
                 bool movable = selectedElement != null && selectedElement.applyPosition;
                 selectionLabel.text = name
                     + (hidden ? "  (hidden in play)" : "")
@@ -198,20 +216,15 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             Camera cam = canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : canvas.worldCamera;
 
-            // Individual buttons first (smaller targets, hide-only when in a grid).
-            GameObject bestButton = null;
-            float bestArea = float.MaxValue;
-            foreach (var b in AllButtons(false))
-            {
-                RectTransform rt = (RectTransform)b.transform;
-                if (!RectTransformUtility.RectangleContainsScreenPoint(rt, screenPos, cam))
-                    continue;
-                float area = rt.rect.width * rt.rect.height;
-                if (area < bestArea) { bestArea = area; bestButton = b; }
-            }
-
-            // Then layout elements; prefer the smallest hit so knob-sized things win.
+            // Elements only, smallest hit wins. There used to be a buttons-first tier here
+            // from the grid era, when action icons were not elements and could only be
+            // hidden - but now every icon IS an element, and since element and button share
+            // the same rect, the strictly-smaller comparison meant the hide-only button
+            // always won and every visible icon was un-movable (device report), while the
+            // drawer's INACTIVE icons skipped that tier and moved fine. One stale tier,
+            // opposite symptoms.
             MobileHudLayout.Element bestElement = null;
+            float bestArea = float.MaxValue;
             foreach (var e in layout.elements)
             {
                 if (e == null || e.target == null || !e.applyPosition)
@@ -219,14 +232,10 @@ namespace DaggerfallWorkshop.Game.Mobile
                 if (!RectTransformUtility.RectangleContainsScreenPoint(e.target, screenPos, cam))
                     continue;
                 float area = e.target.rect.width * e.target.rect.height;
-                if (area < bestArea) { bestArea = area; bestElement = e; bestButton = null; }
+                if (area < bestArea) { bestArea = area; bestElement = e; }
             }
 
-            // A button inside a selected group: element wins only if strictly smaller,
-            // so tapping WEAPONButton selects the button, tapping bank padding selects the bank.
-            if (bestElement != null) Select(bestElement, null);
-            else if (bestButton != null) Select(null, bestButton);
-            else Select(null, null);
+            Select(bestElement, null);
         }
 
         IEnumerable<GameObject> AllButtons(bool includeInactive)
@@ -280,14 +289,11 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (selectedElement == null || selectedElement.target == null || !selectedElement.applyPosition)
                 return;
 
-            // anchoredPosition = margin * unitsPerInch * sign  ->  invert to store inches.
-            float upi = layout.UnitsPerInch * Mathf.Max(layout.hudScale, 0.0001f);
-            Vector2 a = selectedElement.target.anchorMin;
-            float sx = (a.x > 0.5f) ? -1f : 1f;
-            float sy = (a.y > 0.5f) ? -1f : 1f;
-            Vector2 pos = selectedElement.target.anchoredPosition;
+            // The inverse lives in MobileHudLayout because it must mirror Apply() exactly,
+            // including the classic-bar inset - inverting the raw position here is what
+            // corrupted saves whenever the classic bar was visible.
             MobileHudLayout.SetMarginOverride(selectedElement.name,
-                new Vector2(pos.x * sx / upi, pos.y * sy / upi));
+                layout.MarginInchesFromCurrentPosition(selectedElement));
         }
 
         #endregion
@@ -310,7 +316,12 @@ namespace DaggerfallWorkshop.Game.Mobile
             string name = SelectedName();
             if (name == null || neverHide.Contains(name))
                 return;
-            MobileHudLayout.SetHiddenOverride(name, !MobileHudLayout.GetHiddenOverride(name));
+
+            // Flip the EFFECTIVE state, not the raw pref: classic-bar duplicates default
+            // to hidden with no pref key present, and toggling from that state must write
+            // an explicit "visible" for this profile - the player's choice always wins
+            // over the classic-mode default.
+            MobileHudLayout.SetHiddenOverride(name, !layout.EffectiveHiddenByName(name));
             RefreshChrome();
         }
 

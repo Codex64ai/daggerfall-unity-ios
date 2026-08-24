@@ -157,20 +157,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // ---------------------------------------------------------- primary bank
             // Only what is used moment to moment stays on screen. Ten always-visible
             // buttons crowded the look/swipe area, and map/status/rest are occasional.
-            GameObject bankGo = CreateChild(gameplayLayer, "PrimaryBank");
-            RectTransform bankRect = (RectTransform)bankGo.transform;
-            Anchor(bankRect, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(1f, 0f));
-            bankRect.anchoredPosition = new Vector2(-40f, 40f);
-            bankRect.sizeDelta = new Vector2(660f, 160f);
-
-            GridLayoutGroup grid = bankGo.AddComponent<GridLayoutGroup>();
-            grid.cellSize = new Vector2(150f, 150f);
-            grid.spacing = new Vector2(14f, 14f);
-            grid.startCorner = GridLayoutGroup.Corner.LowerRight;
-            grid.startAxis = GridLayoutGroup.Axis.Horizontal;
-            grid.childAlignment = TextAnchor.LowerRight;
-            grid.constraint = GridLayoutGroup.Constraint.FixedRowCount;
-            grid.constraintCount = 1;
+            // Every action icon is its OWN layout element - no GridLayoutGroup. A grid made
+            // the icons one draggable block (device request: move each icon on its own) and
+            // its reflow shuffled the survivors whenever classic mode hid one. The container
+            // is a full-screen pass-through rect kept only for hierarchy tidiness.
+            GameObject bankGo = CreateFullScreenChild(gameplayLayer, "PrimaryBank");
 
             var primary = new List<(string label, InputManager.Actions action, MobileActionButton.PressMode mode)>
             {
@@ -179,11 +170,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 ("JUMP",   InputManager.Actions.Jump,        MobileActionButton.PressMode.Tap),
                 ("CROUCH", InputManager.Actions.Crouch,      MobileActionButton.PressMode.Toggle),
             };
+            var primaryRects = new Dictionary<string, RectTransform>();
             foreach (var entry in primary)
             {
-                CreateActionButton(bankGo, entry.label + "Button", entry.label,
+                GameObject b = CreateActionButton(bankGo, entry.label + "Button", entry.label,
                     entry.action, entry.mode,
-                    new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(150f, 150f));
+                    new Vector2(1f, 0f), Vector2.zero, new Vector2(150f, 150f));
+                primaryRects[entry.label] = (RectTransform)b.transform;
             }
 
             // ---------------------------------------------------------- menu drawer
@@ -197,23 +190,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Button menuToggleButton = menuToggleGo.AddComponent<Button>();
             AddLabel(menuToggleGo, "MENU");
 
-            // Secondary buttons stack upward from the MENU button.
-            GameObject drawerGo = CreateChild(gameplayLayer, "SecondaryBank");
-            RectTransform drawerRect = (RectTransform)drawerGo.transform;
-            Anchor(drawerRect, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(1f, 0f));
-            drawerRect.anchoredPosition = new Vector2(-720f, 230f);
-            drawerRect.sizeDelta = new Vector2(160f, 920f);
-
-            GridLayoutGroup drawerGrid = drawerGo.AddComponent<GridLayoutGroup>();
-            // 140px cells: six buttons (incl. PAUSE and the settings gear) must stay
-            // below the ~1200-unit canvas top on iPad; 150px cells would clip.
-            drawerGrid.cellSize = new Vector2(140f, 140f);
-            drawerGrid.spacing = new Vector2(12f, 12f);
-            drawerGrid.startCorner = GridLayoutGroup.Corner.LowerRight;
-            drawerGrid.startAxis = GridLayoutGroup.Axis.Vertical;
-            drawerGrid.childAlignment = TextAnchor.LowerCenter;
-            drawerGrid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
-            drawerGrid.constraintCount = 1;
+            // Secondary buttons live in a full-screen pass-through container so the drawer
+            // can still show/hide them as one unit, while each icon stays an independent
+            // layout element the player can drag on its own.
+            GameObject drawerGo = CreateFullScreenChild(gameplayLayer, "SecondaryBank");
 
             MobileButtonDrawer drawer = gameplayLayer.AddComponent<MobileButtonDrawer>();
             drawer.panel = drawerGo;
@@ -229,12 +209,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 ("MAP",       InputManager.Actions.TravelMap),
                 ("REST",      InputManager.Actions.Rest),
             };
+            var secondaryRects = new Dictionary<string, RectTransform>();
             foreach (var entry in secondary)
             {
                 GameObject b = CreateActionButton(drawerGo, entry.label + "Button", entry.label,
                     entry.action, MobileActionButton.PressMode.Tap,
-                    new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(150f, 150f));
+                    new Vector2(1f, 0f), Vector2.zero, new Vector2(150f, 150f));
                 b.GetComponent<MobileActionButton>().ownerDrawer = drawer;
+                secondaryRects[entry.label] = (RectTransform)b.transform;
             }
 
             UnityEditor.Events.UnityEventTools.AddPersistentListener(
@@ -270,6 +252,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // Inside the drawer: settings are not a moment-to-moment control.
             GameObject gearGo = CreateChild(drawerGo, "SettingsGear");
             RectTransform gearRect = (RectTransform)gearGo.transform;
+            Anchor(gearRect, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(1f, 0f));
             gearRect.sizeDelta = new Vector2(150f, 150f);
             Image gearImg = gearGo.AddComponent<Image>();
             gearImg.color = new Color(1f, 1f, 1f, 0.28f);
@@ -331,15 +314,51 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             layout.canvas = canvas;
             layout.elements = new[]
             {
-                Elem("Joystick",  joyRect,      1.10f, 0f, new Vector2(1.35f, 1.30f)),
-                Elem("Knob",      knobRect,     0.45f, 0f, Vector2.zero, false),
-                Elem("LookJoystick", lookJoyRect, 1.10f, 0f, new Vector2(1.80f, 1.15f)),
-                Elem("LookKnob",  lookKnobRect, 0.45f, 0f, Vector2.zero, false),
-                Elem("Activate",  (RectTransform)activateGo.transform, 0.80f, 0f, new Vector2(2.40f, 0.65f)),
-                Elem("Combat",    combatRect,   0.55f, 0f, new Vector2(5.95f, 0.10f)),
-                Elem("MenuToggle", menuToggleRect, 0.50f, 0f, new Vector2(2.60f, 0.10f)),
-                Bank("PrimaryBank",   bankRect,   new Vector2(3.35f, 0.10f), 0.50f, 0.07f),
-                Bank("SecondaryBank", drawerRect, new Vector2(0.20f, 1.75f), 0.48f, 0.05f),
+                // Classic-mode values are Ikram's device-tuned minimal layout
+                // (2026-08-23 screenshot, reconstructed by pixel measurement): sticks
+                // smaller and tucked into the corners above the bar, ACTIVATE with CROUCH
+                // and JUMP by the right thumb, MENU beside them, TUNE and MAP stacked at
+                // the top right. Everything else defaults hidden there - the bar itself
+                // provides inventory, map, rest, pause, weapon; SPELL, STATUS and COMBAT
+                // are a Hide/Show away for players who want them.
+                Elem("Joystick",  joyRect,      1.10f, 0f, new Vector2(1.35f, 1.30f),
+                     classicMarginIn: new Vector2(0.78f, 0.76f), classicWidthIn: 0.80f),
+                Elem("Knob",      knobRect,     0.45f, 0f, Vector2.zero, false,
+                     classicWidthIn: 0.33f),
+                Elem("LookJoystick", lookJoyRect, 1.10f, 0f, new Vector2(1.80f, 1.15f),
+                     classicMarginIn: new Vector2(0.58f, 0.78f), classicWidthIn: 0.80f),
+                Elem("LookKnob",  lookKnobRect, 0.45f, 0f, Vector2.zero, false,
+                     classicWidthIn: 0.33f),
+                Elem("Activate",  (RectTransform)activateGo.transform, 0.80f, 0f, new Vector2(2.40f, 0.65f),
+                     classicMarginIn: new Vector2(2.64f, 0.62f), classicWidthIn: 0.50f),
+                Elem("Combat",    combatRect,   0.55f, 0f, new Vector2(5.95f, 0.10f),
+                     classicHidden: true),
+                Elem("MenuToggle", menuToggleRect, 0.50f, 0f, new Vector2(2.60f, 0.10f),
+                     classicMarginIn: new Vector2(3.27f, 0.00f), classicWidthIn: 0.40f),
+                // One element per icon so each is draggable, hideable and scalable on its
+                // own. Defaults reproduce the former grid rows exactly: the bottom-centre
+                // action row steps 0.57in (0.50 cell + 0.07 gap) leftward from WEAPON, the
+                // drawer column steps 0.53in (0.48 + 0.05) upward from PAUSE.
+                Elem("Weapon",    primaryRects["WEAPON"],   0.50f, 0f, new Vector2(3.35f, 0.10f),
+                     classicHidden: true),
+                Elem("Spell",     primaryRects["SPELL"],    0.50f, 0f, new Vector2(3.92f, 0.10f),
+                     classicHidden: true),
+                Elem("Jump",      primaryRects["JUMP"],     0.50f, 0f, new Vector2(4.49f, 0.10f),
+                     classicMarginIn: new Vector2(2.07f, 0.05f), classicWidthIn: 0.45f),
+                Elem("Crouch",    primaryRects["CROUCH"],   0.50f, 0f, new Vector2(5.06f, 0.10f),
+                     classicMarginIn: new Vector2(2.68f, 0.00f), classicWidthIn: 0.45f),
+                Elem("Pause",     secondaryRects["PAUSE"],     0.48f, 0f, new Vector2(0.20f, 1.75f),
+                     classicHidden: true),
+                Elem("Inventory", secondaryRects["INVENTORY"], 0.48f, 0f, new Vector2(0.20f, 2.28f),
+                     classicHidden: true),
+                Elem("Status",    secondaryRects["STATUS"],    0.48f, 0f, new Vector2(0.20f, 2.81f),
+                     classicHidden: true),
+                Elem("Map",       secondaryRects["MAP"],       0.48f, 0f, new Vector2(0.20f, 3.34f),
+                     classicMarginIn: new Vector2(0.26f, 3.61f), classicWidthIn: 0.40f),
+                Elem("Rest",      secondaryRects["REST"],      0.48f, 0f, new Vector2(0.20f, 3.87f),
+                     classicHidden: true),
+                Elem("Tune",      gearRect,                    0.48f, 0f, new Vector2(0.20f, 4.40f),
+                     classicMarginIn: new Vector2(0.28f, 4.07f), classicWidthIn: 0.45f),
             };
 
             settingsPanel.controller = controller;
@@ -440,7 +459,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         }
 
         static MobileHudLayout.Element Elem(string name, RectTransform rt, float widthIn,
-                                            float heightIn, Vector2 marginIn, bool position = true)
+                                            float heightIn, Vector2 marginIn, bool position = true,
+                                            Vector2? classicMarginIn = null,
+                                            float classicWidthIn = 0f,
+                                            bool classicHidden = false)
         {
             return new MobileHudLayout.Element
             {
@@ -449,24 +471,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 widthInches = widthIn,
                 heightInches = heightIn,
                 marginInches = marginIn,
-                applySize = true,
+                applySize = widthIn > 0f,
                 applyPosition = position,
-            };
-        }
-
-        static MobileHudLayout.Element Bank(string name, RectTransform rt, Vector2 marginIn,
-                                            float cellIn, float spacingIn)
-        {
-            return new MobileHudLayout.Element
-            {
-                name = name,
-                target = rt,
-                widthInches = 0f,          // grid drives its own children
-                marginInches = marginIn,
-                applySize = false,
-                applyPosition = true,
-                gridCellInches = cellIn,
-                gridSpacingInches = spacingIn,
+                classicMarginInches = classicMarginIn ?? marginIn,
+                classicWidthInches = classicWidthIn,
+                classicHidden = classicHidden,
             };
         }
 
