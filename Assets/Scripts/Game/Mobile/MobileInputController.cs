@@ -22,6 +22,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
 using DaggerfallWorkshop.Game.UserInterface;
+using DaggerfallWorkshop;
 
 namespace DaggerfallWorkshop.Game.Mobile
 {
@@ -94,6 +95,10 @@ namespace DaggerfallWorkshop.Game.Mobile
         [Tooltip("Keep Actions.SwingWeapon held this long after the finger lifts, so short flicks still resolve and bows release.")]
         public float swingHoldExtension = 0.12f;
 
+        [Tooltip("Hold this long before a bow starts drawing, so an incidental tap on the " +
+                 "view does not loose an arrow. Imperceptible for a deliberate hold.")]
+        public float bowDrawMinHold = 0.10f;
+
 
 
         [Header("Virtual Cursor")]
@@ -151,6 +156,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         float vidHoldStart = -1f;
         bool vidSkipQueued;
         float swingHoldUntil;
+        float bowHoldStart = -1f;
         bool thresholdApplied;
         int appliedScreenWidth;
         int appliedScreenHeight;
@@ -354,6 +360,13 @@ namespace DaggerfallWorkshop.Game.Mobile
             // the bar stays tappable when the rest of the touch overlay has stood down.
             MobileClassicHud.Poll();
 
+            // Passive: records controller buttons the layout does not bind, so an unknown
+            // button (Select/View) identifies itself during normal play.
+            if (controllerConnected)
+                MobileGamepadBindings.WatchUnknownButtons();
+
+            MobileSessionLog.Poll();
+
             MobileControlMode desired = ResolveMode();
             if (desired != MobileInput.Mode)
                 EnterMode(desired);
@@ -513,6 +526,27 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         public bool ControllerConnected { get { return controllerConnected; } }
 
+        /// <summary>
+        /// True while a bow is the drawn weapon. Bows are a completely different input
+        /// shape from every other weapon: WeaponManager ignores swing tracking for them and
+        /// keys off Actions.SwingWeapon being HELD, so the touch layer has to treat them
+        /// separately or aiming itself becomes the trigger.
+        /// </summary>
+        public static bool BowEquipped
+        {
+            get
+            {
+                if (!GameManager.HasInstance)
+                    return false;
+
+                WeaponManager wm = GameManager.Instance.WeaponManager;
+                if (wm == null || wm.ScreenWeapon == null || wm.Sheathed)
+                    return false;
+
+                return wm.ScreenWeapon.WeaponType == WeaponTypes.Bow;
+            }
+        }
+
         #endregion
 
         void OnGUI()
@@ -667,6 +701,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             tapActions.Clear();
             heldActions.Clear();
             swingHoldUntil = 0f;
+            bowHoldStart = -1f;
         }
 
         void RefreshCombatToggleVisual()
@@ -839,13 +874,48 @@ namespace DaggerfallWorkshop.Game.Mobile
             // swing existed briefly and device feedback was unanimous: the stick should
             // only ever be a camera.)
             bool combat = MobileInput.CombatMode;
-            if (combat && lookZone.IsDragging)
+            bool bow = BowEquipped;
+
+            // A BOW IS DRAWN BY HOLDING THE VIEW, AND AIMED WITH THE SAME THUMB.
+            //
+            // Touch and hold anywhere on the view to pull the bow back, move that finger
+            // (or the look stick) to aim while it is drawn, lift to loose the arrow. It is
+            // how a bow actually works, and it needs no button.
+            //
+            // Bows are excluded from the swipe path entirely. WeaponManager keys a bow off
+            // Actions.SwingWeapon being HELD, so under swipe rules the AIMING gesture was
+            // the trigger - drag to line up, the 0.12s flick extension lapsed, an arrow
+            // left, repeatedly (device report: "it just shoots non stop when trying to
+            // aim"). The extension is what makes a flick resolve for a blade; for a bow it
+            // is exactly wrong, because release must be immediate and deliberate.
+            bool bowFingerDown = combat && bow && lookZone.IsDragging;
+            if (bowFingerDown)
+            {
+                if (bowHoldStart < 0f)
+                    bowHoldStart = Time.unscaledTime;
+            }
+            else
+            {
+                bowHoldStart = -1f;
+            }
+
+            bool bowDrawing = bowFingerDown &&
+                              Time.unscaledTime - bowHoldStart >= bowDrawMinHold;
+
+            if (combat && !bow && lookZone.IsDragging)
                 swingHoldUntil = Time.unscaledTime + swingHoldExtension;
-            bool swingWindow = combat && Time.unscaledTime < swingHoldUntil;
+
+            // Swipe-swing (blades) and bow-draw are separate states: only the swipe one
+            // may suppress the look stick.
+            bool swipeWindow = combat && !bow && Time.unscaledTime < swingHoldUntil;
+            bool swingWindow = swipeWindow || bowDrawing;
 
             // Right stick: rate-based look, always and only. Excluded while a swipe-swing
             // is live so the aiming thumb cannot contaminate the attack direction.
-            if (lookJoystick != null && lookJoystick.IsHeld && !swingWindow)
+            // Excluded during a swipe so the aiming thumb cannot contaminate the attack
+            // direction - but a bow has no direction to contaminate, and aiming while drawn
+            // is the whole point, so the stick stays live for it.
+            if (lookJoystick != null && lookJoystick.IsHeld && !swipeWindow)
             {
                 Vector2 stick = lookJoystick.Value;
                 stick = new Vector2(stick.x * Mathf.Abs(stick.x), stick.y * Mathf.Abs(stick.y));

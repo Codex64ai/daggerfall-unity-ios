@@ -56,6 +56,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             [Tooltip("Hidden by default in classic docked mode (until the player chooses " +
                      "otherwise - an explicit Hide/Show always wins).")]
             public bool classicHidden;
+
         }
 
         [Header("Canvas")]

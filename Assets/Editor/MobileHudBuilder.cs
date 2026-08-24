@@ -233,15 +233,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Button combatButton = combatGo.AddComponent<Button>();
             AddLabel(combatGo, "COMBAT");
 
-            // ---------------------------------------------------------- reticle
-            GameObject reticleGo = CreateChild(gameplayLayer, "Reticle");
-            RectTransform reticleRect = (RectTransform)reticleGo.transform;
-            Anchor(reticleRect, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f));
-            reticleRect.anchoredPosition = Vector2.zero;
-            reticleRect.sizeDelta = new Vector2(10f, 10f);
-            Image reticleImg = reticleGo.AddComponent<Image>();
-            reticleImg.color = new Color(1f, 1f, 1f, 0.55f);
-            reticleImg.raycastTarget = false;   // must never absorb a look drag
+            // NO RETICLE OF OUR OWN. Daggerfall already draws a crosshair (HUDCrosshair,
+            // controlled by the Crosshair setting), and ours was a second one - visibly a
+            // separate square BELOW the real cross, because HUDCrosshair centres itself in
+            // the viewport ABOVE the classic bar while a UGUI overlay element centres on
+            // the whole screen. Two crosshairs, and the wrong one was untextured.
 
             // ---------------------------------------------------------- menu back button
             CreateActionButton(menuLayer, "MenuBackButton", "BACK",
@@ -398,7 +394,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Debug.Log(
                 "[MobileHudBuilder] Built touch HUD.\n" +
                 "  MobileCanvas (sort order 50, 1920x1080 reference)\n" +
-                "    GameplayLayer: LookZone, MoveJoystick, ActivateButton, CombatToggle, Reticle\n" +
+                "    GameplayLayer: LookZone, MoveJoystick, ActivateButton, CombatToggle\n" +
                 "      PrimaryBank (" + primary.Count + " always visible)\n" +
                 "      MenuToggle -> SecondaryBank (" + (secondary.Count + 1) + " incl. TUNE, hidden)\n" +
                 "    MenuLayer (inactive): MenuBackButton\n" +

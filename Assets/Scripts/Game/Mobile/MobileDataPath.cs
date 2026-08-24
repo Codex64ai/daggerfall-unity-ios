@@ -69,7 +69,37 @@ namespace DaggerfallWorkshop.Game.Mobile
             // can be added at all. Runs before scene load, so the folders exist by the time
             // the asset-injection loaders first look for them.
             MobileContentPath.EnsureUserFolders();
+            EnsureTouchCombatDefaults();
 #endif
+        }
+
+        /// <summary>
+        /// Turn BowDrawback on once, the first time this build runs.
+        ///
+        /// With it off - the stock default - WeaponManager fires a bow the instant the
+        /// attack begins, with no draw phase at all. On touch that is unusable: there is
+        /// nothing to hold, so a bow becomes a machine gun. With it on, holding draws and
+        /// releasing shoots, which is what the DRAW button expresses.
+        ///
+        /// Applied ONCE, behind a flag, so a player who later turns it off in Daggerfall's
+        /// own settings keeps that choice.
+        /// </summary>
+        static void EnsureTouchCombatDefaults()
+        {
+            const string appliedKey = "DFMobile.BowDrawbackDefaulted";
+            if (PlayerPrefs.GetInt(appliedKey, 0) == 1)
+                return;
+
+            PlayerPrefs.SetInt(appliedKey, 1);
+            PlayerPrefs.Save();
+
+            if (DaggerfallUnity.Settings.BowDrawback)
+                return;
+
+            DaggerfallUnity.Settings.BowDrawback = true;
+            DaggerfallUnity.Settings.SaveSettings();
+            Debug.Log("[MobileDataPath] BowDrawback enabled for touch (hold to draw, " +
+                      "release to shoot). Change it in Settings > Controls if you prefer.");
         }
 
         static void OnSetArena2Source()

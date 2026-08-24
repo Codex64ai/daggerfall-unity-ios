@@ -53,7 +53,6 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             new KeyValuePair<string, string>("joystick_bg", "LookJoystick"),
             new KeyValuePair<string, string>("joystick_knob", "LookKnob"),
             new KeyValuePair<string, string>("btn_menu", "MenuToggle"),
-            new KeyValuePair<string, string>("reticle", "Reticle"),
         };
 
         [MenuItem("Tools/Daggerfall Mobile/Import Touch Icons")]
