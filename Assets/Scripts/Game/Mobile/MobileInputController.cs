@@ -842,6 +842,17 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             Vector2 axis = (moveJoystick != null) ? moveJoystick.Value : Vector2.zero;
 
+            // A journey drives movement itself, holding forward along its own bearing. The
+            // move stick has to stand down for the same reason the look zone does: both end
+            // up calling ApplyVerticalForce, and a thumb resting off-centre would walk the
+            // player off course for the whole trip.
+            //
+            // Deliberately NOT wired as "push to cancel" here. Interrupting a journey is the
+            // travel controller's decision, not the input layer's - it has to stop the clock,
+            // release the camera and offer to resume, none of which belongs in a pump.
+            if (MobileJourneyPilot.Active)
+                return;
+
             // Use the engine's own force API so the impulse flags and ApplyFriction()
             // keep working. Skipping the call when an axis is zero is what lets friction
             // decelerate the player normally.
@@ -866,6 +877,19 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             if (lookZone == null)
                 return;
+
+            // A JOURNEY OWNS THE CAMERA WHILE IT RUNS.
+            //
+            // MobileJourneyPilot sets the body's yaw outright to steer toward the
+            // destination. If the look zone kept feeding mouseX/mouseY at the same time, the
+            // two would fight every frame and the thumb would win - the player would drift
+            // off course by resting a finger on the screen. The delta is still CONSUMED so
+            // it does not pool up and fire as one large jerk the moment the journey ends.
+            if (MobileJourneyPilot.Active)
+            {
+                lookZone.ConsumeDelta();
+                return;
+            }
 
             Vector2 delta = lookZone.ConsumeDelta() * touchToMouseScale;
 
