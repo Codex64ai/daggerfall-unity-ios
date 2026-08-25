@@ -58,6 +58,7 @@ successfulBackstab,Successful backstab!
 languagePacified,Pacified %e using %s skill.
 lockpickingSuccess,The lock clicks open.
 lockpickingFailure,It does not unlock.
+lockpickingNoFurtherProgress,This lock will not yield to your present skill.
 magicLock,This is a magically held lock...
 lockpickChance1,This lock has nothing to fear from you...
 lockpickChance2,It'd be a miracle if you picked this lock...
@@ -1420,7 +1421,8 @@ spry
 nimble
 dexterous
 very agile
-acrobatic"
+acrobatic
+"
 endRatings,"sickly
 pitiable
 unsteady

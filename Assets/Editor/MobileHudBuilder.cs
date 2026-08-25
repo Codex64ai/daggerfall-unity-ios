@@ -205,8 +205,18 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 // without this the save menu is unreachable from the touch HUD.
                 ("PAUSE",     InputManager.Actions.Escape),
                 ("INVENTORY", InputManager.Actions.Inventory),
+                // Distinct from STATUS (which is the smaller status popup): this is the
+                // character sheet proper - skills, level, equipment - and it also carries
+                // Daggerfall's own Logbook button, so it is the route to the quest journal
+                // too. Touch had no way to reach either.
+                ("SHEET",     InputManager.Actions.CharacterSheet),
                 ("STATUS",    InputManager.Actions.Status),
                 ("MAP",       InputManager.Actions.TravelMap),
+                // The DUNGEON/interior automap - a different action and a different window
+                // from the travel map above (dfuiOpenAutomap vs the travel map screen).
+                // Touch had only the travel map, which left dungeon navigation blind in
+                // fullscreen mode; the classic bar's map icon had been covering for it.
+                ("AUTOMAP",   InputManager.Actions.AutoMap),
                 ("REST",      InputManager.Actions.Rest),
             };
             var secondaryRects = new Dictionary<string, RectTransform>();
@@ -218,6 +228,29 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 b.GetComponent<MobileActionButton>().ownerDrawer = drawer;
                 secondaryRects[entry.label] = (RectTransform)b.transform;
             }
+
+            // ------------------------------------------------ interaction mode cycle
+            // Steal is how locks are picked and Info is how things are examined; touch could
+            // reach neither, because the mode switch only existed on the classic bar and the
+            // controller d-pad. Locked doors were simply unopenable by touch.
+            // Lives in the action row, not the drawer: switching to Steal to pick a lock or
+            // Info to examine something is a gameplay move made mid-scene, not a menu trip.
+            GameObject modeGo = CreateActionButton(bankGo, "InteractionModeButton", "",
+                InputManager.Actions.GrabMode, MobileActionButton.PressMode.Tap,
+                new Vector2(1f, 0f), Vector2.zero, new Vector2(150f, 150f));
+            MobileActionButton modeButton = modeGo.GetComponent<MobileActionButton>();
+            modeButton.cyclesInteractionMode = true;
+
+            // Wears Daggerfall's own mode art from MAIN01I0.IMG, so it always shows the
+            // mode it will act on - and matches the classic bar exactly instead of
+            // approximating it.
+            modeGo.AddComponent<MobileGameArtIcon>().source =
+                MobileGameArtIcon.ArtSource.InteractionMode;
+
+            // The character sheet button wears the player's own paper-doll head, which is
+            // what classic Daggerfall used as the character-sheet button.
+            secondaryRects["SHEET"].gameObject.AddComponent<MobileGameArtIcon>().source =
+                MobileGameArtIcon.ArtSource.PlayerPortrait;
 
             UnityEditor.Events.UnityEventTools.AddPersistentListener(
                 menuToggleButton.onClick, drawer.Toggle);
@@ -343,17 +376,30 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                      classicMarginIn: new Vector2(2.07f, 0.05f), classicWidthIn: 0.45f),
                 Elem("Crouch",    primaryRects["CROUCH"],   0.50f, 0f, new Vector2(5.06f, 0.10f),
                      classicMarginIn: new Vector2(2.68f, 0.00f), classicWidthIn: 0.45f),
+                // Interaction mode sits with the action row. Hidden by default in classic
+                // mode - the bar carries its own mode switcher.
+                Elem("Mode",      (RectTransform)modeGo.transform, 0.50f, 0f,
+                     new Vector2(5.63f, 0.10f), classicHidden: true),
                 Elem("Pause",     secondaryRects["PAUSE"],     0.48f, 0f, new Vector2(0.20f, 1.75f),
                      classicHidden: true),
                 Elem("Inventory", secondaryRects["INVENTORY"], 0.48f, 0f, new Vector2(0.20f, 2.28f),
                      classicHidden: true),
-                Elem("Status",    secondaryRects["STATUS"],    0.48f, 0f, new Vector2(0.20f, 2.81f),
+                // The bar opens the character sheet by its portrait, so this is redundant
+                // there - but it is the only route to the sheet (and its Logbook) otherwise.
+                Elem("Sheet",     secondaryRects["SHEET"],     0.48f, 0f, new Vector2(0.20f, 2.81f),
                      classicHidden: true),
-                Elem("Map",       secondaryRects["MAP"],       0.48f, 0f, new Vector2(0.20f, 3.34f),
+                Elem("Status",    secondaryRects["STATUS"],    0.48f, 0f, new Vector2(0.20f, 3.34f),
+                     classicHidden: true),
+                Elem("Map",       secondaryRects["MAP"],       0.48f, 0f, new Vector2(0.20f, 3.87f),
                      classicMarginIn: new Vector2(0.26f, 3.61f), classicWidthIn: 0.40f),
-                Elem("Rest",      secondaryRects["REST"],      0.48f, 0f, new Vector2(0.20f, 3.87f),
+                // Sits directly above the travel map: two map buttons together is the
+                // discoverable arrangement. Hidden in classic mode, where the bar's own
+                // map icon already opens the automap indoors.
+                Elem("Automap",   secondaryRects["AUTOMAP"],   0.48f, 0f, new Vector2(0.20f, 4.40f),
                      classicHidden: true),
-                Elem("Tune",      gearRect,                    0.48f, 0f, new Vector2(0.20f, 4.40f),
+                Elem("Rest",      secondaryRects["REST"],      0.48f, 0f, new Vector2(0.20f, 4.93f),
+                     classicHidden: true),
+                Elem("Tune",      gearRect,                    0.48f, 0f, new Vector2(0.20f, 5.46f),
                      classicMarginIn: new Vector2(0.28f, 4.07f), classicWidthIn: 0.45f),
             };
 
@@ -532,7 +578,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             button.pressMode = mode;
             button.tintTarget = image;
 
-            AddLabel(go, label);
+            if (!string.IsNullOrEmpty(label))
+                AddLabel(go, label);
             return go;
         }
 

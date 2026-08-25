@@ -4,6 +4,7 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using DaggerfallWorkshop;
 
 namespace DaggerfallWorkshop.Game.Mobile
 {
@@ -33,6 +34,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         [Header("Action")]
         public InputManager.Actions action = InputManager.Actions.ActivateCenterObject;
         public PressMode pressMode = PressMode.Tap;
+
+        [Header("Interaction Mode Cycle")]
+        [Tooltip("Cycle the interaction mode instead of sending a fixed action. Steal is " +
+                 "how locks are picked and Info is how things are examined, and touch had " +
+                 "no way to reach either - the mode switch only existed on the classic bar " +
+                 "and the controller d-pad. Cycles in the same order the classic bar does.")]
+        public bool cyclesInteractionMode = false;
 
         [Header("UI Back Button")]
         [Tooltip("Send the UI back button instead of an action. REQUIRED for a menu close button: " +
@@ -88,6 +96,30 @@ namespace DaggerfallWorkshop.Game.Mobile
             ApplyTint(false);
         }
 
+        /// <summary>
+        /// The action that advances the interaction mode one step, matching the order the
+        /// classic bar cycles in (Steal -> Talk -> Grab -> Info -> Steal).
+        ///
+        /// Routed as an ACTION rather than by calling ChangeInteractionMode directly, so it
+        /// goes through PlayerActivate's own handling - the same path the keyboard, the
+        /// controller d-pad and the classic bar all use.
+        /// </summary>
+        InputManager.Actions NextInteractionModeAction()
+        {
+            if (!GameManager.HasInstance || GameManager.Instance.PlayerActivate == null)
+                return InputManager.Actions.GrabMode;
+
+            switch (GameManager.Instance.PlayerActivate.CurrentMode)
+            {
+                case PlayerActivateModes.Steal: return InputManager.Actions.TalkMode;
+                case PlayerActivateModes.Talk: return InputManager.Actions.GrabMode;
+                case PlayerActivateModes.Grab: return InputManager.Actions.InfoMode;
+                case PlayerActivateModes.Info: return InputManager.Actions.StealMode;
+            }
+
+            return InputManager.Actions.GrabMode;
+        }
+
         public void OnPointerDown(PointerEventData eventData)
         {
             if (sendsUiBackButton)
@@ -112,7 +144,8 @@ namespace DaggerfallWorkshop.Game.Mobile
                     if (Time.unscaledTime - lastFireTime < tapCooldown)
                         return;
                     lastFireTime = Time.unscaledTime;
-                    controller.QueueAction(action);
+                    controller.QueueAction(cyclesInteractionMode ? NextInteractionModeAction()
+                                                                : action);
                     ApplyTint(true);
                     break;
 

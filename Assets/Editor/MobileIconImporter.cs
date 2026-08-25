@@ -53,6 +53,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             new KeyValuePair<string, string>("joystick_bg", "LookJoystick"),
             new KeyValuePair<string, string>("joystick_knob", "LookKnob"),
             new KeyValuePair<string, string>("btn_menu", "MenuToggle"),
+            new KeyValuePair<string, string>("btn_sheet", "SHEETButton"),
+            new KeyValuePair<string, string>("btn_automap", "AUTOMAPButton"),
         };
 
         [MenuItem("Tools/Daggerfall Mobile/Import Touch Icons")]
@@ -122,6 +124,45 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
         #region Assignment
 
+        /// <summary>
+        /// Feed the four interaction-mode icons into MobileGameArtIcon.
+        ///
+        /// Separate from the name->object table because this is one component holding FOUR
+        /// sprites, swapped at runtime to show the current mode. Order matches
+        /// PlayerActivateModes: Steal, Grab, Info, Talk. If any are missing the component
+        /// falls back to Daggerfall's own MAIN01I0.IMG art, so the button always works.
+        /// </summary>
+        static int AssignInteractionModeSprites(GameObject canvas, StringBuilder log)
+        {
+            Transform t = FindDeep(canvas.transform, "InteractionModeButton");
+            if (t == null)
+                return 0;
+
+            MobileGameArtIcon icon = t.GetComponent<MobileGameArtIcon>();
+            if (icon == null)
+                return 0;
+
+            string[] names = { "btn_mode_steal", "btn_mode_grab", "btn_mode_info", "btn_mode_talk" };
+            Sprite[] sprites = new Sprite[names.Length];
+            int found = 0;
+
+            for (int i = 0; i < names.Length; i++)
+            {
+                sprites[i] = LoadSprite(names[i]);
+                if (sprites[i] != null)
+                    found++;
+                else
+                    log.AppendLine("  missing mode sprite: " + names[i] + ".png (classic art will be used)");
+            }
+
+            if (found < names.Length)
+                return 0;
+
+            icon.modeSprites = sprites;
+            log.AppendLine("  interaction mode icons -> InteractionModeButton (4 sprites)");
+            return 1;
+        }
+
         static int AssignSprites(StringBuilder log)
         {
             GameObject canvas = GameObject.Find("MobileCanvas");
@@ -133,6 +174,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             }
 
             int assigned = 0;
+
+            assigned += AssignInteractionModeSprites(canvas, log);
 
             foreach (KeyValuePair<string, string> pair in targets)
             {

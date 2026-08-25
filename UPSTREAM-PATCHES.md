@@ -6,8 +6,8 @@ document covers the exception: **15 upstream files we modify**, and what each ch
 for. Keep it current — it is the difference between a routine rebase and an archaeology
 session.
 
-Measured against the port's first commit (`cc434d5e7`) as of v0.1.5-prealpha:
-**439 lines added, 54 lines removed, 54 hunks.** That is a small, tractable footprint for
+Measured against the port's first commit (`cc434d5e7`) as of v0.1.6-prealpha:
+**16 files, roughly 455 lines added, 54 removed.** That is a small, tractable footprint for
 a platform port, and worth defending.
 
 ## Ground rules that keep it small
@@ -58,6 +58,15 @@ Additive by necessity: a straight redirect would leave the game with no quests.
 system was enabled but permanently empty), and the mod builder gains an iOS build target,
 off by default.
 *Rebase risk: LOW.*
+
+### Lockpicking feedback — `Internal/DaggerfallActionDoor.cs` (+15)
+`AttemptLockpicking()` returns silently when the player has already failed this door at
+their current Lockpicking skill - correct vanilla rule, but on a touchscreen a mute door
+is indistinguishable from a dead button, and it read as one in testing. Guarded by
+`MobileInput.Enabled`, so desktop keeps the original silence. Uses the same
+`PopupMessage` the success/failure paths use, with a reversion string because the text key
+is not in the built StringTables yet (it IS in Internal_Strings.csv for a future import).
+*Rebase risk: LOW.* One guarded block inside one method.
 
 ### UI plumbing — `DaggerfallUI.cs` (+3/-3), `BaseScreenComponent.cs` (+2/-1), `DaggerfallFont.cs` (+2/-2)
 Small touch/scaling accommodations. Three lines each; check them by eye after a rebase

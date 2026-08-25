@@ -153,6 +153,21 @@ namespace DaggerfallWorkshop
             // If player fails at their current lockpicking skill level, they can't try again
             if (FailedSkillLevel == player.Skills.GetLiveSkillValue(DFCareer.Skills.Lockpicking))
             {
+                // MOBILE (not upstream): say so instead of refusing in silence. On desktop a
+                // mute door is a small mystery; on a touchscreen it is indistinguishable from
+                // a dead button, and it read as one during testing - the player taps the door
+                // repeatedly and nothing whatsoever happens. Uses the same PopupMessage the
+                // success and failure paths use, so it looks and behaves native. Reversion
+                // text keeps it correct even though the key is not in the string tables yet.
+                if (Game.Mobile.MobileInput.Enabled)
+                {
+                    Game.DaggerfallUI.Instance.PopupMessage(
+                        TextManager.Instance.GetLocalizedTextWithReversion(
+                            "lockpickingNoFurtherProgress",
+                            TextCollections.Internal, false,
+                            "This lock will not yield to your present skill."));
+                }
+
                 return;
             }
 
