@@ -206,6 +206,67 @@ and with it TUNE, hides itself once a gamepad is attached). The probe names each
 in turn, records what Unity actually reported, and ends on a summary page - screenshot it
 and open an issue, and the defaults can be corrected for that controller.
 
+## Interaction modes and locked doors
+
+Classic Daggerfall picks what a click does from a mode - grab, info, talk or steal - which on
+a keyboard is a modifier and on a touchscreen is nothing at all. The HUD therefore carries a
+mode button that cycles **Grab -> Info -> Talk -> Steal**, and the current mode is drawn on it.
+
+**Picking a lock is Steal mode.** Cycle to Steal and tap the door with the action button.
+Tapping a locked door in any other mode now says so, in a Daggerfall-styled message, instead
+of failing silently - which was previously indistinguishable from the touch input being broken.
+
+## Real travel
+
+Instead of fading to black and arriving, the character can walk to the destination while time
+runs fast. Turn on **TUNE -> Walk when travelling**. It is off by default: it is a large change
+to how the game is played, and it costs continuous terrain streaming for the length of a trip.
+
+Travel is started the normal way, from the travel map and its popup. Cautious or reckless
+speed, transport and lodging all keep their vanilla meaning and are read from that window. A
+bar then appears at the top of the screen:
+
+```
+Travelling to Daggerfall            17 Frostfall, 4:12 pm
+[ - ]  [ 20x ]  [ + ]            [ MAP ]  [ STOP ]
+```
+
+- **Speed** steps through 1, 5, 10, 20, 30, 50 - and 100 or 200 on **reckless** travel only.
+  Cautious tops out at 50x, which is roughly the fastest the world can still be seen going by;
+  reckless trades that away along with the safety.
+- **MAP** opens the travel map without ending the journey.
+- **STOP** ends it. The destination is kept, so opening the travel map afterwards offers to
+  resume rather than making you find the same place again.
+
+What interrupts a journey:
+
+| | |
+|---|---|
+| passing a settlement | offered once per town, village or tavern on the way |
+| nightfall | offered once a night, if you chose to camp out rather than take inns |
+| enemies | cautious travel tries to slip past on Running or Stealth; reckless takes the fight |
+| low health or fatigue | cautious travel stops at 20%, rather than letting you collapse |
+| disease | stops and shows the health status box |
+
+**Journeys make you tired, and fast travel does not.** Cautious fast travel restores health,
+fatigue and magicka on arrival, so it never charges for the walk. Real travel gets no such
+refund - the walking actually happened. Expect to rest on a long trip.
+
+**Speed varies as you go.** Time compression multiplies physical movement, not just the clock,
+so the player can outrun terrain streaming and walk into ground that has not been painted yet.
+A journey therefore yields to the world: compression drops while terrain is building and
+recovers when it settles. The bar reports what is actually happening - the speed in effect,
+whether terrain is still building, and measured ground speed - which is diagnostic and will be
+removed once the feature settles.
+
+Trips with nothing to walk to fall back to classic fast travel: a destination with no location
+on its map pixel, or a sea route.
+
+Derived from **Tedious Travel** by TheNewBob / Jedidia, MIT licensed. Reworked for this port:
+no reflection into engine internals, no fork of the travel map window (14 lines of engine
+change rather than 1,958), touch-sized controls, a camera hand-off so a journey and a thumb
+cannot fight for the view, and the terrain throttle.
+
 ## First run tuning
 
 Touch feel cannot be calibrated without a real finger, so the defaults are estimates.

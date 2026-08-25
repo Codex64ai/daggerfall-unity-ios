@@ -60,6 +60,13 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         float journeyYaw;
 
+        // Captured on the first frame that takes the camera, restored on release. Assuming
+        // what "normal" looks like is how a journey ends up editing settings that were never
+        // its to change.
+        bool priorEnableMouseLook = true;
+        bool priorSimpleCursorLock;
+        bool cameraTaken;
+
         public MobileJourneyPilot(ContentReader.MapSummary destinationSummary)
         {
             this.destinationSummary = destinationSummary;
@@ -108,6 +115,14 @@ namespace DaggerfallWorkshop.Game.Mobile
             mouseLook.GetComponent<Transform>().localEulerAngles = Vector3.zero;
             mouseLook.characterBody.transform.localEulerAngles = new Vector3(0f, journeyYaw, 0f);
 
+            // Snapshot before the first change, so release puts back what was actually there.
+            if (!cameraTaken)
+            {
+                priorEnableMouseLook = mouseLook.enableMouseLook;
+                priorSimpleCursorLock = mouseLook.simpleCursorLock;
+                cameraTaken = true;
+            }
+
             // Hold mouse look off for the journey's duration. This is re-asserted every frame
             // on purpose - opening and closing a UI window re-enables it, so setting it once
             // at journey start would silently stop working the first time the player checked
@@ -139,8 +154,13 @@ namespace DaggerfallWorkshop.Game.Mobile
                 return;
 
             PlayerMouseLook mouseLook = MouseLook;
-            mouseLook.enableMouseLook = true;
-            mouseLook.simpleCursorLock = false;
+
+            if (cameraTaken)
+            {
+                mouseLook.enableMouseLook = priorEnableMouseLook;
+                mouseLook.simpleCursorLock = priorSimpleCursorLock;
+                cameraTaken = false;
+            }
 
             // Leave the player looking where they were going, so the destination is in front
             // of them when control returns.

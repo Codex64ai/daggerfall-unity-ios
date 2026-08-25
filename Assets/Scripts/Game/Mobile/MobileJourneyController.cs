@@ -165,6 +165,14 @@ namespace DaggerfallWorkshop.Game.Mobile
         GameObject snowParticles;
         bool weatherSuppressed;
 
+        // CAPTURED, not assumed. Restoring a hardcoded "normal" value is how a journey
+        // silently edits the player's game: RidingVolumeScale defaults to 0.6, and putting it
+        // back as 1.0 raised the horse volume a little more every trip. Nothing here is ours,
+        // so nothing here is restored from a guess.
+        float priorRidingVolume = 1f;
+        bool priorFootstepsEnabled = true;
+        bool noiseSuppressed;
+
         /// <summary>
         /// Own host object rather than a component on the HUD. A journey has to survive the
         /// HUD being torn down and rebuilt - entering a building, opening the classic menu -
@@ -903,22 +911,42 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         void SuppressJourneyNoise()
         {
+            if (noiseSuppressed)
+                return;
+
             PlayerFootsteps footsteps = GetFootsteps();
             if (footsteps != null)
+            {
+                priorFootstepsEnabled = footsteps.enabled;
                 footsteps.enabled = false;
+            }
 
-            if (GameManager.Instance.TransportManager != null)
-                GameManager.Instance.TransportManager.RidingVolumeScale = 0f;
+            TransportManager transport = GameManager.HasInstance
+                ? GameManager.Instance.TransportManager : null;
+            if (transport != null)
+            {
+                priorRidingVolume = transport.RidingVolumeScale;
+                transport.RidingVolumeScale = 0f;
+            }
+
+            noiseSuppressed = true;
         }
 
         void RestoreJourneyNoise()
         {
+            if (!noiseSuppressed)
+                return;
+
+            noiseSuppressed = false;
+
             PlayerFootsteps footsteps = GetFootsteps();
             if (footsteps != null)
-                footsteps.enabled = true;
+                footsteps.enabled = priorFootstepsEnabled;
 
-            if (GameManager.Instance.TransportManager != null)
-                GameManager.Instance.TransportManager.RidingVolumeScale = 1f;
+            TransportManager transport = GameManager.HasInstance
+                ? GameManager.Instance.TransportManager : null;
+            if (transport != null)
+                transport.RidingVolumeScale = priorRidingVolume;
         }
 
         static PlayerFootsteps GetFootsteps()
