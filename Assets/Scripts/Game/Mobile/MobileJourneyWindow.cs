@@ -54,6 +54,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         TextLabel destinationLabel;
         TextLabel clockLabel;
         TextLabel speedLabel;
+        TextLabel diagLabel;
 
         // Near-opaque on device evidence. At 0.55 / 0.85 the snowy landscape read straight
         // through the bar and the buttons looked like windows onto the scene rather than
@@ -84,6 +85,12 @@ namespace DaggerfallWorkshop.Game.Mobile
                 DaggerfallUI.DefaultFont, new Vector2(4, 3), string.Empty, mainPanel);
             clockLabel = DaggerfallUI.AddTextLabel(
                 DaggerfallUI.DefaultFont, new Vector2(170, 3), string.Empty, mainPanel);
+
+            // What the journey is actually doing: speed in effect, whether terrain is still
+            // building, and the player's measured ground speed. If the player is frozen while
+            // the clock runs, this says which of those is at fault.
+            diagLabel = DaggerfallUI.AddTextLabel(
+                DaggerfallUI.DefaultFont, new Vector2(100, 24), string.Empty, mainPanel);
 
             Button slower = DaggerfallUI.AddTextButton(slowerRect, "-", mainPanel);
             slower.BackgroundColor = buttonBackground;
@@ -163,7 +170,14 @@ namespace DaggerfallWorkshop.Game.Mobile
                 clockLabel.Text = DaggerfallUnity.Instance.WorldTime.Now.MidDateTimeString();
 
             if (journey != null)
+            {
                 speedLabel.Text = journey.TimeCompression + "x";
+
+                diagLabel.Text = string.Format("run {0}x  {1}  {2:0} u/s",
+                    journey.ActiveCompression,
+                    journey.TerrainBuilding ? "TERRAIN" : "ready",
+                    journey.MeasuredSpeed);
+            }
         }
 
         void ChangeCompression(int delta)

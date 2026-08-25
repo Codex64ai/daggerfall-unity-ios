@@ -53,6 +53,11 @@ namespace DaggerfallWorkshop.Game.Mobile
         // Speed used while the streaming world is catching up, and how long terrain must stay
         // settled before full speed resumes.
         const int throttledCompression = 3;
+
+        // Ceiling on the physics step. 0.05s is 2.5x the default 0.02 - loose enough to keep
+        // the step count affordable, tight enough that a character controller still resolves
+        // slopes and stairs instead of jamming.
+        const float maxFixedDeltaTime = 0.05f;
         const float terrainSettleSeconds = 0.35f;
 
         // Cautious travel's safety net, matching the vanilla mod defaults.
@@ -93,6 +98,15 @@ namespace DaggerfallWorkshop.Game.Mobile
         // itself instead of guessing a safe fixed speed for every device and biome.
         bool terrainBuilding;
         float terrainSettledAt;
+
+        // Journey diagnostics, shown on the travel bar. Three device-only bugs in a row came
+        // from state that headless tests cannot see, so the bar reports what it is actually
+        // doing rather than leaving us to infer it from a screenshot of the scenery.
+        float lastSampleX, lastSampleZ, lastSampleTime;
+        float measuredSpeed;          // world units per real second
+        public bool TerrainBuilding { get { return terrainBuilding; } }
+        public int ActiveCompression { get { return Mathf.RoundToInt(Time.timeScale); } }
+        public float MeasuredSpeed { get { return measuredSpeed; } }
 
         float baseFixedDeltaTime;
         int diseaseCount;
@@ -155,6 +169,37 @@ namespace DaggerfallWorkshop.Game.Mobile
             // Unscaled: the whole point is a real-time settle, and Time.time is being
             // multiplied by the very compression this is trying to govern.
             terrainSettledAt = Time.unscaledTime;
+        }
+
+        /// <summary>
+        /// Measure how fast the player is ACTUALLY moving, in world units per real second.
+        /// Derived from position rather than asked of the motor, because the question being
+        /// answered is "is the player moving at all" - and a motor can report an intended
+        /// velocity while a character controller is jammed against a slope going nowhere.
+        /// Unscaled time, since scaled time is the thing under suspicion.
+        /// </summary>
+        void SampleSpeed()
+        {
+            if (!GameManager.HasInstance || GameManager.Instance.PlayerGPS == null)
+                return;
+
+            PlayerGPS gps = GameManager.Instance.PlayerGPS;
+            float now = Time.unscaledTime;
+            float dt = now - lastSampleTime;
+
+            if (dt < 0.25f)
+                return;
+
+            if (lastSampleTime > 0f)
+            {
+                float dx = gps.WorldX - lastSampleX;
+                float dz = gps.WorldZ - lastSampleZ;
+                measuredSpeed = Mathf.Sqrt(dx * dx + dz * dz) / dt;
+            }
+
+            lastSampleX = gps.WorldX;
+            lastSampleZ = gps.WorldZ;
+            lastSampleTime = now;
         }
 
         /// <summary>
@@ -324,6 +369,8 @@ namespace DaggerfallWorkshop.Game.Mobile
             int target = SustainableCompression();
             if (!Mathf.Approximately(Time.timeScale, target))
                 SetTimeScale(target);
+
+            SampleSpeed();
 
             pilot.Update();
 
@@ -500,7 +547,18 @@ namespace DaggerfallWorkshop.Game.Mobile
         void SetTimeScale(int scale)
         {
             Time.timeScale = scale;
-            Time.fixedDeltaTime = scale * baseFixedDeltaTime;
+
+            // DO NOT scale fixedDeltaTime linearly, which is the usual advice for timeScale.
+            // It keeps the physics COST constant by making each step simulate more time - at
+            // 12x that is a 0.24s step, and a CharacterController asked to move a quarter of a
+            // second's travel in one go jams on slopes and tunnels through terrain. The player
+            // stops dead while the clock keeps running, which is exactly the reported symptom:
+            // "you freeze and time just clicks down".
+            //
+            // Capped instead, so steps stay small enough for collision to behave. This costs
+            // more CPU (more steps per real second) and that is the right trade - a journey
+            // that stalls is worthless, a journey that costs frames is merely slower.
+            Time.fixedDeltaTime = Mathf.Min(scale * baseFixedDeltaTime, maxFixedDeltaTime);
         }
 
         /// <summary>
