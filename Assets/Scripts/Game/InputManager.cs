@@ -574,6 +574,25 @@ namespace DaggerfallWorkshop.Game
                 ApplyVerticalForce(1);
             }
 
+            // MOBILE: a journey walks the player forward, and it has to happen HERE for the
+            // same reason autorun does - after the axes are collected, before ApplyFriction()
+            // consumes them.
+            //
+            // This was previously called from the journey controller's own Update(), which is a
+            // race Unity does not order: Update() above clears the impulse flags and
+            // ApplyFriction() below decays the axis to zero when no impulse was raised, so a
+            // force applied from another MonoBehaviour that happened to run first was wiped
+            // before PlayerMotor ever read it. On device that meant the player stood still for
+            // the whole journey while the clock ran on and they arrived nowhere.
+            //
+            // Deliberately outside PollGameplayStage(), which stands down in menu mode and when
+            // a gamepad or keyboard is attached. A journey must keep walking regardless - the
+            // travel bar is itself a window, and controller users travel too.
+            if (Mobile.MobileJourneyPilot.Active)
+            {
+                ApplyVerticalForce(1);
+            }
+
             // Process actions from input sources
             FindKeyboardActions();
             FindInputAxisActions();

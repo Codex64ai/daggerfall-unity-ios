@@ -115,9 +115,15 @@ namespace DaggerfallWorkshop.Game.Mobile
             mouseLook.simpleCursorLock = true;
             mouseLook.enableMouseLook = false;
 
-            // Public in this fork, so no reflection. The original mod had to reach a private
-            // method by name, which breaks silently on any engine rename.
-            Input.ApplyVerticalForce(1f);
+            // FORWARD MOVEMENT IS NOT APPLIED HERE.
+            //
+            // It lives in InputManager.Update(), next to ToggleAutorun. Applying it from this
+            // class meant applying it from a MonoBehaviour whose Update order relative to
+            // InputManager is undefined - and InputManager clears the impulse flags at the top
+            // of its Update, then decays the axis in ApplyFriction() at the bottom when no
+            // impulse was raised. Whenever this ran first, the force was wiped before
+            // PlayerMotor read it: the player stood still for the entire journey while the
+            // clock ran. Steering stays here; driving belongs where the engine drives.
         }
 
         /// <summary>
