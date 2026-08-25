@@ -33,15 +33,17 @@ namespace DaggerfallWorkshop.Game.Mobile
     {
         // Classic 320x200 space. The bar sits at the top so it does not cover the horizon,
         // which is the part of the view worth watching while travelling.
-        Rect panelRect = new Rect(0, 0, 320, 44);   // 18 + 22 button + 4 padding
+        Rect panelRect = new Rect(0, 0, 320, 50);   // 20 text row + 26 buttons + padding
 
-        // 22 tall against the original's 10. At the scales this port runs on that is the
-        // difference between a reliable tap and a fiddly one.
-        Rect slowerRect = new Rect(4, 18, 26, 22);
-        Rect speedRect = new Rect(32, 18, 34, 22);
-        Rect fasterRect = new Rect(68, 18, 26, 22);
-        Rect mapRect = new Rect(200, 18, 54, 22);
-        Rect stopRect = new Rect(258, 18, 58, 22);
+        // 26 tall, against this window's first pass at 22 and the original mod's 10. The speed
+        // controls are also wider and pushed apart from the MAP/STOP pair: in the device
+        // screenshot the two groups floated with a large dead gap between them, which read as
+        // two unrelated sets of controls rather than one bar.
+        Rect slowerRect = new Rect(6, 20, 40, 26);
+        Rect speedRect = new Rect(48, 20, 44, 26);
+        Rect fasterRect = new Rect(94, 20, 40, 26);
+        Rect mapRect = new Rect(186, 20, 60, 26);
+        Rect stopRect = new Rect(250, 20, 64, 26);
 
         /// <summary>
         /// On the UI stack right now. The base window type exposes no such flag, so it is
@@ -90,11 +92,11 @@ namespace DaggerfallWorkshop.Game.Mobile
             // building, and the player's measured ground speed. If the player is frozen while
             // the clock runs, this says which of those is at fault.
             diagLabel = DaggerfallUI.AddTextLabel(
-                DaggerfallUI.DefaultFont, new Vector2(100, 24), string.Empty, mainPanel);
+                DaggerfallUI.DefaultFont, new Vector2(140, 27), string.Empty, mainPanel);
 
             Button slower = DaggerfallUI.AddTextButton(slowerRect, "-", mainPanel);
             slower.BackgroundColor = buttonBackground;
-            slower.OnMouseClick += (s, p) => ChangeCompression(-5);
+            slower.OnMouseClick += (s, p) => StepCompression(-1);
 
             Panel speedPanel = DaggerfallUI.AddPanel(speedRect, mainPanel);
             speedPanel.BackgroundColor = buttonBackground;
@@ -103,7 +105,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             Button faster = DaggerfallUI.AddTextButton(fasterRect, "+", mainPanel);
             faster.BackgroundColor = buttonBackground;
-            faster.OnMouseClick += (s, p) => ChangeCompression(5);
+            faster.OnMouseClick += (s, p) => StepCompression(1);
 
             Button map = DaggerfallUI.AddTextButton(mapRect, "MAP", mainPanel);
             map.BackgroundColor = buttonBackground;
@@ -180,13 +182,30 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
         }
 
-        void ChangeCompression(int delta)
+        // Named speeds rather than a fixed increment. A +5 step needed six taps to get from
+        // the default to the maximum, on a control the player uses while travelling; these are
+        // three taps end to end and every stop is a round number they can reason about.
+        static readonly int[] speedSteps = { 1, 5, 10, 20, 30, 50 };
+
+        void StepCompression(int direction)
         {
             if (!MobileJourneyController.HasInstance)
                 return;
 
             MobileJourneyController journey = MobileJourneyController.Instance;
-            journey.SetTimeCompression(journey.TimeCompression + delta);
+            int current = journey.TimeCompression;
+
+            // Nearest step to where we are, then move one along. Starting from the nearest
+            // rather than an index keeps this correct even if the speed was set elsewhere.
+            int nearest = 0;
+            for (int i = 1; i < speedSteps.Length; i++)
+            {
+                if (Mathf.Abs(speedSteps[i] - current) < Mathf.Abs(speedSteps[nearest] - current))
+                    nearest = i;
+            }
+
+            int target = Mathf.Clamp(nearest + direction, 0, speedSteps.Length - 1);
+            journey.SetTimeCompression(speedSteps[target]);
             RefreshLabels();
         }
 

@@ -17,6 +17,7 @@ using DaggerfallConnect.Arena2;
 using DaggerfallConnect.Utility;
 using DaggerfallWorkshop.Game.Entity;
 using DaggerfallWorkshop.Game.Serialization;
+using DaggerfallWorkshop.Game.UserInterface;
 using DaggerfallWorkshop.Game.UserInterfaceWindows;
 using DaggerfallWorkshop.Game.Utility;
 using DaggerfallWorkshop.Game.Weather;
@@ -46,19 +47,30 @@ namespace DaggerfallWorkshop.Game.Mobile
         // Lowered from 20/50 on device evidence: 21x already outran terrain streaming on an
         // M4 iPad and produced untextured ground. The throttle below is the real protection,
         // but a lower ceiling means fewer people meet the problem at all.
-        public const int DefaultTimeCompression = 12;
+        public const int DefaultTimeCompression = 20;
         public const int MinTimeCompression = 1;
-        public const int MaxTimeCompression = 24;
+        public const int MaxTimeCompression = 50;
 
         // Speed used while the streaming world is catching up, and how long terrain must stay
         // settled before full speed resumes.
-        const int throttledCompression = 3;
+        // Raised from 3x. The throttle exists to stop the player outrunning terrain, not to
+        // make journeys crawl, and 3x meant every terrain build felt like a stall. 8x still
+        // gives streaming a large head start while remaining visibly travel-paced.
+        const int throttledCompression = 8;
 
         // Ceiling on the physics step. 0.05s is 2.5x the default 0.02 - loose enough to keep
         // the step count affordable, tight enough that a character controller still resolves
         // slopes and stairs instead of jamming.
-        const float maxFixedDeltaTime = 0.05f;
-        const float terrainSettleSeconds = 0.35f;
+        // Ceiling on the physics step. Steps per real second are timeScale / fixedDeltaTime,
+        // so a hard 0.05 cap costs 1000 steps/s at 50x - unshippable. This is the compromise:
+        // small enough that a CharacterController still resolves slopes (the 0.24s steps that
+        // came from scaling linearly jammed the player outright), large enough that high
+        // compression stays affordable.
+        const float maxFixedDeltaTime = 0.10f;
+        // Shortened from 0.35s. Terrain builds in bursts while travelling, so a long settle
+        // requirement meant the journey spent most of its time throttled - which is what "it's
+        // slow" was measuring. Short enough to recover promptly, long enough not to oscillate.
+        const float terrainSettleSeconds = 0.15f;
 
         // Cautious travel's safety net, matching the vanilla mod defaults.
         const int defaultMaxAvoidChance = 95;
@@ -93,6 +105,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         MobileJourneyPilot pilot;
         MobileJourneyWindow window;
         PlayerEntity exhaustedPlayer;
+        bool promptOpen;
         ContentReader.MapSummary destinationSummary;
         string destinationName;
         bool destinationValid;
@@ -162,6 +175,9 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             StreamingWorld.OnUpdateTerrainsStart -= OnTerrainBuildStart;
             StreamingWorld.OnUpdateTerrainsEnd -= OnTerrainBuildEnd;
+
+            if (DaggerfallUI.HasInstance)
+                DaggerfallUI.UIManager.OnWindowChange -= OnWindowChange;
 
             if (instance == this)
                 instance = null;
@@ -238,6 +254,9 @@ namespace DaggerfallWorkshop.Game.Mobile
             // Public static events, so the throttle needs no engine change.
             StreamingWorld.OnUpdateTerrainsStart += OnTerrainBuildStart;
             StreamingWorld.OnUpdateTerrainsEnd += OnTerrainBuildEnd;
+
+            if (DaggerfallUI.HasInstance)
+                DaggerfallUI.UIManager.OnWindowChange += OnWindowChange;
         }
 
         #region Begin
@@ -359,6 +378,57 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         #endregion
+
+        /// <summary>
+        /// Offer to resume an interrupted journey when the player next opens the travel map.
+        ///
+        /// Without this, an interrupted journey kept its destination but there was no way to
+        /// use it - the player had to find the same place on the map and pick it again, which
+        /// after being stopped by a bandit three days from anywhere is tedious rather than
+        /// atmospheric.
+        /// </summary>
+        void OnWindowChange(object sender, EventArgs e)
+        {
+            if (!JourneyModeEnabled || IsTravelling || !destinationValid || promptOpen)
+                return;
+
+            if (!DaggerfallUI.HasInstance)
+                return;
+
+            IUserInterfaceManager ui = DaggerfallUI.UIManager;
+            if (!(ui.TopWindow is DaggerfallTravelMapWindow))
+                return;
+
+            promptOpen = true;
+
+            DaggerfallMessageBox prompt = new DaggerfallMessageBox(ui,
+                DaggerfallMessageBox.CommonMessageBoxButtons.YesNo,
+                "Resume your journey to " + destinationName + "?",
+                ui.TopWindow);
+
+            prompt.OnButtonClick += (box, button) =>
+            {
+                promptOpen = false;
+                box.CloseWindow();
+
+                if (button != DaggerfallMessageBox.MessageBoxButtons.Yes)
+                    return;
+
+                // Close the map before travelling, for the same reason the travel popup does:
+                // the manager only unpauses once the stack is back to the HUD, and a journey
+                // started above an open window would be popped by that window closing.
+                DaggerfallTravelMapWindow map = ui.TopWindow as DaggerfallTravelMapWindow;
+                if (map != null)
+                    map.CloseTravelWindows(true);
+
+                Resume();
+            };
+
+            // A cancelled box (Back, or a tap outside) must clear the flag too, or the prompt
+            // never offers itself again for the rest of the session.
+            prompt.OnCancel += (box) => { promptOpen = false; };
+            prompt.Show();
+        }
 
         #region Update
 
