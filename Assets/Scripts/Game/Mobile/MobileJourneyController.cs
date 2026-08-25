@@ -397,6 +397,15 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         #region World state
 
+        /// <summary>
+        /// Pure, static, and therefore testable headlessly. Below 1x time would run backwards;
+        /// far above 50x the player outruns terrain streaming and walks into unloaded world.
+        /// </summary>
+        public static int ClampCompression(int scale)
+        {
+            return Mathf.Clamp(scale, MinTimeCompression, MaxTimeCompression);
+        }
+
         void SetTimeScale(int scale)
         {
             Time.timeScale = scale;
@@ -410,7 +419,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public void SetTimeCompression(int scale)
         {
-            TimeCompression = Mathf.Clamp(scale, MinTimeCompression, MaxTimeCompression);
+            TimeCompression = ClampCompression(scale);
 
             if (IsTravelling)
                 SetTimeScale(TimeCompression);

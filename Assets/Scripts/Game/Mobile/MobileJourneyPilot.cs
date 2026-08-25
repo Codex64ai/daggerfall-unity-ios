@@ -65,11 +65,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             this.destinationSummary = destinationSummary;
 
             destinationMapPixel = MapsFile.GetPixelFromPixelID(destinationSummary.ID);
-            destinationWorldRect = GetLocationRect(destinationSummary);
-            destinationWorldRect.xMin -= arrivalMarginWorldUnits;
-            destinationWorldRect.xMax += arrivalMarginWorldUnits;
-            destinationWorldRect.yMin -= arrivalMarginWorldUnits;
-            destinationWorldRect.yMax += arrivalMarginWorldUnits;
+            destinationWorldRect = ArrivalRect(GetLocationRect(destinationSummary));
         }
 
         // Resolved on use, not in field initialisers. A journey can be constructed from a UI
@@ -160,9 +156,42 @@ namespace DaggerfallWorkshop.Game.Mobile
         float YawTowardDestination()
         {
             PlayerGPS gps = Gps;
-            double angleRad = Math.Atan2(gps.WorldX - destinationWorldRect.center.x,
-                                         gps.WorldZ - destinationWorldRect.center.y);
-            return (float)(angleRad * 180.0 / Math.PI + 180.0);
+            return BearingDegrees(gps.WorldX, gps.WorldZ,
+                                  destinationWorldRect.center.x, destinationWorldRect.center.y);
+        }
+
+        /// <summary>
+        /// Unity yaw, in degrees, pointing from one world position toward another.
+        /// 0 faces +Z (north), 90 faces +X (east).
+        ///
+        /// Pure and static so it can be tested headlessly - the walking itself needs a device,
+        /// but getting the bearing wrong would send the player away from the destination for
+        /// the whole journey, and that is worth catching on the desk.
+        /// </summary>
+        public static float BearingDegrees(float fromX, float fromZ, float toX, float toZ)
+        {
+            double deg = Math.Atan2(toX - fromX, toZ - fromZ) * 180.0 / Math.PI;
+
+            // Normalised to 0-360. localEulerAngles tolerates negatives, but a stable range
+            // makes the value comparable and testable.
+            if (deg < 0.0)
+                deg += 360.0;
+
+            return (float)deg;
+        }
+
+        /// <summary>
+        /// Grow a location's rect into the rect a journey stops in. Arriving is a separate act
+        /// from entering: stopping short leaves the player outside, facing the place.
+        /// </summary>
+        public static Rect ArrivalRect(Rect locationRect)
+        {
+            Rect r = locationRect;
+            r.xMin -= arrivalMarginWorldUnits;
+            r.xMax += arrivalMarginWorldUnits;
+            r.yMin -= arrivalMarginWorldUnits;
+            r.yMax += arrivalMarginWorldUnits;
+            return r;
         }
 
         static bool IsPlayerReady()

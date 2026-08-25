@@ -52,6 +52,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestRelinquish();
             TestContentPathRemap();
             TestWavDecoder();
+            TestJourneyBearing();
+            TestJourneyArrivalRect();
+            TestJourneyCompressionClamp();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -422,6 +425,88 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobileInput.Mode == MobileControlMode.Gameplay, "Relinquish resets mode");
         }
 
+        /// <summary>
+        /// A journey steers by bearing alone, so a wrong bearing walks the player away from
+        /// the destination for the entire trip. Unity yaw: 0 faces +Z, 90 faces +X.
+        /// </summary>
+        static void TestJourneyBearing()
+        {
+            Near(MobileJourneyPilot.BearingDegrees(0f, 0f, 0f, 100f), 0f, 0.01f,
+                 "bearing: due north is 0");
+            Near(MobileJourneyPilot.BearingDegrees(0f, 0f, 100f, 0f), 90f, 0.01f,
+                 "bearing: due east is 90");
+            Near(MobileJourneyPilot.BearingDegrees(0f, 0f, 0f, -100f), 180f, 0.01f,
+                 "bearing: due south is 180");
+            Near(MobileJourneyPilot.BearingDegrees(0f, 0f, -100f, 0f), 270f, 0.01f,
+                 "bearing: due west is 270");
+            Near(MobileJourneyPilot.BearingDegrees(0f, 0f, 100f, 100f), 45f, 0.01f,
+                 "bearing: north-east is 45");
+
+            // Never negative - the value is compared and logged, so a stable range matters.
+            bool allInRange = true;
+            for (int deg = 0; deg < 360; deg += 15)
+            {
+                float rad = deg * Mathf.Deg2Rad;
+                float b = MobileJourneyPilot.BearingDegrees(
+                    0f, 0f, Mathf.Sin(rad) * 500f, Mathf.Cos(rad) * 500f);
+                if (b < 0f || b >= 360.01f)
+                    allInRange = false;
+            }
+            Check(allInRange, "bearing: always normalised to 0-360");
+
+            // Offset start position must not change the bearing - only the delta matters.
+            Near(MobileJourneyPilot.BearingDegrees(5000f, -3000f, 5000f, -2900f), 0f, 0.01f,
+                 "bearing: independent of absolute position");
+        }
+
+        /// <summary>
+        /// The arrival rect is the location's rect grown on all four sides, so a journey stops
+        /// outside the gates rather than walking itself into the location.
+        /// </summary>
+        static void TestJourneyArrivalRect()
+        {
+            Rect location = new Rect(10000f, 20000f, 400f, 600f);
+            Rect arrival = MobileJourneyPilot.ArrivalRect(location);
+
+            Check(arrival.Contains(new Vector2(location.center.x, location.center.y)),
+                  "arrival rect: contains the location centre");
+
+            // Grown, not shrunk, on every side.
+            Check(arrival.xMin < location.xMin && arrival.xMax > location.xMax &&
+                  arrival.yMin < location.yMin && arrival.yMax > location.yMax,
+                  "arrival rect: grown on all four sides");
+
+            // A point just outside the location but inside the margin must count as arrived,
+            // which is the whole point of widening it.
+            Check(arrival.Contains(new Vector2(location.xMin - 500f, location.center.y)),
+                  "arrival rect: a point in the margin counts as arrived");
+
+            // Far outside must not.
+            Check(!arrival.Contains(new Vector2(location.xMin - 5000f, location.center.y)),
+                  "arrival rect: a distant point does not count as arrived");
+
+            Near(arrival.width - location.width, (arrival.height - location.height), 0.01f,
+                 "arrival rect: margin applied equally to both axes");
+        }
+
+        static void TestJourneyCompressionClamp()
+        {
+            Check(MobileJourneyController.ClampCompression(0) >= 1,
+                  "compression: zero clamps to at least 1x (time cannot stop)");
+            Check(MobileJourneyController.ClampCompression(-50) >= 1,
+                  "compression: negative clamps to at least 1x (time cannot reverse)");
+            Check(MobileJourneyController.ClampCompression(9999) <=
+                  MobileJourneyController.MaxTimeCompression,
+                  "compression: absurd values clamp to the maximum");
+            Check(MobileJourneyController.ClampCompression(20) == 20,
+                  "compression: a legal value passes through unchanged");
+            Check(MobileJourneyController.ClampCompression(
+                      MobileJourneyController.DefaultTimeCompression) ==
+                  MobileJourneyController.DefaultTimeCompression,
+                  "compression: the default is itself legal");
+        }
+
         #endregion
+
     }
 }

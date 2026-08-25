@@ -25,11 +25,48 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 {
     public static class MobileBuildSetup
     {
+        // Bundle id and home-screen name for the side-by-side test build. A different bundle
+        // id is what makes iOS treat this as a separate app, which is the whole point: the
+        // playable install stays untouched while a test build is thrown away and replaced.
+        const string releaseBundleId = "net.codex64.daggerfall";
+        const string releaseProductName = "Daggerfall Unity";
+        const string testBundleId = "net.codex64.daggerfall.test";
+        const string testProductName = "DFU Test";
+
+        /// <summary>
+        /// True when DFU_IOS_TESTAPP=1. Builds a separate app rather than replacing the
+        /// playable one.
+        ///
+        /// WHAT A SEPARATE BUNDLE ID COSTS
+        /// iOS gives each bundle id its own container, so the test app gets its own Documents
+        /// folder - meaning its own arena2 copy, and its own saves. Separate saves are a
+        /// feature (testing cannot corrupt a real character); a second arena2 is a real cost,
+        /// since the game data has to be copied in again.
+        /// </summary>
+        static bool IsTestApp
+        {
+            get { return System.Environment.GetEnvironmentVariable("DFU_IOS_TESTAPP") == "1"; }
+        }
+
         [MenuItem("Tools/Daggerfall Mobile/Apply iOS Player Settings")]
         public static void ApplyIOSSettings()
         {
             var log = new System.Text.StringBuilder();
             log.AppendLine("[MobileBuildSetup] Applying iOS player settings");
+
+            // --- app identity -----------------------------------------------------
+            // Applied unconditionally in both directions. Setting it only for the test build
+            // would leave the identity sticky in ProjectSettings, so the next ordinary build
+            // would silently still be "DFU Test" and would overwrite the test app instead of
+            // the real one.
+            bool testApp = IsTestApp;
+            PlayerSettings.SetApplicationIdentifier(BuildTargetGroup.iOS,
+                testApp ? testBundleId : releaseBundleId);
+            PlayerSettings.productName = testApp ? testProductName : releaseProductName;
+            log.AppendLine(testApp
+                ? "  app identity           = " + testBundleId + " / " + testProductName +
+                  "   (SEPARATE TEST APP - own container, own arena2, own saves)"
+                : "  app identity           = " + releaseBundleId + " / " + releaseProductName);
 
             // --- scripting / stripping -------------------------------------------
             PlayerSettings.SetScriptingBackend(BuildTargetGroup.iOS, ScriptingImplementation.IL2CPP);
