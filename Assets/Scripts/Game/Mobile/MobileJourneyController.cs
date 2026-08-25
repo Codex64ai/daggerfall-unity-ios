@@ -63,7 +63,16 @@ namespace DaggerfallWorkshop.Game.Mobile
         // Cautious travel's safety net, matching the vanilla mod defaults.
         const int defaultMaxAvoidChance = 95;
         const int defaultHealthMinPercent = 5;
-        const int defaultFatigueMin = 5;
+
+        // PERCENT, not an absolute value. This was 5 flat, which looked reasonable and was
+        // wrong by a factor of 64: DaggerfallEntity.FatigueMultiplier means fatigue is stored
+        // x64, so on a typical character 5 is 5 out of ~6400 - about 0.08%. The guard could
+        // never fire, and the player walked until the engine's own exhaustion collapse.
+        //
+        // 20% rather than something tighter because stopping has to be USEFUL: a journey that
+        // halts at 5% leaves the player collapsing again a minute after they resume. At 20%
+        // there is room to make camp, rest, and carry on.
+        const int defaultFatigueMinPercent = 20;
 
         // Grace period after successfully slipping past an encounter, in classic minutes.
         // Without it the same nearby enemy re-triggers the check on the very next frame and
@@ -83,6 +92,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         MobileJourneyPilot pilot;
         MobileJourneyWindow window;
+        PlayerEntity exhaustedPlayer;
         ContentReader.MapSummary destinationSummary;
         string destinationName;
         bool destinationValid;
@@ -301,6 +311,15 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             pilot.OnArrival += () => Stop(JourneyEnd.Arrived);
 
+            // Collapsing has to END the journey. Passing out raises time by hours, and with a
+            // journey still running the player was walked onward while unconscious and simply
+            // woke up at the destination - reported as "it sent me a walk-through of me getting
+            // all the way there". Subscribed per journey rather than once, because PlayerEntity
+            // is rebuilt on load and a stale handler would point at the previous character.
+            exhaustedPlayer = GameManager.Instance.PlayerEntity;
+            if (exhaustedPlayer != null)
+                exhaustedPlayer.OnExhausted += OnPlayerExhausted;
+
             diseaseCount = GameManager.Instance.PlayerEffectManager.DiseaseCount;
             SuppressJourneyNoise();
             SuppressWeather();
@@ -398,7 +417,8 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             bool healthLow = player.MaxHealth > 0 &&
                              player.CurrentHealth * 100 / player.MaxHealth <= defaultHealthMinPercent;
-            bool fatigueLow = player.CurrentFatigue <= defaultFatigueMin;
+            bool fatigueLow = player.MaxFatigue > 0 &&
+                              player.CurrentFatigue * 100 / player.MaxFatigue <= defaultFatigueMinPercent;
 
             if (!healthLow && !fatigueLow)
                 return false;
@@ -472,6 +492,16 @@ namespace DaggerfallWorkshop.Game.Mobile
             DaggerfallUI.MessageBox("You failed to avoid an encounter!");
         }
 
+        void OnPlayerExhausted(DaggerfallEntity entity)
+        {
+            if (!IsTravelling)
+                return;
+
+            // No message of our own: the engine already shows its exhaustion popup, and a
+            // second box on top of it would just be in the way.
+            Stop(JourneyEnd.Interrupted);
+        }
+
         void OnEncounter()
         {
             if (!IsTravelling)
@@ -505,6 +535,12 @@ namespace DaggerfallWorkshop.Game.Mobile
             {
                 pilot.Release();
                 pilot = null;
+            }
+
+            if (exhaustedPlayer != null)
+            {
+                exhaustedPlayer.OnExhausted -= OnPlayerExhausted;
+                exhaustedPlayer = null;
             }
 
             CloseJourneyWindow();
