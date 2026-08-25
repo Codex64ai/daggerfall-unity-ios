@@ -12,6 +12,7 @@
 // cannot be left in a travelling state.
 
 using System;
+using System.Collections.Generic;
 using DaggerfallConnect;
 using DaggerfallConnect.Arena2;
 using DaggerfallConnect.Utility;
@@ -49,7 +50,22 @@ namespace DaggerfallWorkshop.Game.Mobile
         // but a lower ceiling means fewer people meet the problem at all.
         public const int DefaultTimeCompression = 20;
         public const int MinTimeCompression = 1;
-        public const int MaxTimeCompression = 50;
+
+        // Cautious travel is watchable travel: 50x is about the fastest the world can still
+        // be seen going by. Reckless throws that away along with the safety, and the trade is
+        // honest - at 200x the player outruns terrain streaming badly and the journey becomes
+        // a blur of throttle bursts. That is the player's choice to make, not ours to forbid.
+        public const int MaxCautiousCompression = 50;
+        public const int MaxRecklessCompression = 200;
+
+        public static int MaxTimeCompression
+        {
+            get
+            {
+                return (HasInstance && !Instance.SpeedCautious)
+                    ? MaxRecklessCompression : MaxCautiousCompression;
+            }
+        }
 
         // Speed used while the streaming world is catching up, and how long terrain must stay
         // settled before full speed resumes.
@@ -106,6 +122,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         MobileJourneyWindow window;
         PlayerEntity exhaustedPlayer;
         bool promptOpen;
+
+        // Places already offered this journey, by map id, so passing the same hamlet twice
+        // does not ask twice. Cleared per journey rather than kept: on a later trip through
+        // the same country the offer is worth making again.
+        readonly HashSet<int> offeredPlaces = new HashSet<int>();
+        bool askedToCampTonight;
+        bool wasNight;
         ContentReader.MapSummary destinationSummary;
         string destinationName;
         bool destinationValid;
@@ -339,6 +362,10 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (exhaustedPlayer != null)
                 exhaustedPlayer.OnExhausted += OnPlayerExhausted;
 
+            offeredPlaces.Clear();
+            askedToCampTonight = false;
+            wasNight = false;
+
             diseaseCount = GameManager.Instance.PlayerEffectManager.DiseaseCount;
             SuppressJourneyNoise();
             SuppressWeather();
@@ -471,6 +498,10 @@ namespace DaggerfallWorkshop.Game.Mobile
                 return;
             if (CheckDisease())
                 return;
+            if (CheckPassingPlace())
+                return;
+            if (CheckNightfall())
+                return;
             CheckEnemies();
         }
 
@@ -514,6 +545,116 @@ namespace DaggerfallWorkshop.Game.Mobile
             DaggerfallUI.Instance.CreateHealthStatusBox(
                 DaggerfallUI.Instance.UserInterfaceManager.TopWindow).Show();
             return true;
+        }
+
+        /// <summary>
+        /// Offer to stop when passing through a settlement that is not the destination.
+        ///
+        /// This is most of what makes a journey feel like travelling rather than waiting: the
+        /// places between here and there become real, and an inn three days out is somewhere
+        /// you chose to stop rather than scenery you clipped through at 50x.
+        ///
+        /// Only settlements, and only once each. Farms, dungeons, temples and graveyards are
+        /// skipped - a prompt every time the player passes a shack is an interruption, not a
+        /// feature.
+        /// </summary>
+        bool CheckPassingPlace()
+        {
+            if (promptOpen || !GameManager.HasInstance)
+                return false;
+
+            PlayerGPS gps = GameManager.Instance.PlayerGPS;
+            if (gps == null || !gps.HasCurrentLocation)
+                return false;
+
+            int mapId = gps.CurrentMapID;
+
+            // The destination itself is arrival, not a place to be asked about.
+            if (mapId == destinationSummary.ID || offeredPlaces.Contains(mapId))
+                return false;
+
+            if (!IsSettlement(gps.CurrentLocationType))
+            {
+                offeredPlaces.Add(mapId);
+                return false;
+            }
+
+            offeredPlaces.Add(mapId);
+            string name = gps.CurrentLocation.Name;
+
+            AskToInterrupt("You are passing " + name + ". Stop here?",
+                           "You continue past " + name + ".");
+            return true;
+        }
+
+        static bool IsSettlement(DFRegion.LocationTypes type)
+        {
+            return type == DFRegion.LocationTypes.TownCity ||
+                   type == DFRegion.LocationTypes.TownHamlet ||
+                   type == DFRegion.LocationTypes.TownVillage ||
+                   type == DFRegion.LocationTypes.Tavern;
+        }
+
+        /// <summary>
+        /// Offer to make camp at dusk. Asked once per night, and only when the player chose to
+        /// camp out rather than take inns - someone paying for lodging has already said they
+        /// would rather not sleep in a field.
+        /// </summary>
+        bool CheckNightfall()
+        {
+            if (promptOpen || DaggerfallUnity.Instance.WorldTime == null)
+                return false;
+
+            bool night = DaggerfallUnity.Instance.WorldTime.Now.IsNight;
+
+            // Reset at dawn so tomorrow night asks again.
+            if (!night)
+            {
+                wasNight = false;
+                askedToCampTonight = false;
+                return false;
+            }
+
+            if (wasNight || askedToCampTonight || SleepModeInn)
+                return false;
+
+            wasNight = true;
+            askedToCampTonight = true;
+
+            AskToInterrupt("Night is falling. Make camp here?",
+                           "You travel on through the night.");
+            return true;
+        }
+
+        /// <summary>
+        /// Pause the journey and ask. Yes stops travel but KEEPS the destination, so the
+        /// travel map will offer to resume; No carries on at the same speed.
+        /// </summary>
+        void AskToInterrupt(string question, string declineText)
+        {
+            promptOpen = true;
+
+            DaggerfallMessageBox box = new DaggerfallMessageBox(
+                DaggerfallUI.UIManager,
+                DaggerfallMessageBox.CommonMessageBoxButtons.YesNo,
+                question,
+                DaggerfallUI.UIManager.TopWindow);
+
+            box.OnButtonClick += (sender, button) =>
+            {
+                promptOpen = false;
+                sender.CloseWindow();
+
+                if (button == DaggerfallMessageBox.MessageBoxButtons.Yes)
+                    Stop(JourneyEnd.Interrupted);
+                else if (!string.IsNullOrEmpty(declineText))
+                    DaggerfallUI.AddHUDText(declineText, 2f);
+            };
+
+            // Dismissing without choosing carries on, and must clear the flag or no further
+            // prompt is ever offered.
+            box.OnCancel += (sender) => { promptOpen = false; };
+            box.Show();
         }
 
         void CheckEnemies()
@@ -650,6 +791,13 @@ namespace DaggerfallWorkshop.Game.Mobile
             return Mathf.Clamp(scale, MinTimeCompression, MaxTimeCompression);
         }
 
+        /// <summary>Pure form for tests: the ceiling depends on the travel speed chosen.</summary>
+        public static int ClampCompression(int scale, bool cautious)
+        {
+            return Mathf.Clamp(scale, MinTimeCompression,
+                cautious ? MaxCautiousCompression : MaxRecklessCompression);
+        }
+
         void SetTimeScale(int scale)
         {
             Time.timeScale = scale;
@@ -700,13 +848,22 @@ namespace DaggerfallWorkshop.Game.Mobile
                 SetTimeScale(SustainableCompression());
         }
 
-        bool SpeedCautious { get; set; }
+        public bool SpeedCautious { get; private set; }
+        public bool SleepModeInn { get; private set; }
 
         /// <summary>Read the player's chosen travel options off the vanilla popup.</summary>
         public void AdoptTravelOptions(DaggerfallTravelPopUp popup)
         {
-            if (popup != null)
-                SpeedCautious = popup.SpeedCautious;
+            if (popup == null)
+                return;
+
+            SpeedCautious = popup.SpeedCautious;
+            SleepModeInn = popup.SleepModeInn;
+
+            // Reckless raises the ceiling; switching back to cautious must pull an existing
+            // 200x setting down with it, or the next cautious journey inherits a speed it is
+            // not allowed to use.
+            TimeCompression = ClampCompression(TimeCompression);
         }
 
         /// <summary>

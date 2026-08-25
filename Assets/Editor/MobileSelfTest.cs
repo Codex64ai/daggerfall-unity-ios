@@ -55,6 +55,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestJourneyBearing();
             TestJourneyArrivalRect();
             TestJourneyCompressionClamp();
+            TestJourneySpeedTiers();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -506,7 +507,30 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "compression: the default is itself legal");
         }
 
+
+        /// <summary>
+        /// Reckless travel unlocks the high speeds; cautious must not inherit them. Getting
+        /// this wrong either forbids what the player asked for or lets a cautious journey run
+        /// at a speed the world cannot stream.
+        /// </summary>
+        static void TestJourneySpeedTiers()
+        {
+            Check(MobileJourneyController.ClampCompression(200, false) == 200,
+                  "tiers: reckless allows 200x");
+            Check(MobileJourneyController.ClampCompression(200, true) ==
+                  MobileJourneyController.MaxCautiousCompression,
+                  "tiers: cautious clamps 200x down to its own ceiling");
+            Check(MobileJourneyController.ClampCompression(50, true) == 50,
+                  "tiers: cautious still allows its maximum");
+            Check(MobileJourneyController.ClampCompression(-5, false) >= 1,
+                  "tiers: reckless still cannot reverse time");
+            Check(MobileJourneyController.MaxRecklessCompression >
+                  MobileJourneyController.MaxCautiousCompression,
+                  "tiers: reckless ceiling is genuinely higher");
+        }
+
         #endregion
+
 
     }
 }
