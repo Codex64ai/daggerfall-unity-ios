@@ -44,6 +44,24 @@ namespace DaggerfallWorkshop.Game
         public bool Verbose = false;
         bool isGamePaused = false;
         float savedTimeScale;
+
+        /// <summary>
+        /// MOBILE: the time scale PauseGame() will restore on unpause.
+        ///
+        /// Exposed because PauseGame() snapshots Time.timeScale at the moment of pausing and
+        /// replays it on unpause, which assumes nothing else is driving time. Real travel does
+        /// drive it: if a journey is running at 20x when an encounter opens a message box, the
+        /// compressed scale is captured, and unpausing restores it AFTER the journey has ended
+        /// and reset time to 1x. The whole game is then left running at 20x - including the
+        /// player's own movement, so a few steps fling them across the map. Anything that
+        /// alters Time.timeScale for a while needs to be able to correct this snapshot when it
+        /// stops.
+        /// </summary>
+        public float SavedTimeScale
+        {
+            get { return savedTimeScale; }
+            set { savedTimeScale = value; }
+        }
         float classicUpdateTimer = 0;                       // Timer for matching classic's update loop
         bool classicUpdate = false;                         // True when reached a classic update
         float initialQualitySettingsShadowDistance;

@@ -301,7 +301,20 @@ namespace DaggerfallWorkshop.Game.Mobile
         void Update()
         {
             if (pilot == null)
+            {
+                // WATCHDOG. Nothing in this game runs above 1x time except a journey, so a
+                // compressed scale with no journey running means something escaped - and the
+                // consequence is severe, because the player's own movement is scaled too and a
+                // few steps throw them across the landscape.
+                //
+                // Belt and braces alongside the fix in RestoreNormalTime(): that closes the
+                // path we found, this one heals any path we have not. Skipped while paused,
+                // where timeScale is legitimately 0.
+                if (GameManager.HasInstance && !GameManager.IsGamePaused && Time.timeScale > 1.01f)
+                    RestoreNormalTime();
+
                 return;
+            }
 
             // RE-ASSERT THE TIME SCALE EVERY FRAME.
             // GameManager.PauseGame(false) restores Time.timeScale from its own savedTimeScale,
@@ -439,7 +452,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public void Stop(JourneyEnd reason)
         {
-            SetTimeScale(1);
+            RestoreNormalTime();
 
             if (pilot != null)
             {
@@ -488,6 +501,26 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             Time.timeScale = scale;
             Time.fixedDeltaTime = scale * baseFixedDeltaTime;
+        }
+
+        /// <summary>
+        /// Put time back to normal and make it STAY there.
+        ///
+        /// Resetting Time.timeScale is not enough on its own. GameManager.PauseGame() snapshots
+        /// the time scale when a window opens and replays it when the window closes - so an
+        /// encounter that interrupts a journey captures the compressed scale, and dismissing
+        /// the message box afterwards restores it, leaving the entire game running fast. The
+        /// player's own movement scales with it, so walking a few steps throws them across the
+        /// landscape; the device report read as "teleported me far from where I started".
+        ///
+        /// Correcting the snapshot as well as the live value closes that path.
+        /// </summary>
+        void RestoreNormalTime()
+        {
+            SetTimeScale(1);
+
+            if (GameManager.HasInstance)
+                GameManager.Instance.SavedTimeScale = 1f;
         }
 
         /// <summary>
