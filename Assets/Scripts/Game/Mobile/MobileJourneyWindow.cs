@@ -213,10 +213,16 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         void ShowTravelMap()
         {
-            // Opening the map interrupts, rather than travelling on behind the map. Picking a
-            // new destination mid-journey would otherwise leave two journeys half-running, and
-            // the controller keeps the old destination so the map can offer to resume it.
-            CloseWindow();
+            // MAP NO LONGER ENDS THE JOURNEY.
+            //
+            // It used to close this bar first and then push the map, which stopped travel and
+            // frequently showed no map at all. Glancing at where you are should not cancel a
+            // three-day trip anyway - so the map is pushed ON TOP of this bar, which stays on
+            // the stack underneath. The map pauses the game while it is open, so travel holds
+            // still, and resumes when it closes.
+            //
+            // Pushing rather than closing also keeps the controller's resume prompt quiet: that
+            // only offers itself when no journey is running, and this one still is.
             uiManager.PushWindow(DaggerfallUI.Instance.DfTravelMapWindow);
         }
     }

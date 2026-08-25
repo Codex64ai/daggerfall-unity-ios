@@ -221,6 +221,35 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         /// <summary>
+        /// Unpause when nothing on screen should be pausing us.
+        ///
+        /// UserInterfaceManager.RemoveWindow() only unpauses once the stack is back to a single
+        /// window. The travel bar IS a window, so it holds the count at two - which means any
+        /// OTHER window opened and closed during a journey (the map, an inventory, a message
+        /// box) leaves the game paused with the travel bar still showing and nothing moving.
+        /// Reported as the MAP button "stopping travel entirely".
+        ///
+        /// The bar really belongs on the HUD rather than the window stack, which would avoid
+        /// this entirely; until then, a journey takes responsibility for undoing a pause that
+        /// no visible window is asking for.
+        /// </summary>
+        void ReleaseStalePause()
+        {
+            if (!GameManager.HasInstance || !GameManager.IsGamePaused)
+                return;
+
+            if (!DaggerfallUI.HasInstance)
+                return;
+
+            // Only when OUR bar is what the stack is topped by. Anything else - the map, a
+            // prompt, an inventory - is legitimately pausing and must be left alone.
+            if (DaggerfallUI.UIManager.TopWindow != window)
+                return;
+
+            GameManager.Instance.PauseGame(false);
+        }
+
+        /// <summary>
         /// Measure how fast the player is ACTUALLY moving, in world units per real second.
         /// Derived from position rather than asked of the motor, because the question being
         /// answered is "is the player moving at all" - and a motor can report an intended
@@ -482,6 +511,8 @@ namespace DaggerfallWorkshop.Game.Mobile
             // so any UI window opening and closing during a journey - inventory, the map, a
             // message box - silently resets travel to 1x. Setting it once at departure is not
             // enough. Same reasoning as re-asserting mouse look in the pilot.
+            ReleaseStalePause();
+
             int target = SustainableCompression();
             if (!Mathf.Approximately(Time.timeScale, target))
                 SetTimeScale(target);
