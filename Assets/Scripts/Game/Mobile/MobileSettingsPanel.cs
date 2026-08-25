@@ -198,6 +198,15 @@ namespace DaggerfallWorkshop.Game.Mobile
                 v => MobileJourneyController.JourneyModeEnabled = v,
                 "journeymode");
 
+            // Not routed through AddToggle's own pref key: roads are read once before the first
+            // scene loads, so the toggle records an intent for next launch rather than changing
+            // anything now. Flipping it mid-session would leave already-built terrain painted
+            // the old way and roads would stop at an invisible line.
+            AddToggle(panel, ref y, rowH, "Roads and tracks (restart)",
+                () => MobileRoads.Enabled,
+                v => MobileRoads.Enabled = v,
+                null);
+
             AddButton(panel, ref y, rowH, "Edit layout (drag / resize / hide)", () =>
             {
                 Close();
@@ -395,7 +404,11 @@ namespace DaggerfallWorkshop.Game.Mobile
             strt.offsetMin = Vector2.zero;
             strt.offsetMax = Vector2.zero;
 
-            bool current = PlayerPrefs.GetInt(prefix + key, get() ? 1 : 0) == 1;
+            // A null key means the caller owns its own persistence. Without this, prefix + null
+            // collapses to the bare prefix and every such toggle would share one pref.
+            bool current = (key != null)
+                ? PlayerPrefs.GetInt(prefix + key, get() ? 1 : 0) == 1
+                : get();
             set(current);
 
             System.Action paint = () =>
@@ -409,8 +422,11 @@ namespace DaggerfallWorkshop.Game.Mobile
             {
                 current = !current;
                 set(current);
-                PlayerPrefs.SetInt(prefix + key, current ? 1 : 0);
-                PlayerPrefs.Save();
+                if (key != null)
+                {
+                    PlayerPrefs.SetInt(prefix + key, current ? 1 : 0);
+                    PlayerPrefs.Save();
+                }
                 paint();
             });
         }
