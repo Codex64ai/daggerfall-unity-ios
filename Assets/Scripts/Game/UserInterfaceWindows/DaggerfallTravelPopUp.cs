@@ -244,12 +244,30 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
                     // Diverted here, at the one instant that matters, so the vanilla map and
                     // this popup are otherwise untouched - the player's speed, transport and
                     // lodging choices keep their normal meaning and are read off this window.
-                    // Returns false for anything a journey cannot walk (no location on the
-                    // target map pixel, sea routes), which falls through to classic travel.
-                    Mobile.MobileJourneyController.Instance?.AdoptTravelOptions(this);
-                    if (Mobile.MobileJourneyController.TryBeginJourney(this))
+                    //
+                    // The destination is CHECKED before any UI is torn down, so anything a
+                    // journey cannot walk (no location on the target map pixel, a sea route)
+                    // still falls through to classic fast travel below.
+                    //
+                    // ORDER MATTERS. The travel UI must come down BEFORE the journey starts,
+                    // for two reasons that both looked like "travel does nothing":
+                    //   1. UserInterfaceManager.RemoveWindow() pops TopWindow. Starting the
+                    //      journey first pushes the travel bar on top, so CloseWindow() here
+                    //      popped THAT instead of this popup - and the bar treats being popped
+                    //      as the player interrupting, so the journey died the frame it began.
+                    //   2. The manager only unpauses once the stack is back to the HUD, and
+                    //      PauseGame(false) restores Time.timeScale from savedTimeScale. A
+                    //      time compression set before that is silently reset to 1x.
+                    // Same teardown as performFastTravel() uses, for the same reason.
+                    if (Mobile.MobileJourneyController.CanBeginJourney(this))
                     {
-                        CloseWindow();
+                        Mobile.MobileJourneyController.Instance.AdoptTravelOptions(this);
+
+                        DaggerfallUI.Instance.UserInterfaceManager.PopWindow();
+                        if (travelWindow != null)
+                            travelWindow.CloseTravelWindows(true);
+
+                        Mobile.MobileJourneyController.BeginStoredJourney();
                         return;
                     }
 

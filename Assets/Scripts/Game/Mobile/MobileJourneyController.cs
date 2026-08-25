@@ -131,18 +131,31 @@ namespace DaggerfallWorkshop.Game.Mobile
         #region Begin
 
         /// <summary>
-        /// Called from the travel popup at the instant it would teleport. Returns true if a
-        /// journey took over, in which case the caller must NOT fast travel.
+        /// Can a journey walk to this popup's destination? Answered WITHOUT starting anything
+        /// and without touching the UI, so the caller can still fall back to classic fast
+        /// travel. Stores the destination on success, ready for BeginStoredJourney().
+        ///
+        /// Split from starting the journey because the travel UI has to come down first - see
+        /// the call site in DaggerfallTravelPopUp for why.
         /// </summary>
-        public static bool TryBeginJourney(DaggerfallTravelPopUp popup)
+        public static bool CanBeginJourney(DaggerfallTravelPopUp popup)
         {
             if (!JourneyModeEnabled || !HasInstance || popup == null)
                 return false;
 
-            return Instance.BeginJourney(popup.EndPos);
+            return Instance.StoreDestination(popup.EndPos);
         }
 
-        bool BeginJourney(DFPosition endPos)
+        /// <summary>
+        /// Start walking to the destination stored by CanBeginJourney. Call only after the
+        /// travel windows have closed.
+        /// </summary>
+        public static bool BeginStoredJourney()
+        {
+            return HasInstance && Instance.Resume();
+        }
+
+        bool StoreDestination(DFPosition endPos)
         {
             if (endPos == null || IsTravelling)
                 return false;
@@ -162,8 +175,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             destinationSummary = summary;
             destinationName = location.Name;
             destinationValid = true;
-
-            return Resume();
+            return true;
         }
 
         /// <summary>Start (or restart) walking to the stored destination.</summary>
@@ -233,6 +245,14 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             if (pilot == null)
                 return;
+
+            // RE-ASSERT THE TIME SCALE EVERY FRAME.
+            // GameManager.PauseGame(false) restores Time.timeScale from its own savedTimeScale,
+            // so any UI window opening and closing during a journey - inventory, the map, a
+            // message box - silently resets travel to 1x. Setting it once at departure is not
+            // enough. Same reasoning as re-asserting mouse look in the pilot.
+            if (!Mathf.Approximately(Time.timeScale, TimeCompression))
+                SetTimeScale(TimeCompression);
 
             pilot.Update();
 
