@@ -43,9 +43,17 @@ namespace DaggerfallWorkshop.Game.Mobile
         // fixedDeltaTime MUST scale with it - Unity's physics step is fixed, so leaving it at
         // 0.02 while timeScale is 20 gives physics 20x the simulated distance per step and
         // the player tunnels through terrain and walks over water.
-        public const int DefaultTimeCompression = 20;
+        // Lowered from 20/50 on device evidence: 21x already outran terrain streaming on an
+        // M4 iPad and produced untextured ground. The throttle below is the real protection,
+        // but a lower ceiling means fewer people meet the problem at all.
+        public const int DefaultTimeCompression = 12;
         public const int MinTimeCompression = 1;
-        public const int MaxTimeCompression = 50;
+        public const int MaxTimeCompression = 24;
+
+        // Speed used while the streaming world is catching up, and how long terrain must stay
+        // settled before full speed resumes.
+        const int throttledCompression = 3;
+        const float terrainSettleSeconds = 0.35f;
 
         // Cautious travel's safety net, matching the vanilla mod defaults.
         const int defaultMaxAvoidChance = 95;
@@ -73,6 +81,18 @@ namespace DaggerfallWorkshop.Game.Mobile
         ContentReader.MapSummary destinationSummary;
         string destinationName;
         bool destinationValid;
+
+        // TERRAIN THROTTLE
+        // Time compression multiplies PHYSICAL movement, not just the clock - at 21x the
+        // player crosses map pixels 21x faster than StreamingWorld can build and paint
+        // terrain, and walks into geometry that has no texture yet. Device report: a large
+        // untextured wedge across the lower half of the view.
+        //
+        // So a journey yields to the world. While terrain is being built, compression drops
+        // to a crawl; when the world catches up, full speed resumes. The journey regulates
+        // itself instead of guessing a safe fixed speed for every device and biome.
+        bool terrainBuilding;
+        float terrainSettledAt;
 
         float baseFixedDeltaTime;
         int diseaseCount;
@@ -116,8 +136,41 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (IsTravelling)
                 Stop(JourneyEnd.Cancelled);
 
+            StreamingWorld.OnUpdateTerrainsStart -= OnTerrainBuildStart;
+            StreamingWorld.OnUpdateTerrainsEnd -= OnTerrainBuildEnd;
+
             if (instance == this)
                 instance = null;
+        }
+
+        void OnTerrainBuildStart()
+        {
+            terrainBuilding = true;
+        }
+
+        void OnTerrainBuildEnd()
+        {
+            terrainBuilding = false;
+
+            // Unscaled: the whole point is a real-time settle, and Time.time is being
+            // multiplied by the very compression this is trying to govern.
+            terrainSettledAt = Time.unscaledTime;
+        }
+
+        /// <summary>
+        /// Compression the world can currently keep up with. Full speed once terrain has been
+        /// settled for a moment; a crawl while it is still building.
+        ///
+        /// The settle delay matters: terrain builds in bursts, so reacting to the very frame a
+        /// build ends would snap back to 21x just in time for the next tile to fall behind,
+        /// and the journey would oscillate instead of running smoothly.
+        /// </summary>
+        int SustainableCompression()
+        {
+            if (terrainBuilding || Time.unscaledTime - terrainSettledAt < terrainSettleSeconds)
+                return Mathf.Min(throttledCompression, TimeCompression);
+
+            return TimeCompression;
         }
 
         void Start()
@@ -126,6 +179,10 @@ namespace DaggerfallWorkshop.Game.Mobile
             SaveLoadManager.OnLoad += (saveData) => ForgetDestination();
             StartGameBehaviour.OnNewGame += ForgetDestination;
             GameManager.OnEncounter += OnEncounter;
+
+            // Public static events, so the throttle needs no engine change.
+            StreamingWorld.OnUpdateTerrainsStart += OnTerrainBuildStart;
+            StreamingWorld.OnUpdateTerrainsEnd += OnTerrainBuildEnd;
         }
 
         #region Begin
@@ -251,8 +308,9 @@ namespace DaggerfallWorkshop.Game.Mobile
             // so any UI window opening and closing during a journey - inventory, the map, a
             // message box - silently resets travel to 1x. Setting it once at departure is not
             // enough. Same reasoning as re-asserting mouse look in the pilot.
-            if (!Mathf.Approximately(Time.timeScale, TimeCompression))
-                SetTimeScale(TimeCompression);
+            int target = SustainableCompression();
+            if (!Mathf.Approximately(Time.timeScale, target))
+                SetTimeScale(target);
 
             pilot.Update();
 
@@ -442,7 +500,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             TimeCompression = ClampCompression(scale);
 
             if (IsTravelling)
-                SetTimeScale(TimeCompression);
+                SetTimeScale(SustainableCompression());
         }
 
         bool SpeedCautious { get; set; }

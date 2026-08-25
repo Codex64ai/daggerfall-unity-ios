@@ -33,7 +33,7 @@ namespace DaggerfallWorkshop.Game.Mobile
     {
         // Classic 320x200 space. The bar sits at the top so it does not cover the horizon,
         // which is the part of the view worth watching while travelling.
-        Rect panelRect = new Rect(0, 0, 320, 34);
+        Rect panelRect = new Rect(0, 0, 320, 44);   // 18 + 22 button + 4 padding
 
         // 22 tall against the original's 10. At the scales this port runs on that is the
         // difference between a reliable tap and a fiddly one.
@@ -55,9 +55,14 @@ namespace DaggerfallWorkshop.Game.Mobile
         TextLabel clockLabel;
         TextLabel speedLabel;
 
-        readonly Color panelBackground = new Color(0f, 0f, 0f, 0.55f);
-        readonly Color buttonBackground = new Color(0.15f, 0.12f, 0.08f, 0.85f);
-        readonly Color stopBackground = new Color(0.45f, 0.08f, 0.05f, 0.85f);
+        // Near-opaque on device evidence. At 0.55 / 0.85 the snowy landscape read straight
+        // through the bar and the buttons looked like windows onto the scene rather than
+        // controls - the MAP button in particular appeared to have trees inside it. A HUD
+        // element the player has to hit in a hurry needs to be legible against ANY biome, so
+        // it stops trying to be subtle.
+        readonly Color panelBackground = new Color(0.03f, 0.025f, 0.02f, 0.92f);
+        readonly Color buttonBackground = new Color(0.16f, 0.13f, 0.09f, 1f);
+        readonly Color stopBackground = new Color(0.42f, 0.07f, 0.05f, 1f);
 
         public MobileJourneyWindow(IUserInterfaceManager uiManager)
             : base(uiManager)
