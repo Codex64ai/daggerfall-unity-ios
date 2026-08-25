@@ -190,6 +190,14 @@ namespace DaggerfallWorkshop.Game.Mobile
                 v => { if (joystick != null) joystick.floating = v; },
                 "floatstick");
 
+            // Off by default on purpose. Real travel is a large change to how the game is
+            // played, and it costs continuous terrain streaming for the length of a journey -
+            // opting in should be the player's choice, not something they discover happening.
+            AddToggle(panel, ref y, rowH, "Walk when travelling",
+                () => MobileJourneyController.JourneyModeEnabled,
+                v => MobileJourneyController.JourneyModeEnabled = v,
+                "journeymode");
+
             AddButton(panel, ref y, rowH, "Edit layout (drag / resize / hide)", () =>
             {
                 Close();
@@ -450,6 +458,13 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
             if (joystick != null)
                 joystick.floating = PlayerPrefs.GetInt(prefix + "floatstick", joystick.floating ? 1 : 0) == 1;
+
+            // Needed before the panel is ever opened, and more so than the rest: the travel
+            // popup asks whether journey mode is on the first time the player travels, which
+            // is usually long before they go looking through settings.
+            MobileJourneyController.JourneyModeEnabled =
+                PlayerPrefs.GetInt(prefix + "journeymode",
+                                   MobileJourneyController.JourneyModeEnabled ? 1 : 0) == 1;
         }
 
         void ApplyAll()

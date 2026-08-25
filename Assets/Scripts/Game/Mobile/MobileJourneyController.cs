@@ -69,6 +69,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         public string DestinationName { get { return destinationName; } }
 
         MobileJourneyPilot pilot;
+        MobileJourneyWindow window;
         ContentReader.MapSummary destinationSummary;
         string destinationName;
         bool destinationValid;
@@ -190,7 +191,38 @@ namespace DaggerfallWorkshop.Game.Mobile
             SuppressJourneyNoise();
             SuppressWeather();
             SetTimeScale(TimeCompression);
+            ShowJourneyWindow();
             return true;
+        }
+
+        /// <summary>
+        /// Put the travel bar on screen. Created fresh each journey rather than kept: the
+        /// window caches label references built against a UI stack that does not survive a
+        /// scene change, and a stale one renders as an empty bar.
+        /// </summary>
+        void ShowJourneyWindow()
+        {
+            if (!DaggerfallUI.HasInstance)
+                return;
+
+            window = new MobileJourneyWindow(DaggerfallUI.UIManager);
+            DaggerfallUI.UIManager.PushWindow(window);
+        }
+
+        void CloseJourneyWindow()
+        {
+            if (window == null)
+                return;
+
+            MobileJourneyWindow closing = window;
+
+            // Cleared BEFORE closing. Closing raises OnPop, which calls back into Stop() to
+            // treat a closed bar as an interrupt - without this the two would call each other
+            // until the stack gave out.
+            window = null;
+
+            if (closing.IsShowing)
+                closing.CloseWindow();
         }
 
         #endregion
@@ -337,6 +369,7 @@ namespace DaggerfallWorkshop.Game.Mobile
                 pilot = null;
             }
 
+            CloseJourneyWindow();
             RestoreJourneyNoise();
             RestoreWeather();
 
@@ -368,6 +401,19 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             Time.timeScale = scale;
             Time.fixedDeltaTime = scale * baseFixedDeltaTime;
+        }
+
+        /// <summary>
+        /// Change travel speed, taking effect immediately if a journey is already running.
+        /// Clamped: below 1x time would run backwards, and far above 50x the player outruns
+        /// terrain streaming and walks into unloaded world.
+        /// </summary>
+        public void SetTimeCompression(int scale)
+        {
+            TimeCompression = Mathf.Clamp(scale, MinTimeCompression, MaxTimeCompression);
+
+            if (IsTravelling)
+                SetTimeScale(TimeCompression);
         }
 
         bool SpeedCautious { get; set; }
