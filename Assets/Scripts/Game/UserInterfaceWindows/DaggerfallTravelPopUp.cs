@@ -239,6 +239,20 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
                 else
                 {
                     doFastTravel = false;
+
+                    // MOBILE: real travel walks to the destination instead of teleporting.
+                    // Diverted here, at the one instant that matters, so the vanilla map and
+                    // this popup are otherwise untouched - the player's speed, transport and
+                    // lodging choices keep their normal meaning and are read off this window.
+                    // Returns false for anything a journey cannot walk (no location on the
+                    // target map pixel, sea routes), which falls through to classic travel.
+                    Mobile.MobileJourneyController.Instance?.AdoptTravelOptions(this);
+                    if (Mobile.MobileJourneyController.TryBeginJourney(this))
+                    {
+                        CloseWindow();
+                        return;
+                    }
+
                     DaggerfallUI.Instance.FadeBehaviour.SmashHUDToBlack();
                     performFastTravel();
                 }
