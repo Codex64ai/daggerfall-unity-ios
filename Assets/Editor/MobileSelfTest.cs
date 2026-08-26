@@ -60,6 +60,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestRoadData();
             TestRoadDirectionReciprocity();
             TestRoadRouting();
+            TestWaypointOvershoot();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -688,7 +689,42 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "roads: routing to where you already are is an empty route");
         }
 
+
+        /// <summary>
+        /// A waypoint must not be steppable-over. Its own rect is 512 world units where a map
+        /// pixel is 32768, so at high time compression a single frame covers far more than the
+        /// rect - and a fixed arrival radius would be passed straight through, leaving the
+        /// journey steering at a waypoint behind it indefinitely.
+        /// </summary>
+        static void TestWaypointOvershoot()
+        {
+            // Standing still or walking: the waypoint's own size governs.
+            float still = MobileJourneyPilot.WaypointRadius(0f);
+            Check(still > 0f, "waypoint: radius is positive when stationary");
+            Near(MobileJourneyPilot.WaypointRadius(10f), still, 0.01f,
+                 "waypoint: slow movement does not shrink the radius");
+
+            // Fast: the radius must exceed the distance covered, or the waypoint is skipped.
+            float[] speeds = { 500f, 2000f, 20000f, 200000f };
+            bool alwaysCatchable = true;
+            foreach (float perFrame in speeds)
+            {
+                if (MobileJourneyPilot.WaypointRadius(perFrame) <= perFrame)
+                    alwaysCatchable = false;
+            }
+            Check(alwaysCatchable,
+                  "waypoint: radius always exceeds one frame of travel, at any speed");
+
+            // Monotonic - faster must never mean a smaller catch radius.
+            bool monotonic = MobileJourneyPilot.WaypointRadius(100f) <=
+                             MobileJourneyPilot.WaypointRadius(1000f) &&
+                             MobileJourneyPilot.WaypointRadius(1000f) <=
+                             MobileJourneyPilot.WaypointRadius(10000f);
+            Check(monotonic, "waypoint: radius grows with speed");
+        }
+
         #endregion
+
 
 
 

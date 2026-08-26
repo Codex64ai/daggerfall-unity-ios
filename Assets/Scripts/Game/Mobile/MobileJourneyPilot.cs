@@ -61,6 +61,14 @@ namespace DaggerfallWorkshop.Game.Mobile
         float journeyYaw;
         bool finalTarget = true;
 
+        // Last position and how far the player moved since, in world units per frame. Used to
+        // size the waypoint arrival radius: at high time compression a frame can cover more
+        // ground than a waypoint's rect is wide, and a fixed radius would be flown straight
+        // through without ever registering.
+        float lastX, lastZ;
+        bool haveLast;
+        float perFrameDistance;
+
         // Captured on the first frame that takes the camera, restored on release. Assuming
         // what "normal" looks like is how a journey ends up editing settings that were never
         // its to change.
@@ -136,10 +144,22 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             Active = true;
 
-            // A waypoint is reached by entering its rect. The final destination additionally
-            // requires being in its map pixel, because its arrival rect is deliberately widened
-            // past the location and would otherwise fire from a neighbouring pixel.
-            if (IsPlayerInArrivalRect() && (!finalTarget || inDestinationMapPixel))
+            TrackMovement();
+
+            // The final destination is reached by entering its rect AND being in its map pixel -
+            // its rect is deliberately widened past the location, so without the pixel test it
+            // would fire from a neighbour.
+            //
+            // A waypoint uses a radius instead, sized to how fast the player is actually moving.
+            // Its rect is 512 world units across where a map pixel is 32768, so at high
+            // compression a single frame covers far more than the rect and the player passes
+            // through without ever being inside it on a frame we look. Then the pilot steers at
+            // a waypoint behind it, forever.
+            bool arrived = finalTarget
+                ? (IsPlayerInArrivalRect() && inDestinationMapPixel)
+                : WithinWaypointRadius();
+
+            if (arrived)
             {
                 RaiseOnArrival();
                 return;
@@ -225,6 +245,66 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             PlayerGPS gps = Gps;
             return destinationWorldRect.Contains(new Vector2(gps.WorldX, gps.WorldZ));
+        }
+
+        void TrackMovement()
+        {
+            PlayerGPS gps = Gps;
+
+            if (haveLast)
+            {
+                float dx = gps.WorldX - lastX;
+                float dz = gps.WorldZ - lastZ;
+                perFrameDistance = Mathf.Sqrt(dx * dx + dz * dz);
+            }
+
+            lastX = gps.WorldX;
+            lastZ = gps.WorldZ;
+            haveLast = true;
+        }
+
+        /// <summary>
+        /// Close enough to a waypoint to call it reached. The radius is the larger of the
+        /// waypoint's own size and the distance covered last frame with margin - so however
+        /// fast a journey runs, the waypoint cannot be stepped over.
+        /// </summary>
+        bool WithinWaypointRadius()
+        {
+            PlayerGPS gps = Gps;
+            Vector2 centre = destinationWorldRect.center;
+
+            float dx = gps.WorldX - centre.x;
+            float dz = gps.WorldZ - centre.y;
+            float distance = Mathf.Sqrt(dx * dx + dz * dz);
+
+            return distance <= WaypointRadius(perFrameDistance);
+        }
+
+        /// <summary>
+        /// How close counts as reaching a waypoint, given how far the player moved last frame.
+        /// Pure and static so the overshoot guarantee can be tested headlessly - the failure it
+        /// prevents (a journey stuck steering at a waypoint it already passed) only appears at
+        /// high time compression, which is exactly what is hard to reproduce on demand.
+        /// </summary>
+        public static float WaypointRadius(float perFrameDistance)
+        {
+            return Mathf.Max(pathSize, perFrameDistance * 1.5f);
+        }
+
+        /// <summary>Distance to the current target, for progress reporting.</summary>
+        public float DistanceToTarget
+        {
+            get
+            {
+                if (!IsPlayerReady())
+                    return 0f;
+
+                PlayerGPS gps = Gps;
+                Vector2 centre = destinationWorldRect.center;
+                float dx = gps.WorldX - centre.x;
+                float dz = gps.WorldZ - centre.y;
+                return Mathf.Sqrt(dx * dx + dz * dz);
+            }
         }
 
         float YawTowardDestination()

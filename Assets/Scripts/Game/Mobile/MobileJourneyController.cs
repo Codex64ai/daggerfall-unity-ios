@@ -421,6 +421,13 @@ namespace DaggerfallWorkshop.Game.Mobile
             offeredPlaces.Clear();
             route = null;
             routeStep = 0;
+
+            // The place we are setting out FROM must not be offered as somewhere to stop.
+            // Resuming a journey after stopping in a town would otherwise ask, immediately and
+            // absurdly, whether to stop at the town the player is standing in.
+            PlayerGPS startGps = GameManager.Instance.PlayerGPS;
+            if (startGps != null && startGps.HasCurrentLocation)
+                offeredPlaces.Add(startGps.CurrentMapID);
             askedToCampTonight = false;
             wasNight = false;
 
@@ -555,8 +562,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             routeStep = 0;
             pilot.SetWaypoint(route[0]);
 
-            DaggerfallUI.AddHUDText(
-                string.Format("You set out along the road, {0} leagues of it ahead.", route.Count), 3f);
+            DaggerfallUI.AddHUDText("You set out along the road.", 3f);
         }
 
         /// <summary>
