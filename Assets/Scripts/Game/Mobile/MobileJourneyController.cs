@@ -89,9 +89,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         const float terrainSettleSeconds = 0.15f;
 
         // How far to look for a road when snapping the ends of a journey onto the network.
-        // Map pixels, so this is a handful of leagues - far enough to catch a town just off the
-        // road, close enough that it never snaps to a road going somewhere else entirely.
-        const int snapRadius = 6;
+        //
+        // Generous on purpose. The pilot walks overland to the first waypoint and overland from
+        // the last one to the destination, so a distant snap costs nothing but a stretch of
+        // open country at each end - whereas a tight radius threw away the ENTIRE road route
+        // whenever either end happened to be off-network. Most of a long journey being on a
+        // road is worth a few pixels of field at the start and finish.
+        const int snapRadius = 20;
 
         // Cautious travel's safety net, matching the vanilla mod defaults.
         const int defaultMaxAvoidChance = 95;
@@ -553,9 +557,11 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             List<DFPosition> found = MobileRoadNetwork.FindRoute(from.X, from.Y, to.X, to.Y);
 
-            // A one-hop route is not worth the machinery - the destination is already next
-            // door, and following it would just add a waypoint on the way to the same place.
-            if (found == null || found.Count < 2)
+            // Worth following only if the road actually saves walking. A three-pixel road
+            // reached by a twenty-pixel trudge across country is a worse journey than simply
+            // heading for the destination, so compare the route against the detours it costs.
+            int detour = Distance(here, from) + Distance(to, target);
+            if (found == null || found.Count < 2 || found.Count < detour)
                 return;
 
             route = found;
@@ -563,6 +569,14 @@ namespace DaggerfallWorkshop.Game.Mobile
             pilot.SetWaypoint(route[0]);
 
             DaggerfallUI.AddHUDText("You set out along the road.", 3f);
+        }
+
+        /// <summary>Chebyshev distance in map pixels - diagonals cost one step here.</summary>
+        static int Distance(DFPosition a, DFPosition b)
+        {
+            int dx = Mathf.Abs(a.X - b.X);
+            int dy = Mathf.Abs(a.Y - b.Y);
+            return Mathf.Max(dx, dy);
         }
 
         /// <summary>

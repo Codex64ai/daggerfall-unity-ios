@@ -89,8 +89,9 @@ namespace DaggerfallWorkshop.Game.Mobile
                 DaggerfallUI.DefaultFont, new Vector2(170, 3), string.Empty, mainPanel);
 
             // What the journey is actually doing: speed in effect, whether terrain is still
-            // building, and the player's measured ground speed. If the player is frozen while
-            // the clock runs, this says which of those is at fault.
+            // building, measured ground speed, and road progress. Shown only when TUNE's
+            // "Show diagnostics" is on - it is a developer readout, and leaving it permanently
+            // across a player-facing bar is how a debug string ends up in a release.
             diagLabel = DaggerfallUI.AddTextLabel(
                 DaggerfallUI.DefaultFont, new Vector2(140, 27), string.Empty, mainPanel);
 
@@ -175,11 +176,19 @@ namespace DaggerfallWorkshop.Game.Mobile
             {
                 speedLabel.Text = journey.TimeCompression + "x";
 
-                diagLabel.Text = string.Format("run {0}x  {1}  {2:0} u/s  {3}",
-                    journey.ActiveCompression,
-                    journey.TerrainBuilding ? "TERRAIN" : "ready",
-                    journey.MeasuredSpeed,
-                    journey.FollowingRoad ? "road " + journey.RouteRemaining : "direct");
+                bool diagnostics = MobileInputController.Instance != null &&
+                                   MobileInputController.Instance.showGestureDebug;
+
+                diagLabel.Text = diagnostics
+                    ? string.Format("run {0}x  {1}  {2:0} u/s  {3}",
+                        journey.ActiveCompression,
+                        journey.TerrainBuilding ? "TERRAIN" : "ready",
+                        journey.MeasuredSpeed,
+                        journey.FollowingRoad ? "road " + journey.RouteRemaining : "direct")
+
+                    // Not nothing: following a road is worth telling the player about, because
+                    // it explains why a journey is not heading straight at its destination.
+                    : (journey.FollowingRoad ? "Following the road" : string.Empty);
             }
         }
 

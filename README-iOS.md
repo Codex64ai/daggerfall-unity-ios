@@ -262,6 +262,29 @@ removed once the feature settles.
 Trips with nothing to walk to fall back to classic fast travel: a destination with no location
 on its map pixel, or a sea route.
 
+### Following roads
+
+With **TUNE -> Roads and tracks** enabled, a journey works out a route along the road and track
+network and follows it, rather than heading straight at the destination across open country. The
+bar says *Following the road* when it is doing so.
+
+Both ends of a journey are matched to the nearest path within about twenty map pixels, so the
+character walks overland at the start and finish and takes the road in between. A route is only
+used if the road actually saves walking - a short road reached by a long trudge across country
+is a worse journey than simply setting off, so that case is left as direct travel.
+
+Not every destination has a road to it, and the network is not fully connected. Direct travel is
+the normal outcome in that case, not a failure.
+
+Roads themselves are **off by default and need a restart** to take effect: terrain texturing is
+consulted as each tile is built, so switching it mid-session would leave already-generated
+terrain painted the old way and roads would stop at an invisible line.
+
+Roads are ported from **Basic Roads** by Hazelnut, MIT licensed, including the authored path
+network. The route-finding is this port's own - Basic Roads draws the roads, and Travel Options
+follows a road the player is already standing on, but neither works out a route to a chosen
+destination.
+
 Derived from **Tedious Travel** by TheNewBob / Jedidia, MIT licensed. Reworked for this port:
 no reflection into engine internals, no fork of the travel map window (14 lines of engine
 change rather than 1,958), touch-sized controls, a camera hand-off so a journey and a thumb
