@@ -175,10 +175,11 @@ namespace DaggerfallWorkshop.Game.Mobile
             {
                 speedLabel.Text = journey.TimeCompression + "x";
 
-                diagLabel.Text = string.Format("run {0}x  {1}  {2:0} u/s",
+                diagLabel.Text = string.Format("run {0}x  {1}  {2:0} u/s  {3}",
                     journey.ActiveCompression,
                     journey.TerrainBuilding ? "TERRAIN" : "ready",
-                    journey.MeasuredSpeed);
+                    journey.MeasuredSpeed,
+                    journey.FollowingRoad ? "road " + journey.RouteRemaining : "direct");
             }
         }
 

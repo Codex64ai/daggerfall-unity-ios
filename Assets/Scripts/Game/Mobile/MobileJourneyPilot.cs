@@ -59,6 +59,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         bool inDestinationMapPixel;
 
         float journeyYaw;
+        bool finalTarget = true;
 
         // Captured on the first frame that takes the camera, restored on release. Assuming
         // what "normal" looks like is how a journey ends up editing settings that were never
@@ -67,13 +68,57 @@ namespace DaggerfallWorkshop.Game.Mobile
         bool priorSimpleCursorLock;
         bool cameraTaken;
 
+        // Map pixel geometry, Basic Roads / Travel Options values. A path target is a small
+        // rect at the centre of a map pixel rather than the whole pixel: aiming at the centre
+        // keeps a route on the road, where aiming at the pixel would let the player clip its
+        // corner and count as arrived while still in open country.
+        const int mpWorldUnits = 32768;
+        const int halfMpWorldUnits = mpWorldUnits / 2;
+        const int tileSize = mpWorldUnits / MapsFile.WorldMapTileDim;
+        const int pathSize = tileSize * 2;
+        const int midLo = halfMpWorldUnits - tileSize;
+
         public MobileJourneyPilot(ContentReader.MapSummary destinationSummary)
         {
             this.destinationSummary = destinationSummary;
 
             destinationMapPixel = MapsFile.GetPixelFromPixelID(destinationSummary.ID);
             destinationWorldRect = ArrivalRect(GetLocationRect(destinationSummary));
+            finalTarget = true;
         }
+
+        /// <summary>
+        /// Aim at one step of a road route instead of the final destination. Called again for
+        /// each waypoint, so one pilot walks the whole route rather than being rebuilt per hop -
+        /// rebuilding would re-snapshot the camera state on every map pixel.
+        /// </summary>
+        public void SetWaypoint(DFPosition mapPixel)
+        {
+            destinationMapPixel = mapPixel;
+
+            DFPosition world = MapsFile.MapPixelToWorldCoord(mapPixel.X, mapPixel.Y);
+            destinationWorldRect = new Rect(world.X + midLo, world.Y + midLo, pathSize, pathSize);
+
+            finalTarget = false;
+            inDestinationMapPixel = false;
+
+            // Force a fresh bearing on the next frame; without this the pilot keeps steering at
+            // the previous waypoint until the player happens to cross a map pixel boundary.
+            lastPlayerMapPixel = new DFPosition(int.MaxValue, int.MaxValue);
+        }
+
+        /// <summary>Aim at the journey's real destination again, after the last waypoint.</summary>
+        public void SetFinalTarget()
+        {
+            destinationMapPixel = MapsFile.GetPixelFromPixelID(destinationSummary.ID);
+            destinationWorldRect = ArrivalRect(GetLocationRect(destinationSummary));
+            finalTarget = true;
+            inDestinationMapPixel = false;
+            lastPlayerMapPixel = new DFPosition(int.MaxValue, int.MaxValue);
+        }
+
+        /// <summary>True when aiming at the destination rather than a waypoint.</summary>
+        public bool AtFinalTarget { get { return finalTarget; } }
 
         // Resolved on use, not in field initialisers. A journey can be constructed from a UI
         // window during a scene change, when GameManager.Instance is mid-rebuild; touching
@@ -91,7 +136,10 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             Active = true;
 
-            if (inDestinationMapPixel && IsPlayerInArrivalRect())
+            // A waypoint is reached by entering its rect. The final destination additionally
+            // requires being in its map pixel, because its arrival rect is deliberately widened
+            // past the location and would otherwise fire from a neighbouring pixel.
+            if (IsPlayerInArrivalRect() && (!finalTarget || inDestinationMapPixel))
             {
                 RaiseOnArrival();
                 return;
@@ -244,7 +292,11 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         void RaiseOnArrival()
         {
-            Release();
+            // Only hand the camera back when the journey is genuinely over. Releasing at every
+            // waypoint would re-enable mouse look hundreds of times on a long route, and the
+            // touch layer would fight for the camera between each hop.
+            if (finalTarget)
+                Release();
 
             if (OnArrival != null)
                 OnArrival();

@@ -157,7 +157,7 @@ namespace BasicRoads
             return pathData;
         }
 
-        internal byte[] GetPathData(int pathType)
+        public byte[] GetPathData(int pathType)   // public for the port's router
         {
             byte[] data = new byte[MP_ARRAY_SIZE];
 
@@ -167,7 +167,7 @@ namespace BasicRoads
             return data;
         }
 
-        internal byte GetPathDataPoint(int pathType, int x, int y)
+        public byte GetPathDataPoint(int pathType, int x, int y)   // public for the port's router
         {
             int pathsIndex = x + (y * MapsFile.MaxMapPixelX);
             return pathsData[pathType][pathsIndex];

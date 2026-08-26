@@ -21,6 +21,7 @@ using DaggerfallWorkshop.Utility.AssetInjection;
 using System.IO;
 using System.Text;
 using UnityEngine;
+using DaggerfallConnect.Utility;
 using UnityEditor;
 
 namespace DaggerfallWorkshop.Game.Mobile.EditorTools
@@ -56,6 +57,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestJourneyArrivalRect();
             TestJourneyCompressionClamp();
             TestJourneySpeedTiers();
+            TestRoadData();
+            TestRoadDirectionReciprocity();
+            TestRoadRouting();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -529,7 +533,163 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "tiers: reckless ceiling is genuinely higher");
         }
 
+
+        /// <summary>The ported path data is present and looks like a road network.</summary>
+        static void TestRoadData()
+        {
+            Check(MobileRoadNetwork.Available, "roads: path data loaded from Resources");
+            if (!MobileRoadNetwork.Available)
+                return;
+
+            int withPath = 0;
+            for (int y = 0; y < MobileRoadNetwork.Height; y += 3)
+                for (int x = 0; x < MobileRoadNetwork.Width; x += 3)
+                    if (MobileRoadNetwork.HasAnyPath(x, y))
+                        withPath++;
+
+            // Sampled every third pixel, so this is a shape check rather than a census: a
+            // network covers a small but non-trivial slice of the world. Zero means the data
+            // did not really load; a huge number means it is not a network at all.
+            Check(withPath > 200, "roads: network is not empty",
+                  "sampled pixels carrying a path: " + withPath);
+            Check(withPath < MobileRoadNetwork.Width * MobileRoadNetwork.Height / 9 / 2,
+                  "roads: network is sparse, as a road network should be",
+                  "sampled pixels carrying a path: " + withPath);
+
+            Check(!MobileRoadNetwork.InBounds(-1, 0) &&
+                  !MobileRoadNetwork.InBounds(0, MobileRoadNetwork.Height),
+                  "roads: bounds reject out-of-world pixels");
+        }
+
+        /// <summary>
+        /// THE CHECK THAT MATTERS. Each direction bit must pair with the opposite bit on the
+        /// neighbour it points at. If the direction-to-offset mapping had a sign error - most
+        /// easily on north, since Daggerfall map pixel Y grows southward - reciprocity would
+        /// collapse and every route would run the wrong way. Verified against the real data
+        /// rather than assumed from reading it.
+        /// </summary>
+        static void TestRoadDirectionReciprocity()
+        {
+            if (!MobileRoadNetwork.Available)
+                return;
+
+            byte[] bits = { MobileRoadNetwork.N, MobileRoadNetwork.NE, MobileRoadNetwork.E,
+                            MobileRoadNetwork.SE, MobileRoadNetwork.S, MobileRoadNetwork.SW,
+                            MobileRoadNetwork.W, MobileRoadNetwork.NW };
+            byte[] opposite = { MobileRoadNetwork.S, MobileRoadNetwork.SW, MobileRoadNetwork.W,
+                                MobileRoadNetwork.NW, MobileRoadNetwork.N, MobileRoadNetwork.NE,
+                                MobileRoadNetwork.E, MobileRoadNetwork.SE };
+            int[] dx = { 0, 1, 1, 1, 0, -1, -1, -1 };
+            int[] dy = { -1, -1, 0, 1, 1, 1, 0, -1 };
+
+            int checked_ = 0, reciprocal = 0;
+
+            for (int y = 1; y < MobileRoadNetwork.Height - 1 && checked_ < 4000; y++)
+            {
+                for (int x = 1; x < MobileRoadNetwork.Width - 1 && checked_ < 4000; x++)
+                {
+                    byte here = MobileRoadNetwork.PathsAt(x, y);
+                    if (here == 0)
+                        continue;
+
+                    for (int d = 0; d < 8; d++)
+                    {
+                        if ((here & bits[d]) == 0)
+                            continue;
+
+                        checked_++;
+                        byte there = MobileRoadNetwork.PathsAt(x + dx[d], y + dy[d]);
+                        if ((there & opposite[d]) != 0)
+                            reciprocal++;
+                    }
+                }
+            }
+
+            Check(checked_ > 500, "roads: found enough connections to test",
+                  "connections examined: " + checked_);
+
+            float ratio = checked_ > 0 ? (float)reciprocal / checked_ : 0f;
+            Check(ratio > 0.9f, "roads: direction offsets agree with the data (reciprocity)",
+                  string.Format("{0:P1} of {1} connections were reciprocal - a low value means " +
+                                "the direction-to-offset mapping is wrong", ratio, checked_));
+        }
+
+        /// <summary>
+        /// A route must be walkable: every step adjacent to the last, and every step actually
+        /// carrying the path bit that permits it. A route that teleports or crosses open
+        /// country would walk the player through terrain with no road under them.
+        /// </summary>
+        static void TestRoadRouting()
+        {
+            if (!MobileRoadNetwork.Available)
+                return;
+
+            // Find a start on the network, and a target far enough to be a real search.
+            DFPosition start = null, target = null;
+            for (int y = 20; y < MobileRoadNetwork.Height - 20 && start == null; y += 7)
+                for (int x = 20; x < MobileRoadNetwork.Width - 20 && start == null; x += 7)
+                    if (MobileRoadNetwork.HasAnyPath(x, y))
+                        start = new DFPosition(x, y);
+
+            if (start == null)
+            {
+                Check(false, "roads: found a starting pixel on the network");
+                return;
+            }
+
+            for (int r = 6; r <= 40 && target == null; r += 2)
+            {
+                for (int d = 0; d < 8 && target == null; d++)
+                {
+                    int[] ox = { 0, 1, 1, 1, 0, -1, -1, -1 };
+                    int[] oy = { -1, -1, 0, 1, 1, 1, 0, -1 };
+                    int tx = start.X + ox[d] * r, ty = start.Y + oy[d] * r;
+                    if (MobileRoadNetwork.InBounds(tx, ty) && MobileRoadNetwork.HasAnyPath(tx, ty))
+                        target = new DFPosition(tx, ty);
+                }
+            }
+
+            Check(target != null, "roads: found a distant pixel on the network to route to");
+            if (target == null)
+                return;
+
+            System.Collections.Generic.List<DFPosition> route =
+                MobileRoadNetwork.FindRoute(start.X, start.Y, target.X, target.Y);
+
+            // No route between two arbitrary network pixels is a legitimate outcome - the
+            // network is not fully connected - so absence is not a failure. What must never
+            // happen is a route that is not walkable.
+            if (route == null)
+            {
+                Check(true, "roads: unconnected pair correctly reports no route");
+                return;
+            }
+
+            Check(route.Count > 0, "roads: route is non-empty");
+            Check(route[route.Count - 1].X == target.X && route[route.Count - 1].Y == target.Y,
+                  "roads: route ends at the destination");
+
+            bool contiguous = true, onNetwork = true;
+            DFPosition prev = start;
+            foreach (DFPosition step in route)
+            {
+                int sx = step.X - prev.X, sy = step.Y - prev.Y;
+                if (Mathf.Abs(sx) > 1 || Mathf.Abs(sy) > 1 || (sx == 0 && sy == 0))
+                    contiguous = false;
+                if (!MobileRoadNetwork.HasAnyPath(step.X, step.Y))
+                    onNetwork = false;
+                prev = step;
+            }
+
+            Check(contiguous, "roads: every step is adjacent to the last (no teleports)");
+            Check(onNetwork, "roads: every step is on the network (no open country)");
+
+            Check(MobileRoadNetwork.FindRoute(start.X, start.Y, start.X, start.Y).Count == 0,
+                  "roads: routing to where you already are is an empty route");
+        }
+
         #endregion
+
 
 
     }

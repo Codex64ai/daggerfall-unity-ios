@@ -88,6 +88,11 @@ namespace DaggerfallWorkshop.Game.Mobile
         // slow" was measuring. Short enough to recover promptly, long enough not to oscillate.
         const float terrainSettleSeconds = 0.15f;
 
+        // How far to look for a road when snapping the ends of a journey onto the network.
+        // Map pixels, so this is a handful of leagues - far enough to catch a town just off the
+        // road, close enough that it never snaps to a road going somewhere else entirely.
+        const int snapRadius = 6;
+
         // Cautious travel's safety net, matching the vanilla mod defaults.
         const int defaultMaxAvoidChance = 95;
         const int defaultHealthMinPercent = 5;
@@ -127,6 +132,19 @@ namespace DaggerfallWorkshop.Game.Mobile
         // does not ask twice. Cleared per journey rather than kept: on a later trip through
         // the same country the offer is worth making again.
         readonly HashSet<int> offeredPlaces = new HashSet<int>();
+
+        // The road route for this journey, and how far along it we are. Empty means travelling
+        // straight to the destination, which is what happens when no road route exists.
+        List<DFPosition> route;
+        int routeStep;
+
+        /// <summary>How much of the road route is left, for the travel bar.</summary>
+        public int RouteRemaining
+        {
+            get { return (route == null) ? 0 : Mathf.Max(0, route.Count - routeStep); }
+        }
+
+        public bool FollowingRoad { get { return route != null && routeStep < route.Count; } }
         bool askedToCampTonight;
         bool wasNight;
         ContentReader.MapSummary destinationSummary;
@@ -388,7 +406,8 @@ namespace DaggerfallWorkshop.Game.Mobile
                 return false;
             }
 
-            pilot.OnArrival += () => Stop(JourneyEnd.Arrived);
+            PlanRoute();
+            pilot.OnArrival += OnPilotArrived;
 
             // Collapsing has to END the journey. Passing out raises time by hours, and with a
             // journey still running the player was walked onward while unconscious and simply
@@ -400,6 +419,8 @@ namespace DaggerfallWorkshop.Game.Mobile
                 exhaustedPlayer.OnExhausted += OnPlayerExhausted;
 
             offeredPlaces.Clear();
+            route = null;
+            routeStep = 0;
             askedToCampTonight = false;
             wasNight = false;
 
@@ -492,6 +513,73 @@ namespace DaggerfallWorkshop.Game.Mobile
             // never offers itself again for the rest of the session.
             prompt.OnCancel += (box) => { promptOpen = false; };
             prompt.Show();
+        }
+
+        /// <summary>
+        /// Work out a road route to the destination, if there is one.
+        ///
+        /// Both ends are snapped to the network first: journeys almost never start or finish
+        /// exactly on a road, so without snapping the search would begin off-network and find
+        /// nothing. A failure here is not an error - plenty of destinations have no road to
+        /// them - it just means walking straight there, which is what happened before roads.
+        /// </summary>
+        void PlanRoute()
+        {
+            route = null;
+            routeStep = 0;
+
+            if (!MobileRoads.Enabled || !MobileRoadNetwork.Available)
+                return;
+
+            PlayerGPS gps = GameManager.Instance.PlayerGPS;
+            if (gps == null)
+                return;
+
+            DFPosition here = gps.CurrentMapPixel;
+            DFPosition target = MapsFile.GetPixelFromPixelID(destinationSummary.ID);
+
+            DFPosition from = MobileRoadNetwork.NearestPathPixel(here.X, here.Y, snapRadius);
+            DFPosition to = MobileRoadNetwork.NearestPathPixel(target.X, target.Y, snapRadius);
+
+            if (from == null || to == null)
+                return;
+
+            List<DFPosition> found = MobileRoadNetwork.FindRoute(from.X, from.Y, to.X, to.Y);
+
+            // A one-hop route is not worth the machinery - the destination is already next
+            // door, and following it would just add a waypoint on the way to the same place.
+            if (found == null || found.Count < 2)
+                return;
+
+            route = found;
+            routeStep = 0;
+            pilot.SetWaypoint(route[0]);
+
+            DaggerfallUI.AddHUDText(
+                string.Format("You set out along the road, {0} leagues of it ahead.", route.Count), 3f);
+        }
+
+        /// <summary>
+        /// A waypoint was reached: aim at the next one, or at the destination once the road runs
+        /// out. Arriving at the FINAL target is what ends a journey.
+        /// </summary>
+        void OnPilotArrived()
+        {
+            if (pilot == null)
+                return;
+
+            if (pilot.AtFinalTarget)
+            {
+                Stop(JourneyEnd.Arrived);
+                return;
+            }
+
+            routeStep++;
+
+            if (route != null && routeStep < route.Count)
+                pilot.SetWaypoint(route[routeStep]);
+            else
+                pilot.SetFinalTarget();
         }
 
         #region Update
