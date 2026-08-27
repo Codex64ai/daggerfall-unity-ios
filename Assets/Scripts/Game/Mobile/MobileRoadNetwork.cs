@@ -14,7 +14,9 @@
 
 using System.Collections.Generic;
 using DaggerfallConnect.Arena2;
+using DaggerfallConnect;
 using DaggerfallConnect.Utility;
+using DaggerfallWorkshop.Utility;
 
 namespace DaggerfallWorkshop.Game.Mobile
 {
@@ -47,6 +49,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         const float roadCost = 1.0f;
         const float trackCost = 1.6f;
         const float diagonalScale = 1.41421356f;
+
+        // Routing through a settlement is expensive, because a journey steers a straight bearing
+        // and a town is full of buildings to walk into - the reported failure was the player
+        // stuck behind one. This does not forbid it: a road genuinely runs through many towns,
+        // and the destination is usually a town itself. It just means a route will take a way
+        // around when one exists at anything like a comparable length.
+        const float settlementPenalty = 8.0f;
 
         // A route across the whole map is a few hundred pixels; anything far beyond that means
         // the search is wandering and should be abandoned rather than stalling the game.
@@ -126,6 +135,50 @@ namespace DaggerfallWorkshop.Game.Mobile
             return (byte)(RoadsAt(x, y) | TracksAt(x, y));
         }
 
+        /// <summary>
+        /// Does this map pixel hold a town, village, hamlet or tavern?
+        ///
+        /// Asked of the map data rather than tracked here, and deliberately tolerant: a failure
+        /// to read location data must not break routing, so anything unexpected is treated as
+        /// open country and simply routed through as before.
+        /// </summary>
+        public static bool IsSettlement(int x, int y)
+        {
+            // Memoised. A* asks this for every neighbour of every node it opens, so a route can
+            // want tens of thousands of answers - and each uncached one is a map data lookup.
+            // Without this the settlement penalty would trade a stuck player for a visible
+            // pause whenever a journey starts.
+            int key = y * Width + x;
+            bool known;
+            if (settlementCache.TryGetValue(key, out known))
+                return known;
+
+            bool result = LookupSettlement(x, y);
+            settlementCache[key] = result;
+            return result;
+        }
+
+        static readonly Dictionary<int, bool> settlementCache = new Dictionary<int, bool>();
+
+        static bool LookupSettlement(int x, int y)
+        {
+            try
+            {
+                ContentReader.MapSummary summary;
+                if (!DaggerfallUnity.Instance.ContentReader.HasLocation(x, y, out summary))
+                    return false;
+
+                return summary.LocationType == DFRegion.LocationTypes.TownCity ||
+                       summary.LocationType == DFRegion.LocationTypes.TownHamlet ||
+                       summary.LocationType == DFRegion.LocationTypes.TownVillage ||
+                       summary.LocationType == DFRegion.LocationTypes.Tavern;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         public static bool HasAnyPath(int x, int y)
         {
             return PathsAt(x, y) != 0;
@@ -202,6 +255,11 @@ namespace DaggerfallWorkshop.Game.Mobile
                     float step = onRoad ? roadCost : trackCost;
                     if (dirX[d] != 0 && dirY[d] != 0)
                         step *= diagonalScale;
+
+                    // Prefer to pass settlements rather than through them - except the one we
+                    // are heading for, which must stay reachable at normal cost.
+                    if ((ny * Width + nx) != goal && IsSettlement(nx, ny))
+                        step += settlementPenalty;
 
                     int neighbour = ny * Width + nx;
                     float tentative = currentCost + step;

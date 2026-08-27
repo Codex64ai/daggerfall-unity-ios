@@ -412,6 +412,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             PlanRoute();
             pilot.OnArrival += OnPilotArrived;
+            pilot.OnBlocked += OnPilotBlocked;
 
             // Collapsing has to END the journey. Passing out raises time by hours, and with a
             // journey still running the player was walked onward while unconscious and simply
@@ -569,6 +570,24 @@ namespace DaggerfallWorkshop.Game.Mobile
             pilot.SetWaypoint(route[0]);
 
             DaggerfallUI.AddHUDText("You set out along the road.", 3f);
+        }
+
+        /// <summary>
+        /// The pilot could not get around something after repeated attempts - in practice a
+        /// building, since a journey steers a straight bearing and towns are full of walls.
+        ///
+        /// Stopping is the right answer rather than continuing to shove the player into
+        /// masonry. The destination is kept, so the travel map offers to resume once they have
+        /// walked clear themselves.
+        /// </summary>
+        void OnPilotBlocked()
+        {
+            if (!IsTravelling)
+                return;
+
+            Stop(JourneyEnd.Interrupted);
+            DaggerfallUI.MessageBox("Your way is blocked. You will have to find your own way " +
+                                    "clear before travelling on.");
         }
 
         /// <summary>Chebyshev distance in map pixels - diagonals cost one step here.</summary>

@@ -41,6 +41,21 @@ namespace DaggerfallWorkshop.Game.Mobile
         // place, free to walk in (or not) under their own control.
         const float arrivalMarginWorldUnits = 1000f;
 
+        // Real seconds of no movement before assuming something is in the way. Long enough not
+        // to trip on a moment's contact with a fence or a slope, short enough that the player
+        // does not watch a wall for long.
+        const float blockedThresholdSeconds = 0.6f;
+
+        // How far off the true bearing to steer while trying to get around an obstacle, and how
+        // long to hold each attempt. Alternating sides at a widening angle walks a building
+        // corner far more reliably than one fixed offset.
+        static readonly float[] sidestepAngles = { 55f, -55f, 90f, -90f, 130f, -130f };
+        const float sidestepSeconds = 1.2f;
+
+        // Attempts before giving up. Six alternating angles is a genuine try; more than that and
+        // the player is somewhere a journey should not continue from.
+        const int maxSidestepAttempts = 6;
+
         /// <summary>
         /// True while any journey is steering the player. The touch input layer checks this
         /// and stops feeding look deltas, so the thumb cannot fight the journey for the
@@ -68,6 +83,19 @@ namespace DaggerfallWorkshop.Game.Mobile
         float lastX, lastZ;
         bool haveLast;
         float perFrameDistance;
+
+        // BLOCKED-PATH RECOVERY
+        // The pilot steers a straight bearing and holds forward, which walks into whatever is
+        // in the way. In a town that is a building, and the player stands against a wall
+        // pushing forward for the rest of the journey. Device report: "the player gets stuck
+        // behind a building if in a town".
+        //
+        // So: notice no progress, try to walk around it, and if that fails give up rather than
+        // pinning the player somewhere they cannot see a reason for.
+        float blockedFor;
+        float steerOffset;
+        int sidestepAttempt;
+        float sidestepUntil;
 
         // Captured on the first frame that takes the camera, restored on release. Assuming
         // what "normal" looks like is how a journey ends up editing settings that were never
@@ -109,6 +137,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             finalTarget = false;
             inDestinationMapPixel = false;
+            ClearBlockedState();
 
             // Force a fresh bearing on the next frame; without this the pilot keeps steering at
             // the previous waypoint until the player happens to cross a map pixel boundary.
@@ -122,6 +151,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             destinationWorldRect = ArrivalRect(GetLocationRect(destinationSummary));
             finalTarget = true;
             inDestinationMapPixel = false;
+            ClearBlockedState();
             lastPlayerMapPixel = new DFPosition(int.MaxValue, int.MaxValue);
         }
 
@@ -145,6 +175,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             Active = true;
 
             TrackMovement();
+            UpdateBlockedRecovery();
 
             // The final destination is reached by entering its rect AND being in its map pixel -
             // its rect is deliberately widened past the location, so without the pixel test it
@@ -181,7 +212,9 @@ namespace DaggerfallWorkshop.Game.Mobile
             // rather than preserved: a journey that inherits whatever the player was last
             // looking at can spend the whole trip staring at the sky or their own feet.
             mouseLook.GetComponent<Transform>().localEulerAngles = Vector3.zero;
-            mouseLook.characterBody.transform.localEulerAngles = new Vector3(0f, journeyYaw, 0f);
+            // steerOffset is zero unless we are trying to get around something.
+            mouseLook.characterBody.transform.localEulerAngles =
+                new Vector3(0f, journeyYaw + steerOffset, 0f);
 
             // Snapshot before the first change, so release puts back what was actually there.
             if (!cameraTaken)
@@ -217,6 +250,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         public void Release()
         {
             Active = false;
+            ClearBlockedState();
 
             if (!IsPlayerReady())
                 return;
@@ -245,6 +279,52 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             PlayerGPS gps = Gps;
             return destinationWorldRect.Contains(new Vector2(gps.WorldX, gps.WorldZ));
+        }
+
+        /// <summary>
+        /// Watch for the player making no headway, and try to steer around whatever is in the
+        /// way. Times are real seconds, not scaled: at 50x a scaled timer would declare the
+        /// player stuck almost instantly.
+        /// </summary>
+        void UpdateBlockedRecovery()
+        {
+            // A sidestep in progress runs for its full duration before being judged. Cutting it
+            // short the moment the player moves would abandon the manoeuvre halfway around a
+            // corner, straight back into the wall.
+            if (sidestepUntil > 0f)
+            {
+                if (Time.unscaledTime < sidestepUntil)
+                    return;
+
+                sidestepUntil = 0f;
+                steerOffset = 0f;
+                blockedFor = 0f;
+                return;
+            }
+
+            // Moving is the normal case: forget everything and carry on. The threshold is a
+            // small fraction of a frame's expected travel, so this is "genuinely not moving"
+            // rather than "moving slowly uphill".
+            if (perFrameDistance > 1f)
+            {
+                blockedFor = 0f;
+                sidestepAttempt = 0;
+                return;
+            }
+
+            blockedFor += Time.unscaledDeltaTime;
+            if (blockedFor < blockedThresholdSeconds)
+                return;
+
+            if (sidestepAttempt >= maxSidestepAttempts)
+            {
+                RaiseOnBlocked();
+                return;
+            }
+
+            steerOffset = sidestepAngles[sidestepAttempt];
+            sidestepUntil = Time.unscaledTime + sidestepSeconds;
+            sidestepAttempt++;
         }
 
         void TrackMovement()
@@ -365,6 +445,30 @@ namespace DaggerfallWorkshop.Game.Mobile
                 throw new ArgumentException("Journey destination not found in map data.");
 
             return DaggerfallLocation.GetLocationRect(location);
+        }
+
+        void ClearBlockedState()
+        {
+            blockedFor = 0f;
+            steerOffset = 0f;
+            sidestepAttempt = 0;
+            sidestepUntil = 0f;
+            haveLast = false;
+            perFrameDistance = 0f;
+        }
+
+        /// <summary>True while steering around an obstacle rather than at the target.</summary>
+        public bool WorkingAroundObstacle { get { return sidestepUntil > 0f; } }
+
+        public delegate void OnBlockedHandler();
+        public event OnBlockedHandler OnBlocked;
+
+        void RaiseOnBlocked()
+        {
+            ClearBlockedState();
+
+            if (OnBlocked != null)
+                OnBlocked();
         }
 
         public delegate void OnArrivalHandler();
