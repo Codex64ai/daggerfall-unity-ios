@@ -89,6 +89,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// <summary>True after iPadOS has delivered a hardware-pointer event.</summary>
         public static bool PointerActive { get; set; }
 
+        /// <summary>True while UIKit has placed the indirect pointer on the view edge.</summary>
+        public static bool PointerAtEdge { get; set; }
+
         /// <summary>Relative hardware-pointer movement collected before gameplay input.</summary>
         public static Vector2 PointerDelta { get; set; }
         public static Vector2 PointerPosition { get; private set; }
@@ -367,6 +370,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             VirtualCursorActive = false;
             KeyboardActive = false;
             PointerActive = false;
+            PointerAtEdge = false;
             PointerDelta = Vector2.zero;
             PointerPosition = Vector2.zero;
             pointerButtonHeld = false;

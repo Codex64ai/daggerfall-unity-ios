@@ -47,10 +47,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             root.SetBoolean("LSSupportsOpeningDocumentsInPlace", true);
 
             // --- layout ------------------------------------------------------------
-            // Split View / Slide Over resizes the window arbitrarily. The touch HUD is laid
-            // out against a fixed reference resolution and the swipe threshold is calibrated
-            // from screen dimensions, so a resizable window breaks both.
-            root.SetBoolean("UIRequiresFullScreen", true);
+            // UIRequiresFullScreen is deliberately omitted. On iPadOS 26 it is a legacy
+            // compatibility mode that keeps the app in a non-full-screen scene, which is
+            // exactly where the Magic Keyboard can expose window-resize and Dock gestures.
+            // Gameplay requests UIKit pointer lock instead (DFMobilePointer.mm).
+            root.values.Remove("UIRequiresFullScreen");
+
+            // Opt into UIKit's indirect pointer stream (Magic Keyboard/trackpad). Without
+            // this declaration iPadOS may treat the pointer as window-management input at
+            // the app boundary instead of delivering it consistently to Unity's view.
+            root.SetBoolean("UIApplicationSupportsIndirectInputEvents", true);
 
             // --- convenience -------------------------------------------------------
             // Declares no non-exempt encryption, which skips the export-compliance
@@ -78,6 +84,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             };
             foreach (string guid in guids)
             {
+                pbx.AddFrameworkToProject(guid, "GameController.framework", false);
                 pbx.SetBuildProperty(guid, "ENABLE_USER_SCRIPT_SANDBOXING", "NO");
                 pbx.SetBuildProperty(guid, "ENABLE_MODULE_VERIFIER", "NO");
                 pbx.SetBuildProperty(guid, "CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER", "NO");
@@ -89,8 +96,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                       "  ENABLE_USER_SCRIPT_SANDBOXING     = NO    (IL2CPP script phase needs file access)\n" +
                       "  UIFileSharingEnabled              = true  (Finder file sharing)\n" +
                       "  LSSupportsOpeningDocumentsInPlace = true  (Files app access)\n" +
-                      "  UIRequiresFullScreen              = true  (no Split View)\n" +
-                      "  ITSAppUsesNonExemptEncryption     = false (skips export compliance)");
+                       "  UIRequiresFullScreen              = omitted (iPadOS 26 native scene)\n" +
+                       "  UIApplicationSupportsIndirectInputEvents = true (iPad pointer input)\n" +
+                       "  ITSAppUsesNonExemptEncryption     = false (skips export compliance)");
 #else
             Debug.LogWarning("[MobileIOSPostProcess] Built for iOS but UNITY_IOS was not defined; " +
                              "Info.plist was NOT modified. Switch the active build target to iOS.");

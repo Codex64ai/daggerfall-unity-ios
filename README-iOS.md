@@ -28,6 +28,9 @@ making the game playable on iPhone and iPad without a keyboard or mouse.
 - **Physical-inch layout** so controls are thumb-sized from an iPhone mini to a 13in iPad
 - **Controller support** - hides the touch HUD automatically and hands input back to
   Daggerfall Unity's existing gamepad support
+- **Magic Keyboard support** - uses Apple's `GCMouse` raw-delta stream for buttonless
+  camera look, with UIKit pointer lock during gameplay and a normal visible pointer in
+  classic menus
 - **Real haptics** via the Taptic Engine (iPhone only; iPad has no motor)
 
 ## Engine footprint
@@ -50,9 +53,7 @@ suppressing camera look mid-swing, which it already did for PC players.
 
 ## Requirements
 
-- **Unity 2022.3.21f1** with **iOS Build Support**
-  (this project targets the `2022_2_21f1-lts-upgrade` branch; Unity 2019.4 cannot build
-  for modern iOS)
+- **Unity 6 (6000.5.10f1)** with **iOS Build Support**
 - **Xcode** and an Apple ID
 - **Your own copy of Daggerfall** - free from Bethesda, or a GOG/Steam copy
 
@@ -198,6 +199,20 @@ distinct, you can bind it yourself in **Settings > Controls > Joystick**.
 
 Rebind anything that lands wrong in **Settings > Controls > Joystick**.
 
+### Magic Keyboard and trackpad
+
+The Magic Keyboard trackpad is supported on iPad during both gameplay and classic menus.
+During gameplay, the app requests UIKit pointer lock and hides the hardware pointer, while
+`GCMouseInput.mouseMovedHandler` supplies raw relative movement to the camera. The pointer
+is released when a classic menu opens so menu hit-testing and window interaction work normally.
+
+This is playable but not yet flawless on iPadOS 26. Avoid deliberately steering the pointer
+to the scene edges: iPadOS can still expose the Dock gesture there, and an edge click can
+interrupt camera look until a menu is opened and closed. Touching the display while the
+trackpad is locked can also produce stray camera movement. Weapon mouse-button bindings
+remain available, but a click may still cause an occasional camera snap or temporary look
+lock. The touch HUD or controller controls remain the reliable fallback for those moments.
+
 **If your controller maps wrongly:** Unity's legacy joystick numbering - and especially
 its trigger and d-pad *axis* numbering - varies by controller model and by iOS version,
 so a controller this port has never seen may report different numbers. Turn on
@@ -340,7 +355,7 @@ large texture pack will use considerably more memory on iOS than it does on desk
 
 ## Diagnostics
 
-Two small logs are written into the app's Documents folder, alongside `arena2`. Both are
+Three small logs are written into the app's Documents folder, alongside `arena2`. All are
 plain text and safe to delete.
 
 - `session-log.csv` - one row per 30 seconds: frame time, fps, battery, managed memory
@@ -350,15 +365,19 @@ plain text and safe to delete.
 - `controller-unknown-buttons.txt` - only appears if a gamepad sends a button this port
   does not recognise. If your controller has a button that does nothing, this file will
   name it. Sending it in is the fastest way to get that controller supported properly.
+- `DaggerfallPointerDiagnostics.log` - throttled Magic Keyboard diagnostics: UIKit lock
+  state, raw `GCMouse` deltas, indirect-pointer events, hover events, and Unity axis state.
+  It is intended for diagnosing camera-look or pointer-lock regressions.
 
 ## Known limitations
 
-- **Magic Keyboard pointer hover.** The current bridge handles indirect pointer clicks,
-  classic-menu coordinates, pointer-button routing, and hides the touch HUD while hardware
-  pointer input is active. Camera movement now works without holding the pointer button, and
-  mouse-button bindings can be assigned and used for attacks. Remaining issues are that look
-  input can stop while the player is moving, and can remain locked until another pointer click
-  wakes it.
+- **Magic Keyboard pointer edges.** Camera movement works without holding the pointer button
+  through the native `GCMouse` raw-delta backend. UIKit pointer lock prevents normal window
+  resizing during gameplay, but iPadOS may still expose the Dock at the bottom edge; an edge
+  click can interrupt look until a menu round-trip restores it. A touchscreen contact while
+  the trackpad is locked may inject stray camera motion. Weapon-button transitions can still
+  occasionally snap the view or leave look temporarily locked. The diagnostic log above can
+  distinguish a stopped native mouse stream from a game-side camera issue.
 - **Touch controls setting.** The startup Options screen contains a persistent **Touch
   controls** toggle. The same preference is available from the in-game TUNE panel and can be
   changed without rebuilding.

@@ -20,8 +20,10 @@
 
 using UnityEngine;
 using UnityEngine.UI;
+using System.IO;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.LowLevel;
 #endif
 #if UNITY_IOS && !UNITY_EDITOR
 using System.Runtime.InteropServices;
@@ -34,9 +36,36 @@ namespace DaggerfallWorkshop.Game.Mobile
 {
     public class MobileInputController : MonoBehaviour
     {
+#if ENABLE_INPUT_SYSTEM
+        // Low-level Input System capture. This is intentionally separate from
+        // Mouse.current.delta: the latter may already be consumed by the time the
+        // game's Update loop reaches PollHardwarePointer().
+        Vector2 inputSystemEventDelta;
+        uint inputSystemMouseEvents;
+        uint inputSystemNonZeroMouseEvents;
+
+        void CaptureInputSystemMouseEvent(InputEventPtr eventPtr, InputDevice device)
+        {
+            if (!(device is Mouse) || Mouse.current == null)
+                return;
+
+            inputSystemMouseEvents++;
+            Vector2 delta = Mouse.current.delta.ReadValue();
+            if (delta.sqrMagnitude <= 0f)
+                return;
+
+            inputSystemNonZeroMouseEvents++;
+            inputSystemEventDelta += delta;
+        }
+#endif
 #if UNITY_IOS && !UNITY_EDITOR
-        [DllImport("__Internal")] static extern bool DFMobilePointerRead(out float x, out float y, out float dx, out float dy, out bool buttonHeld);
+        [DllImport("__Internal")] static extern bool DFMobilePointerRead(out float x, out float y, out float dx, out float dy, out bool buttonHeld, out bool atEdge);
         [DllImport("__Internal")] static extern void DFMobilePointerSetHidden(bool hidden);
+        [DllImport("__Internal")] static extern void DFMobilePointerLockWindowSize(bool locked);
+        [DllImport("__Internal")] static extern void DFMobilePointerDiagnostics(
+            out uint windowEvents, out uint indirectTouches, out uint nonZeroDeltas,
+            out uint hoverEvents, out uint gameControllerDeltas,
+            out int lastEventType, out bool locked);
 #endif
         #region Singleton
 
@@ -90,6 +119,12 @@ namespace DaggerfallWorkshop.Game.Mobile
         [Tooltip("Look-stick turn rate at full deflection, in mouse-axis units per second. " +
                  "~270 matches a brisk drag across the screen.")]
         public float lookStickSpeed = 220f;
+
+        [Tooltip("Extra camera turn rate while the hidden pointer is held against a gameplay edge.")]
+        public float pointerEdgeLookSpeed = 480f;
+
+        [Tooltip("Distance from the screen edge where pointer edge-look begins, in pixels.")]
+        public float pointerEdgeMargin = 12f;
 
         [Tooltip("PHYSICAL swipe distance needed to trigger an attack, in inches. Physical rather " +
                  "than a screen fraction because 18% of an iPhone is ~1in while 18% of a 13in iPad " +
@@ -169,6 +204,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         bool pointerPositionInitialized;
         bool indirectPointerActive;
         Vector2 previousPointerPosition;
+        Vector2 lastPointerDirection;
         float vidHoldStart = -1f;
         bool vidSkipQueued;
         float swingHoldUntil;
@@ -205,6 +241,9 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
 
             instance = this;
+#if ENABLE_INPUT_SYSTEM
+            InputSystem.onEvent += CaptureInputSystemMouseEvent;
+#endif
             MobileInput.Enabled = true;
             touchUIEnabled = PlayerPrefs.GetInt(MobileInput.TouchUIEnabledPrefKey,
                 touchUIEnabled ? 1 : 0) == 1;
@@ -324,6 +363,9 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         void OnDisable()
         {
+#if ENABLE_INPUT_SYSTEM
+            InputSystem.onEvent -= CaptureInputSystemMouseEvent;
+#endif
             // Hand the pointer back, otherwise VirtualCursorActive can stay true with
             // nothing driving it and the classic UI is left with a frozen cursor.
             MobileInput.Relinquish();
@@ -332,6 +374,9 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         void OnDestroy()
         {
+#if ENABLE_INPUT_SYSTEM
+            InputSystem.onEvent -= CaptureInputSystemMouseEvent;
+#endif
             if (instance == this)
             {
                 instance = null;
@@ -784,7 +829,9 @@ namespace DaggerfallWorkshop.Game.Mobile
             PollHardwarePointer();
 
 #if UNITY_IOS && !UNITY_EDITOR
-            DFMobilePointerSetHidden(MobileInput.PointerActive && !IsClassicMenuOpen());
+            bool gameplayPointer = MobileInput.PointerActive && !IsClassicMenuOpen();
+            DFMobilePointerSetHidden(gameplayPointer);
+            DFMobilePointerLockWindowSize(gameplayPointer);
 #endif
             if (MobileInput.PointerActive)
                 Cursor.visible = IsClassicMenuOpen();
@@ -827,16 +874,35 @@ namespace DaggerfallWorkshop.Game.Mobile
 
 #if UNITY_IOS && !UNITY_EDITOR
             float nativeX, nativeY, nativeDeltaX, nativeDeltaY;
-            bool nativeButtonHeld;
-            if (DFMobilePointerRead(out nativeX, out nativeY, out nativeDeltaX, out nativeDeltaY, out nativeButtonHeld))
+            bool nativeButtonHeld, nativeAtEdge;
+            if (DFMobilePointerRead(out nativeX, out nativeY, out nativeDeltaX, out nativeDeltaY,
+                                    out nativeButtonHeld, out nativeAtEdge))
             {
+                MobileInput.PointerAtEdge = nativeAtEdge;
 #if ENABLE_INPUT_SYSTEM
-                nativeButtonHeld |= Mouse.current != null && Mouse.current.leftButton.isPressed;
+                if (Mouse.current != null)
+                {
+                    // UIKit owns the cursor lock, but Unity's Input System may be the
+                    // component that receives the relative HID delta. The native hover
+                    // bridge still supplies the stable position and button state; merge
+                    // the Input System delta instead of returning before it is consumed.
+                    Vector2 systemDelta = Mouse.current.delta.ReadValue();
+                    systemDelta += inputSystemEventDelta;
+                    inputSystemEventDelta = Vector2.zero;
+                    if (systemDelta.sqrMagnitude > 0f)
+                    {
+                        nativeDeltaX += systemDelta.x;
+                        nativeDeltaY += systemDelta.y;
+                    }
+                    nativeButtonHeld |= Mouse.current.leftButton.isPressed;
+                }
 #else
                 nativeButtonHeld |= Input.GetMouseButton(0);
 #endif
                 MobileInput.UpdatePointer(new Vector2(nativeX, nativeY),
-                    new Vector2(nativeDeltaX, nativeDeltaY), true, nativeButtonHeld);
+                    EdgeLookDelta(new Vector2(nativeX, nativeY),
+                    new Vector2(nativeDeltaX, nativeDeltaY)), true, nativeButtonHeld);
+                LogPointerDiagnostics(nativeDeltaX, nativeDeltaY, nativeButtonHeld);
                 if (!wasActive)
                     ApplyHudVisibility();
 
@@ -863,10 +929,13 @@ namespace DaggerfallWorkshop.Game.Mobile
                 Vector2 systemDelta = pointerPositionInitialized
                     ? systemPosition - previousPointerPosition
                     : Vector2.zero;
+                systemDelta += inputSystemEventDelta;
+                inputSystemEventDelta = Vector2.zero;
                 previousPointerPosition = systemPosition;
                 pointerPositionInitialized = true;
                 indirectPointerActive = false;
                 MobileInput.UpdatePointer(systemPosition, systemDelta, true, systemMouse.leftButton.isPressed);
+                LogPointerDiagnostics(systemDelta.x, systemDelta.y, systemMouse.leftButton.isPressed);
                 if (!wasActive)
                     ApplyHudVisibility();
                 return;
@@ -952,6 +1021,102 @@ namespace DaggerfallWorkshop.Game.Mobile
                 ApplyHudVisibility();
         }
 
+        int pointerDiagnosticFrames;
+        string pointerDiagnosticPath;
+
+        void LogPointerDiagnostics(float deltaX, float deltaY, bool buttonHeld)
+        {
+            if (++pointerDiagnosticFrames % 60 != 0)
+                return;
+
+#if UNITY_IOS && !UNITY_EDITOR
+            uint windowEvents, indirectTouches, nonZeroDeltas, hoverEvents, gameControllerDeltas;
+            int lastEventType;
+            bool locked;
+            DFMobilePointerDiagnostics(out windowEvents, out indirectTouches, out nonZeroDeltas,
+                                       out hoverEvents, out gameControllerDeltas,
+                                       out lastEventType, out locked);
+            Debug.Log(string.Format(
+                "[DFPointerDiag] lock={0} native/systemDelta=({1:0.##},{2:0.##}) held={3} " +
+                "windowEvents={4} indirectTouches={5} nonZero={6} hover={7} lastEventType={8} " +
+                "rawAxes=({9:0.##},{10:0.##})",
+                locked, deltaX, deltaY, buttonHeld, windowEvents, indirectTouches,
+                nonZeroDeltas, hoverEvents, lastEventType,
+                Input.GetAxisRaw("Mouse X"), Input.GetAxisRaw("Mouse Y")));
+
+            string line = string.Format(
+                "{0:O} lock={1} delta=({2:0.##},{3:0.##}) held={4} windowEvents={5} " +
+                "indirectTouches={6} nonZero={7} hover={8} gcDeltas={9} lastEventType={10} " +
+                "rawAxes=({11:0.##},{12:0.##}) inputSystemEvents={13} inputSystemNonZero={14} " +
+                "queuedDelta=({15:0.##},{16:0.##})\n",
+                System.DateTime.UtcNow, locked, deltaX, deltaY, buttonHeld, windowEvents,
+                indirectTouches, nonZeroDeltas, hoverEvents, gameControllerDeltas, lastEventType,
+                Input.GetAxisRaw("Mouse X"), Input.GetAxisRaw("Mouse Y"), inputSystemMouseEvents,
+                inputSystemNonZeroMouseEvents, inputSystemEventDelta.x, inputSystemEventDelta.y);
+            AppendPointerDiagnostic(line);
+            Debug.Log(string.Format("[DFPointerDiag] inputSystemEvents={0} inputSystemNonZero={1} queuedDelta=({2:0.##},{3:0.##})",
+                inputSystemMouseEvents, inputSystemNonZeroMouseEvents,
+                inputSystemEventDelta.x, inputSystemEventDelta.y));
+        #endif
+        }
+
+        void AppendPointerDiagnostic(string line)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(pointerDiagnosticPath))
+                {
+                    // UIFileSharingEnabled/LSSupportsOpeningDocumentsInPlace expose
+                    // persistentDataPath's Documents directory in the Files app.
+                    pointerDiagnosticPath = Path.Combine(Application.persistentDataPath,
+                                                         "DaggerfallPointerDiagnostics.log");
+                    File.WriteAllText(pointerDiagnosticPath,
+                        "Daggerfall Unity pointer diagnostics\n");
+                    Debug.Log("[DFPointerDiag] file=" + pointerDiagnosticPath);
+                }
+
+                File.AppendAllText(pointerDiagnosticPath, line);
+            }
+            catch (System.Exception exception)
+            {
+                Debug.LogWarning("[DFPointerDiag] file write failed: " + exception.Message);
+            }
+        }
+
+        Vector2 EdgeLookDelta(Vector2 position, Vector2 delta)
+        {
+            // A lock/unlock transition can report the distance between the old
+            // absolute hover position and the new scene position as one frame of
+            // movement. It is not user input; passing it to PlayerMouseLook sends
+            // pitch straight to the upper clamp and looks like a camera reset.
+            const float maximumPointerDelta = 250f;
+            if (delta.sqrMagnitude > maximumPointerDelta * maximumPointerDelta)
+            {
+                lastPointerDirection = Vector2.zero;
+                return Vector2.zero;
+            }
+
+            if (delta.sqrMagnitude > 0.01f)
+                lastPointerDirection = new Vector2(Mathf.Sign(delta.x), Mathf.Sign(delta.y));
+
+            if (delta.sqrMagnitude > 0.01f || IsClassicMenuOpen())
+                return delta;
+
+            bool atHorizontalEdge = position.x <= pointerEdgeMargin ||
+                                    position.x >= Screen.width - pointerEdgeMargin;
+            bool atVerticalEdge = position.y <= pointerEdgeMargin ||
+                                  position.y >= Screen.height - pointerEdgeMargin;
+            if (!atHorizontalEdge && !atVerticalEdge)
+                return delta;
+
+            Vector2 edgeDelta = Vector2.zero;
+            if (atHorizontalEdge)
+                edgeDelta.x = lastPointerDirection.x * pointerEdgeLookSpeed * Time.unscaledDeltaTime;
+            if (atVerticalEdge)
+                edgeDelta.y = lastPointerDirection.y * pointerEdgeLookSpeed * Time.unscaledDeltaTime;
+            return edgeDelta;
+        }
+
         /// <summary>
         /// Hold-to-skip for intro and cutscene videos. DaggerfallVidPlayerWindow exits on
         /// InputManager.GetBackButtonDown(), which touch had no way to press - keyboard
@@ -994,6 +1159,9 @@ namespace DaggerfallWorkshop.Game.Mobile
                 Vector2 pointerDelta = MobileInput.PointerDelta;
                 if (pointerDelta.sqrMagnitude > 0f)
                     inputManager.SetMobileMouseAxes(pointerDelta.x, pointerDelta.y);
+                if (pointerDiagnosticFrames % 60 == 0)
+                    Debug.Log(string.Format("[DFPointerDiag] gameplayDelta=({0:0.##},{1:0.##}) finalLook=({2:0.##},{3:0.##})",
+                        pointerDelta.x, pointerDelta.y, inputManager.LookX, inputManager.LookY));
                 return;
             }
 

@@ -1127,6 +1127,8 @@ namespace DaggerfallWorkshop.Game
 
         public bool GetMouseButtonDown(int button)
         {
+            if (Mobile.MobileInput.PointerAtEdge && button == 1)
+                return false;
             // MOBILE: virtual cursor taps and long-press drags.
             if (Mobile.MobileInput.VirtualCursorActive)
                 return Mobile.MobileInput.GetMouseButtonDown(button) || Input.GetMouseButtonDown(button);
@@ -1139,6 +1141,8 @@ namespace DaggerfallWorkshop.Game
 
         public bool GetMouseButtonUp(int button)
         {
+            if (Mobile.MobileInput.PointerAtEdge && button == 1)
+                return false;
             if (Mobile.MobileInput.VirtualCursorActive)
                 return Mobile.MobileInput.GetMouseButtonUp(button) || Input.GetMouseButtonUp(button);
 
@@ -1150,6 +1154,8 @@ namespace DaggerfallWorkshop.Game
 
         public bool GetMouseButton(int button)
         {
+            if (Mobile.MobileInput.PointerAtEdge && button == 1)
+                return false;
             if (Mobile.MobileInput.VirtualCursorActive)
                 return Mobile.MobileInput.GetMouseButton(button);
 
@@ -1758,6 +1764,8 @@ namespace DaggerfallWorkshop.Game
             {
                 if (Mobile.MobileInput.PointerActive && k == KeyCode.Mouse0)
                     return Mobile.MobileInput.GetPointerButton();
+                if (Mobile.MobileInput.PointerAtEdge && k == KeyCode.Mouse1)
+                    return false;
                 return Input.GetKey(k);
             }
             else

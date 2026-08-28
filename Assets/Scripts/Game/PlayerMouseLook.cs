@@ -222,12 +222,18 @@ namespace DaggerfallWorkshop.Game
                                            Mobile.MobileInput.Mode != Mobile.MobileControlMode.Menu;
             if (hardwarePointerGameplay)
             {
-                // iPadOS only exposes continuous trackpad deltas to Unity when the
-                // player view owns the pointer. This also prevents the platform cursor
-                // from being drawn over the game during look movement.
-                Cursor.lockState = CursorLockMode.Locked;
+                // UIKit owns the real Magic Keyboard pointer lock on iPadOS. Do not also
+                // ask Unity to lock its legacy cursor: that second lock suppresses the
+                // indirect-pointer delta stream on Unity 6/iPadOS 26. UIKit keeps the
+                // physical pointer captive; Unity only needs its software cursor hidden.
+                Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = false;
                 InputManager.Instance.CursorVisible = false;
+                // A physical trackpad click is a weapon/UI input, never Unity's
+                // legacy "recapture cursor" gesture. Letting simpleCursorLock
+                // process that click can toggle mouse-look and make the view snap
+                // when the swing begins.
+                enableMouseLook = true;
             }
             else if (lockCursor && enableMouseLook)
             {
@@ -241,7 +247,7 @@ namespace DaggerfallWorkshop.Game
             }
 
             // Handle mouse look enable/disable
-            if (simpleCursorLock)
+            if (simpleCursorLock && !hardwarePointerGameplay)
             {
                 if (Input.GetKeyDown(KeyCode.Escape))
                     enableMouseLook = !enableMouseLook;
