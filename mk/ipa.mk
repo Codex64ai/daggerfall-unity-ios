@@ -27,7 +27,7 @@ ipa:
 	@mkdir -p ${PAYLOAD}
 	@ditto "${APP}" "${PAYLOAD}/${PRODUCT_NAME}.app"
 	@rm -f "${IPA}"
-	@( cd ${BUILDDIR} && ditto -c -k --keepParent "./Payload/${PRODUCT_NAME}.app" "${IPA}" )
+	@( cd ${BUILDDIR} && ditto -c -k --keepParent "./Payload" "${IPA}" )
 	@rm -rf ${PAYLOAD}
 	@${ECHO} "   ipa: ${IPA}"
 	@${ECHO} "   bundle id: ${BUNDLE_ID}"
