@@ -986,7 +986,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public void PollGameplayStage(InputManager inputManager)
         {
-            if (inputManager == null || MobileInput.MenuMode || controllerConnected || keyboardActive)
+            if (inputManager == null || MobileInput.MenuMode || controllerConnected)
                 return;
 
             if (MobileInput.PointerActive)
@@ -997,7 +997,7 @@ namespace DaggerfallWorkshop.Game.Mobile
                 return;
             }
 
-            if (!touchUIEnabled)
+            if (!touchUIEnabled || keyboardActive)
                 return;
 
             PumpMovement(inputManager);
