@@ -355,8 +355,10 @@ plain text and safe to delete.
 
 - **Magic Keyboard pointer hover.** The current bridge handles indirect pointer clicks,
   classic-menu coordinates, pointer-button routing, and hides the touch HUD while hardware
-  pointer input is active. iPadOS still does not consistently deliver hover movement to the
-  Unity runtime, so camera look without holding the pointer button remains under active work.
+  pointer input is active. Camera movement now works without holding the pointer button, and
+  mouse-button bindings can be assigned and used for attacks. Remaining issues are that look
+  input can stop while the player is moving, and can remain locked until another pointer click
+  wakes it.
 - **Touch controls setting.** The startup Options screen contains a persistent **Touch
   controls** toggle. The same preference is available from the in-game TUNE panel and can be
   changed without rebuilding.

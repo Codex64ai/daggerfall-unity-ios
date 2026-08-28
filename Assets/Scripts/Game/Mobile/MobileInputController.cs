@@ -23,6 +23,9 @@ using UnityEngine.UI;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
+#if UNITY_IOS && !UNITY_EDITOR
+using System.Runtime.InteropServices;
+#endif
 using System.Collections.Generic;
 using DaggerfallWorkshop.Game.UserInterface;
 using DaggerfallWorkshop;
@@ -31,6 +34,10 @@ namespace DaggerfallWorkshop.Game.Mobile
 {
     public class MobileInputController : MonoBehaviour
     {
+#if UNITY_IOS && !UNITY_EDITOR
+        [DllImport("__Internal")] static extern bool DFMobilePointerRead(out float x, out float y, out float dx, out float dy, out bool buttonHeld);
+        [DllImport("__Internal")] static extern void DFMobilePointerSetHidden(bool hidden);
+#endif
         #region Singleton
 
         static MobileInputController instance;
@@ -776,6 +783,12 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             PollHardwarePointer();
 
+#if UNITY_IOS && !UNITY_EDITOR
+            DFMobilePointerSetHidden(MobileInput.PointerActive && !IsClassicMenuOpen());
+#endif
+            if (MobileInput.PointerActive)
+                Cursor.visible = IsClassicMenuOpen();
+
             // iOS soft keyboard for classic text fields (player name entry, the travel map's
             // city search, and so on). Without this, TextBoxes are untypeable on device - the
             // soft keyboard only exists if something opens it.
@@ -811,6 +824,36 @@ namespace DaggerfallWorkshop.Game.Mobile
         void PollHardwarePointer()
         {
             bool wasActive = MobileInput.PointerActive;
+
+#if UNITY_IOS && !UNITY_EDITOR
+            float nativeX, nativeY, nativeDeltaX, nativeDeltaY;
+            bool nativeButtonHeld;
+            if (DFMobilePointerRead(out nativeX, out nativeY, out nativeDeltaX, out nativeDeltaY, out nativeButtonHeld))
+            {
+#if ENABLE_INPUT_SYSTEM
+                nativeButtonHeld |= Mouse.current != null && Mouse.current.leftButton.isPressed;
+#else
+                nativeButtonHeld |= Input.GetMouseButton(0);
+#endif
+                MobileInput.UpdatePointer(new Vector2(nativeX, nativeY),
+                    new Vector2(nativeDeltaX, nativeDeltaY), true, nativeButtonHeld);
+                if (!wasActive)
+                    ApplyHudVisibility();
+
+                bool directTouch = false;
+                for (int i = 0; i < Input.touchCount; i++)
+                {
+                    if (Input.GetTouch(i).type != TouchType.Indirect)
+                    {
+                        directTouch = true;
+                        break;
+                    }
+                }
+                if (!directTouch)
+                    return;
+
+            }
+#endif
 
 #if ENABLE_INPUT_SYSTEM
             Mouse systemMouse = Mouse.current;
@@ -943,7 +986,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public void PollGameplayStage(InputManager inputManager)
         {
-            if (inputManager == null || !touchUIEnabled || MobileInput.MenuMode || controllerConnected || keyboardActive)
+            if (inputManager == null || MobileInput.MenuMode || controllerConnected || keyboardActive)
                 return;
 
             if (MobileInput.PointerActive)
@@ -953,6 +996,9 @@ namespace DaggerfallWorkshop.Game.Mobile
                     inputManager.SetMobileMouseAxes(pointerDelta.x, pointerDelta.y);
                 return;
             }
+
+            if (!touchUIEnabled)
+                return;
 
             PumpMovement(inputManager);
             PumpLookAndGesture(inputManager);
