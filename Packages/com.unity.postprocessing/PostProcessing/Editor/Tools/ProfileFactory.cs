@@ -4,6 +4,10 @@ using System.IO;
 using UnityEngine.SceneManagement;
 using UnityEngine.Rendering.PostProcessing;
 
+#if UNITY_6000_4_OR_NEWER
+using UnityEditor;
+#endif
+
 namespace UnityEditor.Rendering.PostProcessing
 {
     /// <summary>
@@ -15,7 +19,11 @@ namespace UnityEditor.Rendering.PostProcessing
         static void CreatePostProcessProfile()
         {
             //var icon = EditorGUIUtility.FindTexture("ScriptableObject Icon");
+#if UNITY_6000_4_OR_NEWER
+            ProjectWindowUtil.StartNameEditingIfProjectWindowExists(EntityId.None, ScriptableObject.CreateInstance<DoCreatePostProcessProfile>(), "New Post-processing Profile.asset", null, null);
+#else
             ProjectWindowUtil.StartNameEditingIfProjectWindowExists(0, ScriptableObject.CreateInstance<DoCreatePostProcessProfile>(), "New Post-processing Profile.asset", null, null);
+#endif
         }
 
         /// <summary>
@@ -71,6 +79,16 @@ namespace UnityEditor.Rendering.PostProcessing
         }
     }
 
+ #if UNITY_6000_4_OR_NEWER
+    class DoCreatePostProcessProfile : AssetCreationEndAction
+    {
+        public override void Action(EntityId entityId, string pathName, string resourceFile)
+        {
+            var profile = ProfileFactory.CreatePostProcessProfileAtPath(pathName);
+            ProjectWindowUtil.ShowCreatedAsset(profile);
+        }
+    }
+ #else
     class DoCreatePostProcessProfile : EndNameEditAction
     {
         public override void Action(int instanceId, string pathName, string resourceFile)
@@ -79,4 +97,5 @@ namespace UnityEditor.Rendering.PostProcessing
             ProjectWindowUtil.ShowCreatedAsset(profile);
         }
     }
+ #endif
 }

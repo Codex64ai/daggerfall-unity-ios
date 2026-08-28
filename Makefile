@@ -8,7 +8,7 @@
 #	xcode		build the .app from the generated Xcode project
 #	ipa		package and code-sign the .app into a deployable .ipa
 #	check		run the touch-layer self test headlessly (fail-fast gate)
-#	unity-install	print what 2022.3.62f3 modules are needed and how to install them
+#	unity-install	print what 6000.5.10f1 modules are needed and how to install them
 #	clean		remove Builds/ entirely
 #
 # The iOS pipeline is three stages, each driven from mk/ so the driver Makefile
@@ -19,9 +19,10 @@
 #	stage 2  mk/xcode.mk   -- xcodebuild turns that project into a .app
 #	stage 3  mk/ipa.mk     -- sign + zip the .app into an .ipa
 #
-# Project pin: 2022.3.62f3 (ProjectSettings/ProjectVersion.txt). Unity 6 is NOT
-# the target -- the README and the Xcode-16 post-process were validated against
-# 2022.3, and iOS IL2CPP is version-sensitive.
+# Project pin: 6000.5.10f1 (ProjectSettings/ProjectVersion.txt). Unity 2022.3.62f3
+# shipped a Linux-baked iOS IL2CPP backend for macOS-arm64 that hard-fails iOS
+# builds, so the port moved to Unity 6 (the iOS pipeline is version-sensitive;
+# see mk/dfios.sys.mk for the full rationale).
 
 TOP?=		${.CURDIR}
 

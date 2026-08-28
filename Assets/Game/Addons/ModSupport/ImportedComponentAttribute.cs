@@ -226,7 +226,7 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
 
         readonly static fsSerializer fsSerializer = new fsSerializer();
         readonly static Dictionary<string, Type> types = new Dictionary<string, Type>();
-        readonly static Dictionary<string, float> deserializedObjects = new Dictionary<string, float>();
+        readonly static Dictionary<string, string> deserializedObjects = new Dictionary<string, string>();
 
         #endregion
 
@@ -291,11 +291,11 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
             }
 
             string assetKey = string.Format("{0}-{1}", mod.GUID, assetname);
-            float instanceID = gameObject.GetInstanceID();
+            string instanceID = gameObject.GetEntityId().ToString();
 
             // Make sure a gameobject is not deserialized more than one time.
             // This can happen if is removed from cache then readded without being unloaded due to other references.
-            float currentInstanceID;
+            string currentInstanceID;
             if (deserializedObjects.TryGetValue(assetKey, out currentInstanceID) && currentInstanceID == instanceID)
                 return;
 

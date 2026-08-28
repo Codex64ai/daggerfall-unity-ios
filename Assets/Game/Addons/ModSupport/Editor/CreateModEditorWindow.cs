@@ -513,7 +513,7 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
 
             for (int i = 0; i < selection.Length; i++)
             {
-                string path = FixSeperatorCharacters(AssetDatabase.GetAssetPath(selection[i].GetInstanceID()));
+                string path = FixSeperatorCharacters(AssetDatabase.GetAssetPath(selection[i].GetEntityId()));
                 if (string.IsNullOrWhiteSpace(path))
                 {
                     const string errorMessage = "Selected asset is not saved to disk. Make sure you selected an asset from the Project window and not the Hierarchy window.";

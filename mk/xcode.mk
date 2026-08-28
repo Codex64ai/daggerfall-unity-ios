@@ -18,6 +18,12 @@
 #   * To use a real Development identity later, set SIGN_IDENTITY and
 #     DEVELOPMENT_TEAM (see dfios.sys.mk) and add the account to
 #     Xcode -> Settings -> Accounts.
+#
+# Toolchain / SDK:
+#   Unity 6 natively supports the current system Xcode 26 + iOS 26 SDK, so by
+#   default (XCODE_DEV_DIR empty) both xcodebuild AND the il2cpp Bee subprocess
+#   it spawns use the system Xcode via xcode-select.  Set XCODE_DEV_DIR only to
+#   force an older toolchain.
 
 .include "${TOP}/mk/dfios.sys.mk"
 
@@ -37,20 +43,43 @@ xcode:
 		${ECHO} "Run  bmake unity  first so Unity emits the project.";	\
 		exit 1;								\
 	fi
+	@if [ -n "${XCODE_DEV_DIR}" ] && [ ! -d "${XCODE_DEV_DIR}" ]; then	\
+		${ECHO} "error: XCODE_DEV_DIR=${XCODE_DEV_DIR} not found.";	\
+		exit 1;								\
+	fi
 	@${ECHO} "== stage 2: xcodebuild -> .app (unsigned) =="
+	@if [ -n "${XCODE_DEV_DIR}" ]; then					\
+		${ECHO} "   developer dir for this build: ${XCODE_DEV_DIR}";	\
+	fi
 	@mkdir -p ${XCDERIVED}
-	@${XCODEBUILD} \
-	   -project "${XCPROJECT}" \
-	   -scheme "${XSCHEME}" \
-	   -configuration Release \
-	   -destination 'generic/platform=iOS' \
-	   -derivedDataPath "${XCDERIVED}" \
-	   CODE_SIGNING_ALLOWED=NO \
-	   ONLY_ACTIVE_ARCH=NO \
-	   > "${LOGDIR}/xcodebuild.log" 2>&1 && ${ECHO} "   xcodebuild ok" || {	\
+	@if [ -n "${XCODE_DEV_DIR}" ]; then					\
+		env DEVELOPER_DIR="${XCODE_DEV_DIR}" ${XCODEBUILD} \
+		   -project "${XCPROJECT}" \
+		   -scheme "${XSCHEME}" \
+		   -configuration Release \
+		   -destination 'generic/platform=iOS' \
+		   -derivedDataPath "${XCDERIVED}" \
+		   CODE_SIGNING_ALLOWED=NO \
+		   ONLY_ACTIVE_ARCH=NO \
+		   ${XCODEBUILD_EXTRA_FLAGS} \
+		   > "${LOGDIR}/xcodebuild.log" 2>&1; \
+	else							\
+		${XCODEBUILD} \
+		   -project "${XCPROJECT}" \
+		   -scheme "${XSCHEME}" \
+		   -configuration Release \
+		   -destination 'generic/platform=iOS' \
+		   -derivedDataPath "${XCDERIVED}" \
+		   CODE_SIGNING_ALLOWED=NO \
+		   ONLY_ACTIVE_ARCH=NO \
+		   ${XCODEBUILD_EXTRA_FLAGS} \
+		   > "${LOGDIR}/xcodebuild.log" 2>&1; \
+	fi
+	@if ! grep -q "BUILD SUCCEEDED" "${LOGDIR}/xcodebuild.log" 2>/dev/null; then	\
 		${ECHO} "   xcodebuild FAILED; see ${LOGDIR}/xcodebuild.log";	\
 		exit 1;								\
-	}
+	fi
+	@${ECHO} "   xcodebuild ok"
 	@if [ ! -d "${APP_SOURCE}" ]; then					\
 		${ECHO} "error: built .app not found at ${APP_SOURCE}.";	\
 		exit 1;								\

@@ -15,9 +15,9 @@
 # patches Info.plist and the pbxproj for Xcode 16+. Everything Unity emits is
 # considered generated and lives under BUILDDIR.
 #
-# The editor must be Unity 2022.3.62f3 (see mk/dfios.sys.mk).  If it is missing
-# the `unity-install` target explains exactly which modules to install; `unity`
-# itself fails fast rather than silently building with the wrong editor.
+# The editor must be Unity 6 (6000.5.10f1) -- see mk/dfios.sys.mk.  If it is
+# missing the `unity-install` target explains exactly which modules to install;
+# `unity` itself fails fast rather than silently building with the wrong editor.
 
 .include "${TOP}/mk/dfios.sys.mk"
 
@@ -59,7 +59,7 @@ unity-install:
 	@${ECHO}
 	@${ECHO} "Easiest, via Unity Hub:"
 	@${ECHO} "   1. Unity Hub -> Installs -> Install Editor -> Archive tab"
-	@${ECHO} "   2. pick  2022.3.62f3"
+	@${ECHO} "   2. pick  6000.5.10f1"
 	@${ECHO} "   3. in Modules, check:  iOS Build Support (IL2CPP)"
 	@${ECHO} "                         iOS Build Support (Mac)"
 	@${ECHO}
