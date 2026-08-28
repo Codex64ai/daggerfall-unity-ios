@@ -41,12 +41,16 @@ namespace DaggerfallWorkshop.Game.Mobile
         // Mouse.current.delta: the latter may already be consumed by the time the
         // game's Update loop reaches PollHardwarePointer().
         Vector2 inputSystemEventDelta;
+        bool directTouchInputActive;
         uint inputSystemMouseEvents;
         uint inputSystemNonZeroMouseEvents;
 
         void CaptureInputSystemMouseEvent(InputEventPtr eventPtr, InputDevice device)
         {
             if (!(device is Mouse) || Mouse.current == null)
+                return;
+
+            if (directTouchInputActive)
                 return;
 
             inputSystemMouseEvents++;
@@ -61,6 +65,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 #if UNITY_IOS && !UNITY_EDITOR
         [DllImport("__Internal")] static extern bool DFMobilePointerRead(out float x, out float y, out float dx, out float dy, out bool buttonHeld, out bool atEdge);
         [DllImport("__Internal")] static extern void DFMobilePointerSetHidden(bool hidden);
+        [DllImport("__Internal")] static extern void DFMobilePointerSetDirectTouchActive(bool active);
         [DllImport("__Internal")] static extern void DFMobilePointerLockWindowSize(bool locked);
         [DllImport("__Internal")] static extern void DFMobilePointerDiagnostics(
             out uint windowEvents, out uint indirectTouches, out uint nonZeroDeltas,
@@ -873,6 +878,20 @@ namespace DaggerfallWorkshop.Game.Mobile
             bool wasActive = MobileInput.PointerActive;
 
 #if UNITY_IOS && !UNITY_EDITOR
+            bool directTouchActive = false;
+            for (int touchIndex = 0; touchIndex < Input.touchCount; touchIndex++)
+            {
+                if (Input.GetTouch(touchIndex).type != TouchType.Indirect)
+                {
+                    directTouchActive = true;
+                    break;
+                }
+            }
+            DFMobilePointerSetDirectTouchActive(directTouchActive);
+            directTouchInputActive = directTouchActive;
+            if (directTouchActive)
+                inputSystemEventDelta = Vector2.zero;
+
             float nativeX, nativeY, nativeDeltaX, nativeDeltaY;
             bool nativeButtonHeld, nativeAtEdge;
             if (DFMobilePointerRead(out nativeX, out nativeY, out nativeDeltaX, out nativeDeltaY,

@@ -15,6 +15,7 @@ static CGPoint pointerDelta = {0, 0};
 static BOOL pointerActive = NO;
 static BOOL pointerHidden = NO;
 static BOOL pointerLockRequested = NO;
+static BOOL directTouchActive = NO;
 static BOOL pointerButtonHeld = NO;
 static BOOL pointerAtEdge = NO;
 static int pointerClickFrames = 0;
@@ -126,7 +127,7 @@ static void InstallGameControllerMouse()
         {
             mouseInput.mouseMovedHandler = ^(GCMouseInput *mouse, float deltaX, float deltaY) {
                 (void)mouse;
-                if (!pointerLockRequested)
+                if (!pointerLockRequested || directTouchActive)
                     return;
 
                 pointerDelta.x += deltaX;
@@ -292,6 +293,13 @@ void DFMobilePointerSetHidden(bool hidden)
         pointerInteraction.enabled = !hidden;
         [pointerInteraction invalidate];
     }
+}
+
+void DFMobilePointerSetDirectTouchActive(bool active)
+{
+    directTouchActive = active;
+    if (active)
+        pointerDelta = CGPointZero;
 }
 
 void DFMobilePointerLockWindowSize(bool locked)
