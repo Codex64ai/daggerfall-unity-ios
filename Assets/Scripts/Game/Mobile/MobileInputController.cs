@@ -20,6 +20,9 @@
 
 using UnityEngine;
 using UnityEngine.UI;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
 using System.Collections.Generic;
 using DaggerfallWorkshop.Game.UserInterface;
 using DaggerfallWorkshop;
@@ -123,6 +126,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         public bool autoCombatWhenWeaponDrawn = true;
 
         [Header("Physical Input")]
+        [Tooltip("Show and process the touch controls. Turn this off when using only a Magic Keyboard or gamepad.")]
+        public bool touchUIEnabled = true;
+
         [Tooltip("Hide the touch HUD when a hardware keyboard is used, the same way a gamepad " +
                  "does. Touching the screen brings it back.")]
         public bool autoHideOnKeyboard = true;
@@ -153,6 +159,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         float nextControllerPoll;
         float nextTouchAssert;
         bool keyboardActive;
+        bool pointerPositionInitialized;
+        bool indirectPointerActive;
+        Vector2 previousPointerPosition;
         float vidHoldStart = -1f;
         bool vidSkipQueued;
         float swingHoldUntil;
@@ -190,6 +199,8 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             instance = this;
             MobileInput.Enabled = true;
+            touchUIEnabled = PlayerPrefs.GetInt(MobileInput.TouchUIEnabledPrefKey,
+                touchUIEnabled ? 1 : 0) == 1;
 
             // Unity's legacy touch-to-mouse emulation reports a left click at the
             // fingertip on every touch. InputManager.GetMouseButtonDown() ORs against
@@ -236,17 +247,20 @@ namespace DaggerfallWorkshop.Game.Mobile
             // Daggerfall's ActivateCenterObject binding, the engine re-added the action
             // every frame, so the release edge PlayerActivate waits for never existed -
             // doors could not be opened by any means. On touch devices the mouse-button
-            // bindings serve no purpose (the touch layer injects actions directly), so
-            // clear them for this session. KeyBinds.txt on disk is not modified.
+            // bindings are no longer cleared here: Magic Keyboard users need the normal
+            // mouse attack and interaction assignments. Joystick bindings are swept below.
             if (Input.touchSupported && !Application.isEditor && InputManager.HasInstance)
             {
                 ClearPhantomProneBindings();
             }
+
+            ApplyHudVisibility();
         }
 
         /// <summary>
-        /// On touch devices, remove every mouse and joystick-button keybind, primary AND
-        /// secondary, then force the private binding cache to rebuild.
+        /// On touch devices, remove joystick-button keybinds, primary AND secondary, then
+        /// force the private binding cache to rebuild. Mouse bindings remain available for
+        /// hardware-pointer users.
         ///
         /// Two device-proven reasons. First, iPadOS (Magic Keyboard attached) reports a
         /// mouse button as permanently held. Second - the subtle one - severing only the
@@ -258,8 +272,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// MobileGamepadBindings.Apply() rebinds live; on disconnect we clear again.
         /// KeyBinds.txt on disk is never modified here.
         ///
-        /// Scope note: this sweeps Mouse0-6 and JoystickButton0-19 only. The gamepad layout
-        /// also binds InputManager's synthetic axis keycodes (5000+) and combo keycodes
+        /// Scope note: this sweeps JoystickButton0-19 only. The gamepad layout also binds
+        /// InputManager's synthetic axis keycodes (5000+) and combo keycodes
         /// (65537+) for the trigger/d-pad and LT-modifier layers, which are outside that
         /// range on purpose - they cannot resurrect from KeyBinds.txt because they are never
         /// written to it, and they resolve to false while EnableController is off. They are
@@ -272,11 +286,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             InputManager im = InputManager.Instance;
 
-            var prone = new List<KeyCode>
-            {
-                KeyCode.Mouse0, KeyCode.Mouse1, KeyCode.Mouse2,
-                KeyCode.Mouse3, KeyCode.Mouse4, KeyCode.Mouse5, KeyCode.Mouse6,
-            };
+            var prone = new List<KeyCode>();
             for (KeyCode k = KeyCode.JoystickButton0; k <= KeyCode.JoystickButton19; k++)
                 prone.Add(k);
 
@@ -439,24 +449,6 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             nextControllerPoll = Time.unscaledTime + Mathf.Max(controllerPollInterval, 0.1f);
 
-            // SELF-HEALING BINDING GUARD. Each scene carries an InputManager whose Start()
-            // loads KeyBinds.txt, and Unity does not order it against our Start() - so the
-            // phantom-prone mouse binding can resurrect AFTER our clear, nondeterministically
-            // per launch (which is why the door worked exactly once). Instead of winning an
-            // ordering race, detect any resurrection on this cadence and re-clear.
-            if (Input.touchSupported && !Application.isEditor && !controllerConnected &&
-                InputManager.HasInstance)
-            {
-                InputManager imGuard = InputManager.Instance;
-                if (imGuard.GetBinding(InputManager.Actions.ActivateCenterObject, true) != KeyCode.None ||
-                    imGuard.GetBinding(InputManager.Actions.ActivateCenterObject, false) != KeyCode.None ||
-                    imGuard.GetBinding(InputManager.Actions.SwingWeapon, true) == KeyCode.Mouse1)
-                {
-                    Debug.Log("[MobileInput] phantom-prone bindings RESURRECTED (scene InputManager reloaded keybinds) - re-clearing");
-                    ClearPhantomProneBindings();
-                }
-            }
-
             bool found = false;
             string[] names = Input.GetJoystickNames();
             for (int i = 0; i < names.Length; i++)
@@ -517,11 +509,23 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// <summary>Single place that decides which HUD layer is visible.</summary>
         void ApplyHudVisibility()
         {
-            bool touchAllowed = !controllerConnected && !keyboardActive;
+            bool touchAllowed = touchUIEnabled && !controllerConnected && !keyboardActive && !MobileInput.PointerActive;
             bool menu = MobileInput.Mode == MobileControlMode.Menu;
 
             SetLayer(gameplayLayer, touchAllowed && !menu);
             SetLayer(menuLayer, touchAllowed && menu);
+        }
+
+        public void SetTouchUIEnabled(bool value)
+        {
+            touchUIEnabled = value;
+            if (!value)
+            {
+                ReleaseGameplayInput();
+                MobileInput.ResetButtons();
+                MobileInput.VirtualCursorActive = false;
+            }
+            ApplyHudVisibility();
         }
 
         public bool ControllerConnected { get { return controllerConnected; } }
@@ -770,6 +774,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public void PollCursorStage()
         {
+            PollHardwarePointer();
+
             // iOS soft keyboard for classic text fields (player name entry, the travel map's
             // city search, and so on). Without this, TextBoxes are untypeable on device - the
             // soft keyboard only exists if something opens it.
@@ -786,7 +792,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             // Touch-only from here. The virtual cursor must stand down for a controller
             // (InputManager drives its own cursor instead) and video-skip needs live touches.
-            if (controllerConnected || keyboardActive)
+            if (!touchUIEnabled || controllerConnected || keyboardActive || MobileInput.PointerActive)
                 return;
 
             if (virtualMouse != null && MobileInput.MenuMode)
@@ -794,6 +800,113 @@ namespace DaggerfallWorkshop.Game.Mobile
                 PollVideoSkip();
                 virtualMouse.PollTouches();
             }
+        }
+
+        /// <summary>
+        /// iPadOS exposes the Magic Keyboard trackpad through mousePosition, but on some
+        /// iPadOS/Unity combinations it does not set Input.mousePresent or produce Mouse X/Y.
+        /// Collect the position delta ourselves and use the real pointer for classic menus.
+        /// A pointer event remains active until a finger takes ownership again.
+        /// </summary>
+        void PollHardwarePointer()
+        {
+            bool wasActive = MobileInput.PointerActive;
+
+#if ENABLE_INPUT_SYSTEM
+            Mouse systemMouse = Mouse.current;
+            if (systemMouse != null && systemMouse.added)
+            {
+                Vector2 systemPosition = systemMouse.position.ReadValue();
+                Vector2 systemDelta = pointerPositionInitialized
+                    ? systemPosition - previousPointerPosition
+                    : Vector2.zero;
+                previousPointerPosition = systemPosition;
+                pointerPositionInitialized = true;
+                indirectPointerActive = false;
+                MobileInput.UpdatePointer(systemPosition, systemDelta, true, systemMouse.leftButton.isPressed);
+                if (!wasActive)
+                    ApplyHudVisibility();
+                return;
+            }
+#endif
+
+            for (int i = 0; i < Input.touchCount; i++)
+            {
+                Touch indirect = Input.GetTouch(i);
+                if (indirect.type != TouchType.Indirect)
+                    continue;
+
+                Vector2 pointerPosition = indirect.position;
+                Vector2 indirectDelta = pointerPositionInitialized
+                    ? pointerPosition - previousPointerPosition
+                    : Vector2.zero;
+                previousPointerPosition = pointerPosition;
+                pointerPositionInitialized = true;
+                indirectPointerActive = true;
+
+                bool buttonHeld = indirect.phase == UnityEngine.TouchPhase.Began ||
+                                  (indirect.phase == UnityEngine.TouchPhase.Moved && MobileInput.GetPointerButton()) ||
+                                  (indirect.phase == UnityEngine.TouchPhase.Stationary && MobileInput.GetPointerButton());
+                MobileInput.UpdatePointer(pointerPosition, indirectDelta, true, buttonHeld);
+                if (!wasActive)
+                    ApplyHudVisibility();
+                return;
+            }
+
+            if (Input.touchCount > 0)
+            {
+                bool directTouchBegan = false;
+                for (int i = 0; i < Input.touchCount; i++)
+                {
+                    Touch touch = Input.GetTouch(i);
+                    if (touch.type != TouchType.Indirect)
+                    {
+                        directTouchBegan |= touch.phase == UnityEngine.TouchPhase.Began;
+                        break;
+                    }
+                }
+
+                // Keep ownership through the short gap after an indirect trackpad
+                // click. iPadOS can leave the touch record alive for a frame after
+                // release; handing it back immediately makes the next hover invisible
+                // until another click occurs.
+                if (wasActive && !directTouchBegan)
+                {
+                    Vector2 fallbackPosition = Input.mousePosition;
+                    Vector2 fallbackDelta = pointerPositionInitialized
+                        ? fallbackPosition - previousPointerPosition
+                        : Vector2.zero;
+                    previousPointerPosition = fallbackPosition;
+                    pointerPositionInitialized = true;
+                    MobileInput.UpdatePointer(fallbackPosition, fallbackDelta, true, false);
+                    return;
+                }
+
+                MobileInput.PointerActive = false;
+                MobileInput.PointerDelta = Vector2.zero;
+                MobileInput.UpdatePointer(Vector2.zero, Vector2.zero, false, false);
+                pointerPositionInitialized = false;
+                indirectPointerActive = false;
+                if (wasActive)
+                    ApplyHudVisibility();
+                return;
+            }
+
+            Vector2 position = Input.mousePosition;
+            Vector2 delta = pointerPositionInitialized ? position - previousPointerPosition : Vector2.zero;
+            previousPointerPosition = position;
+            pointerPositionInitialized = true;
+
+            bool moved = delta.sqrMagnitude > 0.01f;
+            bool buttonEvent = Input.GetMouseButtonDown(0) || Input.GetMouseButtonUp(0) ||
+                               Input.GetMouseButtonDown(1) || Input.GetMouseButtonUp(1);
+            if (moved || buttonEvent)
+                MobileInput.PointerActive = true;
+
+            MobileInput.UpdatePointer(position, delta, MobileInput.PointerActive,
+                MobileInput.PointerActive && !indirectPointerActive && Input.GetMouseButton(0));
+            if (wasActive != MobileInput.PointerActive)
+                ApplyHudVisibility();
         }
 
         /// <summary>
@@ -830,8 +943,16 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public void PollGameplayStage(InputManager inputManager)
         {
-            if (inputManager == null || MobileInput.MenuMode || controllerConnected || keyboardActive)
+            if (inputManager == null || !touchUIEnabled || MobileInput.MenuMode || controllerConnected || keyboardActive)
                 return;
+
+            if (MobileInput.PointerActive)
+            {
+                Vector2 pointerDelta = MobileInput.PointerDelta;
+                if (pointerDelta.sqrMagnitude > 0f)
+                    inputManager.SetMobileMouseAxes(pointerDelta.x, pointerDelta.y);
+                return;
+            }
 
             PumpMovement(inputManager);
             PumpLookAndGesture(inputManager);

@@ -271,6 +271,9 @@ namespace DaggerfallWorkshop.Game
                 if (Mobile.MobileInput.VirtualCursorActive)
                     return Mobile.MobileInput.CursorPosition;
 
+                if (Mobile.MobileInput.PointerActive)
+                    return Mobile.MobileInput.PointerPosition;
+
                 if (UsingController)
                     return controllerCursorPosition;
                 else
@@ -1126,7 +1129,10 @@ namespace DaggerfallWorkshop.Game
         {
             // MOBILE: virtual cursor taps and long-press drags.
             if (Mobile.MobileInput.VirtualCursorActive)
-                return Mobile.MobileInput.GetMouseButtonDown(button);
+                return Mobile.MobileInput.GetMouseButtonDown(button) || Input.GetMouseButtonDown(button);
+
+            if (Mobile.MobileInput.PointerActive && button == 0)
+                return Mobile.MobileInput.GetPointerButtonDown();
 
             return Input.GetMouseButtonDown(button) || (EnableController && GetKeyDown(joystickUICache[button], false));
         }
@@ -1134,7 +1140,10 @@ namespace DaggerfallWorkshop.Game
         public bool GetMouseButtonUp(int button)
         {
             if (Mobile.MobileInput.VirtualCursorActive)
-                return Mobile.MobileInput.GetMouseButtonUp(button);
+                return Mobile.MobileInput.GetMouseButtonUp(button) || Input.GetMouseButtonUp(button);
+
+            if (Mobile.MobileInput.PointerActive && button == 0)
+                return Mobile.MobileInput.GetPointerButtonUp();
 
             return Input.GetMouseButtonUp(button) || (EnableController && GetKeyUp(joystickUICache[button], false));
         }
@@ -1143,6 +1152,9 @@ namespace DaggerfallWorkshop.Game
         {
             if (Mobile.MobileInput.VirtualCursorActive)
                 return Mobile.MobileInput.GetMouseButton(button);
+
+            if (Mobile.MobileInput.PointerActive && button == 0)
+                return Mobile.MobileInput.GetPointerButton();
 
             return Input.GetMouseButton(button) || (EnableController && GetKey(joystickUICache[button], false));
         }
@@ -1743,7 +1755,11 @@ namespace DaggerfallWorkshop.Game
         bool GetPollKey(KeyCode k)
         {
             if ((int)k < startingAxisKeyCode)
+            {
+                if (Mobile.MobileInput.PointerActive && k == KeyCode.Mouse0)
+                    return Mobile.MobileInput.GetPointerButton();
                 return Input.GetKey(k);
+            }
             else
                 return GetAxisKey((int)k);
         }
@@ -1962,6 +1978,18 @@ namespace DaggerfallWorkshop.Game
                     }
                 }
             }
+
+            // Keep camera rotation available on iPadOS even if the user's saved bindings
+            // predate the mobile input layer or were cleared with the pointer bindings.
+            if (Input.GetKey(KeyCode.LeftArrow))
+                keyboardLookX = -1;
+            else if (Input.GetKey(KeyCode.RightArrow))
+                keyboardLookX = 1;
+
+            if (Input.GetKey(KeyCode.UpArrow))
+                keyboardLookY = 1;
+            else if (Input.GetKey(KeyCode.DownArrow))
+                keyboardLookY = -1;
         }
 
         // processes player movement via joystick

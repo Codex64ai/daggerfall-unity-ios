@@ -353,8 +353,15 @@ plain text and safe to delete.
 
 ## Known limitations
 
-- **Xcode/Unity pairing.** Unity 2022.3 predates current Xcode releases; the generated
-  Xcode project may need manual fixes.
+- **Magic Keyboard pointer hover.** The current bridge handles indirect pointer clicks,
+  classic-menu coordinates, pointer-button routing, and hides the touch HUD while hardware
+  pointer input is active. iPadOS still does not consistently deliver hover movement to the
+  Unity runtime, so camera look without holding the pointer button remains under active work.
+- **Touch controls setting.** The startup Options screen contains a persistent **Touch
+  controls** toggle. The same preference is available from the in-game TUNE panel and can be
+  changed without rebuilding.
+- **Xcode/Unity pairing.** Unity 6 (6000.5.10f1) is required. Its iOS backend is used with
+  the system Xcode release; the generated project may still need manual fixes for newer SDKs.
 - **Free Apple ID signing expires after 7 days**, after which you re-sign and redeploy.
 - iPad has no vibration motor, so haptics are a deliberate no-op there.
 

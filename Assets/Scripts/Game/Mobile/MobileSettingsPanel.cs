@@ -155,6 +155,17 @@ namespace DaggerfallWorkshop.Game.Mobile
                 v => { if (hudGroup != null) hudGroup.alpha = v; },
                 "hudalpha", "0.00");
 
+            AddToggle(panel, ref y, rowH, "Touch controls",
+                () => controller == null || controller.touchUIEnabled,
+                v =>
+                {
+                    if (controller != null)
+                        controller.SetTouchUIEnabled(v);
+                    PlayerPrefs.SetInt(MobileInput.TouchUIEnabledPrefKey, v ? 1 : 0);
+                    PlayerPrefs.Save();
+                },
+                "touchui");
+
             AddSlider(panel, ref y, rowH, "Palm rejection (inches)", 0f, 1.0f,
                 () => lookZone != null ? lookZone.cornerDeadMarginInches : 0.45f,
                 v => { if (lookZone != null) lookZone.cornerDeadMarginInches = v; },
@@ -460,6 +471,8 @@ namespace DaggerfallWorkshop.Game.Mobile
             // panel has ever been opened.
             if (controller != null)
             {
+                controller.touchUIEnabled = PlayerPrefs.GetInt(MobileInput.TouchUIEnabledPrefKey,
+                    controller.touchUIEnabled ? 1 : 0) == 1;
                 controller.touchToMouseScale = PlayerPrefs.GetFloat(prefix + "look", controller.touchToMouseScale);
                 controller.swipeDistanceInches = PlayerPrefs.GetFloat(prefix + "swipe", controller.swipeDistanceInches);
             }

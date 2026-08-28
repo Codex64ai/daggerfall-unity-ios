@@ -26,6 +26,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
     public static class MobileInput
     {
+        public const string TouchUIEnabledPrefKey = "DFMobile.touchui";
         #region State
 
 #if UNITY_IOS || UNITY_ANDROID
@@ -79,11 +80,45 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public static bool PhysicalInputActive
         {
-            get { return ControllerActive || KeyboardActive; }
+            get { return ControllerActive || KeyboardActive || PointerActive; }
         }
 
         /// <summary>Set by MobileInputController when a hardware key is pressed.</summary>
         public static bool KeyboardActive { get; set; }
+
+        /// <summary>True after iPadOS has delivered a hardware-pointer event.</summary>
+        public static bool PointerActive { get; set; }
+
+        /// <summary>Relative hardware-pointer movement collected before gameplay input.</summary>
+        public static Vector2 PointerDelta { get; set; }
+        public static Vector2 PointerPosition { get; private set; }
+
+        static bool pointerButtonHeld;
+        static bool pointerButtonPrevious;
+
+        public static bool GetPointerButtonDown()
+        {
+            return pointerButtonHeld && !pointerButtonPrevious;
+        }
+
+        public static bool GetPointerButtonUp()
+        {
+            return !pointerButtonHeld && pointerButtonPrevious;
+        }
+
+        public static bool GetPointerButton()
+        {
+            return pointerButtonHeld;
+        }
+
+        public static void UpdatePointer(Vector2 position, Vector2 delta, bool active, bool buttonHeld)
+        {
+            pointerButtonPrevious = pointerButtonHeld;
+            pointerButtonHeld = active && buttonHeld;
+            PointerPosition = position;
+            PointerDelta = active ? delta : Vector2.zero;
+            PointerActive = active || PointerActive;
+        }
 
         /// <summary>
         /// True while a physical gamepad is connected. Touch input stands down entirely:
@@ -331,6 +366,11 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             VirtualCursorActive = false;
             KeyboardActive = false;
+            PointerActive = false;
+            PointerDelta = Vector2.zero;
+            PointerPosition = Vector2.zero;
+            pointerButtonHeld = false;
+            pointerButtonPrevious = false;
             Mode = MobileControlMode.Gameplay;
             ResetButtons();
         }

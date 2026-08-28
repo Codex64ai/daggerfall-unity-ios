@@ -212,11 +212,14 @@ namespace DaggerfallWorkshop.Game.UserInterface
 
         void UpButton_OnMouseDown(BaseScreenComponent sender, Vector2 position)
         {
-            action = Action.Up;
+            // iPadOS can expose a Magic Keyboard hover as an indirect touch that looks
+            // held to the legacy input layer. Never enter the repeat path for hardware
+            // pointer input; a real click is still handled by OnMouseClick below.
+            action = Action.None;
         }
         void DownButton_OnMouseDown(BaseScreenComponent sender, Vector2 position)
         {
-            action = Action.Down;
+            action = Action.None;
         }
         void UpDownButtons_OnMouseUp(BaseScreenComponent sender, Vector2 position)
         {

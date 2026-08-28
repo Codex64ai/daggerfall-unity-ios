@@ -119,11 +119,11 @@ namespace DaggerfallWorkshop.Game.UserInterface
 
         void LeftButton_OnMouseDown(BaseScreenComponent sender, Vector2 position)
         {
-            action = Action.Left;
+            action = Action.None;
         }
         void RightButton_OnMouseDown(BaseScreenComponent sender, Vector2 position)
         {
-            action = Action.Right;
+            action = Action.None;
         }
         void LeftRightButtons_OnMouseUp(BaseScreenComponent sender, Vector2 position)
         {

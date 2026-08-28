@@ -68,6 +68,7 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
         HorizontalSlider weaponSwingMode;
         Checkbox sdfFontRendering;
         Checkbox enableController;
+        Checkbox touchInterface;
         Checkbox retro320x200WorldRendering;
 
         Color unselectedTextColor = new Color(0.6f, 0.6f, 0.6f, 1f);
@@ -561,6 +562,12 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
             enableController = AddOption(x, "enableController", DaggerfallUnity.Settings.EnableController);
             enableController.OnToggleState += EnableController_OnToggleState;
 
+            touchInterface = AddOption(x, "touchControls", PlayerPrefs.GetInt(
+                DaggerfallWorkshop.Game.Mobile.MobileInput.TouchUIEnabledPrefKey, 1) == 1);
+            touchInterface.Label.Text = "Touch controls";
+            touchInterface.ToolTipText = "Enable the on-screen touch controls.";
+            touchInterface.OnToggleState += TouchInterface_OnToggleState;
+
             weaponSwingMode = AddSlider(x, "weaponSwingMode", "weaponSwingModeInfo", DaggerfallUnity.Settings.WeaponSwingMode, TextManager.Instance.GetLocalizedTextList("weaponSwingModes", TextCollections.TextSettings));
                         
             // Confirm button
@@ -645,6 +652,13 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
         {
             // Immediately toggle controller
             DaggerfallUnity.Settings.EnableController = enableController.IsChecked;
+        }
+
+        private void TouchInterface_OnToggleState()
+        {
+            PlayerPrefs.SetInt(DaggerfallWorkshop.Game.Mobile.MobileInput.TouchUIEnabledPrefKey,
+                touchInterface.IsChecked ? 1 : 0);
+            PlayerPrefs.Save();
         }
 
         //void ShowSummaryPanel()

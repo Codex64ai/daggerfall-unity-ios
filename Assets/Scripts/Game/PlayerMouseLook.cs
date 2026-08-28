@@ -197,6 +197,9 @@ namespace DaggerfallWorkshop.Game
                     cursorActive = !cursorActive;
             }
 
+            if (Mobile.MobileInput.PointerActive && !GameManager.IsGamePaused)
+                cursorActive = false;
+
             // Show cursor and unlock while active
             // While cursor is active, player can click on objects in scene using mouse similar to activating centre object
             // Clicking on UI element of large HUD will instead operate on that UI
@@ -214,7 +217,19 @@ namespace DaggerfallWorkshop.Game
             }
 
             // Ensure the cursor always locked when set
-            if (lockCursor && enableMouseLook)
+            bool hardwarePointerGameplay = Mobile.MobileInput.PointerActive &&
+                                           !GameManager.IsGamePaused &&
+                                           Mobile.MobileInput.Mode != Mobile.MobileControlMode.Menu;
+            if (hardwarePointerGameplay)
+            {
+                // iPadOS only exposes continuous trackpad deltas to Unity when the
+                // player view owns the pointer. This also prevents the platform cursor
+                // from being drawn over the game during look movement.
+                Cursor.lockState = CursorLockMode.Locked;
+                Cursor.visible = false;
+                InputManager.Instance.CursorVisible = false;
+            }
+            else if (lockCursor && enableMouseLook)
             {
                 Cursor.lockState = CursorLockMode.Locked;
                 InputManager.Instance.CursorVisible = false;
