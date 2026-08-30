@@ -206,6 +206,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         bool combatDelayed;
         uint combatDelayUntil;
 
+        // Cautious travel and encounters (tuned 2026-08-31, device feedback): total
+        // suppression meant ZERO encounters and "a ton" was the state before it - Ikram wants
+        // "a healthy medium of a little bit of encounters". The gate below leaves vanilla
+        // spawns enabled for this percentage of in-game hours; the rest stay suppressed.
+        // AttemptAvoid then still gives Running/Stealth a say about whatever does spawn.
+        public int cautiousEncounterPercent = 25;
+
         // Weather particle systems are detached during a journey and put back afterwards.
         // Held here because the weather manager's own references are nulled while suppressed.
         GameObject rainParticles;
@@ -1125,9 +1132,32 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         void ApplySpawnSuppression(bool travellingCautiously)
         {
+            bool suppress = travellingCautiously;
+            if (suppress && DaggerfallUnity.HasInstance)
+            {
+                uint hour = DaggerfallUnity.Instance.WorldTime.Now.ToClassicDaggerfallTime() / 60u;
+                if (CautiousEncounterGateOpen(hour, cautiousEncounterPercent))
+                    suppress = false;
+            }
+
             PlayerEntity player = GameManager.HasInstance ? GameManager.Instance.PlayerEntity : null;
-            if (player != null && player.PreventEnemySpawns != travellingCautiously)
-                player.PreventEnemySpawns = travellingCautiously;
+            if (player != null && player.PreventEnemySpawns != suppress)
+                player.PreventEnemySpawns = suppress;
+        }
+
+        /// <summary>
+        /// Pure: is this in-game hour one where cautious travel lets vanilla spawns roll?
+        /// Deterministic per hour (Knuth multiplicative hash), so the gate holds for the whole
+        /// hour instead of flickering per frame, saves/loads agree, and the long-run open rate
+        /// is the given percentage.
+        /// </summary>
+        public static bool CautiousEncounterGateOpen(uint classicHour, int percent)
+        {
+            if (percent <= 0)
+                return false;
+            if (percent >= 100)
+                return true;
+            return (classicHour * 2654435761u) % 100u < (uint)percent;
         }
 
         DFPosition lastLoggedPixel;

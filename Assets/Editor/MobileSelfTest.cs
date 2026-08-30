@@ -918,6 +918,23 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "second tap: keyboard/programmatic selection never confirms");
             Check(!MobileInput.SecondTapConfirms(true, true, -1, -1, 0.5f, 0.3f),
                   "second tap: empty selection never confirms");
+
+            int open = 0;
+            for (uint h = 0; h < 1000u; h++)
+                if (MobileJourneyController.CautiousEncounterGateOpen(h, 25)) open++;
+            Check(open > 150 && open < 350,
+                  "encounter gate: ~25% of hours are open (got " + open + "/1000)");
+            Check(MobileJourneyController.CautiousEncounterGateOpen(7u, 25) ==
+                  MobileJourneyController.CautiousEncounterGateOpen(7u, 25),
+                  "encounter gate: deterministic for the same hour");
+            bool anyOpen0 = false, allOpen100 = true;
+            for (uint h = 0; h < 200u; h++)
+            {
+                anyOpen0 |= MobileJourneyController.CautiousEncounterGateOpen(h, 0);
+                allOpen100 &= MobileJourneyController.CautiousEncounterGateOpen(h, 100);
+            }
+            Check(!anyOpen0, "encounter gate: 0% never opens");
+            Check(allOpen100, "encounter gate: 100% always open");
         }
 
         /// <summary>The HID table must round-trip and cover what Daggerfall binds by default.</summary>
