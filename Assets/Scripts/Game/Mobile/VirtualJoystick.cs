@@ -50,6 +50,15 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         public bool IsHeld { get { return activePointerId != pointerIdNone || directFingerId >= 0; } }
 
+        /// <summary>Diagnostics: which finger this stick owns, and by which route.</summary>
+        public int DirectFingerId { get { return directFingerId; } }
+        public int PointerId { get { return activePointerId; } }
+
+        /// <summary>Diagnostics: how many finger ids are claimed across all sticks. A count
+        /// that outlives every finger on the glass is a leaked claim, and a leaked claim is
+        /// a stick that can never take that finger id again.</summary>
+        public static int ClaimedFingerCount { get { return claimedFingers.Count; } }
+
         RectTransform rect;
         CanvasGroup canvasGroup;
         Canvas parentCanvas;

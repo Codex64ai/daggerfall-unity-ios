@@ -67,6 +67,15 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         public bool IsDragging { get { return activePointerId != pointerIdNone || directFingerId >= 0; } }
 
+        /// <summary>Diagnostics: the two routes into IsDragging, separately.
+        ///
+        /// They are not interchangeable. activePointerId comes from UGUI and is what makes
+        /// IsDragging true; directFingerId is the raw-touch path and is what actually
+        /// produces delta. A zone dragging on the first without the second reports motion
+        /// it cannot deliver - the camera stands still while combat reads a swipe.</summary>
+        public int DirectFingerId { get { return directFingerId; } }
+        public int PointerId { get { return activePointerId; } }
+
         public bool CombatMode { get { return combatMode; } }
 
         public void SetCombatMode(bool value)

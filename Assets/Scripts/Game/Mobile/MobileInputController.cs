@@ -896,6 +896,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             PollHardwarePointer();
             LogMenuDiagnostics();
+            LogTouchDiagnostics();
 
 #if UNITY_IOS && !UNITY_EDITOR
             bool gameplayPointer = MobileInput.PointerActive && !IsClassicMenuOpen();
@@ -1239,6 +1240,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         int pointerDiagnosticFrames;
         string pointerDiagnosticPath;
         float nextMenuDiagnostic;
+        float nextTouchDiagnostic;
         int menuFrames;
         int menuHeldFrames;
         int menuDownEdges;
@@ -1254,6 +1256,69 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// a frozen cursor position, or buttons that never read down each point somewhere
         /// different.
         /// </summary>
+        /// <summary>
+        /// Gameplay-side input state, once a second, into the pointer diagnostics file.
+        ///
+        /// SEPARATE FROM LogPointerDiagnostics ON PURPOSE. That one is called from inside
+        /// the `if (pointerRead)` branch of PollHardwarePointer, and touchOwnsPointer
+        /// forces pointerRead false for exactly as long as a finger owns the pointer. So
+        /// it goes silent during the touch period - the capture has a forty-second hole
+        /// where the touch handover happens, and every touch field it prints is sampled
+        /// only while the trackpad is live, where they are all legitimately false. It
+        /// cannot see a touch bug. This runs every frame regardless of who owns what.
+        ///
+        /// The fields are chosen to separate the candidates for a dead camera stick:
+        /// whether the stick claimed a finger at all (stickFinger), whether the look zone
+        /// took it instead (zoneFinger), whether the zone is reporting a drag it cannot
+        /// deliver motion for (zonePointer set while zoneFinger is not), and whether a
+        /// claim leaked across the handover (claimed outliving touches).
+        /// </summary>
+        void LogTouchDiagnostics()
+        {
+            if (IsClassicMenuOpen() || !MobileInput.Enabled)
+            {
+                nextTouchDiagnostic = 0f;
+                return;
+            }
+
+            if (Time.unscaledTime < nextTouchDiagnostic)
+                return;
+
+            nextTouchDiagnostic = Time.unscaledTime + 1f;
+
+            string phases = string.Empty;
+            for (int i = 0; i < Input.touchCount && i < 4; i++)
+            {
+                UnityEngine.Touch t = Input.GetTouch(i);
+                phases += string.Format("{0}{1}:{2}@{3:0},{4:0}", i > 0 ? "," : string.Empty,
+                    t.fingerId, t.phase, t.position.x, t.position.y);
+            }
+            if (phases.Length == 0)
+                phases = "-";
+
+            AppendPointerDiagnostic(string.Format(
+                "{0:O} TOUCH mode={1} touchUI={2} keyboard={3} controller={4} pointerActive={5} " +
+                "touchOwns={6} hudGameplay={7} touches={8} [{9}] claimed={10} " +
+                "lookHeld={11} lookValue=({12:0.##},{13:0.##}) lookFinger={14} lookPointer={15} " +
+                "moveHeld={16} moveFinger={17} " +
+                "zoneDragging={18} zoneFinger={19} zonePointer={20} combat={21}\n",
+                System.DateTime.UtcNow, MobileInput.Mode, touchUIEnabled, keyboardActive,
+                controllerConnected, MobileInput.PointerActive, touchOwnsPointer,
+                gameplayLayer != null && gameplayLayer.activeSelf, Input.touchCount, phases,
+                VirtualJoystick.ClaimedFingerCount,
+                lookJoystick != null && lookJoystick.IsHeld,
+                lookJoystick != null ? lookJoystick.Value.x : 0f,
+                lookJoystick != null ? lookJoystick.Value.y : 0f,
+                lookJoystick != null ? lookJoystick.DirectFingerId : -99,
+                lookJoystick != null ? lookJoystick.PointerId : -99,
+                moveJoystick != null && moveJoystick.IsHeld,
+                moveJoystick != null ? moveJoystick.DirectFingerId : -99,
+                lookZone != null && lookZone.IsDragging,
+                lookZone != null ? lookZone.DirectFingerId : -99,
+                lookZone != null ? lookZone.PointerId : -99,
+                MobileInput.CombatMode));
+        }
+
         void LogMenuDiagnostics()
         {
             if (!IsClassicMenuOpen())
