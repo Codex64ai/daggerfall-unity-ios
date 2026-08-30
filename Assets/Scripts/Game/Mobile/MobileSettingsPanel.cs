@@ -170,6 +170,14 @@ namespace DaggerfallWorkshop.Game.Mobile
                 v => { if (lookZone != null) lookZone.invertY = v; },
                 "inverty");
 
+            // Mouse/trackpad only. GameController reports Y positive-up like Unity, so this
+            // should stay off - it exists so a wrong sign on some device is a toggle, not a
+            // rebuild (the pointer plugin cannot be exercised in the editor).
+            AddToggle(panel, ref y, rowH, "Invert pointer Y (mouse/trackpad)",
+                () => controller != null && controller.pointerFlipY,
+                v => { if (controller != null) controller.pointerFlipY = v; },
+                "pointerflipy");
+
             AddToggle(panel, ref y, rowH, "Show diagnostics",
                 () => controller != null && controller.showGestureDebug,
                 v => { if (controller != null) controller.showGestureDebug = v; },
@@ -239,10 +247,11 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (header == null)
                 return;
 
-            header.text = string.Format("Touch Controls\n{0:0} dpi   {1:0.0}in screen   gamepad: {2}",
+            header.text = string.Format("Touch Controls\n{0:0} dpi   {1:0.0}in screen   gamepad: {2}   mouse: {3}",
                 MobileInput.Dpi,
                 MobileHudLayout.ScreenDiagonalInches,
-                (controller != null && controller.ControllerConnected) ? "yes" : "no");
+                (controller != null && controller.ControllerConnected) ? "yes" : "no",
+                MobilePointer.Connected ? (MobilePointer.IsLocked ? "locked" : "yes") : "no");
         }
 
         void ReapplyThreshold()

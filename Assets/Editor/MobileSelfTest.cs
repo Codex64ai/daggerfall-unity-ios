@@ -46,6 +46,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestScrollOneStepPerFrame();
             TestControllerForcesCursorOff();
             TestKeyboardForcesCursorOff();
+            TestPointerKeepsCursorOverKeyboard();
+            TestPointerDeltaScale();
+            TestPointerLockDecision();
+            TestPointerHoverToScreen();
+            TestPointerScrollTicks();
+            TestPointerFingerRule();
+            TestPointerDefaultActions();
             TestDpiFallback();
             TestThresholdMaths();
             TestThresholdRoundTrip();
@@ -365,6 +372,142 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             MobileInput.VirtualCursorActive = false;
             MobileInput.KeyboardActive = savedKeyboard;
             MobileInput.ControllerActive = savedController;
+        }
+
+        /// <summary>
+        /// A real pointer DRIVES the virtual cursor rather than standing it down: hover feeds
+        /// the position and GCMouse buttons feed the clicks, so the classic UI never consults
+        /// Unity's phantom-held Input.GetMouseButton(0). That must hold even with a hardware
+        /// keyboard active (Magic Keyboard = keyboard + trackpad together), where the keyboard
+        /// alone would have switched the cursor off. A gamepad still wins outright.
+        /// </summary>
+        static void TestPointerKeepsCursorOverKeyboard()
+        {
+            bool savedKeyboard = MobileInput.KeyboardActive;
+            bool savedController = MobileInput.ControllerActive;
+            bool savedMouse = MobileInput.MouseActive;
+
+            MobileInput.ControllerActive = false;
+            MobileInput.KeyboardActive = false;
+            MobileInput.MouseActive = true;
+            MobileInput.VirtualCursorActive = true;
+            Check(MobileInput.VirtualCursorActive, "pointer alone keeps the virtual cursor");
+            Check(MobileInput.PhysicalInputActive, "PhysicalInputActive true for pointer");
+
+            MobileInput.KeyboardActive = true;
+            Check(MobileInput.VirtualCursorActive, "pointer + keyboard keeps the virtual cursor");
+
+            MobileInput.MouseActive = false;
+            Check(!MobileInput.VirtualCursorActive, "keyboard alone still forces cursor OFF");
+
+            MobileInput.MouseActive = true;
+            MobileInput.ControllerActive = true;
+            Check(!MobileInput.VirtualCursorActive, "gamepad beats pointer for the cursor");
+
+            MobileInput.VirtualCursorActive = false;
+            MobileInput.KeyboardActive = savedKeyboard;
+            MobileInput.ControllerActive = savedController;
+            MobileInput.MouseActive = savedMouse;
+        }
+
+        /// <summary>
+        /// GCMouse reports raw counts; Unity's "Mouse X/Y" axes are counts x 0.1 (the project's
+        /// InputManager.asset sensitivity). Matching that keeps DFU's own mouse-sensitivity
+        /// setting meaning the same thing it does on PC. Y is positive-up in both systems, so
+        /// the flip is OFF by default and only exists as a device-verification escape hatch.
+        /// </summary>
+        static void TestPointerDeltaScale()
+        {
+            Vector2 d = MobilePointer.ScaleDelta(new Vector2(40f, -20f), 0.1f, false);
+            Near(d.x, 4f, 0.0001f, "delta X scaled by 0.1");
+            Near(d.y, -2f, 0.0001f, "delta Y scaled by 0.1, sign kept");
+
+            Vector2 f = MobilePointer.ScaleDelta(new Vector2(40f, -20f), 0.1f, true);
+            Near(f.y, 2f, 0.0001f, "flipY inverts Y only");
+            Near(f.x, 4f, 0.0001f, "flipY leaves X alone");
+
+            Vector2 z = MobilePointer.ScaleDelta(Vector2.zero, 0.1f, true);
+            Check(z == Vector2.zero, "zero delta stays zero");
+        }
+
+        /// <summary>
+        /// The pointer is locked exactly when PlayerMouseLook would have locked it on PC:
+        /// a pointer is in use, no classic window is open, the game is not paused, and the
+        /// engine has hidden its cursor. Any one of those failing releases the pointer, so
+        /// menus, the pause screen and the ActivateCursor toggle all get the arrow back.
+        /// </summary>
+        static void TestPointerLockDecision()
+        {
+            Check(MobilePointer.ShouldLock(true, false, false, false), "locks in plain gameplay");
+            Check(!MobilePointer.ShouldLock(false, false, false, false), "no pointer -> no lock");
+            Check(!MobilePointer.ShouldLock(true, true, false, false), "menu open -> unlocked");
+            Check(!MobilePointer.ShouldLock(true, false, true, false), "paused -> unlocked");
+            Check(!MobilePointer.ShouldLock(true, false, false, true), "engine cursor visible -> unlocked");
+        }
+
+        /// <summary>
+        /// Hover arrives normalised (0..1, bottom-left origin) so the plugin never has to
+        /// agree with Unity about contentScaleFactor. Corners must land on the pixel edges.
+        /// </summary>
+        static void TestPointerHoverToScreen()
+        {
+            Vector2 c = MobilePointer.HoverToScreen(0.5f, 0.5f, 2000, 1000);
+            Near(c.x, 1000f, 0.001f, "hover centre X");
+            Near(c.y, 500f, 0.001f, "hover centre Y");
+
+            Vector2 tl = MobilePointer.HoverToScreen(0f, 1f, 2000, 1000);
+            Near(tl.x, 0f, 0.001f, "hover left edge");
+            Near(tl.y, 1000f, 0.001f, "hover top edge (bottom-left origin)");
+
+            Vector2 over = MobilePointer.HoverToScreen(1.5f, -0.5f, 2000, 1000);
+            Near(over.x, 2000f, 0.001f, "hover clamps X into the screen");
+            Near(over.y, 0f, 0.001f, "hover clamps Y into the screen");
+        }
+
+        /// <summary>
+        /// Scroll wheel/trackpad values have no defined range, so the accumulator emits at
+        /// most one classic-UI step per frame once it crosses the threshold, and carries
+        /// nothing over - a hard flick must not keep a list scrolling for seconds.
+        /// </summary>
+        static void TestPointerScrollTicks()
+        {
+            float acc = 0.2f;
+            Check(MobilePointer.ScrollTicks(ref acc, 0.5f) == 0, "below threshold -> no tick");
+            Near(acc, 0.2f, 0.0001f, "sub-threshold scroll is kept");
+
+            acc = 0.7f;
+            Check(MobilePointer.ScrollTicks(ref acc, 0.5f) == 1, "above threshold -> one tick up");
+            Near(acc, 0f, 0.0001f, "tick consumes the accumulator");
+
+            acc = -30f;
+            Check(MobilePointer.ScrollTicks(ref acc, 0.5f) == -1, "large flick -> still exactly one tick down");
+            Near(acc, 0f, 0.0001f, "large flick does not carry over");
+        }
+
+        /// <summary>
+        /// A touch counts as a FINGER (and so hands control back to the touch layer) only if it
+        /// is not an indirect device and no pointer button is down. iPadOS delivers pointer
+        /// clicks as touches - without this rule every click would flip the touch HUD back on.
+        /// </summary>
+        static void TestPointerFingerRule()
+        {
+            Check(MobilePointer.IsFingerTouch(TouchType.Direct, false), "direct touch, no button -> finger");
+            Check(MobilePointer.IsFingerTouch(TouchType.Stylus, false), "pencil counts as a finger");
+            Check(!MobilePointer.IsFingerTouch(TouchType.Indirect, false), "indirect touch -> not a finger");
+            Check(!MobilePointer.IsFingerTouch(TouchType.Direct, true), "touch while a pointer button is held -> pointer click, not a finger");
+        }
+
+        /// <summary>
+        /// Fallback layout when KeyBinds.txt has no mouse bindings to capture: Daggerfall's
+        /// own defaults, left = activate, right = swing. Anything else is unbound.
+        /// </summary>
+        static void TestPointerDefaultActions()
+        {
+            InputManager.Actions a;
+            Check(MobilePointer.TryDefaultAction(0, out a) && a == InputManager.Actions.ActivateCenterObject, "left button -> ActivateCenterObject");
+            Check(MobilePointer.TryDefaultAction(1, out a) && a == InputManager.Actions.SwingWeapon, "right button -> SwingWeapon");
+            Check(!MobilePointer.TryDefaultAction(2, out a), "middle button unbound by default");
+            Check(!MobilePointer.TryDefaultAction(-1, out a), "invalid button unbound");
         }
 
         /// <summary>Screen.dpi returns 0 on some devices; the fallback must hold.</summary>

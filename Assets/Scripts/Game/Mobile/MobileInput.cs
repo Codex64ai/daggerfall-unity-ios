@@ -63,11 +63,20 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// Set by MobileInputController; InputManager reads it to decide whether to divert
         /// the mouse. Forced false while a gamepad is active so Daggerfall's own controller
         /// cursor (InputManager.UsingController) keeps the pointer - otherwise the touch
-        /// layer would hijack it away from the gamepad.
+        /// layer would hijack it away from the gamepad. A hardware keyboard alone also
+        /// stands it down.
+        ///
+        /// A real mouse/trackpad does NOT stand it down - it drives it. Unity's iOS player
+        /// has no mouse support of its own (pointer clicks arrive as touches, and
+        /// Input.GetMouseButton(0) reads as permanently held with a trackpad attached), so
+        /// the classic UI must never fall back to the stock Input path while a pointer is in
+        /// use. MobileInputController feeds the cursor from the plugin's hover position and
+        /// real button state instead. The pointer wins over the keyboard because a Magic
+        /// Keyboard is both at once.
         /// </summary>
         public static bool VirtualCursorActive
         {
-            get { return virtualCursorActive && !PhysicalInputActive; }
+            get { return virtualCursorActive && !ControllerActive && (MouseActive || !KeyboardActive); }
             set { virtualCursorActive = value; }
         }
         static bool virtualCursorActive;
@@ -83,10 +92,12 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         /// <summary>
-        /// True while a physical mouse or trackpad is being used. Detected from movement on
-        /// the raw mouse axes, never from button state - iPadOS reports a phantom Mouse0
-        /// permanently held, which is exactly the trap that broke door activation once
-        /// already. Touching the screen clears it, the same as the keyboard.
+        /// True while a physical mouse or trackpad is being used. With the pointer plugin
+        /// this means a GCMouse is attached and has moved or clicked; without it (iOS 13,
+        /// plugin absent) it falls back to movement on the raw mouse axes. Never Unity
+        /// button state - iPadOS reports a phantom Mouse0 permanently held, which is exactly
+        /// the trap that broke door activation once already. A finger on the screen clears
+        /// it, the same as the keyboard; a pointer click does not count as a finger.
         /// </summary>
         public static bool MouseActive { get; set; }
 

@@ -127,6 +127,20 @@ namespace DaggerfallWorkshop.Game.Mobile
                  "does. Touching the screen brings it back.")]
         public bool autoHideOnKeyboard = true;
 
+        [Header("Pointer (mouse / trackpad)")]
+        [Tooltip("GCMouse raw counts -> mouse-axis units. 0.1 matches Unity's own Mouse X/Y axes " +
+                 "(ProjectSettings/InputManager.asset), so DFU's mouse sensitivity setting behaves as on PC.")]
+        public float pointerToMouseScale = MobilePointer.UnityMouseAxisScale;
+
+        [Tooltip("Invert pointer Y. GameController reports positive-up like Unity, so this should " +
+                 "stay off; it exists so a wrong sign on some device is a toggle, not a rebuild. " +
+                 "TUNE > Invert pointer Y.")]
+        public bool pointerFlipY = false;
+
+        [Tooltip("Scroll accumulator threshold for one classic-UI step. GCMouse scroll has no " +
+                 "defined range, so this is tuned by feel.")]
+        public float pointerScrollThreshold = 0.5f;
+
         [Header("Controller")]
         [Tooltip("Detect a connected gamepad, hide the touch HUD, and hand input back to " +
                  "Daggerfall's own controller support (which already exists and is complete).")]
@@ -154,6 +168,14 @@ namespace DaggerfallWorkshop.Game.Mobile
         float nextTouchAssert;
         bool keyboardActive;
         bool mouseActive;
+
+        // Pointer plugin state. pointerBindings is the player's own Mouse0-2 keybinds, captured
+        // from InputManager BEFORE ClearPhantomProneBindings() removes them, so the pointer
+        // pump can inject the same actions the bindings would have produced on PC.
+        float pointerScrollAccum;
+        readonly Dictionary<int, InputManager.Actions> pointerBindings = new Dictionary<int, InputManager.Actions>();
+        Vector2 lastPointerDelta;
+        string lastTouchTypes = "-";
 
         // Master switch for the touch interface, requested for mouse/keyboard-first players.
         // Persisted here rather than through the settings panel's own pref plumbing because
@@ -238,14 +260,20 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             ApplyAttackThreshold();
 
+            // Real mouse/trackpad support. Unity's iOS player has none (see MobilePointer);
+            // this registers for GCMouse, the hover recogniser and the pointer-lock override.
+            // Inert below iOS 14 and in the editor.
+            MobilePointer.Init();
+
             // DEVICE-PROVEN FIX: iPadOS (with a Magic Keyboard trackpad attached) reports
             // KeyCode.Mouse0 / GetMouseButton(0) as PERMANENTLY HELD - captured in the
             // idle probe with zero touches: "m0key=True m0btn=True". Since Mouse0 is
             // Daggerfall's ActivateCenterObject binding, the engine re-added the action
             // every frame, so the release edge PlayerActivate waits for never existed -
             // doors could not be opened by any means. On touch devices the mouse-button
-            // bindings serve no purpose (the touch layer injects actions directly), so
-            // clear them for this session. KeyBinds.txt on disk is not modified.
+            // bindings serve no purpose (the touch layer injects actions directly, and a
+            // real pointer injects the CAPTURED bindings via MobilePointer), so clear them
+            // for this session. KeyBinds.txt on disk is not modified.
             if (Input.touchSupported && !Application.isEditor && InputManager.HasInstance)
             {
                 ClearPhantomProneBindings();
@@ -279,6 +307,10 @@ namespace DaggerfallWorkshop.Game.Mobile
                 return;
 
             InputManager im = InputManager.Instance;
+
+            // Remember what the mouse buttons MEANT before they go, so a real pointer can
+            // still honour the player's layout (see PumpPointerGameplay).
+            CapturePointerBindings(im);
 
             var prone = new List<KeyCode>
             {
@@ -316,8 +348,10 @@ namespace DaggerfallWorkshop.Game.Mobile
         void OnDisable()
         {
             // Hand the pointer back, otherwise VirtualCursorActive can stay true with
-            // nothing driving it and the classic UI is left with a frozen cursor.
+            // nothing driving it and the classic UI is left with a frozen cursor. And never
+            // leave the OS pointer locked with nothing to unlock it.
             MobileInput.Relinquish();
+            MobilePointer.SetLocked(false);
             RestoreEngineTouchDefaults();
         }
 
@@ -363,6 +397,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             PollKeyboard();
             PollMouse();
+            PollPointerLock();
             PollTouchRestoreGesture();
             PollController();
 
@@ -418,31 +453,202 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// every frame and its virtual cursor fought the real pointer, so a mouse that worked
         /// before the port stopped working after it.
         ///
-        /// Detection is movement on the raw mouse axes and nothing else. With
-        /// simulateMouseWithTouches forced off, touches never reach those axes, so movement
-        /// there can only be a real pointer - the same "only the real device produces this"
-        /// principle as the keyboard's inputString check. Never button state: iPadOS reports a
-        /// phantom Mouse0 permanently held, the trap that broke doors once already. And not in
-        /// the editor, where the mouse legitimately drives the touch overlay for testing.
+        /// Detection is a connected GCMouse that has moved or clicked (MobilePointer). Unity's
+        /// own view of the pointer is useless here: its iOS player has no mouse support, so
+        /// hover never reaches the raw axes and Input.GetMouseButton(0) reads as permanently
+        /// held with a trackpad attached - the trap that broke doors once already. Without the
+        /// plugin (iOS 13) the old axis-movement check remains as a fallback. Not in the
+        /// editor, where the mouse legitimately drives the touch overlay for testing.
+        ///
+        /// A FINGER on the glass hands control back to touch. iPadOS delivers pointer clicks
+        /// as touches too, so only touches that pass MobilePointer.IsFingerTouch count -
+        /// otherwise every click would flip the touch HUD back on.
         /// </summary>
         void PollMouse()
         {
             if (Application.isEditor)
                 return;
 
+            bool plugin = MobilePointer.Supported;
+            bool anyButton = plugin && MobilePointer.AnyButton;
+
             if (Input.touchCount > 0)
             {
-                if (mouseActive)
-                    SetMouseActive(false);
+                bool finger = false;
+                var types = new System.Text.StringBuilder();
+                for (int i = 0; i < Input.touchCount; i++)
+                {
+                    Touch t = Input.GetTouch(i);
+                    types.Append(t.type).Append(' ');
+                    if (MobilePointer.IsFingerTouch(t.type, anyButton))
+                        finger = true;
+                }
+                lastTouchTypes = types.ToString();
+
+                if (finger)
+                {
+                    if (mouseActive)
+                        SetMouseActive(false);
+                    return;
+                }
+            }
+
+            if (mouseActive)
+                return;
+
+            if (plugin)
+            {
+                if (!MobilePointer.Connected)
+                    return;
+
+                // Nobody else consumes while the pointer is idle, so consuming here is what
+                // keeps the first real movement from arriving as one accumulated jerk.
+                bool moved = MobilePointer.ConsumeDelta().sqrMagnitude > 0f;
+                if (moved || anyButton)
+                    SetMouseActive(true);
                 return;
             }
 
-            if (!mouseActive &&
-                (Mathf.Abs(Input.GetAxisRaw("Mouse X")) > 0.01f ||
-                 Mathf.Abs(Input.GetAxisRaw("Mouse Y")) > 0.01f))
+            // Fallback without the plugin: movement on the raw axes and nothing else. With
+            // simulateMouseWithTouches forced off, touches never reach those axes.
+            if (Mathf.Abs(Input.GetAxisRaw("Mouse X")) > 0.01f ||
+                Mathf.Abs(Input.GetAxisRaw("Mouse Y")) > 0.01f)
             {
                 SetMouseActive(true);
             }
+        }
+
+        /// <summary>
+        /// Lock the pointer exactly when PlayerMouseLook would have on PC. Cursor.lockState is
+        /// a no-op on iOS, so the engine's request never reaches the OS; this mirrors the
+        /// engine's own cursor state (PlayerMouseLook hides it during play and shows it for
+        /// menus, pause and the ActivateCursor toggle) into the plugin instead. Never in the
+        /// startup scene - there is no game to look around in.
+        /// </summary>
+        void PollPointerLock()
+        {
+            if (!MobilePointer.Supported)
+                return;
+
+            bool inGame = GameManager.HasInstance;
+            bool paused = inGame && GameManager.IsGamePaused;
+            bool cursorVisible = !InputManager.HasInstance || InputManager.Instance.CursorVisible;
+
+            MobilePointer.SetLocked(inGame &&
+                MobilePointer.ShouldLock(mouseActive, MobileInput.MenuMode, paused, cursorVisible));
+        }
+
+        /// <summary>
+        /// Menu-side pointer pump, run from PollCursorStage (so it works while the game is
+        /// paused behind a window). The real pointer drives the existing virtual cursor: hover
+        /// gives the position, GCMouse buttons are latched so TickButtons() derives the same
+        /// down/up edges the touch path produces, scroll becomes classic-UI steps. The cursor
+        /// TEXTURE is not drawn while a pointer is active (InputManager.OnGUI) because the
+        /// system arrow is already there.
+        /// </summary>
+        void PumpPointerCursor()
+        {
+            if (!MobileInput.MenuMode)
+            {
+                // Paused with no classic window: nothing to steer, but drain the deltas so
+                // they do not burst into the camera the moment play resumes.
+                MobilePointer.ConsumeDelta();
+                return;
+            }
+
+            Vector2 hover;
+            if (MobilePointer.TryGetHover(out hover))
+                MobileInput.SetCursorPosition(hover);
+
+            MobileInput.SetLatched(0, MobilePointer.Left);
+            MobileInput.SetLatched(1, MobilePointer.Right);
+
+            pointerScrollAccum += MobilePointer.ConsumeScroll();
+            int tick = MobilePointer.ScrollTicks(ref pointerScrollAccum, pointerScrollThreshold);
+            if (tick != 0)
+                MobileInput.QueueScroll(tick);
+
+            // Unlocked: hover owns the position. Drop movement so it cannot pool up.
+            MobilePointer.ConsumeDelta();
+        }
+
+        /// <summary>
+        /// Gameplay-side pointer pump, run from PollGameplayStage in place of the touch pumps.
+        /// Movement goes into the same mouseX/mouseY channel the touch drag uses, so
+        /// PlayerMouseLook and WeaponManager.TrackMouseAttack() both see it exactly as they
+        /// would a PC mouse - hold the swing button and drag to attack, release to reset,
+        /// bows draw while held and loose on release. Buttons inject the actions the player's
+        /// own Mouse0-2 keybinds named, falling back to Daggerfall's defaults.
+        /// </summary>
+        void PumpPointerGameplay(InputManager inputManager)
+        {
+            Vector2 raw = MobilePointer.ConsumeDelta();
+            lastPointerDelta = raw;
+
+            // ALWAYS overwrite, including with zero. A pointer click arrives as a touch too,
+            // and on iOS the primary touch's movement feeds Unity's raw Mouse X/Y - left alone
+            // it would add to ours and double the look during a click-drag. A journey owns the
+            // camera outright (see PumpLookAndGesture), so it gets zero.
+            Vector2 d = MobileJourneyPilot.Active
+                ? Vector2.zero
+                : MobilePointer.ScaleDelta(raw, pointerToMouseScale, pointerFlipY);
+            inputManager.SetMobileMouseAxes(d.x, d.y);
+
+            int buttons = MobilePointer.Buttons;
+            for (int b = 0; b < 3; b++)
+            {
+                if ((buttons & (1 << b)) == 0)
+                    continue;
+
+                InputManager.Actions action;
+                if (TryGetPointerAction(b, out action))
+                    inputManager.AddAction(action);
+            }
+        }
+
+        /// <summary>
+        /// Record every action bound to Mouse0-2 (primary or secondary). Called before each
+        /// ClearPhantomProneBindings() sweep - including the self-healing re-clears, which is
+        /// what makes this robust to the InputManager.Start() ordering race: if keybinds had
+        /// not loaded yet the first time, the resurrection pass captures them.
+        /// </summary>
+        void CapturePointerBindings(InputManager im)
+        {
+            foreach (InputManager.Actions action in System.Enum.GetValues(typeof(InputManager.Actions)))
+            {
+                if (action == InputManager.Actions.Unknown)
+                    continue;
+                RecordPointerBinding(im.GetBinding(action, true), action);
+                RecordPointerBinding(im.GetBinding(action, false), action);
+            }
+        }
+
+        void RecordPointerBinding(KeyCode key, InputManager.Actions action)
+        {
+            if (key < KeyCode.Mouse0 || key > KeyCode.Mouse2)
+                return;
+
+            int button = key - KeyCode.Mouse0;
+            if (pointerBindings.ContainsKey(button))
+                return;
+
+            pointerBindings[button] = action;
+            Debug.Log("[MobileInput] pointer binding captured: " + key + " -> " + action);
+        }
+
+        bool TryGetPointerAction(int button, out InputManager.Actions action)
+        {
+            if (pointerBindings.TryGetValue(button, out action))
+                return true;
+
+            // Nothing captured at all (KeyBinds.txt with no mouse entries, or not yet
+            // loaded): use the stock layout. If the player HAS mouse bindings, an unbound
+            // button stays unbound - that is their choice.
+            if (pointerBindings.Count == 0)
+                return MobilePointer.TryDefaultAction(button, out action);
+
+            action = InputManager.Actions.Unknown;
+            return false;
         }
 
         void SetMouseActive(bool value)
@@ -450,10 +656,17 @@ namespace DaggerfallWorkshop.Game.Mobile
             mouseActive = value;
             MobileInput.MouseActive = value;
 
-            // Same hand-back as the keyboard: the virtual cursor and touch buttons must not
-            // linger over a session being driven by a real pointer.
+            // Same hand-back as the keyboard: touch buttons and gestures must not linger over
+            // a session being driven by a real pointer. Relinquish() also drops the virtual
+            // cursor and resets Mode; ResolveMode() re-enters Menu on the next Update if a
+            // window is open, which re-claims the cursor for the pointer pump.
             if (value)
                 MobileInput.Relinquish();
+            else
+                MobilePointer.SetLocked(false);
+
+            Debug.Log(value ? "[MobileInput] pointer active - touch HUD hidden, pointer drives look/cursor"
+                            : "[MobileInput] pointer idle - finger on screen, touch HUD restored");
 
             ApplyHudVisibility();
         }
@@ -681,7 +894,14 @@ namespace DaggerfallWorkshop.Game.Mobile
                     : 0f,
                 controllerConnected, MobileInput.Dpi);
 
-            GUI.Label(new Rect(12f, 12f, 560f, 250f), text);
+            text += string.Format(
+                "\npointer: plugin {0}  connected {1}  active {2}  lock req {3} / actual {4}\n" +
+                "buttons {5}  last delta {6}  touch types: {7}",
+                MobilePointer.Supported ? "yes" : "no", MobilePointer.Connected, mouseActive,
+                MobilePointer.LockRequested, MobilePointer.IsLocked,
+                MobilePointer.Buttons, lastPointerDelta.ToString("0.0"), lastTouchTypes);
+
+            GUI.Label(new Rect(12f, 12f, 560f, 300f), text);
         }
 
         #endregion
@@ -875,6 +1095,15 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (!keyboardActive && MobileInput.MenuMode)
                 MobileKeyboard.Poll();
 
+            // A real pointer drives the virtual cursor itself (hover + GCMouse buttons). The
+            // touch cursor must NOT also run: a pointer click arrives as a touch and would
+            // fire a second click.
+            if (mouseActive && !controllerConnected)
+            {
+                PumpPointerCursor();
+                return;
+            }
+
             // Touch-only from here. The virtual cursor must stand down for a controller
             // (InputManager drives its own cursor instead) and video-skip needs live touches.
             if (controllerConnected || keyboardActive)
@@ -921,7 +1150,18 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public void PollGameplayStage(InputManager inputManager)
         {
-            if (inputManager == null || !touchControlsEnabled || MobileInput.MenuMode || controllerConnected || keyboardActive || mouseActive)
+            if (inputManager == null || MobileInput.MenuMode || controllerConnected)
+                return;
+
+            // A pointer replaces the touch pumps entirely, and runs regardless of the touch
+            // master toggle or a hardware keyboard (a Magic Keyboard is both at once).
+            if (mouseActive)
+            {
+                PumpPointerGameplay(inputManager);
+                return;
+            }
+
+            if (!touchControlsEnabled || keyboardActive)
                 return;
 
             PumpMovement(inputManager);

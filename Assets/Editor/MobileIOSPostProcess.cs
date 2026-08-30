@@ -52,6 +52,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // from screen dimensions, so a resizable window breaks both.
             root.SetBoolean("UIRequiresFullScreen", true);
 
+            // --- pointer -----------------------------------------------------------
+            // Real mouse/trackpad support (DFMobilePointer.mm). Before iOS 17 the system
+            // emulated direct touches for a mouse unless this key was set; with it, pointer
+            // clicks are UITouchTypeIndirectPointer and a right-click is no longer synthesised
+            // as a long press. Default YES from iOS 17, so this only matters on older iPadOS.
+            root.SetBoolean("UIApplicationSupportsIndirectInputEvents", true);
+
             // --- convenience -------------------------------------------------------
             // Declares no non-exempt encryption, which skips the export-compliance
             // questionnaire on every TestFlight/App Store upload.
@@ -82,6 +89,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 pbx.SetBuildProperty(guid, "ENABLE_MODULE_VERIFIER", "NO");
                 pbx.SetBuildProperty(guid, "CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER", "NO");
             }
+
+            // DFMobilePointer.mm uses GCMouse. Native plugins compile into UnityFramework,
+            // so that is the target that has to link GameController.
+            pbx.AddFrameworkToProject(pbx.GetUnityFrameworkTargetGuid(), "GameController.framework", false);
+
             pbx.WriteToFile(pbxPath);
 
             Debug.Log("[MobileIOSPostProcess] Info.plist + pbxproj updated:\n" +
@@ -90,6 +102,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                       "  UIFileSharingEnabled              = true  (Finder file sharing)\n" +
                       "  LSSupportsOpeningDocumentsInPlace = true  (Files app access)\n" +
                       "  UIRequiresFullScreen              = true  (no Split View)\n" +
+                      "  UIApplicationSupportsIndirectInputEvents = true (pointer as pointer, pre-iOS 17)\n" +
+                      "  GameController.framework          linked into UnityFramework (GCMouse)\n" +
                       "  ITSAppUsesNonExemptEncryption     = false (skips export compliance)");
 #else
             Debug.LogWarning("[MobileIOSPostProcess] Built for iOS but UNITY_IOS was not defined; " +
