@@ -351,6 +351,17 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             UnityEditor.Build.Reporting.BuildReport report = BuildPipeline.BuildPlayer(opts);
             UnityEditor.Build.Reporting.BuildSummary summary = report.summary;
 
+            // A simulator build must not leave the PROJECT silent: with m_DisableAudio still
+            // set, the editor self-test's "wav decodes to a clip" fails and a build from the
+            // Unity UI ships without sound. The player has been exported by now, so this
+            // only affects what is left on disk.
+            if (IsSimulator)
+            {
+                var restore = new System.Text.StringBuilder();
+                SetUnityAudioDisabled(false, restore);
+                Debug.Log("[MobileBuildSetup] simulator build done - restoring project audio\n" + restore);
+            }
+
             Debug.Log(string.Format(
                 "[MobileBuildSetup] build result = {0}\n  errors {1}, warnings {2}\n  size {3:0.0} MB\n  time {4}\n  output {5}",
                 summary.result, summary.totalErrors, summary.totalWarnings,
