@@ -120,16 +120,51 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
                     audioClip = null;
                     return false;
 #else
-                    WWW www = new WWW("file://" + path); // TODO: Replace with UnityWebRequest
-                    if (streaming) {
-                        audioClip = www.GetAudioClip(true, true);
-                    }
-                    else
+                    // WWW is removed in Unity 6, so this is UnityWebRequest now - the same
+                    // API the iOS ogg preloader above already uses. WWW's old semantics were
+                    // "return a clip that finishes loading in the background"; a UWR clip only
+                    // exists after the request completes, so this waits for it. The wait is
+                    // bounded and cheap: it is a file:// read on desktop, which completes in
+                    // milliseconds, and the timeout means a truncated file fails with a log
+                    // line rather than hanging the game.
+                    string url = "file://" + path;
+                    AudioType audioType = AudioType.UNKNOWN;
+                    if (string.Equals(extension, ".ogg", StringComparison.OrdinalIgnoreCase))
+                        audioType = AudioType.OGGVORBIS;
+                    else if (string.Equals(extension, ".wav", StringComparison.OrdinalIgnoreCase))
+                        audioType = AudioType.WAV;
+                    else if (string.Equals(extension, ".mp3", StringComparison.OrdinalIgnoreCase))
+                        audioType = AudioType.MPEG;
+
+                    using (var request = UnityEngine.Networking.UnityWebRequestMultimedia.GetAudioClip(url, audioType))
                     {
-                        audioClip = www.GetAudioClip();
-                        DaggerfallUnity.Instance.StartCoroutine(LoadAudioData(www, audioClip));
+                        var handler = (UnityEngine.Networking.DownloadHandlerAudioClip)request.downloadHandler;
+                        handler.streamAudio = streaming;
+
+                        request.SendWebRequest();
+
+                        var started = DateTime.UtcNow;
+                        while (!request.isDone)
+                        {
+                            if ((DateTime.UtcNow - started).TotalSeconds > 10)
+                            {
+                                Debug.LogErrorFormat("Timed out loading audioclip: {0}", path);
+                                audioClip = null;
+                                return false;
+                            }
+                            System.Threading.Thread.Sleep(1);
+                        }
+
+                        if (request.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
+                        {
+                            Debug.LogErrorFormat("Failed to load audioclip: {0}", request.error);
+                            audioClip = null;
+                            return false;
+                        }
+
+                        audioClip = UnityEngine.Networking.DownloadHandlerAudioClip.GetContent(request);
+                        return audioClip != null;
                     }
-                    return true;
 #endif
                 }
 
@@ -354,16 +389,6 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
                 audioClip = null;
                 return false;
             }
-        }
-
-        private static IEnumerator LoadAudioData(WWW www, AudioClip clip) // TODO: Replace with UnityWebRequest
-        {
-            yield return www;
-
-            if (clip.loadState == AudioDataLoadState.Failed)
-                Debug.LogErrorFormat("Failed to load audioclip: {0}", www.error);
-
-            www.Dispose();
         }
 
         #endregion
