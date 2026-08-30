@@ -75,6 +75,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestRoadData();
             TestRoadsInstallSurvivesSceneSwap();
             TestModsSwitchOwnsBothPrefs();
+            TestModBundleRoundTrip();
             TestRoadDirectionReciprocity();
             TestRoadRouting();
             TestWaypointOvershoot();
@@ -1004,6 +1005,59 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 MobileMods.Roads = savedRoads;
                 MobileMods.RealTravel = savedTravel;
             }
+        }
+
+        /// <summary>
+        /// The whole iOS mod pipeline in one pass: pack the pilot manifest into a .dfmod,
+        /// load it back, and look up the replacement exactly the way ModManager does at
+        /// runtime. Also pins the refusal of script mods - iOS is IL2CPP, no JIT.
+        /// </summary>
+        static void TestModBundleRoundTrip()
+        {
+            const string manifest = "Assets/Game/Mods/IOSPilot/ios-pilot.dfmod.json";
+            const string outRoot = "Temp/MobileModBuilderTest";
+            if (Directory.Exists(outRoot))
+                Directory.Delete(outRoot, true);
+
+            // Import settings must be normalized (NPOT scaling would silently resize).
+            AssetDatabase.ImportAsset("Assets/Game/Mods/IOSPilot/PICK03I0.IMG.png",
+                ImportAssetOptions.ForceUpdate);
+
+            string[] built = MobileModBuilder.BuildMod(manifest, outRoot,
+                new[] { BuildTarget.StandaloneOSX });
+            Check(built.Length == 1 && File.Exists(built[0]),
+                  "builder produces a .dfmod", built.Length > 0 ? built[0] : "no output");
+
+            AssetBundle ab = AssetBundle.LoadFromFile(built[0]);
+            Check(ab != null, "built bundle loads in the editor");
+            if (ab != null)
+            {
+                bool hasManifest = false;
+                foreach (string n in ab.GetAllAssetNames())
+                    if (n.EndsWith(".dfmod.json")) hasManifest = true;
+                Check(hasManifest, "bundle carries its manifest (Mod ctor requires it)");
+
+                // Exactly the lookup ModManager.TryGetAsset does at runtime.
+                Check(ab.Contains("PICK03I0.IMG"), "bundle answers to the runtime texture name");
+                var tex = ab.LoadAsset<Texture2D>("PICK03I0.IMG");
+                Check(tex != null && tex.width == 320 && tex.height == 200,
+                      "replacement texture loads at 320x200",
+                      tex ? tex.width + "x" + tex.height : "null");
+                ab.Unload(true);
+            }
+
+            // Script mods must be refused loudly, not built silently.
+            Directory.CreateDirectory(outRoot);
+            string scriptManifest = Path.Combine(outRoot, "script-mod.dfmod.json");
+            File.WriteAllText(scriptManifest,
+                "{\"ModTitle\":\"Script Mod\",\"GUID\":\"test-script-mod\"," +
+                "\"Files\":[\"Assets/Fake/Thing.cs\"]}");
+            bool refused = false;
+            try { MobileModBuilder.BuildMod(scriptManifest, outRoot, new[] { BuildTarget.StandaloneOSX }); }
+            catch (System.NotSupportedException) { refused = true; }
+            Check(refused, "builder refuses script mods (no JIT on iOS)");
+
+            Directory.Delete(outRoot, true);
         }
 
         /// <summary>
