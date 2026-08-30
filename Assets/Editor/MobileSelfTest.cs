@@ -17,6 +17,7 @@
 // Place in Assets/Editor/
 
 using DaggerfallWorkshop.Game.Mobile;
+using DaggerfallWorkshop.Game.Utility.ModSupport;
 using DaggerfallWorkshop.Utility.AssetInjection;
 using System.IO;
 using System.Text;
@@ -76,6 +77,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestRoadsInstallSurvivesSceneSwap();
             TestModsSwitchOwnsBothPrefs();
             TestModBundleRoundTrip();
+            TestModScriptSkipRule();
             TestRoadDirectionReciprocity();
             TestRoadRouting();
             TestWaypointOvershoot();
@@ -1058,6 +1060,22 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(refused, "builder refuses script mods (no JIT on iOS)");
 
             Directory.Delete(outRoot, true);
+        }
+
+        /// <summary>
+        /// The engine-side half of the same rule: iOS runs IL2CPP, so mod scripts can be
+        /// neither compiled from source nor Assembly.Load-ed. The guard must fire only for
+        /// mods that actually carry sources, leaving asset-only mods completely alone.
+        /// </summary>
+        static void TestModScriptSkipRule()
+        {
+            // iOS runs IL2CPP: no JIT, so mod scripts can be neither compiled nor loaded.
+            // Asset-only mods (sources == 0) must be untouched by the guard.
+            Check(!Mod.ShouldSkipScriptCompilation(0, true), "asset-only mod, JIT: no skip");
+            Check(!Mod.ShouldSkipScriptCompilation(0, false), "asset-only mod, no JIT: no skip");
+            Check(!Mod.ShouldSkipScriptCompilation(2, true), "script mod, JIT: compiles");
+            Check(Mod.ShouldSkipScriptCompilation(2, false), "script mod, no JIT: skips");
+            Check(Mod.RuntimeScriptsSupported, "editor/desktop supports mod scripts");
         }
 
         /// <summary>

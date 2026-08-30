@@ -173,6 +173,24 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
         public bool IsVirtual { get; private set; }
 #endif
 
+        // MOBILE: script support decision, split out so the editor self-test can pin it.
+        public static bool RuntimeScriptsSupported
+        {
+            get
+            {
+#if UNITY_IOS && !UNITY_EDITOR
+                return false;
+#else
+                return true;
+#endif
+            }
+        }
+
+        public static bool ShouldSkipScriptCompilation(int sourceCount, bool scriptsSupported)
+        {
+            return sourceCount > 0 && !scriptsSupported;
+        }
+
         #endregion
 
         #region Constructors
@@ -945,6 +963,16 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
             if (IsVirtual)
                 return null;
 #endif
+
+            // MOBILE: iOS runs IL2CPP with no JIT - mod scripts can be neither compiled from
+            // source nor Assembly.Load-ed. Skip cleanly so an asset-only mod is unaffected and
+            // a script mod degrades to its assets instead of throwing per source file.
+            if (ShouldSkipScriptCompilation(sources.Count, RuntimeScriptsSupported))
+            {
+                Debug.LogWarning(string.Format(
+                    "[Mod] {0}: script mods are not supported on this platform (no JIT); loading assets only.", Title));
+                return null;
+            }
 
             List<string> stringSource = new List<string>(sources.Count);
             Assembly assembly;
