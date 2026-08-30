@@ -171,9 +171,18 @@ namespace DaggerfallWorkshop.Game.Mobile
                 v => { if (lookZone != null) lookZone.cornerDeadMarginInches = v; },
                 "palm", "0.00");
 
+            // Also refreshes the input layers: direct touch decides whether a cursor
+            // sprite is drawn at all, and relative mode needs its cursor back.
             AddToggle(panel, ref y, rowH, "Direct touch in menus",
                 () => controller != null && controller.virtualMouse != null && controller.virtualMouse.absoluteMode,
-                v => { if (controller != null && controller.virtualMouse != null) controller.virtualMouse.absoluteMode = v; },
+                v =>
+                {
+                    if (controller == null || controller.virtualMouse == null)
+                        return;
+
+                    controller.virtualMouse.absoluteMode = v;
+                    controller.RefreshInputLayers();
+                },
                 "directtouch");
 
             AddToggle(panel, ref y, rowH, "Invert look Y",

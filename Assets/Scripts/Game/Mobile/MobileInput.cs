@@ -197,6 +197,23 @@ namespace DaggerfallWorkshop.Game.Mobile
             return inches * Dpi;
         }
 
+        /// <summary>
+        /// True while the touch layer owns input: touch controls are enabled and nothing
+        /// else has taken the pointer - no gamepad, no hardware keyboard, no trackpad.
+        /// Maintained by MobileInputController.ApplyHudVisibility, the single place that
+        /// decides which input layer is live.
+        /// </summary>
+        public static bool TouchInputActive { get; set; }
+
+        /// <summary>
+        /// Whether to actually draw the virtual cursor sprite.
+        ///
+        /// Separate from VirtualCursorActive, which must stay on for touch to reach the
+        /// classic UI at all - it is what routes MousePosition and the mouse buttons
+        /// through the touch layer. This only governs whether anything is painted.
+        /// </summary>
+        public static bool VirtualCursorVisible { get; set; } = true;
+
         /// <summary>Cursor texture drawn by InputManager.OnGUI. Assigned by MobileInputController.</summary>
         public static Texture2D CursorTexture { get; set; }
         public static int CursorWidth { get; set; }
@@ -398,6 +415,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         public static void Relinquish()
         {
             VirtualCursorActive = false;
+            VirtualCursorVisible = true;
+            TouchInputActive = false;
             KeyboardActive = false;
             PointerActive = false;
             PointerAtEdge = false;

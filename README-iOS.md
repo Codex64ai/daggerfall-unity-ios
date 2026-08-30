@@ -19,7 +19,10 @@ making the game playable on iPhone and iPad without a keyboard or mouse.
 - **Action buttons** - Activate, Weapon, Spell, Jump, Crouch always visible; Pause
   (save/load), Inventory, Status, Map, Rest and settings behind one MENU button
 - **Direct touch in the classic menus** - tap a button to click it; the original 1996
-  windows (inventory, spellbook, travel map, dialogue) were not rebuilt
+  windows (inventory, spellbook, travel map, dialogue) were not rebuilt. No cursor is
+  drawn: the finger is the pointer, so touch is the whole interface. Switching **TUNE ->
+  Direct touch in menus** off gives trackpad-style relative movement, which brings the
+  cursor back because it is then the only thing showing where a tap will land.
 - **On-screen keyboard** appears automatically for text fields (character name etc.)
 - **Metal colour fix** - extends Daggerfall Unity's macOS colour-space correction to iOS,
   fixing washed-out videos, weapon sprites and fonts (same Metal API, same bug)

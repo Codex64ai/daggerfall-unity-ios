@@ -611,11 +611,26 @@ namespace DaggerfallWorkshop.Game
         {
             // MOBILE: draw the virtual cursor in the same IMGUI layer as the classic UI
             // so it composites correctly over every window.
-            if (Mobile.MobileInput.VirtualCursorActive && Mobile.MobileInput.CursorTexture != null)
+            if (Mobile.MobileInput.VirtualCursorActive)
+            {
+                // Unconditional, and before the draw test: the touch layer owns the
+                // pointer whether or not a sprite is painted for it, and falling through
+                // to the branches below would turn the system cursor back on.
+                Cursor.visible = false;
+
+                if (Mobile.MobileInput.VirtualCursorVisible && Mobile.MobileInput.CursorTexture != null)
+                {
+                    GUI.depth = 0;
+                    GUI.DrawTexture(Mobile.MobileInput.CursorRect, Mobile.MobileInput.CursorTexture);
+                }
+                return;
+            }
+
+            // MOBILE: gameplay, where there is no virtual cursor to route. Touch controls
+            // are the whole interface, so nothing should be drawing a pointer over them.
+            if (Mobile.MobileInput.TouchInputActive)
             {
                 Cursor.visible = false;
-                GUI.depth = 0;
-                GUI.DrawTexture(Mobile.MobileInput.CursorRect, Mobile.MobileInput.CursorTexture);
                 return;
             }
 
