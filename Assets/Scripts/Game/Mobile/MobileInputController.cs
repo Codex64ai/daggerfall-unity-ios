@@ -986,6 +986,23 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (directTouchActive)
                 inputSystemEventDelta = Vector2.zero;
 
+            // A real finger takes ownership immediately. Do not first publish the
+            // still-live Magic Keyboard pointer: MobileInput.UpdatePointer preserves
+            // an active pointer until it is explicitly relinquished, and publishing
+            // it here leaves the HUD hidden while the finger is already on the glass.
+            // The direct-touch path below will process the same touch and lets the
+            // joystick/look-zone ownership rules decide where it belongs.
+            if (directTouchPresent)
+            {
+                if (MobileInput.PointerActive)
+                {
+                    MobileInput.PointerActive = false;
+                    MobileInput.PointerDelta = Vector2.zero;
+                    ApplyHudVisibility();
+                }
+                pointerRead = false;
+            }
+
             if (pointerRead)
             {
                 MobileInput.PointerAtEdge = nativeAtEdge;
