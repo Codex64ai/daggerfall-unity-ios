@@ -41,10 +41,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         public bool absoluteMode = true;
 
         [Header("Tap / Hold")]
-        [Tooltip("Longest touch duration that still counts as a tap.")]
-        public float tapMaxDuration = 0.22f;
-
-        [Tooltip("Largest travel for a tap, as a fraction of screen height.")]
+        [Tooltip("Largest travel for a tap, as a fraction of screen height. A tap is " +
+                 "decided by how far the finger moved, not how long it was down - " +
+                 "holdToDragDelay below is what separates a tap from a drag.")]
         [Range(0.004f, 0.08f)] public float tapMaxTravel = 0.02f;
 
         [Tooltip("Stationary hold that latches the left button down, for scrollbars and sliders.")]
@@ -278,9 +277,19 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
             else
             {
-                bool wasTap = (Time.unscaledTime - primaryStartTime) <= tapMaxDuration &&
-                              primaryTravel <= tapMaxTravel * Screen.height;
-                if (wasTap)
+                // Travel decides a tap, not duration.
+                //
+                // There used to be a tapMaxDuration of 0.22s as well, which left a dead
+                // band up to holdToDragDelay at 0.32s: a touch lifted in that window was
+                // too slow to count as a tap and too quick to have latched, so it emitted
+                // nothing at all. A press that lands on a province and lifts a quarter of
+                // a second later is an ordinary tap, and it did nothing.
+                //
+                // Duration is not needed to tell the two apart: a stationary hold long
+                // enough to matter has already latched by holdToDragDelay and taken the
+                // branch above, and a touch that wandered fails the travel test whatever
+                // its duration.
+                if (primaryTravel <= tapMaxTravel * Screen.height)
                     MobileInput.QueueClick(0);
             }
 

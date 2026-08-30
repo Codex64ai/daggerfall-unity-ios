@@ -214,6 +214,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         bool keyboardActive;
         bool pointerPositionInitialized;
         bool indirectPointerActive;
+        bool touchCursorWasDriving;
 #if UNITY_IOS && !UNITY_EDITOR
         float directTouchSince = -1f;
 #endif
@@ -880,8 +881,33 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             // Touch-only from here. The virtual cursor must stand down for a controller
             // (InputManager drives its own cursor instead) and video-skip needs live touches.
-            if (!touchUIEnabled || controllerConnected || keyboardActive || MobileInput.PointerActive)
+            bool touchDrivesCursor = touchUIEnabled && !controllerConnected && !keyboardActive &&
+                                     !MobileInput.PointerActive;
+
+            // A GESTURE IN FLIGHT CANNOT BE ENDED BY A LAYER THAT IS NO LONGER POLLED.
+            //
+            // VirtualMouseCursor latches the left button down after a third of a second of
+            // stationary contact, and only EndPrimary releases it - which runs from
+            // PollTouches, below this return. So a hand still on the glass when a key is
+            // typed, a gamepad appears, or the trackpad moves left the button latched with
+            // no finger holding it, and TickButtons re-asserted it every frame afterwards.
+            // With the button already down no press can produce a down edge, and a down
+            // edge is the whole of a click: touch went dead and stayed dead. The capture
+            // shows twenty-second stretches of held=True with touches=0.
+            //
+            // End the gesture on the way out instead. ResetGesture clears both sides -
+            // MobileInput's latch and the cursor's own buttonLatched - which ResetButtons
+            // alone does not, and that desync ate the tap after every handover.
+            if (!touchDrivesCursor)
+            {
+                if (touchCursorWasDriving && virtualMouse != null)
+                    virtualMouse.ResetGesture();
+
+                touchCursorWasDriving = false;
                 return;
+            }
+
+            touchCursorWasDriving = true;
 
             if (virtualMouse != null && MobileInput.MenuMode)
             {
