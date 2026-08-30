@@ -1682,7 +1682,7 @@ MonoBehaviour:
   action: 0
   pressMode: 0
   cyclesInteractionMode: 0
-  sendsUiBackButton: 0
+   sendsUiBackButton: 1
   tintTarget: {fileID: 485676179}
   pressedColor: {r: 1, g: 0.85, b: 0.4, a: 1}
   haptic: 0

@@ -273,9 +273,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // the whole screen. Two crosshairs, and the wrong one was untextured.
 
             // ---------------------------------------------------------- menu back button
-            CreateActionButton(menuLayer, "MenuBackButton", "BACK",
+            GameObject menuBackGo = CreateActionButton(menuLayer, "MenuBackButton", "BACK",
                 InputManager.Actions.Escape, MobileActionButton.PressMode.Tap,
                 new Vector2(0f, 1f), new Vector2(120f, -90f), new Vector2(160f, 110f));
+            // Classic windows read their close signal through InputManager.GetBackButtonUp(),
+            // not through the regular Actions.Escape path. Keep this explicit so rebuilding
+            // the HUD does not recreate the inert return button.
+            menuBackGo.GetComponent<MobileActionButton>().sendsUiBackButton = true;
 
             // ---------------------------------------------------------- settings gear
             // Inside the drawer: settings are not a moment-to-moment control.
