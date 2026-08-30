@@ -398,6 +398,21 @@ every failure here falls back to the original music rather than to silence.
 Loose textures import uncompressed, because the runtime PNG loader cannot compress. A
 large texture pack will use considerably more memory on iOS than it does on desktop.
 
+## Installing mods
+
+Mods load from the app's `Documents/Mods` folder - put `.dfmod` files there with the
+Files app (On My iPad > DFU Test > Mods), the same way as `arena2`. New mods start
+enabled; manage them from the launcher's MODS window.
+
+Two iOS-specific rules:
+
+- **A `.dfmod` must be built for iOS.** Bundles from Nexus are Windows/Linux/Mac builds
+  and will not load. Mods have to be rebuilt from their source assets with the Daggerfall
+  Unity Mod Builder with the iOS target ticked (this fork's Mod Builder has it), or with
+  the headless builder: `-executeMethod DaggerfallWorkshop.Game.Mobile.EditorTools.MobileModBuilder.BuildFromEnv`.
+- **Asset mods only.** Mods that ship C# scripts need a JIT compiler, which iOS forbids;
+  their scripts are skipped (assets still load). Texture/sound/model packs work.
+
 ## Diagnostics
 
 Two small logs are written into the app's Documents folder, alongside `arena2`. Both are
