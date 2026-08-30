@@ -29,9 +29,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         public Canvas canvas;
         public GameObject gameplayLayer;
 
-        // MenuToggle is the way back into the drawer; Tune is the way back into settings
-        // (and this editor). Hiding either would strand the player.
-        static readonly HashSet<string> neverHide = new HashSet<string> { "MenuToggle", "Tune" };
+        // MenuToggle is the way back into the drawer; hiding it would strand the player.
+        // (Settings used to have a gear here too; it now lives in the pause menu.)
+        static readonly HashSet<string> neverHide = new HashSet<string> { "MenuToggle" };
 
         RectTransform overlay;
         RectTransform highlight;

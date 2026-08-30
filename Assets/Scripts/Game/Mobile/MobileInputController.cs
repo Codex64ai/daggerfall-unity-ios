@@ -109,11 +109,11 @@ namespace DaggerfallWorkshop.Game.Mobile
         public int cursorHeight = 32;
 
         [Header("Weapon Swing Mode")]
-        [Tooltip("Force WeaponSwingMode 0 (hold-and-drag gestures). Required for swipe attacks: " +
-                 "modes 1 and 2 are click-to-attack and pick a RANDOM direction, discarding the " +
-                 "swipe. Mode 0 is also classic Daggerfall behaviour, so this does not disadvantage " +
-                 "keyboard players - but it DOES overwrite the setting in settings.ini, so turn it " +
-                 "off if you want to keep your own choice.")]
+        [Tooltip("Impose WeaponSwingMode 0 (hold-and-drag gestures) WHILE TOUCH IS SWINGING. " +
+                 "Swipe attacks need it: modes 1 and 2 are click-to-attack and pick a RANDOM " +
+                 "direction, discarding the swipe. The moment a mouse, keyboard or pad is driving, " +
+                 "the player's own launcher choice comes back - so click-to-attack works with a " +
+                 "mouse. Off = never touch the setting.")]
         public bool forceGestureSwingMode = true;
 
         [Header("Auto Combat")]
@@ -177,11 +177,24 @@ namespace DaggerfallWorkshop.Game.Mobile
         Vector2 lastPointerDelta;
         string lastTouchTypes = "-";
 
-        // Master switch for the touch interface, requested for mouse/keyboard-first players.
-        // Persisted here rather than through the settings panel's own pref plumbing because
-        // the HUD must honour it before the panel has ever been built.
-        const string touchControlsPref = "DFMobile.touchcontrols";
-        bool touchControlsEnabled = true;
+        // The player's declared input mode. Persisted here rather than through the settings
+        // panel's own pref plumbing because the HUD must honour it before the panel has ever
+        // been built. The legacy "touch controls off" toggle migrates to KeyboardMouse.
+        const string inputModePref = "DFMobile.inputmode";
+        const string legacyTouchControlsPref = "DFMobile.touchcontrols";
+        MobileInputMode inputMode = MobileInputMode.Auto;
+
+        // RAW detection, before the mode has its say. controllerConnected, keyboardActive and
+        // mouseActive above are the EFFECTIVE values the rest of the layer acts on - the
+        // polls detect into these, then MobileInput.ResolveInput decides.
+        bool controllerDetected;
+        bool keyboardDetected;
+        bool mouseDetected;
+
+        // The swing mode the player chose (launcher / controls window). Touch imposes 0 only
+        // while it is the thing swinging; see ApplySwingMode.
+        int userSwingMode;
+        int appliedSwingMode = -1;
         float vidHoldStart = -1f;
         bool vidSkipQueued;
         float swingHoldUntil;
@@ -209,7 +222,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         void Awake()
         {
-            touchControlsEnabled = PlayerPrefs.GetInt(touchControlsPref, 1) == 1;
+            inputMode = LoadInputMode();
             // A second controller (e.g. one placed in both scenes) would clobber the
             // singleton and then reset globals when it was torn down.
             if (instance != null && instance != this)
@@ -247,16 +260,15 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         void Start()
         {
-            // Gesture swings require WeaponSwingMode 0 (hold-and-drag). Modes 1 and 2
-            // are click-to-attack, which picks a RANDOM direction in WeaponManager.cs:345
-            // and would discard the swipe direction entirely.
-            if (forceGestureSwingMode && DaggerfallUnity.Settings.WeaponSwingMode != 0)
-            {
-                Debug.Log("[MobileInput] forcing WeaponSwingMode 0 (was " +
-                          DaggerfallUnity.Settings.WeaponSwingMode +
-                          ") - required for directional swipe attacks");
-                DaggerfallUnity.Settings.WeaponSwingMode = 0;
-            }
+            // The swing mode the player chose in the launcher (or the controls window). It
+            // used to be overwritten with 0 here for everyone, which is why "click to attack"
+            // never worked with a mouse: the setting was gone before the first swing. Now
+            // touch imposes 0 only while it is the thing swinging - see ApplySwingMode.
+            userSwingMode = DaggerfallUnity.Settings.WeaponSwingMode;
+            ApplySwingMode();
+
+            // Mobile Settings lives in the pause menu; the window subclass adds the button.
+            MobilePauseOptionsWindow.Register();
 
             ApplyAttackThreshold();
 
@@ -426,25 +438,28 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         void PollKeyboard()
         {
-            if (!autoHideOnKeyboard)
-                return;
-
-            // Any touch means the player is back on the glass.
-            if (Input.touchCount > 0)
+            if (autoHideOnKeyboard)
             {
-                if (keyboardActive)
-                    SetKeyboardActive(false);
-                return;
+                // Any touch means the player is back on the glass.
+                if (Input.touchCount > 0)
+                {
+                    keyboardDetected = false;
+                }
+                // DEVICE-PROVEN FIX: on iOS, Input.anyKeyDown fires for TOUCHES, and at
+                // frame boundaries between touches it latched keyboard mode with no keyboard
+                // attached - force-releasing both joysticks mid-grab. That was the entire
+                // "sticks are inconsistent" bug. Detect keyboards by the one signal only a
+                // real keyboard produces: typed characters. Touches, trackpads and styluses
+                // never populate Input.inputString.
+                else if (!keyboardDetected && Input.inputString.Length > 0)
+                {
+                    keyboardDetected = true;
+                }
             }
 
-            // DEVICE-PROVEN FIX: on iOS, Input.anyKeyDown fires for TOUCHES, and at
-            // frame boundaries between touches it latched keyboard mode with no keyboard
-            // attached - force-releasing both joysticks mid-grab. That was the entire
-            // "sticks are inconsistent" bug. Detect keyboards by the one signal only a
-            // real keyboard produces: typed characters. Touches, trackpads and styluses
-            // never populate Input.inputString.
-            if (!keyboardActive && Input.inputString.Length > 0)
-                SetKeyboardActive(true);
+            bool want = Effective.Keyboard;
+            if (want != keyboardActive)
+                SetKeyboardActive(want);
         }
 
         /// <summary>
@@ -469,6 +484,21 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (Application.isEditor)
                 return;
 
+            DetectMouse();
+
+            bool want = Effective.Mouse;
+            if (want != mouseActive)
+                SetMouseActive(want);
+
+            // A pointer nobody is listening to (Touch or Controller mode) must not bank its
+            // movement: switching back to Auto later would release it all as one jerk.
+            if (!want && MobilePointer.Supported)
+                MobilePointer.ConsumeDelta();
+        }
+
+        /// <summary>Raw pointer detection into mouseDetected; the mode decides what to do with it.</summary>
+        void DetectMouse()
+        {
             bool plugin = MobilePointer.Supported;
             bool anyButton = plugin && MobilePointer.AnyButton;
 
@@ -487,13 +517,12 @@ namespace DaggerfallWorkshop.Game.Mobile
 
                 if (finger)
                 {
-                    if (mouseActive)
-                        SetMouseActive(false);
+                    mouseDetected = false;
                     return;
                 }
             }
 
-            if (mouseActive)
+            if (mouseDetected)
                 return;
 
             if (plugin)
@@ -505,7 +534,7 @@ namespace DaggerfallWorkshop.Game.Mobile
                 // keeps the first real movement from arriving as one accumulated jerk.
                 bool moved = MobilePointer.ConsumeDelta().sqrMagnitude > 0f;
                 if (moved || anyButton)
-                    SetMouseActive(true);
+                    mouseDetected = true;
                 return;
             }
 
@@ -514,7 +543,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (Mathf.Abs(Input.GetAxisRaw("Mouse X")) > 0.01f ||
                 Mathf.Abs(Input.GetAxisRaw("Mouse Y")) > 0.01f)
             {
-                SetMouseActive(true);
+                mouseDetected = true;
             }
         }
 
@@ -680,34 +709,78 @@ namespace DaggerfallWorkshop.Game.Mobile
         public bool MouseActive { get { return mouseActive; } }
 
         /// <summary>
-        /// The touch interface as a whole. OFF hides the touch HUD and stops the touch pumps,
-        /// for players driving the game with a mouse and keyboard.
-        ///
-        /// THE ESCAPE HATCH MATTERS: the TUNE gear lives on the touch HUD, so a touch-only
-        /// player who turns this off has just removed the only control that could turn it
-        /// back on. A four-finger tap - a gesture nothing else in the port uses - restores it.
-        /// Without that, this toggle is a soft brick on any iPad without a paired mouse.
+        /// What the mode makes of the raw detection. Recomputed on demand - it is a handful of
+        /// booleans - so every decision in the layer reads the same table.
         /// </summary>
-        public bool TouchControlsEnabled
+        EffectiveInput Effective
         {
-            get { return touchControlsEnabled; }
+            get { return MobileInput.ResolveInput(inputMode, controllerDetected, keyboardDetected, mouseDetected); }
+        }
+
+        /// <summary>
+        /// The player's declared input mode (Mobile Settings > Input). Setting it re-runs every
+        /// decision immediately rather than on the next poll tick, so the HUD and pumps flip
+        /// the frame the row is tapped.
+        ///
+        /// THE ESCAPE HATCH MATTERS: with touch stood down there is nothing on screen that can
+        /// bring it back, and the pause menu that holds Mobile Settings needs a pad or keyboard
+        /// to open. A four-finger tap - a gesture nothing else in the port uses - returns to
+        /// Touch. Without it, KeyboardMouse or Controller is a soft brick on an iPad whose
+        /// accessory has just been unplugged.
+        /// </summary>
+        public MobileInputMode InputMode
+        {
+            get { return inputMode; }
             set
             {
-                touchControlsEnabled = value;
-                PlayerPrefs.SetInt(touchControlsPref, value ? 1 : 0);
+                if (inputMode == value)
+                    return;
+
+                inputMode = value;
+                PlayerPrefs.SetInt(inputModePref, (int)value);
                 PlayerPrefs.Save();
+                Debug.Log("[MobileInput] input mode -> " + value);
+
+                nextControllerPoll = 0f;
+                PollController();
+
+                bool wantKeyboard = Effective.Keyboard;
+                if (wantKeyboard != keyboardActive)
+                    SetKeyboardActive(wantKeyboard);
+
+                bool wantMouse = Effective.Mouse;
+                if (wantMouse != mouseActive)
+                    SetMouseActive(wantMouse);
+
                 ApplyHudVisibility();
             }
         }
 
+        static MobileInputMode LoadInputMode()
+        {
+            if (PlayerPrefs.HasKey(inputModePref))
+            {
+                int raw = PlayerPrefs.GetInt(inputModePref, 0);
+                if (raw >= (int)MobileInputMode.Auto && raw <= (int)MobileInputMode.Controller)
+                    return (MobileInputMode)raw;
+                return MobileInputMode.Auto;
+            }
+
+            // Pre-mode builds had a single "touch controls" switch; off meant mouse and keyboard.
+            if (PlayerPrefs.GetInt(legacyTouchControlsPref, 1) == 0)
+                return MobileInputMode.KeyboardMouse;
+
+            return MobileInputMode.Auto;
+        }
+
         void PollTouchRestoreGesture()
         {
-            if (touchControlsEnabled)
+            if (Effective.TouchHud)
                 return;
 
             if (Input.touchCount >= 4)
             {
-                TouchControlsEnabled = true;
+                InputMode = MobileInputMode.Touch;
                 DaggerfallUI.AddHUDText("Touch controls restored.", 2f);
             }
         }
@@ -744,7 +817,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         void PollController()
         {
-            if (!autoDetectController || Time.unscaledTime < nextControllerPoll)
+            if (Time.unscaledTime < nextControllerPoll)
                 return;
 
             nextControllerPoll = Time.unscaledTime + Mathf.Max(controllerPollInterval, 0.1f);
@@ -767,16 +840,20 @@ namespace DaggerfallWorkshop.Game.Mobile
                 }
             }
 
-            bool found = false;
-            string[] names = Input.GetJoystickNames();
+            controllerDetected = false;
+            string[] names = autoDetectController ? Input.GetJoystickNames() : new string[0];
             for (int i = 0; i < names.Length; i++)
             {
                 if (!string.IsNullOrEmpty(names[i]))
                 {
-                    found = true;
+                    controllerDetected = true;
                     break;
                 }
             }
+
+            // Raw detection in, the mode's verdict out: Touch ignores a phantom pad,
+            // Controller is on with nothing listed.
+            bool found = Effective.Controller;
             // Kept for the log line below: on iPadOS Unity can list things that are not
             // gamepads (the iOS 26 Simulator reports one with nothing attached), and a
             // phantom "controller" hides the touch HUD. Only computed on a state change.
@@ -833,11 +910,36 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// <summary>Single place that decides which HUD layer is visible.</summary>
         void ApplyHudVisibility()
         {
-            bool touchAllowed = touchControlsEnabled && !controllerConnected && !keyboardActive && !mouseActive;
+            bool touchAllowed = Effective.TouchHud;
             bool menu = MobileInput.Mode == MobileControlMode.Menu;
 
             SetLayer(gameplayLayer, touchAllowed && !menu);
             SetLayer(menuLayer, touchAllowed && menu);
+
+            // Whoever now drives gameplay decides how a swing is made.
+            ApplySwingMode();
+        }
+
+        /// <summary>
+        /// Hold-and-drag (0) while touch swings, the player's own choice otherwise, and always
+        /// the player's own choice while a classic window is open so settings.ini can only
+        /// ever be written with their value. See MobileInput.ResolveSwingMode.
+        /// </summary>
+        void ApplySwingMode()
+        {
+            if (!forceGestureSwingMode)
+                return;
+
+            int want = MobileInput.ResolveSwingMode(userSwingMode, Effective.TouchHud, MobileInput.MenuMode);
+            if (DaggerfallUnity.Settings.WeaponSwingMode != want)
+                DaggerfallUnity.Settings.WeaponSwingMode = want;
+
+            if (appliedSwingMode != want)
+            {
+                appliedSwingMode = want;
+                Debug.Log("[MobileInput] WeaponSwingMode -> " + want +
+                          (want == 0 && userSwingMode != 0 ? " (touch swipes; player's choice " + userSwingMode + " returns with a pointer or pad)" : ""));
+            }
         }
 
         public bool ControllerConnected { get { return controllerConnected; } }
@@ -898,13 +1000,13 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
 
             string text = "ui hit: " + uiHit + "\n" + sticks + "\n" + string.Format(
-                "mode {0}  gamepad {6}\nswipe {1:0.00}in x scale {2:0.000}  dpi {7:0}\nAttackThreshold {3:0.0000}\nswinging {4}\nrequired swipe ~{5:0} px",
+                "mode {0}  input {8}  gamepad {6}  swing {9}\nswipe {1:0.00}in x scale {2:0.000}  dpi {7:0}\nAttackThreshold {3:0.0000}\nswinging {4}\nrequired swipe ~{5:0} px",
                 MobileInput.Mode, swipeDistanceInches, touchToMouseScale, threshold,
                 Time.unscaledTime < swingHoldUntil,
                 touchToMouseScale > 0f
                     ? threshold * Mathf.Max(Screen.width, Screen.height) / touchToMouseScale
                     : 0f,
-                controllerConnected, MobileInput.Dpi);
+                controllerConnected, MobileInput.Dpi, inputMode, DaggerfallUnity.Settings.WeaponSwingMode);
 
             text += string.Format(
                 "\npointer: plugin {0}  connected {1}  active {2}  lock req {3} / actual {4}\n" +
@@ -996,6 +1098,11 @@ namespace DaggerfallWorkshop.Game.Mobile
 
                 MobileInput.VirtualCursorActive = false;
                 MobileKeyboard.Dismiss();
+
+                // A window was open, so the setting held the player's value the whole time -
+                // including any change they just made in the controls screen. Take it before
+                // touch imposes its own again.
+                userSwingMode = DaggerfallUnity.Settings.WeaponSwingMode;
 
                 ApplyHudVisibility();
             }
@@ -1173,7 +1280,7 @@ namespace DaggerfallWorkshop.Game.Mobile
                 return;
             }
 
-            if (!touchControlsEnabled || keyboardActive)
+            if (!Effective.TouchHud)
                 return;
 
             PumpMovement(inputManager);

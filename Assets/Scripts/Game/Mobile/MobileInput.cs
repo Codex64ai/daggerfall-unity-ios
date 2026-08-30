@@ -24,6 +24,31 @@ namespace DaggerfallWorkshop.Game.Mobile
         Menu,
     }
 
+    /// <summary>
+    /// The player's declared way of playing. Auto is the behaviour the port shipped with:
+    /// detect a pad, keyboard or pointer and stand touch down while it is used. The other
+    /// three are overrides for when detection gets it wrong - a keyboard case that reports
+    /// as a joystick, a trackpad the player never touches, a pad they want to keep using
+    /// while a mouse is plugged in. Persisted by MobileInputController.
+    /// </summary>
+    public enum MobileInputMode
+    {
+        Auto = 0,
+        Touch = 1,
+        KeyboardMouse = 2,
+        Controller = 3,
+    }
+
+    /// <summary>What the input layer should act on, after the mode has had its say.</summary>
+    public struct EffectiveInput
+    {
+        /// <summary>Touch HUD shown and the touch pumps drive the game.</summary>
+        public bool TouchHud;
+        public bool Controller;
+        public bool Keyboard;
+        public bool Mouse;
+    }
+
     public static class MobileInput
     {
         #region State
@@ -89,6 +114,63 @@ namespace DaggerfallWorkshop.Game.Mobile
         public static bool PhysicalInputActive
         {
             get { return ControllerActive || KeyboardActive || MouseActive; }
+        }
+
+        /// <summary>
+        /// The single decision table for "who is driving". Pure, so the self-test can walk it.
+        ///
+        /// Auto            - detection rules; touch stands down while anything physical is used.
+        /// Touch           - touch always; detection is ignored entirely. A phantom joystick
+        ///                   or an idle trackpad can no longer hide the HUD or steal the pumps.
+        /// KeyboardMouse   - touch HUD off; a connected pointer drives look and cursor;
+        ///                   the keyboard counts as in use even between keystrokes (so a
+        ///                   stray touch does not flip the HUD back on).
+        /// Controller      - touch HUD off; the pad path is on whether or not Unity lists one.
+        /// </summary>
+        public static EffectiveInput ResolveInput(MobileInputMode mode,
+            bool controllerDetected, bool keyboardDetected, bool mouseDetected)
+        {
+            EffectiveInput e = new EffectiveInput();
+            switch (mode)
+            {
+                case MobileInputMode.Touch:
+                    e.TouchHud = true;
+                    break;
+
+                case MobileInputMode.KeyboardMouse:
+                    e.Keyboard = true;
+                    e.Mouse = mouseDetected;
+                    break;
+
+                case MobileInputMode.Controller:
+                    e.Controller = true;
+                    break;
+
+                default:
+                    e.Controller = controllerDetected;
+                    e.Keyboard = keyboardDetected;
+                    e.Mouse = mouseDetected;
+                    e.TouchHud = !(e.Controller || e.Keyboard || e.Mouse);
+                    break;
+            }
+            return e;
+        }
+
+        /// <summary>
+        /// Which WeaponSwingMode the engine should see. Touch swipes need mode 0 (hold and
+        /// drag: the drag IS the strike direction; modes 1 and 2 pick a random one), so mode
+        /// 0 is imposed only while touch drives gameplay. Everyone else - mouse, keyboard, pad -
+        /// gets the mode they chose in the launcher, which is where "click to attack" lives.
+        ///
+        /// Never while a classic window is open: settings.ini is only ever written from
+        /// windows (pause menu, controls screens), and the value on disk must be the player's,
+        /// not our override. Nothing swings with a window open anyway.
+        /// </summary>
+        public static int ResolveSwingMode(int userMode, bool touchDrivesGameplay, bool menuOpen)
+        {
+            if (touchDrivesGameplay && !menuOpen)
+                return 0;
+            return userMode;
         }
 
         /// <summary>

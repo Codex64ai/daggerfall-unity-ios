@@ -277,20 +277,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 InputManager.Actions.Escape, MobileActionButton.PressMode.Tap,
                 new Vector2(0f, 1f), new Vector2(120f, -90f), new Vector2(160f, 110f));
 
-            // ---------------------------------------------------------- settings gear
-            // Inside the drawer: settings are not a moment-to-moment control.
-            GameObject gearGo = CreateChild(drawerGo, "SettingsGear");
-            RectTransform gearRect = (RectTransform)gearGo.transform;
-            Anchor(gearRect, new Vector2(1f, 0f), new Vector2(1f, 0f), new Vector2(1f, 0f));
-            gearRect.sizeDelta = new Vector2(150f, 150f);
-            Image gearImg = gearGo.AddComponent<Image>();
-            gearImg.color = new Color(1f, 1f, 1f, 0.28f);
-            Button gearButton = gearGo.AddComponent<Button>();
-            AddLabel(gearGo, "TUNE");
-
-            // ---------------------------------------------------------- tuning panel
-            // Parented to the canvas, not GameplayLayer, so it stays reachable when the
-            // gameplay HUD is hidden behind a classic menu.
+            // ---------------------------------------------------------- settings panel
+            // No gear on the HUD any more: Mobile Settings is a button in the pause menu
+            // (MobilePauseOptionsWindow), reachable by touch, mouse, keyboard and pad alike.
+            // Parented to the canvas, not GameplayLayer, so it stays visible while the
+            // gameplay HUD is hidden behind the classic menus it is opened from.
             GameObject panelHost = CreateFullScreenChild(canvasGo, "SettingsHost");
             MobileSettingsPanel settingsPanel = panelHost.AddComponent<MobileSettingsPanel>();
             MobileLayoutEditor layoutEditor = panelHost.AddComponent<MobileLayoutEditor>();
@@ -399,8 +390,6 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                      classicHidden: true),
                 Elem("Rest",      secondaryRects["REST"],      0.48f, 0f, new Vector2(0.20f, 4.93f),
                      classicHidden: true),
-                Elem("Tune",      gearRect,                    0.48f, 0f, new Vector2(0.20f, 5.46f),
-                     classicMarginIn: new Vector2(0.28f, 4.07f), classicWidthIn: 0.45f),
             };
 
             settingsPanel.controller = controller;
@@ -412,11 +401,6 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             layoutEditor.layout = layout;
             layoutEditor.canvas = canvas;
             layoutEditor.gameplayLayer = gameplayLayer;
-
-            UnityEditor.Events.UnityEventTools.AddPersistentListener(
-                gearButton.onClick, settingsPanel.Toggle);
-            UnityEditor.Events.UnityEventTools.AddPersistentListener(
-                gearButton.onClick, drawer.Close);
 
             // Hidden until MENU is pressed. Done last so children exist first.
             drawerGo.SetActive(false);

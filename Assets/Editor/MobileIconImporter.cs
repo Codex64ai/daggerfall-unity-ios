@@ -47,7 +47,6 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             new KeyValuePair<string, string>("btn_map", "MAPButton"),
             new KeyValuePair<string, string>("btn_pause", "PAUSEButton"),
             new KeyValuePair<string, string>("btn_back", "MenuBackButton"),
-            new KeyValuePair<string, string>("btn_tune", "SettingsGear"),
             new KeyValuePair<string, string>("joystick_bg", "MoveJoystick"),
             new KeyValuePair<string, string>("joystick_knob", "Knob"),
             new KeyValuePair<string, string>("joystick_bg", "LookJoystick"),

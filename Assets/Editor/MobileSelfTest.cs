@@ -46,6 +46,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestScrollOneStepPerFrame();
             TestControllerForcesCursorOff();
             TestKeyboardForcesCursorOff();
+            TestInputModeResolution();
+            TestSwingModeDecision();
             TestPointerKeepsCursorOverKeyboard();
             TestPointerDeltaScale();
             TestPointerLockDecision();
@@ -244,6 +246,53 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         #endregion
 
         #region Tests
+
+        /// <summary>
+        /// The input-mode table. Auto must reproduce the shipped detection behaviour exactly;
+        /// the three overrides must ignore detection in the directions that matter - a phantom
+        /// joystick (the iOS 26 Simulator lists one) must not be able to hide the touch HUD in
+        /// Touch mode, and Controller mode must work with nothing listed at all.
+        /// </summary>
+        static void TestInputModeResolution()
+        {
+            EffectiveInput e = MobileInput.ResolveInput(MobileInputMode.Auto, false, false, false);
+            Check(e.TouchHud && !e.Controller && !e.Keyboard && !e.Mouse, "auto: nothing physical -> touch HUD");
+
+            e = MobileInput.ResolveInput(MobileInputMode.Auto, true, false, false);
+            Check(!e.TouchHud && e.Controller, "auto: pad detected -> pad drives, touch stands down");
+
+            e = MobileInput.ResolveInput(MobileInputMode.Auto, false, true, true);
+            Check(!e.TouchHud && e.Keyboard && e.Mouse && !e.Controller, "auto: keyboard + pointer detected -> both drive");
+
+            e = MobileInput.ResolveInput(MobileInputMode.Touch, true, true, true);
+            Check(e.TouchHud && !e.Controller && !e.Keyboard && !e.Mouse, "touch: phantom pad, keyboard and pointer all ignored");
+
+            e = MobileInput.ResolveInput(MobileInputMode.KeyboardMouse, true, false, false);
+            Check(!e.TouchHud && e.Keyboard && !e.Mouse && !e.Controller,
+                  "kb+mouse: keyboard counts without a keystroke, pad ignored, no pointer until one connects");
+
+            e = MobileInput.ResolveInput(MobileInputMode.KeyboardMouse, false, false, true);
+            Check(e.Mouse && e.Keyboard && !e.TouchHud, "kb+mouse: connected pointer drives look and cursor");
+
+            e = MobileInput.ResolveInput(MobileInputMode.Controller, false, true, true);
+            Check(!e.TouchHud && e.Controller && !e.Keyboard && !e.Mouse,
+                  "controller: pad path on with nothing listed; keyboard and pointer stand down");
+        }
+
+        /// <summary>
+        /// WeaponSwingMode: touch swipes need hold-and-drag (0); everyone else keeps what they
+        /// chose in the launcher - which is where "click to attack" was being lost. With a
+        /// classic window open the player's value must be the one in memory, because that is
+        /// the only time settings.ini gets written.
+        /// </summary>
+        static void TestSwingModeDecision()
+        {
+            Check(MobileInput.ResolveSwingMode(1, true, false) == 0, "touch play imposes hold-and-drag");
+            Check(MobileInput.ResolveSwingMode(1, false, false) == 1, "mouse/pad play keeps click-to-attack");
+            Check(MobileInput.ResolveSwingMode(2, false, false) == 2, "hold-to-attack kept too");
+            Check(MobileInput.ResolveSwingMode(1, true, true) == 1, "window open -> player's own value, so saves keep it");
+            Check(MobileInput.ResolveSwingMode(0, false, false) == 0, "vanilla stays vanilla");
+        }
 
         /// <summary>A queued click must produce exactly one Down frame and one Up frame.</summary>
         static void TestButtonEdges()
