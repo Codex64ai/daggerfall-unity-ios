@@ -413,8 +413,15 @@ plain text and safe to delete.
 
 ## Known limitations
 
-- **Xcode/Unity pairing.** Unity 2022.3 predates current Xcode releases; the generated
-  Xcode project may need manual fixes.
+- **Hardware-tested on one device.** Everything above is verified on an iPad Pro 11" (M4),
+  iPadOS 26, with a Magic Keyboard and one Bluetooth controller. Untested: iPhone hardware
+  (the physical-inch layout is designed for it but has never run on one), other controller
+  models, older iPadOS versions, and other Xcode/Unity 6000.3 pairings.
+- **Journeys do not sail.** Real travel walks. A destination pixel with no location on it
+  (open sea, empty wilderness) falls back to classic fast travel automatically - but a real
+  destination across open water is walked toward in a straight line, over the water. For
+  overseas trips, use classic fast travel (switch Real travel off for that trip, or travel
+  recklessly and expect wet feet).
 - **Free Apple ID signing expires after 7 days**, after which you re-sign and redeploy.
 - iPad has no vibration motor, so haptics are a deliberate no-op there.
 - Mouse/trackpad support needs iPadOS 14 (`GCMouse`); on 13 the pointer still works as

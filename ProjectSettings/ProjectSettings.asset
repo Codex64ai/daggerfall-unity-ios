@@ -13,7 +13,7 @@ PlayerSettings:
   useOnDemandResources: 0
   accelerometerFrequency: 60
   companyName: Daggerfall Workshop
-  productName: DFU Test
+  productName: Daggerfall Unity
   defaultCursor: {fileID: 2800000, guid: 887ec86cd12e1624d8458c8d7950402a, type: 3}
   cursorHotspot: {x: 0, y: 0}
   m_SplashScreenBackgroundColor: {r: 0.13725491, g: 0.12156863, b: 0.1254902, a: 1}
@@ -176,7 +176,7 @@ PlayerSettings:
     Android: com.Company.ProductName
     Standalone: unity.Daggerfall Workshop.Daggerfall Unity
     Tizen: com.Company.ProductName
-    iPhone: net.codex64.daggerfall.test
+    iPhone: net.codex64.daggerfall
     tvOS: com.Company.ProductName
   buildNumber:
     Standalone: 0
