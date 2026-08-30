@@ -380,15 +380,17 @@ inside the app, and anything you leave out falls back to it - so partial packs a
 
 **What cannot work, ever: mods containing C# code.** iOS compiles ahead of time, so there
 is no way to execute mod code that was not built into the app, and Apple forbids
-downloading executable code. On device this fails while constructing `CompilerParameters`,
-before any compilation is attempted. This rules out most popular gameplay mods - Roleplay
-Realism, Travel Options, Archaeologists Guild, Basic Roads and Roleplay Realism: Items all
-use a C# entry point.
+downloading executable code. On device the mod's scripts are skipped with a warning in the
+log and the rest of the mod loads normally, so a script mod's textures and sounds still
+apply - but anything its code did will not happen. This rules out most popular gameplay
+mods - Roleplay Realism, Travel Options, Archaeologists Guild, Basic Roads and Roleplay
+Realism: Items all use a C# entry point.
 
 **What cannot work as distributed: `.dfmod` packages from Nexus.** Asset bundles are built
-per platform and DFU's mod builder targets Windows, macOS and Linux only. A macOS-built
-bundle is refused by iOS. They must be rebuilt against an iOS target, which needs the
-mod's original source assets - re-targeting an existing `.dfmod` is not possible.
+per platform, and upstream's Mod Builder targets Windows, macOS and Linux; this fork adds
+an iOS target. A macOS-built bundle is refused by iOS, so a Nexus mod must be rebuilt
+against an iOS target, which needs the mod's original source assets - re-targeting an
+existing `.dfmod` is not possible.
 
 **Music replacement is deliberately delayed by one play.** A replacement `.ogg` is decoded
 in the background while the original track plays, and takes over the next time that song
@@ -404,6 +406,12 @@ Mods load from the app's `Documents/Mods` folder - put `.dfmod` files there with
 Files app (On My iPad > DFU Test > Mods), the same way as `arena2`. New mods start
 enabled; manage them from the launcher's MODS window.
 
+A small pilot mod ships in this repo at `Assets/Game/Mods/IOSPilot/`, used to prove the
+build and load path end to end. The Unity editor loads it as a virtual mod, so a fresh
+clone of this fork shows its orange/checker test art on the start menu. Delete
+`Assets/Game/Mods/IOSPilot/` (or untick "iOS Pilot" in the editor's MODS window) to get
+the vanilla menu back.
+
 Two iOS-specific rules:
 
 - **A `.dfmod` must be built for iOS.** Bundles from Nexus are Windows/Linux/Mac builds
@@ -411,7 +419,9 @@ Two iOS-specific rules:
   Unity Mod Builder with the iOS target ticked (this fork's Mod Builder has it), or with
   the headless builder: `-executeMethod DaggerfallWorkshop.Game.Mobile.EditorTools.MobileModBuilder.BuildFromEnv`.
 - **Asset mods only.** Mods that ship C# scripts need a JIT compiler, which iOS forbids;
-  their scripts are skipped (assets still load). Texture/sound/model packs work.
+  their scripts are skipped (assets still load). Texture and sound packs work; model
+  replacements are not covered by the headless builder, which does not run the GUI Mod
+  Builder's prefab serialization pass.
 
 ## Diagnostics
 
