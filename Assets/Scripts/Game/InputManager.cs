@@ -607,8 +607,11 @@ namespace DaggerfallWorkshop.Game
         void OnGUI()
         {
             // MOBILE: draw the virtual cursor in the same IMGUI layer as the classic UI
-            // so it composites correctly over every window.
-            if (Mobile.MobileInput.VirtualCursorActive && Mobile.MobileInput.CursorTexture != null)
+            // so it composites correctly over every window. Not while a real pointer drives
+            // it (MobileInput.MouseActive): the system arrow is already on screen, and a
+            // second cursor trailing it reads as broken.
+            if (Mobile.MobileInput.VirtualCursorActive && Mobile.MobileInput.CursorTexture != null &&
+                !Mobile.MobileInput.MouseActive)
             {
                 Cursor.visible = false;
                 GUI.depth = 0;
