@@ -119,16 +119,18 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
     }
 
     /// <summary>
-    /// Classic-art replacements are odd sizes (320x200 IMGs, tiny CIF frames). Unity's
+    /// Import settings for the in-repo pilot mod's art only (Assets/Game/Mods/IOSPilot/).
+    /// Classic-art replacements are odd sizes (320x200 IMGs, tiny CIF frames): Unity's
     /// default NPOT scaling would silently resize them and DFU draws them 1:1, so pin
-    /// import settings for everything under Assets/Game/Mods. Point filtering too: the
-    /// vanilla look is unfiltered pixels at 1:1.
+    /// NPOT off, and Point filtering because the vanilla look is unfiltered pixels at 1:1.
+    /// Deliberately scoped to the pilot: real texture packs (DREAM-class) pick their own
+    /// import settings, and DFU leaves that choice to the mod author.
     /// </summary>
     class MobileModTextureImporter : AssetPostprocessor
     {
         void OnPreprocessTexture()
         {
-            if (!assetPath.Replace('\\', '/').StartsWith("Assets/Game/Mods/", StringComparison.Ordinal))
+            if (!assetPath.Replace('\\', '/').StartsWith("Assets/Game/Mods/IOSPilot/", StringComparison.Ordinal))
                 return;
             var importer = (TextureImporter)assetImporter;
             importer.npotScale = TextureImporterNPOTScale.None;
@@ -137,5 +139,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             importer.textureCompression = TextureImporterCompression.Uncompressed;
             importer.filterMode = FilterMode.Point;
         }
+
+        // Bumping this makes Unity reimport affected textures when the rule above changes.
+        public override uint GetVersion() { return 1; }
     }
 }
