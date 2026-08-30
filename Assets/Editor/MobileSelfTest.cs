@@ -68,6 +68,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestJourneyCompressionClamp();
             TestJourneySpeedTiers();
             TestRoadData();
+            TestRoadsInstallSurvivesSceneSwap();
             TestRoadDirectionReciprocity();
             TestRoadRouting();
             TestWaypointOvershoot();
@@ -767,6 +768,49 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(!MobileRoadNetwork.InBounds(-1, 0) &&
                   !MobileRoadNetwork.InBounds(0, MobileRoadNetwork.Height),
                   "roads: bounds reject out-of-world pixels");
+        }
+
+        /// <summary>
+        /// The bug that hid the roads: the texturing was assigned once, before any scene, to a
+        /// DaggerfallUnity the game scene then replaced - whose fresh DefaultTerrainTexturing
+        /// nobody overrode. Model exactly that: install, swap in a default (what a new
+        /// DaggerfallUnity's field initialiser does), and require the install to come back.
+        /// </summary>
+        static void TestRoadsInstallSurvivesSceneSwap()
+        {
+            bool savedPref = MobileRoads.Enabled;
+            try
+            {
+                MobileRoads.Enabled = true;
+                DaggerfallUnity dfUnity = DaggerfallUnity.Instance;
+                dfUnity.TerrainTexturing = new DefaultTerrainTexturing();
+                Check(!MobileRoads.Active, "roads: default texturing reads as not active");
+
+                MobileRoads.InstallOnLiveInstance();
+                Check(dfUnity.TerrainTexturing is BasicRoads.BasicRoadsTexturing,
+                      "roads: install lands on the live DaggerfallUnity");
+                Check(MobileRoads.Active && !MobileRoads.RestartRequired,
+                      "roads: Active reflects the live instance");
+
+                // A scene swap: the new DaggerfallUnity arrives with a default texturing.
+                dfUnity.TerrainTexturing = new DefaultTerrainTexturing();
+                Check(!MobileRoads.Active && MobileRoads.RestartRequired,
+                      "roads: a replaced texturing is reported honestly");
+
+                MobileRoads.InstallOnLiveInstance();
+                Check(MobileRoads.Active, "roads: re-installed after the swap");
+
+                MobileRoads.Enabled = false;
+                dfUnity.TerrainTexturing = new DefaultTerrainTexturing();
+                MobileRoads.InstallOnLiveInstance();
+                Check(!MobileRoads.Active, "roads: not installed while the preference is off");
+            }
+            finally
+            {
+                MobileRoads.Enabled = savedPref;
+                if (DaggerfallUnity.HasInstance)
+                    DaggerfallUnity.Instance.TerrainTexturing = new DefaultTerrainTexturing();
+            }
         }
 
         /// <summary>
