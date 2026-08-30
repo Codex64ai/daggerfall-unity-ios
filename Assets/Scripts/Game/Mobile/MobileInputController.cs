@@ -261,6 +261,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             MobileInput.Enabled = true;
             touchUIEnabled = PlayerPrefs.GetInt(MobileInput.TouchUIEnabledPrefKey,
                 touchUIEnabled ? 1 : 0) == 1;
+            MobileInput.TouchUIEnabled = touchUIEnabled;
 
             // Unity's legacy touch-to-mouse emulation reports a left click at the
             // fingertip on every touch. InputManager.GetMouseButtonDown() ORs against
@@ -596,6 +597,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         public void SetTouchUIEnabled(bool value)
         {
             touchUIEnabled = value;
+            MobileInput.TouchUIEnabled = value;
             if (!value)
             {
                 ReleaseGameplayInput();
@@ -1048,11 +1050,21 @@ namespace DaggerfallWorkshop.Game.Mobile
                     break;
                 }
 
-                // Keep ownership through the short gap after an indirect trackpad
+                // ONLY HAND THE POINTER TO A FINGER THAT SOMETHING WILL DRIVE.
+                //
+                // Relinquishing below is a handover to the touch layer, and the touch
+                // layer stands down with the touch controls - PollCursorStage is what
+                // polls the virtual cursor, and it returns early when they are off. So
+                // with them off this handed the classic UI a cursor nothing moved:
+                // frozen where CentreCursor left it, at screen centre, with buttons that
+                // never latch. Brushing the glass while reading a menu was enough to stop
+                // that menu responding until the trackpad was moved again.
+                //
+                // Also keeps ownership through the short gap after an indirect trackpad
                 // click. iPadOS can leave the touch record alive for a frame after
                 // release; handing it back immediately makes the next hover invisible
                 // until another click occurs.
-                if (wasActive && !directTouchBegan)
+                if (wasActive && (!directTouchBegan || !touchUIEnabled))
                 {
                     Vector2 fallbackPosition = Input.mousePosition;
                     Vector2 fallbackDelta = pointerPositionInitialized
@@ -1094,6 +1106,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         int pointerDiagnosticFrames;
         string pointerDiagnosticPath;
         float nextMenuDiagnostic;
+        int menuFrames;
+        int menuHeldFrames;
+        int menuDownEdges;
 
         /// <summary>
         /// One line a second while a classic menu owns the screen, into the same file as
@@ -1111,7 +1126,27 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (!IsClassicMenuOpen())
             {
                 nextMenuDiagnostic = 0f;
+                menuFrames = 0;
+                menuHeldFrames = 0;
+                menuDownEdges = 0;
                 return;
+            }
+
+            // COUNTED EVERY FRAME, NOT SAMPLED.
+            //
+            // A click is one frame of GetMouseButtonDown, and that is exactly what
+            // BaseScreenComponent turns into OnMouseClick. Sampling once a second cannot
+            // see an edge, so count them: the last capture showed the pointer sitting on
+            // the exit button with the button held, which narrows the fault to whether
+            // the down edge ever arrives. downEdges staying at 0 while heldFrames climbs
+            // says it does not.
+            menuFrames++;
+            if (InputManager.HasInstance)
+            {
+                if (InputManager.Instance.GetMouseButton(0))
+                    menuHeldFrames++;
+                if (InputManager.Instance.GetMouseButtonDown(0))
+                    menuDownEdges++;
             }
 
             if (Time.unscaledTime < nextMenuDiagnostic)
@@ -1141,13 +1176,15 @@ namespace DaggerfallWorkshop.Game.Mobile
             AppendPointerDiagnostic(string.Format(
                 "{0:O} MENU top={1} windows={2} mode={3} virtualCursor={4} pointer={5} " +
                 "touch={6} mouse=({7:0.#},{8:0.#}) held={9} down={10} cursor=({11:0.#},{12:0.#}) " +
-                "screen=({13}x{14}) touches={15} paused={16}\n",
+                "screen=({13}x{14}) touches={15} paused={16} " +
+                "frames={17} heldFrames={18} downEdges={19}\n",
                 System.DateTime.UtcNow, topWindowName, windowCount, MobileInput.Mode,
                 MobileInput.VirtualCursorActive, MobileInput.PointerActive,
                 MobileInput.TouchInputActive, mousePosition.x, mousePosition.y,
                 mouseHeld, mouseDown, MobileInput.CursorPosition.x, MobileInput.CursorPosition.y,
                 Screen.width, Screen.height, Input.touchCount,
-                GameManager.HasInstance && GameManager.IsGamePaused));
+                GameManager.HasInstance && GameManager.IsGamePaused,
+                menuFrames, menuHeldFrames, menuDownEdges));
         }
 
         void LogPointerDiagnostics(float deltaX, float deltaY, bool buttonHeld)

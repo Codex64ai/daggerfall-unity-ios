@@ -60,15 +60,24 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         static float pendingScroll;
 
+        /// <summary>True while the on-screen touch controls are switched on.</summary>
+        public static bool TouchUIEnabled { get; set; } = true;
+
         /// <summary>
         /// Set by MobileInputController; InputManager reads it to decide whether to divert
         /// the mouse. Forced false while a gamepad is active so Daggerfall's own controller
         /// cursor (InputManager.UsingController) keeps the pointer - otherwise the touch
         /// layer would hijack it away from the gamepad.
+        ///
+        /// Also forced false while the touch controls are switched off. Diverting the
+        /// classic UI here is a promise that something will drive the virtual cursor, and
+        /// only MobileInputController.PollCursorStage does that - which stands down with
+        /// the touch controls. Claiming the pointer anyway handed every classic window a
+        /// cursor frozen where CentreCursor left it, with buttons that never latch.
         /// </summary>
         public static bool VirtualCursorActive
         {
-            get { return virtualCursorActive && !PhysicalInputActive; }
+            get { return virtualCursorActive && TouchUIEnabled && !PhysicalInputActive; }
             set { virtualCursorActive = value; }
         }
         static bool virtualCursorActive;
