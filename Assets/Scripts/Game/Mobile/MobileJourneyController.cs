@@ -650,9 +650,19 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (!IsTravelling)
                 return;
 
+            PlayerGPS gps = GameManager.Instance.PlayerGPS;
+
+            // Pinned in the destination's own pixel - against its city wall, typically (device
+            // report: Burgwall). That IS arrival: the player is at the gates.
+            if (gps != null && gps.HasCurrentLocation && gps.CurrentMapID == destinationSummary.ID)
+            {
+                Debug.Log("[Journey] blocked at the destination's walls - counting it as arrival");
+                Stop(JourneyEnd.Arrived);
+                return;
+            }
+
             // In a town the block is a building, and the journey is only passing through:
             // cross to the far side rather than leaving the player against a wall.
-            PlayerGPS gps = GameManager.Instance.PlayerGPS;
             if (gps != null && gps.HasCurrentLocation && gps.CurrentMapID != destinationSummary.ID &&
                 IsSettlement(gps.CurrentLocationType) && PassThroughSettlement(gps.CurrentMapPixel))
                 return;

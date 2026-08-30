@@ -63,6 +63,15 @@ namespace DaggerfallWorkshop.Game.Mobile
         // recomputed every frame and followed at this rate: a curve, not a snap.
         const float turnRateDegPerSec = 360f;
 
+        // Progress-based stuck test. Standing against a wall at an angle SLIDES along it, which
+        // the not-moving test counts as movement - so a walled city (device report: Burgwall)
+        // never registered as an obstacle. If the distance to the target has not improved by
+        // progressEpsilon in noProgressSeconds of real time, we are stuck whatever the feet say.
+        const float noProgressSeconds = 1.0f;
+        const float progressEpsilon = 8f;
+        float bestDistanceToTarget = float.MaxValue;
+        float lastProgressTime;
+
         // Attempts before giving up. Six alternating angles is a genuine try; more than that and
         // the player is somewhere a journey should not continue from.
         const int maxSidestepAttempts = 6;
@@ -320,7 +329,8 @@ namespace DaggerfallWorkshop.Game.Mobile
             // Moving is the normal case: forget everything and carry on. The threshold is a
             // small fraction of a frame's expected travel, so this is "genuinely not moving"
             // rather than "moving slowly uphill".
-            if (perFrameDistance > 1f)
+            bool noProgress = Time.unscaledTime - lastProgressTime > noProgressSeconds;
+            if (perFrameDistance > 1f && !noProgress)
             {
                 blockedFor = 0f;
                 sidestepAttempt = 0;
@@ -354,6 +364,15 @@ namespace DaggerfallWorkshop.Game.Mobile
         void TrackMovement()
         {
             PlayerGPS gps = Gps;
+
+            // Progress toward the target, independent of how the feet are moving.
+            float distance = DistanceToTarget;
+            if (distance < bestDistanceToTarget - progressEpsilon)
+            {
+                bestDistanceToTarget = distance;
+                lastProgressTime = Time.unscaledTime;
+            }
+
 
             if (haveLast)
             {
@@ -532,6 +551,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             blockedFor = 0f;
             nudged = false;
+            bestDistanceToTarget = float.MaxValue;
+            lastProgressTime = Time.unscaledTime;
             steerOffset = 0f;
             sidestepAttempt = 0;
             sidestepUntil = 0f;
