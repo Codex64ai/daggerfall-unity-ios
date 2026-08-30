@@ -237,6 +237,10 @@ namespace DaggerfallWorkshop.Game.Mobile
         bool pointerPositionInitialized;
         bool indirectPointerActive;
         bool touchCursorWasDriving;
+        // Once a finger takes the pointer back, a detached or merely parked native
+        // pointer must not reclaim it on the first zero-delta read after release.
+        // Cleared only by demonstrable hardware-pointer activity or a keyboard key.
+        bool touchOwnsPointer;
 #if UNITY_IOS && !UNITY_EDITOR
         float directTouchSince = -1f;
 #endif
@@ -522,6 +526,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             if (value)
             {
+                touchOwnsPointer = false;
                 ReleaseGameplayInput();
                 MobileInput.ResetButtons();
             }
@@ -1006,6 +1011,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             // joystick/look-zone ownership rules decide where it belongs.
             if (directTouchPresent)
             {
+                touchOwnsPointer = true;
                 if (MobileInput.PointerActive)
                 {
                     MobileInput.PointerActive = false;
@@ -1013,6 +1019,21 @@ namespace DaggerfallWorkshop.Game.Mobile
                     ApplyHudVisibility();
                 }
                 pointerRead = false;
+            }
+
+            // The native bridge can still report the pointer as active after a
+            // finger is lifted, but its position and delta are merely the last
+            // parked sample. Keep touch ownership until real hardware activity
+            // proves that the user intentionally returned to the trackpad.
+            if (!directTouchPresent && touchOwnsPointer)
+            {
+                bool hardwareResumed = pointerRead &&
+                    (new Vector2(nativeDeltaX, nativeDeltaY).sqrMagnitude > 0f ||
+                     nativeButtonHeld || nativeSecondaryHeld);
+                if (hardwareResumed)
+                    touchOwnsPointer = false;
+                else
+                    pointerRead = false;
             }
 
             if (pointerRead)
@@ -1078,7 +1099,8 @@ namespace DaggerfallWorkshop.Game.Mobile
             bool inputSystemFresh = systemMouse != null && (systemMouse.wasUpdatedThisFrame ||
                 (lastInputSystemEventAt != float.MinValue &&
                  Time.unscaledTime - lastInputSystemEventAt <= pointerIdleTimeout));
-            if (systemMouse != null && systemMouse.added && inputSystemFresh && !directTouchPresent)
+            if (systemMouse != null && systemMouse.added && inputSystemFresh &&
+                !directTouchPresent && !touchOwnsPointer)
 #else
             if (systemMouse != null && systemMouse.added)
 #endif
@@ -1341,14 +1363,20 @@ namespace DaggerfallWorkshop.Game.Mobile
                 "indirectTouches={6} nonZero={7} hover={8} gcDeltas={9} lastEventType={10} " +
                 "rawAxes=({11:0.##},{12:0.##}) inputSystemEvents={13} inputSystemNonZero={14} " +
                 "queuedDelta=({15:0.##},{16:0.##}) atEdge={17} directTouch={18} lockRecoveries={19} " +
-                "swing={20} directTouches={21} styleRequests={22} unlockHeld={23} unlockIdle={24}\n",
+                 "swing={20} directTouches={21} styleRequests={22} unlockHeld={23} unlockIdle={24} " +
+                 "mode={25} touchOwnsPointer={26} lookHeld={27} lookValue=({28:0.##},{29:0.##}) " +
+                 "lookZoneDragging={30}\n",
                 System.DateTime.UtcNow, locked, deltaX, deltaY, buttonHeld, windowEvents,
                 indirectTouches, nonZeroDeltas, hoverEvents, gameControllerDeltas, lastEventType,
                 Input.GetAxisRaw("Mouse X"), Input.GetAxisRaw("Mouse Y"), inputSystemMouseEvents,
                 inputSystemNonZeroMouseEvents, inputSystemEventDelta.x, inputSystemEventDelta.y,
                 MobileInput.PointerAtEdge, directTouchInputActive, lockRecoveries,
                 MobileInput.GetPointerSecondaryButton(), directTouches, styleRequests,
-                unlocksWhileHeld, unlocksWhileIdle);
+                 unlocksWhileHeld, unlocksWhileIdle, MobileInput.Mode, touchOwnsPointer,
+                 lookJoystick != null && lookJoystick.IsHeld,
+                 lookJoystick != null ? lookJoystick.Value.x : 0f,
+                 lookJoystick != null ? lookJoystick.Value.y : 0f,
+                 lookZone != null && lookZone.IsDragging);
             AppendPointerDiagnostic(line);
             Debug.Log(string.Format("[DFPointerDiag] inputSystemEvents={0} inputSystemNonZero={1} queuedDelta=({2:0.##},{3:0.##})",
                 inputSystemMouseEvents, inputSystemNonZeroMouseEvents,
