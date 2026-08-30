@@ -13,10 +13,6 @@
 //     InteractionMode  - the four mode icons in MAIN01I0.IMG (steal / grab / info / talk),
 //                        the same subrects HUDLarge draws, so the button always SHOWS the
 //                        mode it will act on.
-//     Transport        - the legs glyph from the classic bar (MAIN00I0.IMG, the rect HUDLarge
-//                        makes clickable to open the transport window). The fullscreen HUD had
-//                        no way to change between foot, horse, cart and ship; this dresses the
-//                        drawer button that opens that window.
 //
 //   Better than drawing new icons in two ways: the style match is exact rather than
 //   approximate, and nothing is redistributed - the art is read from the player's own game
@@ -44,17 +40,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             PlayerPortrait,
             InteractionMode,
-            Transport,
         }
 
         const string interactionModesFilename = "MAIN01I0.IMG";
-        const string mainBarFilename = "MAIN00I0.IMG";
-
-        // HUDLarge.transportModePanelRect, against the classic bar's native 320 x 46.
-        static readonly Rect transportSubrect = new Rect(131, 23, 47, 23);
-        static readonly DFSize mainBarSize = new DFSize(320, 46);
-        static Texture2D transportTexture;
-        static bool transportArtLoaded;
 
         // Same subrects HUDLarge uses, against the same native size.
         static readonly Rect stealSubrect = new Rect(0, 0, 47, 23);
@@ -127,13 +115,9 @@ namespace DaggerfallWorkshop.Game.Mobile
                 }
             }
 
-            Texture2D art;
-            switch (source)
-            {
-                case ArtSource.InteractionMode: art = GetInteractionModeTexture(); break;
-                case ArtSource.Transport: art = GetTransportTexture(); break;
-                default: art = GetPortraitTexture(); break;
-            }
+            Texture2D art = (source == ArtSource.InteractionMode)
+                ? GetInteractionModeTexture()
+                : GetPortraitTexture();
 
             if (art == null)
                 return;
@@ -194,25 +178,6 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
 
             return grabTexture;
-        }
-
-        static Texture2D GetTransportTexture()
-        {
-            if (!transportArtLoaded)
-            {
-                transportArtLoaded = true;      // one attempt, success or not
-                try
-                {
-                    Texture2D bar = ImageReader.GetTexture(mainBarFilename);
-                    if (bar != null)
-                        transportTexture = ImageReader.GetSubTexture(bar, transportSubrect, mainBarSize);
-                }
-                catch (System.Exception ex)
-                {
-                    Debug.LogWarning("[MobileGameArtIcon] could not load transport art: " + ex.Message);
-                }
-            }
-            return transportTexture;
         }
 
         Texture2D GetPortraitTexture()

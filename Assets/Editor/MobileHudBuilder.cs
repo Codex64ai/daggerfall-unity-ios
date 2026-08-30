@@ -220,14 +220,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 ("REST",      InputManager.Actions.Rest),
                 // Foot / horse / cart / ship. The classic bar has a legs button for this; the
                 // fullscreen HUD had nothing, so a player who bought a horse could never
-                // mount it by touch. Wordless on purpose - it wears the bar's own legs art.
+                // mount it by touch. Icon: btn_transport.png via MobileIconImporter.
                 ("TRANSPORT", InputManager.Actions.Transport),
             };
             var secondaryRects = new Dictionary<string, RectTransform>();
             foreach (var entry in secondary)
             {
-                string caption = entry.label == "TRANSPORT" ? "" : entry.label;
-                GameObject b = CreateActionButton(drawerGo, entry.label + "Button", caption,
+                GameObject b = CreateActionButton(drawerGo, entry.label + "Button", entry.label,
                     entry.action, MobileActionButton.PressMode.Tap,
                     new Vector2(1f, 0f), Vector2.zero, new Vector2(150f, 150f));
                 b.GetComponent<MobileActionButton>().ownerDrawer = drawer;
@@ -256,10 +255,6 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // what classic Daggerfall used as the character-sheet button.
             secondaryRects["SHEET"].gameObject.AddComponent<MobileGameArtIcon>().source =
                 MobileGameArtIcon.ArtSource.PlayerPortrait;
-
-            // Transport wears the classic bar's legs glyph (MAIN00I0.IMG).
-            secondaryRects["TRANSPORT"].gameObject.AddComponent<MobileGameArtIcon>().source =
-                MobileGameArtIcon.ArtSource.Transport;
 
             UnityEditor.Events.UnityEventTools.AddPersistentListener(
                 menuToggleButton.onClick, drawer.Toggle);
