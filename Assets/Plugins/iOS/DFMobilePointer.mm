@@ -201,6 +201,44 @@ static void DFPointerAttachAll() API_AVAILABLE(ios(14.0))
 
 // ---------------------------------------------------------------- exports
 
+// ---------------------------------------------------------------- GCKeyboard
+//
+// Unity's iOS player reads hardware keyboards through UIKeyCommand (UnityView+Keyboard.mm),
+// which only reports key PRESSES with the system's auto-repeat timing and never a release -
+// Unity fakes the held state with timers. The result is a half-second lag before a walk
+// starts and a stutter while the key is held (device report). GCKeyboard (iOS 14) delivers
+// true down/up per key, so the C# side reads key state from here instead.
+static BOOL keyDown[256];
+static int  keysHeld = 0;
+static int  attachedKeyboards = 0;
+
+static void DFKeyboardClear()
+{
+    memset(keyDown, 0, sizeof(keyDown));
+    keysHeld = 0;
+}
+
+static void DFKeyboardAttach(GCKeyboard *keyboard) API_AVAILABLE(ios(14.0))
+{
+    GCKeyboardInput *input = keyboard.keyboardInput;
+    if (input == nil)
+        return;
+
+    input.keyChangedHandler = ^(GCKeyboardInput *kb, GCControllerButtonInput *key, GCKeyCode keyCode, BOOL pressed) {
+        if (keyCode < 0 || keyCode >= 256)
+            return;
+        BOOL now = pressed ? YES : NO;
+        if (keyDown[keyCode] == now)
+            return;
+        keyDown[keyCode] = now;
+        keysHeld += now ? 1 : -1;
+        if (keysHeld < 0)
+            keysHeld = 0;
+    };
+    attachedKeyboards++;
+    NSLog(@"[DFPointer] keyboard attached: %@", keyboard.vendorName ?: @"?");
+}
+
 extern "C" {
 
 /// iOS 14 introduced GCMouse and pointer lock together. Below that this plugin is inert
@@ -237,6 +275,24 @@ void DFPointerInit()
             NSLog(@"[DFPointer] mouse disconnected (%d remain)", attachedMice);
         }];
 
+        [nc addObserverForName:GCKeyboardDidConnectNotification object:nil queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(NSNotification *note) {
+            GCKeyboard *kb = note.object;
+            if (kb != nil)
+                DFKeyboardAttach(kb);
+        }];
+        [nc addObserverForName:GCKeyboardDidDisconnectNotification object:nil queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(NSNotification *note) {
+            attachedKeyboards = MAX(attachedKeyboards - 1, 0);
+            DFKeyboardClear();      // a key held at unplug must not stay held forever
+            NSLog(@"[DFPointer] keyboard disconnected (%d remain)", attachedKeyboards);
+        }];
+        // Backgrounding drops key-up events; start clean when the app returns.
+        [nc addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:[NSOperationQueue mainQueue]
+                    usingBlock:^(NSNotification *note) { DFKeyboardClear(); }];
+        if ([GCKeyboard coalescedKeyboard] != nil)
+            DFKeyboardAttach([GCKeyboard coalescedKeyboard]);
+
         [nc addObserverForName:UIPointerLockStateDidChangeNotification object:nil queue:[NSOperationQueue mainQueue]
                     usingBlock:^(NSNotification *note) {
             UIScene *scene = note.userInfo[UIPointerLockStateSceneUserInfoKey];
@@ -259,7 +315,7 @@ void DFPointerInit()
 
     DFPointerInstallLockOverride();
 
-    NSLog(@"[DFPointer] initialised: %d mice present", attachedMice);
+    NSLog(@"[DFPointer] initialised: %d mice, %d keyboards present", attachedMice, attachedKeyboards);
 }
 
 /// True while at least one mouse/trackpad is attached. This, not axis movement, is what
@@ -330,4 +386,31 @@ bool DFPointerIsLocked()
     return false;
 }
 
+
+/// True while a hardware keyboard is attached (GCKeyboard, iOS 14+).
+bool DFKeyboardConnected()
+{
+    if (@available(iOS 14.0, *))
+        return [GCKeyboard coalescedKeyboard] != nil;
+    return false;
+}
+
+/// Number of keys currently down.
+int DFKeyboardHeldCount()
+{
+    return keysHeld;
+}
+
+/// Copies the HID usage codes of every key currently down into codes (up to max) and
+/// returns how many were written. Codes are GCKeyCode values = USB HID keyboard usages.
+int DFKeyboardSnapshot(int *codes, int max)
+{
+    int n = 0;
+    if (codes == NULL || max <= 0)
+        return 0;
+    for (int c = 0; c < 256 && n < max; c++)
+        if (keyDown[c])
+            codes[n++] = c;
+    return n;
+}
 } // extern "C"

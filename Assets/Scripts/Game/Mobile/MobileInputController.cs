@@ -141,6 +141,11 @@ namespace DaggerfallWorkshop.Game.Mobile
                  "defined range, so this is tuned by feel.")]
         public float pointerScrollThreshold = 0.5f;
 
+        [Tooltip("Seconds after any pointer button or movement during which a touch is treated as " +
+                 "the pointer's own click rather than a finger. Stops the touch HUD flashing on " +
+                 "every right-click attack.")]
+        public float pointerTouchGrace = 0.4f;
+
         [Header("Controller")]
         [Tooltip("Detect a connected gamepad, hide the touch HUD, and hand input back to " +
                  "Daggerfall's own controller support (which already exists and is complete).")]
@@ -176,6 +181,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         readonly Dictionary<int, InputManager.Actions> pointerBindings = new Dictionary<int, InputManager.Actions>();
         Vector2 lastPointerDelta;
         string lastTouchTypes = "-";
+        // When the pointer last did anything (button or movement). A touch that lands inside
+        // pointerTouchGrace of it is the pointer's own click, not a finger.
+        float lastPointerActivity = -10f;
 
         // The player's declared input mode. Persisted here rather than through the settings
         // panel's own pref plumbing because the HUD must honour it before the panel has ever
@@ -451,8 +459,10 @@ namespace DaggerfallWorkshop.Game.Mobile
                 // "sticks are inconsistent" bug. Detect keyboards by the one signal only a
                 // real keyboard produces: typed characters. Touches, trackpads and styluses
                 // never populate Input.inputString.
-                else if (!keyboardDetected && Input.inputString.Length > 0)
+                else if (!keyboardDetected && (Input.inputString.Length > 0 || MobileHardwareKeyboard.AnyHeld))
                 {
+                    // inputString misses arrows, modifiers and held keys; the plugin's key
+                    // state does not.
                     keyboardDetected = true;
                 }
             }
@@ -501,6 +511,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             bool plugin = MobilePointer.Supported;
             bool anyButton = plugin && MobilePointer.AnyButton;
+            if (anyButton)
+                lastPointerActivity = Time.unscaledTime;
 
             if (Input.touchCount > 0)
             {
@@ -510,7 +522,8 @@ namespace DaggerfallWorkshop.Game.Mobile
                 {
                     Touch t = Input.GetTouch(i);
                     types.Append(t.type).Append(' ');
-                    if (MobilePointer.IsFingerTouch(t.type, anyButton))
+                    if (MobilePointer.IsFingerTouch(t.type, anyButton,
+                                                    Time.unscaledTime - lastPointerActivity, pointerTouchGrace))
                         finger = true;
                 }
                 lastTouchTypes = types.ToString();
@@ -619,6 +632,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             Vector2 raw = MobilePointer.ConsumeDelta();
             lastPointerDelta = raw;
+            if (raw.sqrMagnitude > 0f || MobilePointer.Buttons != 0)
+                lastPointerActivity = Time.unscaledTime;
 
             // ALWAYS overwrite, including with zero. A pointer click arrives as a touch too,
             // and on iOS the primary touch's movement feeds Unity's raw Mouse X/Y - left alone
@@ -1282,6 +1297,17 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             if (!Effective.TouchHud)
                 return;
+
+            // Daggerfall's cursor mode (Return on a keyboard) parks the camera and shows the
+            // arrow. Touch has its own menu cursor and no key to toggle this back, so a player
+            // who pressed Return with a keyboard and then unplugged it found the look stick dead
+            // (device report). Touch play simply never runs with cursor mode on.
+            if (GameManager.HasInstance && GameManager.Instance.PlayerMouseLook != null &&
+                GameManager.Instance.PlayerMouseLook.cursorActive)
+            {
+                GameManager.Instance.PlayerMouseLook.cursorActive = false;
+                Debug.Log("[MobileInput] cursor mode cleared for touch play");
+            }
 
             PumpMovement(inputManager);
             PumpLookAndGesture(inputManager);

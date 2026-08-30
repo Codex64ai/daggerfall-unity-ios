@@ -55,6 +55,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestPointerHoverToScreen();
             TestPointerScrollTicks();
             TestPointerFingerRule();
+            TestPointerClickGrace();
+            TestHardwareKeyboardTable();
             TestPointerDefaultActions();
             TestDpiFallback();
             TestThresholdMaths();
@@ -811,6 +813,48 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 if (DaggerfallUnity.HasInstance)
                     DaggerfallUnity.Instance.TerrainTexturing = new DefaultTerrainTexturing();
             }
+        }
+
+        /// <summary>
+        /// A right-click's touch can be seen a frame before GameController reports the button.
+        /// Inside the grace window it must not count as a finger, or the touch HUD flashes on
+        /// every attack. Outside it, with no button held, a direct touch is a finger.
+        /// </summary>
+        static void TestPointerClickGrace()
+        {
+            Check(!MobilePointer.IsFingerTouch(TouchType.Direct, false, 0.05f, 0.4f),
+                  "grace: touch right after pointer activity is the click, not a finger");
+            Check(MobilePointer.IsFingerTouch(TouchType.Direct, false, 1.0f, 0.4f),
+                  "grace: a touch well after pointer activity is a finger");
+            Check(!MobilePointer.IsFingerTouch(TouchType.Direct, true, 5f, 0.4f),
+                  "grace: button held is never a finger");
+            Check(!MobilePointer.IsFingerTouch(TouchType.Indirect, false, 5f, 0.4f),
+                  "grace: indirect touch is never a finger");
+            Check(MobilePointer.IsFingerTouch(TouchType.Direct, false),
+                  "grace: two-argument rule unchanged for callers without timing");
+        }
+
+        /// <summary>The HID table must round-trip and cover what Daggerfall binds by default.</summary>
+        static void TestHardwareKeyboardTable()
+        {
+            KeyCode[] must = { KeyCode.W, KeyCode.A, KeyCode.S, KeyCode.D, KeyCode.Space, KeyCode.Return,
+                               KeyCode.Escape, KeyCode.LeftShift, KeyCode.UpArrow, KeyCode.F5, KeyCode.Alpha0,
+                               KeyCode.Keypad0, KeyCode.Tab, KeyCode.BackQuote };
+            bool ok = true;
+            foreach (KeyCode k in must)
+            {
+                int hid = MobileHardwareKeyboard.ToHid(k);
+                if (hid < 0 || MobileHardwareKeyboard.FromHid(hid) != k)
+                    ok = false;
+            }
+            Check(ok, "keyboard: HID table round-trips the default bindings");
+            Check(MobileHardwareKeyboard.FromHid(4) == KeyCode.A && MobileHardwareKeyboard.FromHid(29) == KeyCode.Z,
+                  "keyboard: letters follow HID usage order");
+            Check(MobileHardwareKeyboard.FromHid(0) == KeyCode.None && MobileHardwareKeyboard.ToHid(KeyCode.Mouse0) < 0,
+                  "keyboard: unknown codes are None / -1, so callers fall back");
+            bool held;
+            Check(!MobileHardwareKeyboard.TryGetKey(KeyCode.W, out held) && !held,
+                  "keyboard: no plugin in the editor -> fall back to Unity");
         }
 
         /// <summary>

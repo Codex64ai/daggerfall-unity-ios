@@ -1173,6 +1173,10 @@ namespace DaggerfallWorkshop.Game
             if (Mobile.MobileInput.Enabled && Mobile.MobileInput.GetBackButton())
                 return true;
 
+            bool mobileEscape;
+            if (Mobile.MobileHardwareKeyboard.TryGetKey(KeyCode.Escape, out mobileEscape) && mobileEscape)
+                return true;
+
             return Input.GetKey(KeyCode.Escape) || (EnableController && GetKey(joystickUICache[3], false));
         }
 
@@ -1746,7 +1750,16 @@ namespace DaggerfallWorkshop.Game
         bool GetPollKey(KeyCode k)
         {
             if ((int)k < startingAxisKeyCode)
+            {
+                // MOBILE: on iPadOS Unity reads hardware keyboards through UIKeyCommand, which
+                // has no key-up event and repeat-delay timing - a laggy, stuttering walk. With
+                // a keyboard attached the real per-key state comes from GCKeyboard instead;
+                // keys the table does not know fall back to Unity's reading.
+                bool mobileHeld;
+                if (Mobile.MobileHardwareKeyboard.TryGetKey(k, out mobileHeld))
+                    return mobileHeld;
                 return Input.GetKey(k);
+            }
             else
                 return GetAxisKey((int)k);
         }

@@ -256,7 +256,22 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public static bool IsFingerTouch(TouchType type, bool anyPointerButtonHeld)
         {
-            return type != TouchType.Indirect && !anyPointerButtonHeld;
+            return IsFingerTouch(type, anyPointerButtonHeld, float.MaxValue, 0f);
+        }
+
+        /// <summary>
+        /// Seconds since the last pointer button or movement decides borderline touches.
+        /// UIKit's touch for a click and GameController's button report arrive on different
+        /// paths, so the touch can be seen a frame before the button - and a right-click
+        /// then read as a finger, flipping the touch HUD on and off with every attack
+        /// (device report). Pointer activity inside the grace window keeps the touch a click.
+        /// </summary>
+        public static bool IsFingerTouch(TouchType type, bool anyPointerButtonHeld,
+                                         float secondsSincePointerActivity, float graceSeconds)
+        {
+            if (type == TouchType.Indirect || anyPointerButtonHeld)
+                return false;
+            return secondsSincePointerActivity > graceSeconds;
         }
 
         /// <summary>
