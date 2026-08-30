@@ -44,13 +44,24 @@ namespace DaggerfallWorkshop.Game.Mobile
         // Real seconds of no movement before assuming something is in the way. Long enough not
         // to trip on a moment's contact with a fence or a slope, short enough that the player
         // does not watch a wall for long.
-        const float blockedThresholdSeconds = 0.6f;
+        const float blockedThresholdSeconds = 0.35f;
 
         // How far off the true bearing to steer while trying to get around an obstacle, and how
         // long to hold each attempt. Alternating sides at a widening angle walks a building
         // corner far more reliably than one fixed offset.
         static readonly float[] sidestepAngles = { 55f, -55f, 90f, -90f, 130f, -130f };
-        const float sidestepSeconds = 1.2f;
+        const float sidestepSeconds = 0.7f;
+
+        // After the sidesteps fail, one straight nudge through whatever it is (fence, low wall,
+        // rock) before giving up. World units; a map pixel is 32768.
+        const float nudgeWorldUnits = 300f;
+        bool nudged;
+
+        // How fast the body may turn toward the bearing, degrees per real second. The bearing
+        // used to be recomputed only on crossing a map-pixel boundary, so the player drifted
+        // for up to a pixel and was then yanked back onto the road (device report). Now it is
+        // recomputed every frame and followed at this rate: a curve, not a snap.
+        const float turnRateDegPerSec = 360f;
 
         // Attempts before giving up. Six alternating angles is a genuine try; more than that and
         // the player is somewhere a journey should not continue from.
@@ -199,12 +210,16 @@ namespace DaggerfallWorkshop.Game.Mobile
             DFPosition playerPixel = Gps.CurrentMapPixel;
             if (playerPixel.X != lastPlayerMapPixel.X || playerPixel.Y != lastPlayerMapPixel.Y)
             {
+                bool firstFix = lastPlayerMapPixel.X == int.MaxValue;
                 lastPlayerMapPixel = playerPixel;
-                journeyYaw = YawTowardDestination();
-
                 inDestinationMapPixel = playerPixel.X == destinationMapPixel.X &&
                                         playerPixel.Y == destinationMapPixel.Y;
+                if (firstFix)
+                    journeyYaw = YawTowardDestination();      // face the target at once on a new leg
             }
+
+            // Steer toward the target every frame, at a bounded turn rate.
+            journeyYaw = TurnToward(journeyYaw, YawTowardDestination(), turnRateDegPerSec * Time.unscaledDeltaTime);
 
             PlayerMouseLook mouseLook = MouseLook;
 
@@ -309,6 +324,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             {
                 blockedFor = 0f;
                 sidestepAttempt = 0;
+                nudged = false;
                 return;
             }
 
@@ -318,6 +334,14 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             if (sidestepAttempt >= maxSidestepAttempts)
             {
+                // Last resort before giving up: step straight through. Once.
+                if (!nudged && NudgeForward(nudgeWorldUnits))
+                {
+                    nudged = true;
+                    blockedFor = 0f;
+                    sidestepAttempt = 0;
+                    return;
+                }
                 RaiseOnBlocked();
                 return;
             }
@@ -447,9 +471,67 @@ namespace DaggerfallWorkshop.Game.Mobile
             return DaggerfallLocation.GetLocationRect(location);
         }
 
+        /// <summary>The bearing the body is currently being steered along, in Unity yaw degrees.</summary>
+        public float JourneyYaw { get { return journeyYaw; } }
+
+        /// <summary>Pure: turn from one yaw toward another by at most maxStep degrees.</summary>
+        public static float TurnToward(float currentYaw, float targetYaw, float maxStep)
+        {
+            return Mathf.MoveTowardsAngle(currentYaw, targetYaw, Mathf.Max(0f, maxStep));
+        }
+
+        /// <summary>
+        /// Pure: the point where a ray from p along yawDeg leaves rect, plus margin beyond it.
+        /// If the ray never enters or has already left, the point is margin ahead of p.
+        /// World axes: x east, y north; yaw 0 = north, 90 = east.
+        /// </summary>
+        public static Vector2 ExitPointThroughRect(Rect rect, Vector2 p, float yawDeg, float margin)
+        {
+            float rad = yawDeg * Mathf.Deg2Rad;
+            Vector2 d = new Vector2(Mathf.Sin(rad), Mathf.Cos(rad));
+
+            float tx = d.x > 1e-5f ? (rect.xMax - p.x) / d.x : d.x < -1e-5f ? (rect.xMin - p.x) / d.x : float.PositiveInfinity;
+            float ty = d.y > 1e-5f ? (rect.yMax - p.y) / d.y : d.y < -1e-5f ? (rect.yMin - p.y) / d.y : float.PositiveInfinity;
+            float t = Mathf.Min(tx, ty);
+            if (float.IsInfinity(t) || t < 0f)
+                t = 0f;
+            return p + d * (t + margin);
+        }
+
+        /// <summary>
+        /// Move the player straight along the bearing by the given distance, through whatever is
+        /// there. Used as the last unstick step and to cross a settlement the journey is only
+        /// passing through.
+        /// </summary>
+        public bool NudgeForward(float worldUnits)
+        {
+            return TeleportTo(Gps.WorldX + Mathf.Sin(journeyYaw * Mathf.Deg2Rad) * worldUnits,
+                              Gps.WorldZ + Mathf.Cos(journeyYaw * Mathf.Deg2Rad) * worldUnits);
+        }
+
+        /// <summary>Put the player at a DFU world coordinate, grounded by StreamingWorld.</summary>
+        public bool TeleportTo(float worldX, float worldZ)
+        {
+            if (!GameManager.HasInstance || GameManager.Instance.StreamingWorld == null)
+                return false;
+            try
+            {
+                GameManager.Instance.StreamingWorld.TeleportToWorldCoordinates(
+                    Mathf.RoundToInt(worldX), Mathf.RoundToInt(worldZ));
+                haveLast = false;               // do not count the jump as movement
+                return true;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[Journey] teleport failed: " + e.Message);
+                return false;
+            }
+        }
+
         void ClearBlockedState()
         {
             blockedFor = 0f;
+            nudged = false;
             steerOffset = 0f;
             sidestepAttempt = 0;
             sidestepUntil = 0f;

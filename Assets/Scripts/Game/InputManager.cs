@@ -1950,18 +1950,26 @@ namespace DaggerfallWorkshop.Game
                     // Keyboard look overrides current mouseX and mouseY values
                     switch (element.Value)
                     {
+                        // MOBILE: a journey drives the player itself; keys must not steer it
+                        // (the pilot's forward push is applied in Update, above).
                         case Actions.MoveRight:
-                            ApplyHorizontalForce(1);
+                            if (!Mobile.MobileJourneyPilot.Active)
+                                ApplyHorizontalForce(1);
                             break;
                         case Actions.MoveLeft:
-                            ApplyHorizontalForce(-1);
+                            if (!Mobile.MobileJourneyPilot.Active)
+                                ApplyHorizontalForce(-1);
                             break;
                         case Actions.MoveForwards:
-                            ApplyVerticalForce(1);
+                            if (!Mobile.MobileJourneyPilot.Active)
+                                ApplyVerticalForce(1);
                             break;
                         case Actions.MoveBackwards:
-                            ToggleAutorun = false;
-                            ApplyVerticalForce(-1);
+                            if (!Mobile.MobileJourneyPilot.Active)
+                            {
+                                ToggleAutorun = false;
+                                ApplyVerticalForce(-1);
+                            }
                             break;
                         case Actions.TurnLeft:
                             keyboardLookX = -1;
@@ -1983,6 +1991,10 @@ namespace DaggerfallWorkshop.Game
         // processes player movement via joystick
         void FindInputAxisActions()
         {
+            // MOBILE: the stick must not move the player during a journey (device report).
+            if (Mobile.MobileJourneyPilot.Active)
+                return;
+
 
             if (!EnableController || String.IsNullOrEmpty(movementAxisBindingCache[0]) || String.IsNullOrEmpty(movementAxisBindingCache[1]))
                 return;

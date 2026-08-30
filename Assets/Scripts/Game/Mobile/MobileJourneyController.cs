@@ -650,6 +650,13 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (!IsTravelling)
                 return;
 
+            // In a town the block is a building, and the journey is only passing through:
+            // cross to the far side rather than leaving the player against a wall.
+            PlayerGPS gps = GameManager.Instance.PlayerGPS;
+            if (gps != null && gps.HasCurrentLocation && gps.CurrentMapID != destinationSummary.ID &&
+                IsSettlement(gps.CurrentLocationType) && PassThroughSettlement(gps.CurrentMapPixel))
+                return;
+
             Stop(JourneyEnd.Interrupted);
             DaggerfallUI.MessageBox("Your way is blocked. You will have to find your own way " +
                                     "clear before travelling on.");
@@ -725,7 +732,7 @@ namespace DaggerfallWorkshop.Game.Mobile
                 SetTimeScale(target);
 
             SampleSpeed();
-
+            ApplySpawnSuppression(SpeedCautious);
             pilot.Update();
 
             // pilot.Update() may have arrived and stopped us mid-frame.
@@ -834,7 +841,8 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
 
             AskToInterrupt("You are passing " + name + ". Stop here?",
-                           "You continue past " + name + ".");
+                           "You continue past " + name + ".",
+                           () => PassThroughSettlement(gps.CurrentMapPixel));
             return true;
         }
 
@@ -1023,7 +1031,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// Pause the journey and ask. Yes stops travel but KEEPS the destination, so the
         /// travel map will offer to resume; No carries on at the same speed.
         /// </summary>
-        void AskToInterrupt(string question, string declineText)
+        void AskToInterrupt(string question, string declineText, Action onDecline = null)
         {
             promptOpen = true;
 
@@ -1039,15 +1047,67 @@ namespace DaggerfallWorkshop.Game.Mobile
                 sender.CloseWindow();
 
                 if (button == DaggerfallMessageBox.MessageBoxButtons.Yes)
+                {
                     Stop(JourneyEnd.Interrupted);
-                else if (!string.IsNullOrEmpty(declineText))
-                    DaggerfallUI.AddHUDText(declineText, 2f);
+                }
+                else
+                {
+                    if (!string.IsNullOrEmpty(declineText))
+                        DaggerfallUI.AddHUDText(declineText, 2f);
+                    if (onDecline != null)
+                        onDecline();
+                }
             };
 
             // Dismissing without choosing carries on, and must clear the flag or no further
             // prompt is ever offered.
             box.OnCancel += (sender) => { promptOpen = false; };
             box.Show();
+        }
+
+        /// <summary>
+        /// Cross a settlement the journey is only passing through: put the player at the far
+        /// edge of its footprint along the current bearing. Towns are building blocks; steering
+        /// a straight line through one is how the player ended up pressed against walls
+        /// (device report). The prompt to stop there has already been offered.
+        /// </summary>
+        bool PassThroughSettlement(DFPosition pixel)
+        {
+            if (pilot == null)
+                return false;
+
+            ContentReader.MapSummary summary;
+            if (!DaggerfallUnity.Instance.ContentReader.HasLocation(pixel.X, pixel.Y, out summary))
+                return false;
+
+            Rect footprint;
+            try { footprint = MobileJourneyPilot.GetLocationRect(summary); }
+            catch (ArgumentException) { return false; }
+
+            PlayerGPS gps = GameManager.Instance.PlayerGPS;
+            Vector2 exit = MobileJourneyPilot.ExitPointThroughRect(footprint,
+                new Vector2(gps.WorldX, gps.WorldZ), pilot.JourneyYaw, passThroughMarginWorldUnits);
+
+            if (!pilot.TeleportTo(exit.x, exit.y))
+                return false;
+
+            Debug.Log("[Journey] passed through " + gps.CurrentLocation.Name);
+            return true;
+        }
+
+        // How far beyond a settlement's footprint to land when crossing it. Roughly two tiles.
+        const float passThroughMarginWorldUnits = 600f;
+
+        /// <summary>
+        /// Cautious travel is Daggerfall's safe travel: no random encounters. PlayerEntity clears
+        /// its own flag every game minute, so this is re-asserted each frame while walking and
+        /// dropped in Stop(). Reckless keeps the spawns - that is its trade for the straight line.
+        /// </summary>
+        void ApplySpawnSuppression(bool travellingCautiously)
+        {
+            PlayerEntity player = GameManager.HasInstance ? GameManager.Instance.PlayerEntity : null;
+            if (player != null && player.PreventEnemySpawns != travellingCautiously)
+                player.PreventEnemySpawns = travellingCautiously;
         }
 
         void CheckEnemies()
@@ -1135,6 +1195,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         public void Stop(JourneyEnd reason)
         {
             RestoreNormalTime();
+            ApplySpawnSuppression(false);
 
             if (pilot != null)
             {

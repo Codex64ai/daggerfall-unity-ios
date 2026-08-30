@@ -71,6 +71,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestJourneySpeedTiers();
             TestRouteRule();
             TestNightDecision();
+            TestPassThroughGeometry();
             TestRoadData();
             TestRoadsInstallSurvivesSceneSwap();
             TestModsSwitchOwnsBothPrefs();
@@ -787,6 +788,34 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobileJourneyController.HoursUntilDawn(18) == 12 && MobileJourneyController.HoursUntilDawn(2) == 4 &&
                   MobileJourneyController.HoursUntilDawn(23) == 7,
                   "night: hours to dawn wrap past midnight");
+        }
+
+        /// <summary>
+        /// Crossing a settlement: the exit point must be on the far side of its footprint along
+        /// the bearing, plus the margin - and never behind the player.
+        /// </summary>
+        static void TestPassThroughGeometry()
+        {
+            Rect town = new Rect(1000f, 1000f, 2000f, 2000f);      // x 1000..3000, y 1000..3000
+
+            // Heading north (yaw 0) from the south edge: leave through y = 3000.
+            Vector2 e = MobileJourneyPilot.ExitPointThroughRect(town, new Vector2(2000f, 1000f), 0f, 100f);
+            Near(e.x, 2000f, 0.5f, "pass-through: north exit keeps x");
+            Near(e.y, 3100f, 0.5f, "pass-through: north exit is the far edge plus margin");
+
+            // Heading east (yaw 90) from inside: leave through x = 3000.
+            e = MobileJourneyPilot.ExitPointThroughRect(town, new Vector2(1500f, 2000f), 90f, 50f);
+            Near(e.x, 3050f, 0.5f, "pass-through: east exit is the far edge plus margin");
+            Near(e.y, 2000f, 0.5f, "pass-through: east exit keeps y");
+
+            // Already past it, heading away: just the margin ahead.
+            e = MobileJourneyPilot.ExitPointThroughRect(town, new Vector2(2000f, 3500f), 0f, 100f);
+            Near(e.y, 3600f, 0.5f, "pass-through: beyond the town, a short hop forward");
+
+            Check(Mathf.Abs(Mathf.DeltaAngle(MobileJourneyPilot.TurnToward(10f, 350f, 5f), 5f)) < 0.01f,
+                  "steering: turns the short way round and no faster than the step");
+            Check(Mathf.Abs(Mathf.DeltaAngle(MobileJourneyPilot.TurnToward(10f, 20f, 90f), 20f)) < 0.01f,
+                  "steering: a big step reaches the target");
         }
 
         /// <summary>The ported path data is present and looks like a road network.</summary>
