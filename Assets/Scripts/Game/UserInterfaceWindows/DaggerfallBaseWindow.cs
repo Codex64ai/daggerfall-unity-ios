@@ -90,7 +90,28 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
             // Must be setup
             if (!isSetup)
             {
-                Setup();
+                // SET UP ONCE, EVEN IF SETUP THREW.
+                //
+                // isSetup used to be assigned only after Setup() returned, so an exception
+                // inside it left the flag false and Update() retried every frame. Each
+                // retry adds another full set of components to NativePanel, and none of
+                // them ever update: this early return is before base.Update(), so no
+                // component in the window sees a mouse event again. That is a window which
+                // draws normally, ignores every click on every control, and loses frames
+                // steadily as the duplicates pile up - the only way out being a key that
+                // the window's own Update() handles past this point.
+                //
+                // Take the half-built window over that, and say what went wrong.
+                try
+                {
+                    Setup();
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogErrorFormat("{0}.Setup() failed - window will be incomplete: {1}",
+                        GetType().Name, ex);
+                }
+
                 isSetup = true;
                 return;
             }

@@ -1156,12 +1156,27 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             string topWindowName = "none";
             int windowCount = 0;
+            bool topSetup = false;
+            int topComponents = -1;
             if (DaggerfallUI.HasInstance && DaggerfallUI.UIManager != null)
             {
                 windowCount = DaggerfallUI.UIManager.WindowCount;
                 IUserInterfaceWindow topWindow = DaggerfallUI.UIManager.TopWindow;
                 if (topWindow != null)
                     topWindowName = topWindow.GetType().Name;
+
+                // The direct measure of a window rebuilding itself. Setup() runs once and
+                // only once, so a component count that climbs frame over frame means it is
+                // being called again - and a window that never finishes setup never runs
+                // base.Update(), which is what feeds mouse events to its controls.
+                DaggerfallWorkshop.Game.UserInterfaceWindows.DaggerfallBaseWindow baseWindow =
+                    topWindow as DaggerfallWorkshop.Game.UserInterfaceWindows.DaggerfallBaseWindow;
+                if (baseWindow != null)
+                {
+                    topSetup = baseWindow.IsSetup;
+                    if (baseWindow.NativePanel != null)
+                        topComponents = baseWindow.NativePanel.Components.Count;
+                }
             }
 
             Vector3 mousePosition = Vector3.zero;
@@ -1177,14 +1192,14 @@ namespace DaggerfallWorkshop.Game.Mobile
                 "{0:O} MENU top={1} windows={2} mode={3} virtualCursor={4} pointer={5} " +
                 "touch={6} mouse=({7:0.#},{8:0.#}) held={9} down={10} cursor=({11:0.#},{12:0.#}) " +
                 "screen=({13}x{14}) touches={15} paused={16} " +
-                "frames={17} heldFrames={18} downEdges={19}\n",
+                "frames={17} heldFrames={18} downEdges={19} setup={20} components={21}\n",
                 System.DateTime.UtcNow, topWindowName, windowCount, MobileInput.Mode,
                 MobileInput.VirtualCursorActive, MobileInput.PointerActive,
                 MobileInput.TouchInputActive, mousePosition.x, mousePosition.y,
                 mouseHeld, mouseDown, MobileInput.CursorPosition.x, MobileInput.CursorPosition.y,
                 Screen.width, Screen.height, Input.touchCount,
                 GameManager.HasInstance && GameManager.IsGamePaused,
-                menuFrames, menuHeldFrames, menuDownEdges));
+                menuFrames, menuHeldFrames, menuDownEdges, topSetup, topComponents));
         }
 
         void LogPointerDiagnostics(float deltaX, float deltaY, bool buttonHeld)
