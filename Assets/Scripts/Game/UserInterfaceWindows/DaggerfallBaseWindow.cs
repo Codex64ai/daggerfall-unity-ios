@@ -90,7 +90,18 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
             // Must be setup
             if (!isSetup)
             {
-                Setup();
+                // MOBILE: a Setup() that throws must still count as done. Otherwise it runs
+                // again every frame, stacking duplicate components into NativePanel and
+                // returning before base.Update(), so the window crawls and no control ever
+                // sees a click. Log it and move on with whatever Setup managed to build.
+                try
+                {
+                    Setup();
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError(string.Format("{0}.Setup() threw: {1}", GetType().Name, e));
+                }
                 isSetup = true;
                 return;
             }

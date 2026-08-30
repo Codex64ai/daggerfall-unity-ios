@@ -149,6 +149,11 @@ Pointer lock is granted by iPadOS only to a full-screen, foreground scene - Stag
 windows and Split View will get look-by-hover up to the screen edge instead.
 
 
+A trap for anyone touching this code: on iPadOS a trackpad click arrives in Unity as a touch
+whose `TouchType` is reported as **Direct** (Unity maps `UITouchTypeIndirectPointer` onto it),
+so `TouchType` cannot tell a finger from a click. The port uses the native plugin's button
+state and a short grace window after pointer activity instead.
+
 ### Hardware keyboard
 
 Keys are read through the same native plugin (`GCKeyboard`), not Unity's own path. Unity's iOS

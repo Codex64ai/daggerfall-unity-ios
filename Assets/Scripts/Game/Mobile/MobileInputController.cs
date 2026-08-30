@@ -159,6 +159,10 @@ namespace DaggerfallWorkshop.Game.Mobile
                  "every right-click attack.")]
         public float pointerTouchGrace = 0.4f;
 
+        [Tooltip("Largest pointer movement accepted in one frame, in raw counts. A pointer-lock " +
+                 "transition can report one enormous delta; this keeps it from throwing the camera.")]
+        public float maxPointerDeltaPerFrame = 250f;
+
         [Header("Controller")]
         [Tooltip("Detect a connected gamepad, hide the touch HUD, and hand input back to " +
                  "Daggerfall's own controller support (which already exists and is complete).")]
@@ -646,7 +650,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         void PumpPointerGameplay(InputManager inputManager)
         {
-            Vector2 raw = MobilePointer.ConsumeDelta();
+            // One frame of pointer-lock transition can report a huge delta; unclamped it
+            // slams pitch to its limit.
+            Vector2 raw = MobilePointer.ClampDelta(MobilePointer.ConsumeDelta(), maxPointerDeltaPerFrame);
             lastPointerDelta = raw;
             if (raw.sqrMagnitude > 0f || MobilePointer.Buttons != 0)
                 lastPointerActivity = Time.unscaledTime;
@@ -950,6 +956,11 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             SetLayer(gameplayLayer, touchAllowed && !menu);
             SetLayer(menuLayer, touchAllowed && menu);
+
+            // Touch standing down mid-gesture must not leave a latched button or a half-drag
+            // behind for the keyboard, pad or pointer that took over.
+            if (!touchAllowed && virtualMouse != null)
+                virtualMouse.ResetGesture();
 
             // Whoever now drives gameplay decides how a swing is made.
             ApplySwingMode();

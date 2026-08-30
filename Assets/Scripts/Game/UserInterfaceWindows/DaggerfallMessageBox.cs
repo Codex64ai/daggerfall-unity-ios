@@ -304,9 +304,30 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
             presentationTime = Time.realtimeSinceStartup;
         }
 
+        // MOBILE: frame in which the touch path closed this box, so the panel click that the
+        // same tap may also raise does not act a second time.
+        int mobileClickFrame = -1;
+
         public override void Update()
         {
             base.Update();
+
+            // MOBILE: a tap on a "click anywhere to close" box lands on the box's own label or
+            // panel, whose click events never bubble up to the parent panel handler below - so
+            // touch could not dismiss the intro text or a quest popup at all. Poll the virtual
+            // cursor's button while touch owns the cursor; the pointer path is unaffected.
+            if (clickAnywhereToClose && Mobile.MobileInput.VirtualCursorActive &&
+                uiManager.TopWindow == this &&
+                Time.realtimeSinceStartup - presentationTime >= minTimePresented &&
+                InputManager.Instance.GetMouseButtonDown(0))
+            {
+                mobileClickFrame = Time.frameCount;
+                if (nextMessageBox != null)
+                    nextMessageBox.Show();
+                else
+                    CloseWindow();
+                return;
+            }
 
             if (DaggerfallUI.Instance.HotkeySequenceProcessed == HotkeySequence.HotkeySequenceProcessStatus.NotFound)
             {
@@ -644,6 +665,10 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
 
         private void ParentPanel_OnMouseClick(BaseScreenComponent sender, Vector2 position)
         {
+            // MOBILE: already handled by the touch poll in Update this frame.
+            if (Time.frameCount == mobileClickFrame)
+                return;
+
             // Must be presented for minimum time before allowing to click through
             // This prevents capturing parent-level click events and closing immediately
             if (Time.realtimeSinceStartup - presentationTime < minTimePresented)

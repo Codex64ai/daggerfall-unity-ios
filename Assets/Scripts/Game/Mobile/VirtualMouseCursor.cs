@@ -41,9 +41,6 @@ namespace DaggerfallWorkshop.Game.Mobile
         public bool absoluteMode = true;
 
         [Header("Tap / Hold")]
-        [Tooltip("Longest touch duration that still counts as a tap.")]
-        public float tapMaxDuration = 0.22f;
-
         [Tooltip("Largest travel for a tap, as a fraction of screen height.")]
         [Range(0.004f, 0.08f)] public float tapMaxTravel = 0.02f;
 
@@ -92,15 +89,21 @@ namespace DaggerfallWorkshop.Game.Mobile
 
                 uiOwnedFingers.Clear();
 
+                // No finger on the glass means no virtual button can be down. Whatever path
+                // latched one, this makes a stuck button unreachable.
+                MobileInput.SetLatched(0, false);
+                MobileInput.SetLatched(1, false);
+
+#if !UNITY_IOS || UNITY_EDITOR
                 // Desktop / editor fallback. With no touches there is nothing to drive
                 // the virtual cursor, yet InputManager.MousePosition is already being
                 // diverted to it - so the classic UI would be stuck with a cursor frozen
-                // at screen centre. Mirror the real mouse instead.
-                //
-                // Input.mousePresent is false on iOS, so this is inert on device and
-                // needs no compile guard.
+                // at screen centre. Mirror the real mouse instead. Compiled out on device:
+                // Input.mousePresent turns TRUE there with a trackpad case attached, and
+                // Unity's stale button state would feed the touch cursor every frame.
                 if (Input.mousePresent)
                     PollMouseFallback();
+#endif
 
                 return;
             }
@@ -278,8 +281,9 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
             else
             {
-                bool wasTap = (Time.unscaledTime - primaryStartTime) <= tapMaxDuration &&
-                              primaryTravel <= tapMaxTravel * Screen.height;
+                // Travel alone decides a tap. A duration cap left a dead band between it and
+                // holdToDragDelay where a lift produced nothing at all.
+                bool wasTap = primaryTravel <= tapMaxTravel * Screen.height;
                 if (wasTap)
                     MobileInput.QueueClick(0);
             }

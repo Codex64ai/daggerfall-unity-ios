@@ -901,6 +901,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "grace: button held is never a finger");
             Check(!MobilePointer.IsFingerTouch(TouchType.Indirect, false, 5f, 0.4f),
                   "grace: indirect touch is never a finger");
+
+            Vector2 big = MobilePointer.ClampDelta(new Vector2(3000f, -4000f), 250f);
+            Check(Mathf.Abs(big.magnitude - 250f) < 0.01f, "delta clamp: a lock-transition spike is capped");
+            Check(Mathf.Abs(big.x / big.y - 3000f / -4000f) < 0.001f, "delta clamp: direction preserved");
+            Check(MobilePointer.ClampDelta(new Vector2(3f, 4f), 250f) == new Vector2(3f, 4f),
+                  "delta clamp: ordinary movement untouched");
         }
 
         /// <summary>The HID table must round-trip and cover what Daggerfall binds by default.</summary>

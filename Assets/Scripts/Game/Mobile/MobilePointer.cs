@@ -128,6 +128,14 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         public static bool AnyButton { get { return Buttons != 0; } }
+
+        /// <summary>Pure: a delta no longer than maxMagnitude, same direction.</summary>
+        public static Vector2 ClampDelta(Vector2 delta, float maxMagnitude)
+        {
+            if (maxMagnitude <= 0f || delta.sqrMagnitude <= maxMagnitude * maxMagnitude)
+                return delta;
+            return delta.normalized * maxMagnitude;
+        }
         public static bool Left { get { return (Buttons & LeftMask) != 0; } }
         public static bool Right { get { return (Buttons & RightMask) != 0; } }
         public static bool Middle { get { return (Buttons & MiddleMask) != 0; } }
