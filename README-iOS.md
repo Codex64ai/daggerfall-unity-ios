@@ -206,19 +206,26 @@ During gameplay, the app requests UIKit pointer lock and hides the hardware poin
 `GCMouseInput.mouseMovedHandler` supplies raw relative movement to the camera. The pointer
 is released when a classic menu opens so menu hit-testing and window interaction work normally.
 
-The hardware pointer stays hidden for the whole of gameplay, weapon swings included. The
-hidden pointer style is applied by the pointer interaction itself rather than by the lock,
-so a moment where iPadOS takes the lock back - an edge affordance, the Dock gesture - no
-longer flashes the system cursor over the game.
+Both trackpad buttons are read from `GCMouse` rather than from Unity. This is not a
+preference - a locked pointer has no screen position, so iPadOS delivers no located touch
+for a click and Unity's own mouse buttons never go down during gameplay. Reading the
+hardware is what lets the pointer stay locked, and the cursor stay hidden, while the player
+swings.
 
-When iPadOS does take the lock, the app now asks for it back on its own. UIKit only
-reacquires the pointer on a `NO -> YES` transition of `prefersPointerLocked`, so the bridge
-performs that transition; this used to require opening and closing a menu by hand.
+**Unity cannot tell a finger from the trackpad on iPad.** `UnityEngine.TouchType` has only
+`Direct`, `Indirect` and `Stylus`, and iPadOS reports a Magic Keyboard trackpad click as
+`UITouchTypeIndirectPointer` - which Unity maps to `Direct`. Anything in C# that asks
+`Input.GetTouch().type` whether a touch is a finger will be told yes for every trackpad
+press. `DFMobilePointer.mm` classifies touches from the real `UITouch.type` and hands the
+verdict back; use that, not `TouchType`, for anything that must distinguish the two.
+
+When iPadOS does take the lock, the app asks for it back on its own. UIKit only reacquires
+the pointer on a `NO -> YES` transition of `prefersPointerLocked`, so the bridge performs
+that transition; this used to require opening and closing a menu by hand.
 
 Still not flawless on iPadOS 26. Steering the pointer into the scene edges can expose the
-Dock gesture, and a touchscreen contact while the trackpad is locked mutes the trackpad for
-as long as the finger is down. The touch HUD or controller controls remain the reliable
-fallback for those moments.
+Dock gesture, and a real finger on the display mutes the trackpad for as long as it is down.
+The touch HUD or controller controls remain the reliable fallback for those moments.
 
 **If your controller maps wrongly:** Unity's legacy joystick numbering - and especially
 its trigger and d-pad *axis* numbering - varies by controller model and by iOS version,
@@ -373,19 +380,19 @@ plain text and safe to delete.
   does not recognise. If your controller has a button that does nothing, this file will
   name it. Sending it in is the fastest way to get that controller supported properly.
 - `DaggerfallPointerDiagnostics.log` - throttled Magic Keyboard diagnostics: UIKit lock
-  state, lock reacquisitions, raw `GCMouse` deltas, indirect-pointer events, hover events,
-  edge and direct-touch state, and Unity axis state. It is intended for diagnosing
-  camera-look or pointer-lock regressions.
+  state, lock reacquisitions, lock drops split by whether a button was held, pointer-style
+  requests, raw `GCMouse` deltas, indirect-pointer and native direct-touch counts, hover
+  events, edge state, both button states, and Unity axis state. It is intended for
+  diagnosing camera-look or pointer-lock regressions.
 
 ## Known limitations
 
-- **Magic Keyboard pointer edges.** Camera movement works without holding the pointer button
-  through the native `GCMouse` raw-delta backend. UIKit pointer lock prevents normal window
-  resizing during gameplay, but iPadOS may still expose the Dock at the bottom edge. A lost
-  lock is now reclaimed automatically instead of needing a menu round-trip, at up to two
-  attempts a second, so an edge click costs a moment of look rather than the rest of the
-  session. A touchscreen contact still mutes the trackpad while the finger is down; a touch
-  iPadOS claims for a system gesture and never ends is released after
+- **Magic Keyboard pointer edges.** Camera movement and both buttons come from the native
+  `GCMouse` backend, so neither depends on the pointer lock being held. UIKit pointer lock
+  prevents normal window resizing during gameplay, but iPadOS may still expose the Dock at
+  the bottom edge. A lost lock is reclaimed automatically instead of needing a menu
+  round-trip. A real finger on the display still mutes the trackpad while it is down; a
+  touch iPadOS claims for a system gesture and never ends is released after
   `maximumDirectTouchMute` seconds. The diagnostic log above can distinguish a stopped
   native mouse stream from a game-side camera issue.
 - **Touch controls setting.** The startup Options screen contains a persistent **Touch

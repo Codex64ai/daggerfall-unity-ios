@@ -1127,8 +1127,6 @@ namespace DaggerfallWorkshop.Game
 
         public bool GetMouseButtonDown(int button)
         {
-            if (Mobile.MobileInput.PointerAtEdge && button == 1)
-                return false;
             // MOBILE: virtual cursor taps and long-press drags.
             if (Mobile.MobileInput.VirtualCursorActive)
                 return Mobile.MobileInput.GetMouseButtonDown(button) || Input.GetMouseButtonDown(button);
@@ -1136,31 +1134,40 @@ namespace DaggerfallWorkshop.Game
             if (Mobile.MobileInput.PointerActive && button == 0)
                 return Mobile.MobileInput.GetPointerButtonDown();
 
+            // Both pointer buttons now come from GCMouse. Button 1 is the classic
+            // SwingWeapon binding, and reading it from the hardware is what lets the
+            // pointer stay locked through a swing instead of being released so
+            // iPadOS can deliver the click as a located touch.
+            if (Mobile.MobileInput.PointerActive && button == 1)
+                return Mobile.MobileInput.GetPointerSecondaryButtonDown();
+
             return Input.GetMouseButtonDown(button) || (EnableController && GetKeyDown(joystickUICache[button], false));
         }
 
         public bool GetMouseButtonUp(int button)
         {
-            if (Mobile.MobileInput.PointerAtEdge && button == 1)
-                return false;
             if (Mobile.MobileInput.VirtualCursorActive)
                 return Mobile.MobileInput.GetMouseButtonUp(button) || Input.GetMouseButtonUp(button);
 
             if (Mobile.MobileInput.PointerActive && button == 0)
                 return Mobile.MobileInput.GetPointerButtonUp();
 
+            if (Mobile.MobileInput.PointerActive && button == 1)
+                return Mobile.MobileInput.GetPointerSecondaryButtonUp();
+
             return Input.GetMouseButtonUp(button) || (EnableController && GetKeyUp(joystickUICache[button], false));
         }
 
         public bool GetMouseButton(int button)
         {
-            if (Mobile.MobileInput.PointerAtEdge && button == 1)
-                return false;
             if (Mobile.MobileInput.VirtualCursorActive)
                 return Mobile.MobileInput.GetMouseButton(button);
 
             if (Mobile.MobileInput.PointerActive && button == 0)
                 return Mobile.MobileInput.GetPointerButton();
+
+            if (Mobile.MobileInput.PointerActive && button == 1)
+                return Mobile.MobileInput.GetPointerSecondaryButton();
 
             return Input.GetMouseButton(button) || (EnableController && GetKey(joystickUICache[button], false));
         }
@@ -1764,8 +1771,8 @@ namespace DaggerfallWorkshop.Game
             {
                 if (Mobile.MobileInput.PointerActive && k == KeyCode.Mouse0)
                     return Mobile.MobileInput.GetPointerButton();
-                if (Mobile.MobileInput.PointerAtEdge && k == KeyCode.Mouse1)
-                    return false;
+                if (Mobile.MobileInput.PointerActive && k == KeyCode.Mouse1)
+                    return Mobile.MobileInput.GetPointerSecondaryButton();
                 return Input.GetKey(k);
             }
             else

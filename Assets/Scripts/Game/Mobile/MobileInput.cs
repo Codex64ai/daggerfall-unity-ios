@@ -98,6 +98,8 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         static bool pointerButtonHeld;
         static bool pointerButtonPrevious;
+        static bool pointerSecondaryHeld;
+        static bool pointerSecondaryPrevious;
 
         public static bool GetPointerButtonDown()
         {
@@ -114,10 +116,38 @@ namespace DaggerfallWorkshop.Game.Mobile
             return pointerButtonHeld;
         }
 
-        public static void UpdatePointer(Vector2 position, Vector2 delta, bool active, bool buttonHeld)
+        /// <summary>
+        /// Secondary (right) pointer button - the classic SwingWeapon binding.
+        ///
+        /// Read from GCMouse through the native bridge rather than from Unity. A
+        /// locked pointer has no screen position, so iPadOS delivers no located
+        /// touch for the click and Unity's own mouse buttons stay down-less for the
+        /// whole of a swing. GCMouse reports the button either way, which is what
+        /// lets the pointer stay locked - and the cursor stay hidden - while the
+        /// player swings.
+        /// </summary>
+        public static bool GetPointerSecondaryButtonDown()
+        {
+            return pointerSecondaryHeld && !pointerSecondaryPrevious;
+        }
+
+        public static bool GetPointerSecondaryButtonUp()
+        {
+            return !pointerSecondaryHeld && pointerSecondaryPrevious;
+        }
+
+        public static bool GetPointerSecondaryButton()
+        {
+            return pointerSecondaryHeld;
+        }
+
+        public static void UpdatePointer(Vector2 position, Vector2 delta, bool active, bool buttonHeld,
+                                         bool secondaryHeld = false)
         {
             pointerButtonPrevious = pointerButtonHeld;
             pointerButtonHeld = active && buttonHeld;
+            pointerSecondaryPrevious = pointerSecondaryHeld;
+            pointerSecondaryHeld = active && secondaryHeld;
             PointerPosition = position;
             PointerDelta = active ? delta : Vector2.zero;
             PointerActive = active || PointerActive;
@@ -375,6 +405,8 @@ namespace DaggerfallWorkshop.Game.Mobile
             PointerPosition = Vector2.zero;
             pointerButtonHeld = false;
             pointerButtonPrevious = false;
+            pointerSecondaryHeld = false;
+            pointerSecondaryPrevious = false;
             Mode = MobileControlMode.Gameplay;
             ResetButtons();
         }

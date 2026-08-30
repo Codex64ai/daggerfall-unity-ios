@@ -37,6 +37,13 @@ static BOOL pointerLockOverrideOff = NO;
 static BOOL pointerLockRecoveryScheduled = NO;
 static NSTimeInterval pointerLockRecoveryTime = 0;
 static NSUInteger diagnosticLockRecoveries = 0;
+static NSUInteger diagnosticDirectTouches = 0;
+static NSUInteger diagnosticStyleRequests = 0;
+static NSUInteger diagnosticUnlocksWhileHeld = 0;
+static NSUInteger diagnosticUnlocksWhileIdle = 0;
+static BOOL nativeDirectTouchActive = NO;
+static BOOL windowSizeLocked = NO;
+static BOOL windowSizeLockApplied = NO;
 
 // UIKit drops the lock the moment it needs the pointer for something of its own
 // (an edge affordance, a system gesture). Retry no faster than this so a scene
@@ -72,7 +79,10 @@ static const NSTimeInterval pointerLockRecoveryInterval = 0.5;
                       styleForRegion:(UIPointerRegion *)region
 {
     if (@available(iOS 13.4, *))
+    {
+        diagnosticStyleRequests++;
         return pointerHidden ? [UIPointerStyle hiddenPointerStyle] : nil;
+    }
     return nil;
 }
 @end
@@ -117,10 +127,43 @@ static void DFMobilePointerRecordEvent(UIEvent *event, UIView *view)
     }
 }
 
+// Which touches are really fingers on the glass.
+//
+// Unity cannot answer this. Its TouchType has only Direct/Indirect/Stylus, and
+// UITouchTypeIndirectPointer - the Magic Keyboard trackpad's own click, added in
+// iOS 13.4 - falls through its mapping to Direct. So every press of the trackpad
+// button looked to the C# layer like a finger on the screen, and the mute that is
+// meant to stop a finger fighting the trackpad fired on the trackpad itself, for
+// the whole of every weapon swing. Classify here, where the real UITouch type is
+// visible.
+static void DFMobilePointerClassifyTouches(UIEvent *event)
+{
+    if (event == nil)
+        return;
+    if (event.type != UIEventTypeTouches)
+        return;
+
+    BOOL directTouch = NO;
+    for (UITouch *touch in event.allTouches)
+    {
+        if (touch.type != UITouchTypeDirect)
+            continue;
+        if (touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled)
+            continue;
+
+        directTouch = YES;
+        diagnosticDirectTouches++;
+        break;
+    }
+
+    nativeDirectTouchActive = directTouch;
+}
+
 static void DFMobilePointerWindowSendEvent(UIWindow *window, SEL selector, UIEvent *event)
 {
     diagnosticWindowEvents++;
     diagnosticLastEventType = event.type;
+    DFMobilePointerClassifyTouches(event);
     DFMobilePointerRecordEvent(event, UnityGetGLView());
     ((void (*)(id, SEL, UIEvent *))originalWindowSendEvent)(window, selector, event);
 }
@@ -152,6 +195,10 @@ static void InstallGameControllerMouse()
         {
             mouseInput.mouseMovedHandler = ^(GCMouseInput *mouse, float deltaX, float deltaY) {
                 (void)mouse;
+                // Gate on the value C# hands back, not on nativeDirectTouchActive
+                // directly: the classification happens here but the watchdog that
+                // releases a touch iPadOS abandoned lives up there, and gating on the
+                // raw flag would put the mute beyond its reach.
                 if (!pointerLockRequested || directTouchActive)
                     return;
 
@@ -310,6 +357,13 @@ static void EnsurePointerBridge()
                                      queue:[NSOperationQueue mainQueue]
                                 usingBlock:^(NSNotification *notification) {
                                     (void)notification;
+                                    if (pointerLockRequested && !DFMobilePointerIsLocked())
+                                    {
+                                        if (pointerButtonHeld || pointerSecondaryButtonHeld)
+                                            diagnosticUnlocksWhileHeld++;
+                                        else
+                                            diagnosticUnlocksWhileIdle++;
+                                    }
                                     // Re-resolve the cursor for the mode we are in
                                     // before asking for the lock back, so the gap
                                     // between the two is not a visible pointer.
@@ -362,9 +416,12 @@ static void EnsurePointerBridge()
 
 extern "C" {
 
-bool DFMobilePointerRead(float *x, float *y, float *dx, float *dy, bool *buttonHeld, bool *atEdge)
+bool DFMobilePointerRead(float *x, float *y, float *dx, float *dy, bool *buttonHeld, bool *atEdge,
+                         bool *secondaryButtonHeld, bool *directTouch)
 {
     EnsurePointerBridge();
+    *secondaryButtonHeld = pointerSecondaryButtonHeld;
+    *directTouch = nativeDirectTouchActive;
     if (!pointerActive)
         return false;
 
@@ -388,9 +445,15 @@ bool DFMobilePointerRead(float *x, float *y, float *dx, float *dy, bool *buttonH
 void DFMobilePointerDiagnostics(unsigned int *windowEvents, unsigned int *indirectTouches,
                                 unsigned int *nonZeroDeltas, unsigned int *hoverEvents,
                                 unsigned int *gameControllerDeltas, int *lastEventType, bool *locked,
-                                unsigned int *lockRecoveries)
+                                unsigned int *lockRecoveries, unsigned int *directTouches,
+                                unsigned int *styleRequests, unsigned int *unlocksWhileHeld,
+                                unsigned int *unlocksWhileIdle)
 {
     *lockRecoveries = (unsigned int)diagnosticLockRecoveries;
+    *directTouches = (unsigned int)diagnosticDirectTouches;
+    *styleRequests = (unsigned int)diagnosticStyleRequests;
+    *unlocksWhileHeld = (unsigned int)diagnosticUnlocksWhileHeld;
+    *unlocksWhileIdle = (unsigned int)diagnosticUnlocksWhileIdle;
     *windowEvents = (unsigned int)diagnosticWindowEvents;
     *indirectTouches = (unsigned int)diagnosticIndirectTouches;
     *nonZeroDeltas = (unsigned int)diagnosticNonZeroDeltas;
@@ -431,6 +494,14 @@ void DFMobilePointerSetHidden(bool hidden)
         if (hoverRecognizer != nil)
             hoverRecognizer.enabled = !hidden;
 
+        // The tap recognizer asks UIKit for the click as a located touch, which
+        // UIKit can only produce by releasing the pointer lock. It is also inert
+        // during gameplay - pointerTap: returns immediately while the pointer is
+        // hidden - so all it did there was cost the lock on every weapon swing.
+        // Menus keep it; gameplay takes its buttons from GCMouse instead.
+        if (tapRecognizer != nil)
+            tapRecognizer.enabled = !hidden;
+
         if (@available(iOS 13.4, *))
         {
             // The interaction stays installed for both modes and the delegate picks
@@ -456,8 +527,21 @@ void DFMobilePointerSetDirectTouchActive(bool active)
 
 void DFMobilePointerLockWindowSize(bool locked)
 {
+    // Transition-only. This runs once a frame, and rewriting sizeRestrictions on
+    // every one of them asks UIKit to re-resolve the scene geometry continuously -
+    // and a scene whose geometry is in flux is one UIKit will not hold a pointer
+    // lock for.
+    if (windowSizeLockApplied && windowSizeLocked == (BOOL)locked)
+        return;
+
     UIView *view = UnityGetGLView();
+    if (view == nil)
+        return;
+
     UIWindowScene *scene = view.window.windowScene;
+    if (scene == nil)
+        return;
+
     if (@available(iOS 13.0, *))
     {
         if (locked)
@@ -471,6 +555,9 @@ void DFMobilePointerLockWindowSize(bool locked)
             scene.sizeRestrictions.minimumSize = CGSizeZero;
             scene.sizeRestrictions.maximumSize = CGSizeZero;
         }
+
+        windowSizeLocked = locked;
+        windowSizeLockApplied = YES;
     }
 }
 

@@ -63,14 +63,16 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 #endif
 #if UNITY_IOS && !UNITY_EDITOR
-        [DllImport("__Internal")] static extern bool DFMobilePointerRead(out float x, out float y, out float dx, out float dy, out bool buttonHeld, out bool atEdge);
+        [DllImport("__Internal")] static extern bool DFMobilePointerRead(out float x, out float y, out float dx, out float dy, out bool buttonHeld, out bool atEdge, out bool secondaryButtonHeld, out bool directTouch);
         [DllImport("__Internal")] static extern void DFMobilePointerSetHidden(bool hidden);
         [DllImport("__Internal")] static extern void DFMobilePointerSetDirectTouchActive(bool active);
         [DllImport("__Internal")] static extern void DFMobilePointerLockWindowSize(bool locked);
         [DllImport("__Internal")] static extern void DFMobilePointerDiagnostics(
             out uint windowEvents, out uint indirectTouches, out uint nonZeroDeltas,
             out uint hoverEvents, out uint gameControllerDeltas,
-            out int lastEventType, out bool locked, out uint lockRecoveries);
+            out int lastEventType, out bool locked, out uint lockRecoveries,
+            out uint directTouches, out uint styleRequests,
+            out uint unlocksWhileHeld, out uint unlocksWhileIdle);
 #endif
         #region Singleton
 
@@ -883,38 +885,37 @@ namespace DaggerfallWorkshop.Game.Mobile
         void PollHardwarePointer()
         {
             bool wasActive = MobileInput.PointerActive;
+#if UNITY_IOS && !UNITY_EDITOR
+            bool nativeDirectTouchPresent = false;
+#endif
 
 #if UNITY_IOS && !UNITY_EDITOR
-            // A finger on the screen mutes the trackpad, because the two would
-            // otherwise both drive the camera. Only a LIVE finger may do that: a touch
-            // that has already ended still appears in Input.touches for its final
-            // frame, and a press that lands on the display edge can be claimed by an
-            // iPadOS system gesture and never report an end at all. Either one used to
-            // latch the mute on and leave the camera deaf to the trackpad for the rest
-            // of the session.
-            bool directTouchPresent = false;
-            for (int touchIndex = 0; touchIndex < Input.touchCount; touchIndex++)
-            {
-                // Qualified: the Input System package declares its own TouchPhase in a
-                // namespace this file already imports.
-                UnityEngine.Touch touch = Input.GetTouch(touchIndex);
-                if (touch.type == TouchType.Indirect)
-                    continue;
-                if (touch.phase == UnityEngine.TouchPhase.Ended ||
-                    touch.phase == UnityEngine.TouchPhase.Canceled)
-                    continue;
+            // WHICH TOUCHES ARE FINGERS IS NOT A QUESTION UNITY CAN ANSWER.
+            //
+            // UnityEngine.TouchType has only Direct/Indirect/Stylus, and iPadOS reports
+            // the Magic Keyboard trackpad's own click as UITouchTypeIndirectPointer,
+            // which Unity maps to Direct. Testing Input.GetTouch().type here therefore
+            // called every trackpad press a finger on the screen - so the mute meant to
+            // stop a finger fighting the trackpad fired on the trackpad itself, for the
+            // whole of every weapon swing. The native bridge sees the real UITouch type
+            // and answers this now.
+            float nativeX, nativeY, nativeDeltaX, nativeDeltaY;
+            bool nativeButtonHeld, nativeAtEdge, nativeSecondaryHeld, nativeDirectTouch;
+            bool pointerRead = DFMobilePointerRead(out nativeX, out nativeY,
+                                                   out nativeDeltaX, out nativeDeltaY,
+                                                   out nativeButtonHeld, out nativeAtEdge,
+                                                   out nativeSecondaryHeld, out nativeDirectTouch);
 
-                directTouchPresent = true;
-                break;
-            }
-
+            bool directTouchPresent = nativeDirectTouch;
+            nativeDirectTouchPresent = nativeDirectTouch;
             if (!directTouchPresent)
                 directTouchSince = -1f;
             else if (directTouchSince < 0f)
                 directTouchSince = Time.unscaledTime;
 
             // The touch UI is hidden while the pointer owns gameplay, so a finger held
-            // down this long is not a control input - it is a touch iPadOS abandoned.
+            // down this long is not a control input - it is a touch iPadOS claimed for a
+            // system gesture and never ended.
             bool directTouchActive = directTouchPresent &&
                 Time.unscaledTime - directTouchSince <= maximumDirectTouchMute;
             DFMobilePointerSetDirectTouchActive(directTouchActive);
@@ -922,10 +923,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (directTouchActive)
                 inputSystemEventDelta = Vector2.zero;
 
-            float nativeX, nativeY, nativeDeltaX, nativeDeltaY;
-            bool nativeButtonHeld, nativeAtEdge;
-            if (DFMobilePointerRead(out nativeX, out nativeY, out nativeDeltaX, out nativeDeltaY,
-                                    out nativeButtonHeld, out nativeAtEdge))
+            if (pointerRead)
             {
                 MobileInput.PointerAtEdge = nativeAtEdge;
 #if ENABLE_INPUT_SYSTEM
@@ -944,13 +942,21 @@ namespace DaggerfallWorkshop.Game.Mobile
                         nativeDeltaY += systemDelta.y;
                     }
                     nativeButtonHeld |= Mouse.current.leftButton.isPressed;
+                    // Fallback only. GCMouse is the authoritative source for both
+                    // buttons because it reports them while the pointer is locked,
+                    // but GCMouse.current can be nil until the trackpad is first
+                    // actuated - and on any setup where it never arrives, this keeps
+                    // the swing button working the way it did before.
+                    nativeSecondaryHeld |= Mouse.current.rightButton.isPressed;
                 }
 #else
                 nativeButtonHeld |= Input.GetMouseButton(0);
+                nativeSecondaryHeld |= Input.GetMouseButton(1);
 #endif
                 MobileInput.UpdatePointer(new Vector2(nativeX, nativeY),
                     EdgeLookDelta(new Vector2(nativeX, nativeY),
-                    new Vector2(nativeDeltaX, nativeDeltaY)), true, nativeButtonHeld);
+                    new Vector2(nativeDeltaX, nativeDeltaY)), true, nativeButtonHeld,
+                    nativeSecondaryHeld);
                 LogPointerDiagnostics(nativeDeltaX, nativeDeltaY, nativeButtonHeld);
                 if (!wasActive)
                     ApplyHudVisibility();
@@ -1016,11 +1022,18 @@ namespace DaggerfallWorkshop.Game.Mobile
                 for (int i = 0; i < Input.touchCount; i++)
                 {
                     Touch touch = Input.GetTouch(i);
-                    if (touch.type != TouchType.Indirect)
-                    {
-                        directTouchBegan |= touch.phase == UnityEngine.TouchPhase.Began;
-                        break;
-                    }
+                    if (touch.type == TouchType.Indirect)
+                        continue;
+#if UNITY_IOS && !UNITY_EDITOR
+                    // Unity calls the trackpad's own click a direct touch, so without
+                    // the native verdict a press of the trackpad button relinquished
+                    // the pointer below - which drops the UIKit lock and puts the
+                    // system cursor back on screen for the length of a weapon swing.
+                    if (!nativeDirectTouchPresent)
+                        continue;
+#endif
+                    directTouchBegan |= touch.phase == UnityEngine.TouchPhase.Began;
+                    break;
                 }
 
                 // Keep ownership through the short gap after an indirect trackpad
@@ -1076,12 +1089,14 @@ namespace DaggerfallWorkshop.Game.Mobile
 
 #if UNITY_IOS && !UNITY_EDITOR
             uint windowEvents, indirectTouches, nonZeroDeltas, hoverEvents, gameControllerDeltas;
-            uint lockRecoveries;
+            uint lockRecoveries, directTouches, styleRequests, unlocksWhileHeld, unlocksWhileIdle;
             int lastEventType;
             bool locked;
             DFMobilePointerDiagnostics(out windowEvents, out indirectTouches, out nonZeroDeltas,
                                        out hoverEvents, out gameControllerDeltas,
-                                       out lastEventType, out locked, out lockRecoveries);
+                                       out lastEventType, out locked, out lockRecoveries,
+                                       out directTouches, out styleRequests,
+                                       out unlocksWhileHeld, out unlocksWhileIdle);
             Debug.Log(string.Format(
                 "[DFPointerDiag] lock={0} native/systemDelta=({1:0.##},{2:0.##}) held={3} " +
                 "windowEvents={4} indirectTouches={5} nonZero={6} hover={7} lastEventType={8} " +
@@ -1094,12 +1109,15 @@ namespace DaggerfallWorkshop.Game.Mobile
                 "{0:O} lock={1} delta=({2:0.##},{3:0.##}) held={4} windowEvents={5} " +
                 "indirectTouches={6} nonZero={7} hover={8} gcDeltas={9} lastEventType={10} " +
                 "rawAxes=({11:0.##},{12:0.##}) inputSystemEvents={13} inputSystemNonZero={14} " +
-                "queuedDelta=({15:0.##},{16:0.##}) atEdge={17} directTouch={18} lockRecoveries={19}\n",
+                "queuedDelta=({15:0.##},{16:0.##}) atEdge={17} directTouch={18} lockRecoveries={19} " +
+                "swing={20} directTouches={21} styleRequests={22} unlockHeld={23} unlockIdle={24}\n",
                 System.DateTime.UtcNow, locked, deltaX, deltaY, buttonHeld, windowEvents,
                 indirectTouches, nonZeroDeltas, hoverEvents, gameControllerDeltas, lastEventType,
                 Input.GetAxisRaw("Mouse X"), Input.GetAxisRaw("Mouse Y"), inputSystemMouseEvents,
                 inputSystemNonZeroMouseEvents, inputSystemEventDelta.x, inputSystemEventDelta.y,
-                MobileInput.PointerAtEdge, directTouchInputActive, lockRecoveries);
+                MobileInput.PointerAtEdge, directTouchInputActive, lockRecoveries,
+                MobileInput.GetPointerSecondaryButton(), directTouches, styleRequests,
+                unlocksWhileHeld, unlocksWhileIdle);
             AppendPointerDiagnostic(line);
             Debug.Log(string.Format("[DFPointerDiag] inputSystemEvents={0} inputSystemNonZero={1} queuedDelta=({2:0.##},{3:0.##})",
                 inputSystemMouseEvents, inputSystemNonZeroMouseEvents,
