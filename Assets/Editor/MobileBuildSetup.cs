@@ -48,6 +48,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             get { return System.Environment.GetEnvironmentVariable("DFU_IOS_TESTAPP") == "1"; }
         }
 
+        /// <summary>
+        /// True when DFU_IOS_SIM=1: build against the iOS Simulator SDK, for exercising the
+        /// real iOS code path (native plugins included) on the Mac when no device is at hand.
+        /// Never a substitute for a device - pointer lock and haptics do not exist there.
+        /// </summary>
+        static bool IsSimulator
+        {
+            get { return System.Environment.GetEnvironmentVariable("DFU_IOS_SIM") == "1"; }
+        }
+
         [MenuItem("Tools/Daggerfall Mobile/Apply iOS Player Settings")]
         public static void ApplyIOSSettings()
         {
@@ -91,6 +101,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             log.AppendLine("  min iOS version        = 13.0 (repo shipped 10.0, which modern Xcode rejects)");
 
             PlayerSettings.iOS.targetDevice = iOSTargetDevice.iPhoneAndiPad;
+
+            // Applied unconditionally in both directions, like the app identity: a simulator
+            // build must not leave the SDK setting sticky for the next device build.
+            PlayerSettings.iOS.sdkVersion = IsSimulator ? iOSSdkVersion.SimulatorSDK : iOSSdkVersion.DeviceSDK;
+            log.AppendLine("  sdk                = " + PlayerSettings.iOS.sdkVersion);
             log.AppendLine("  target device          = iPhone + iPad");
 
             // --- rendering --------------------------------------------------------
