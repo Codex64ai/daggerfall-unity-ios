@@ -201,6 +201,10 @@ namespace DaggerfallWorkshop.Game.Mobile
                  "way to press it.")]
         public float holdToSkipVideoSeconds = 0.6f;
 
+        [Tooltip("Two taps inside this window skip an intro/cutscene video, as an " +
+                 "alternative to holding to skip.")]
+        public float doubleTapToSkipWindow = 0.45f;
+
         [Header("Debug")]
         [Tooltip("On-screen readout: live touch count, both sticks' state, gesture calibration. " +
                  "Toggle from TUNE > Show diagnostics.")]
@@ -222,6 +226,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         Vector2 lastPointerDirection;
         float vidHoldStart = -1f;
         bool vidSkipQueued;
+        float vidLastTapTime = -1f;
         float swingHoldUntil;
         float bowHoldStart = -1f;
         bool thresholdApplied;
@@ -1345,11 +1350,39 @@ namespace DaggerfallWorkshop.Game.Mobile
             bool videoOnTop = DaggerfallUI.HasInstance && DaggerfallUI.UIManager != null &&
                 DaggerfallUI.UIManager.TopWindow is DaggerfallWorkshop.Game.UserInterfaceWindows.DaggerfallVidPlayerWindow;
 
-            if (!videoOnTop || Input.touchCount == 0)
+            if (!videoOnTop)
+            {
+                vidHoldStart = -1f;
+                vidSkipQueued = false;
+                vidLastTapTime = -1f;
+                return;
+            }
+
+            // Finger off the glass: stop the hold timer and allow a fresh skip decision,
+            // but KEEP vidLastTapTime - a double-tap must survive the gap between taps.
+            // Wiping it here is why the first double-tap implementation never landed on
+            // device: the reset ran on the frame between the two taps, so the second tap
+            // always saw the timestamp as -1.
+            if (Input.touchCount == 0)
             {
                 vidHoldStart = -1f;
                 vidSkipQueued = false;
                 return;
+            }
+
+            // Double-tap: two taps inside the window skip. Counted on the Began phase so
+            // a finger held on the glass does not keep re-arming the window frame after
+            // frame - only a new touch counts as a tap.
+            if (Input.GetTouch(0).phase == UnityEngine.TouchPhase.Began)
+            {
+                if (!vidSkipQueued && vidLastTapTime >= 0f &&
+                    Time.unscaledTime - vidLastTapTime <= doubleTapToSkipWindow)
+                {
+                    vidSkipQueued = true;
+                    MobileInput.QueueBack();
+                    Debug.Log("[MobileInput] video skipped by touch double-tap");
+                }
+                vidLastTapTime = Time.unscaledTime;
             }
 
             if (vidHoldStart < 0f)

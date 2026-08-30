@@ -89,6 +89,18 @@ namespace DaggerfallWorkshop.Game.Mobile
                 else if (primaryFingerId != -1)
                     EndPrimary();
 
+                // INVARIANT: no finger on the glass means the touch layer's buttons are up.
+                //
+                // The device log showed held=True with touches=0 for twenty-plus seconds
+                // after a Magic Keyboard trackpad click: iPadOS never delivered that click
+                // as a touch phase, so EndPrimary never ran, and the ghost button state
+                // lived on in MobileInput.latched. With the button already down, TickButtons
+                // derives no down edge - and a down edge is the whole of a click - so touch
+                // went dead and stayed dead until the trackpad moved again. Whatever set the
+                // latch, this holds: no finger, button up.
+                MobileInput.SetLatched(0, false);
+                MobileInput.SetLatched(1, false);
+
                 uiOwnedFingers.Clear();
 
                 // Desktop / editor fallback. With no touches there is nothing to drive
@@ -96,10 +108,20 @@ namespace DaggerfallWorkshop.Game.Mobile
                 // diverted to it - so the classic UI would be stuck with a cursor frozen
                 // at screen centre. Mirror the real mouse instead.
                 //
-                // Input.mousePresent is false on iOS, so this is inert on device and
-                // needs no compile guard.
+                // EDITOR ONLY. Input.mousePresent becomes true on some iPadOS/Unity
+                // combinations when a Magic Keyboard is attached, which drove this from
+                // the stale legacy mouse state left behind by a trackpad click: it moved
+                // the cursor to a coordinate the native bridge does not track, then the
+                // ORed Input.GetMouseButton(0) fed the ghost button straight back into
+                // latched[] - undoing the invariant above every frame. On device the
+                // native bridge (DFMobilePointerRead) is authoritative for the hardware
+                // pointer, and on Android there is no hardware pointer. Keep the fallback
+                // for the editor, where a real desktop mouse legitimately exercises the
+                // layer.
+#if !UNITY_IOS || UNITY_EDITOR
                 if (Input.mousePresent)
                     PollMouseFallback();
+#endif
 
                 return;
             }

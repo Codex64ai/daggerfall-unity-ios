@@ -12,6 +12,7 @@
 using System;
 using System.Collections.Generic;
 using DaggerfallConnect.Arena2;
+using DaggerfallWorkshop.Game.Mobile;
 using DaggerfallWorkshop.Game.UserInterface;
 using DaggerfallWorkshop.Utility;
 using DaggerfallWorkshop.Utility.AssetInjection;
@@ -350,6 +351,34 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
                 // if there is a nested next message box show it
                 if (nextMessageBox != null)
                     nextMessageBox.Show();
+            }
+
+            // TOUCH (iOS): ClickAnywhereToClose through the panel event path cannot see
+            // synthetic touch clicks. The mobile click is a few frames of a virtual button,
+            // and BaseScreenComponent completes it on whichever component is under the
+            // cursor - for taps on the popup's own label and message panel that is not the
+            // parent panel, so ParentPanel_OnMouseClick never fires. The device log shows
+            // the reputation popup staying open while InputManager registered 35 seconds
+            // of clicks. Drive the close from the input contract instead: a click that
+            // reaches InputManager while this box is on top closes it, exactly as the
+            // desktop pointer does through the events.
+            //
+            // Gated on VirtualCursorActive so this only runs while the TOUCH layer owns
+            // the pointer. With a trackpad, gamepad or keyboard active the event path
+            // already works, and running both paths on one click would close twice.
+            if (MobileInput.VirtualCursorActive &&
+                clickAnywhereToClose &&
+                uiManager.TopWindow == this &&
+                Time.realtimeSinceStartup - presentationTime >= minTimePresented &&
+                !InputManager.Instance.GetKey(InputManager.Instance.GetBinding(InputManager.Actions.SwingWeapon)) &&
+                (InputManager.Instance.GetMouseButtonDown(0) ||
+                 InputManager.Instance.GetMouseButtonDown(1) ||
+                 InputManager.Instance.GetMouseButtonDown(2)))
+            {
+                if (nextMessageBox != null)
+                    nextMessageBox.Show();
+                else
+                    CloseWindow();
             }
         }
 
