@@ -935,6 +935,26 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             }
             Check(!anyOpen0, "encounter gate: 0% never opens");
             Check(allOpen100, "encounter gate: 100% always open");
+
+            // Fresh install: both built-in mods must start OFF (release requirement,
+            // 2026-08-31). With no pref keys and no ModManager, the flags fall back to
+            // their shipped defaults - which must be false.
+            bool hadRoads = PlayerPrefs.HasKey("DFMobile.mod.roads");
+            bool hadTravel = PlayerPrefs.HasKey("DFMobile.journeymode");
+            int savedRoadsPref = PlayerPrefs.GetInt("DFMobile.mod.roads", 0);
+            int savedTravelPref = PlayerPrefs.GetInt("DFMobile.journeymode", 0);
+            try
+            {
+                PlayerPrefs.DeleteKey("DFMobile.mod.roads");
+                PlayerPrefs.DeleteKey("DFMobile.journeymode");
+                Check(!MobileMods.Roads, "fresh install: Roads & tracks starts off");
+                Check(!MobileMods.RealTravel, "fresh install: Real travel starts off");
+            }
+            finally
+            {
+                if (hadRoads) PlayerPrefs.SetInt("DFMobile.mod.roads", savedRoadsPref);
+                if (hadTravel) PlayerPrefs.SetInt("DFMobile.journeymode", savedTravelPref);
+            }
         }
 
         /// <summary>The HID table must round-trip and cover what Daggerfall binds by default.</summary>
