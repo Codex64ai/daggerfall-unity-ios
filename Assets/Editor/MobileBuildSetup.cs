@@ -84,6 +84,32 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             log.AppendLine("  sim architecture   = ARM64 (was " + before + "; 0 = X64, 1 = ARM64)");
         }
 
+        /// <summary>
+        /// Sets AudioManager.m_DisableAudio ("Disable Unity Audio" in Project Settings > Audio),
+        /// which has no public API. With it on, the player never initialises FMOD.
+        /// </summary>
+        static void SetUnityAudioDisabled(bool disabled, System.Text.StringBuilder log)
+        {
+            Object[] assets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/AudioManager.asset");
+            if (assets == null || assets.Length == 0)
+            {
+                log.AppendLine("  unity audio        = COULD NOT LOAD AudioManager.asset (left as is)");
+                return;
+            }
+            var so = new SerializedObject(assets[0]);
+            SerializedProperty prop = so.FindProperty("m_DisableAudio");
+            if (prop == null)
+            {
+                log.AppendLine("  unity audio        = m_DisableAudio field not found (left as is)");
+                return;
+            }
+            bool before = prop.boolValue;
+            prop.boolValue = disabled;
+            so.ApplyModifiedPropertiesWithoutUndo();
+            log.AppendLine("  unity audio        = " + (disabled ? "DISABLED (simulator build)" : "enabled") +
+                           " (was " + (before ? "disabled" : "enabled") + ")");
+        }
+
         [MenuItem("Tools/Daggerfall Mobile/Apply iOS Player Settings")]
         public static void ApplyIOSSettings()
         {
@@ -140,6 +166,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // PlayerSettings.iOS accessor for this in 6000.3, so it goes through the
             // serialized field. 0 = X64, 1 = ARM64. Ignored by device builds.
             SetSimulatorArchitectureArm64(log);
+
+            // Simulator builds run without Unity audio. FMOD's CoreAudio init deadlocks in the
+            // iOS 26 simulator when the Mac's default output is a virtual device (here: Jump
+            // Desktop Audio, because the Mac is driven remotely) - "Initialize: RPC timeout.
+            // Apparently deadlocked. Aborting now." ten seconds after launch, every launch.
+            // Applied in both directions so a device build never ships silent.
+            SetUnityAudioDisabled(IsSimulator, log);
             log.AppendLine("  target device          = iPhone + iPad");
 
             // --- rendering --------------------------------------------------------
