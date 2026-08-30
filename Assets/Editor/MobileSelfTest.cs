@@ -907,6 +907,17 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(Mathf.Abs(big.x / big.y - 3000f / -4000f) < 0.001f, "delta clamp: direction preserved");
             Check(MobilePointer.ClampDelta(new Vector2(3f, 4f), 250f) == new Vector2(3f, 4f),
                   "delta clamp: ordinary movement untouched");
+
+            Check(MobileInput.SecondTapConfirms(true, true, 4, 4, 0.5f, 0.3f),
+                  "second tap: slow re-tap on the same row confirms");
+            Check(!MobileInput.SecondTapConfirms(true, true, 4, 4, 0.2f, 0.3f),
+                  "second tap: a fast pair is the engine's double-click, not ours");
+            Check(!MobileInput.SecondTapConfirms(true, true, 5, 4, 0.5f, 0.3f),
+                  "second tap: a different row only selects");
+            Check(!MobileInput.SecondTapConfirms(false, true, 4, 4, 0.5f, 0.3f),
+                  "second tap: keyboard/programmatic selection never confirms");
+            Check(!MobileInput.SecondTapConfirms(true, true, -1, -1, 0.5f, 0.3f),
+                  "second tap: empty selection never confirms");
         }
 
         /// <summary>The HID table must round-trip and cover what Daggerfall binds by default.</summary>

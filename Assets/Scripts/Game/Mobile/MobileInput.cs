@@ -359,6 +359,20 @@ namespace DaggerfallWorkshop.Game.Mobile
                 pressFrames[button] = Mathf.Max(frames, 2);
         }
 
+        /// <summary>
+        /// Pure: does this selection event confirm (ready/buy) the spell rather than just
+        /// select it? True only for a REAL cursor click on the row that is already the
+        /// last-tapped one, and only when the click pair is too slow for the engine's own
+        /// double-click (same clock, same boundary - exactly one of the two paths fires).
+        /// </summary>
+        public static bool SecondTapConfirms(bool fromClick, bool virtualCursor, int index,
+                                             int lastTappedIndex, float secondsSinceLastTap,
+                                             float doubleClickDelay)
+        {
+            return fromClick && virtualCursor && index >= 0 && index == lastTappedIndex &&
+                   secondsSinceLastTap >= doubleClickDelay;
+        }
+
         /// <summary>Latch a button down (long-press drag on scrollbars and sliders).</summary>
         public static void SetLatched(int button, bool value)
         {

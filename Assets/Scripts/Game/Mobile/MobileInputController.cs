@@ -221,6 +221,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         // while it is the thing swinging; see ApplySwingMode.
         int userSwingMode;
         int appliedSwingMode = -1;
+        bool spellWasReady;         // edge for the tap-to-cast HUD hint
         float vidHoldStart = -1f;
         bool vidSkipQueued;
         float swingHoldUntil;
@@ -1448,10 +1449,28 @@ namespace DaggerfallWorkshop.Game.Mobile
             bool bowDrawing = bowFingerDown &&
                               Time.unscaledTime - bowHoldStart >= bowDrawMinHold;
 
+            // A READY SPELL IS CAST BY ACTIVATE, NOT BY A SWING. EntityEffectManager fires
+            // CastReadySpell on Actions.ActivateCenterObject, and WeaponManager deliberately
+            // ignores SwingWeapon while a spell is ready - so the swipe gesture could never
+            // cast. Mouse left-click and the pad's A button both ARE Activate, which is why
+            // only touch was broken. With a mouse the cast is a click, so the touch analog
+            // is a tap on the view; drags still only look, in or out of combat mode.
+            bool spellReady = GameManager.HasInstance &&
+                              GameManager.Instance.PlayerEffectManager != null &&
+                              GameManager.Instance.PlayerEffectManager.HasReadySpell;
+            if (spellReady && !spellWasReady)
+                DaggerfallUI.AddHUDText("Tap the view to cast", 2.5f);
+            spellWasReady = spellReady;
+
             // TAP TO ATTACK (Mobile Settings > Input, off by default): the engine runs in
             // click mode for touch, so a quick tap is the click and a drag only looks. The
             // swipe hold below must not arm, or every look-drag would be an attack.
-            if (tapToAttack)
+            if (spellReady)
+            {
+                if (lookZone.ConsumeTap())
+                    QueueAction(InputManager.Actions.ActivateCenterObject);
+            }
+            else if (tapToAttack)
             {
                 if (combat && !bow && lookZone.ConsumeTap())
                     QueueAction(InputManager.Actions.SwingWeapon);

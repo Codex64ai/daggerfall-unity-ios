@@ -158,6 +158,10 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
 
         public override void OnPush()
         {
+            // MOBILE: the window instance is reused; a tap index remembered from the last
+            // visit must not let the first tap of this visit count as the "second".
+            mobileLastTappedIndex = -1;
+
             toggleClosedBinding = InputManager.Instance.GetBinding(InputManager.Actions.CastSpell);
 
             if (buyMode && GameManager.Instance.PlayerEnterExit.IsPlayerInside)
@@ -349,6 +353,13 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
             spellsListBox.RowsDisplayed = 16;
             spellsListBox.MaxCharacters = 22;
             spellsListBox.OnSelectItem += SpellsListBox_OnSelectItem;
+            // MOBILE: touch cannot double-click reliably (two taps within 0.3s on the same
+            // row), so a SLOW second tap on the already-selected row confirms it instead -
+            // one tap selects, another readies (or buys), no timer to beat. base.MouseClick
+            // raises OnMouseClick before ListBox updates the selection, so this flag marks
+            // the selection events that came from a real cursor click; the fast pair is left
+            // to the engine's own double-click so exactly one path fires.
+            spellsListBox.OnMouseClick += (sender, pos) => { mobileClickPending = true; };
             if (buyMode)
                 spellsListBox.OnMouseDoubleClick += BuyButton_OnMouseClick;
             else
@@ -760,8 +771,34 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
             ShowEffectPopup(effect);
         }
 
+        // MOBILE: state for the slow-second-tap confirm (see Setup).
+        bool mobileClickPending;
+        int mobileLastTappedIndex = -1;
+        float mobileLastTapTime = -10f;
+
         protected virtual void SpellsListBox_OnSelectItem()
         {
+            // MOBILE: slow second tap on the same row = confirm.
+            bool fromClick = mobileClickPending;
+            mobileClickPending = false;
+            if (fromClick)
+            {
+                float now = Time.realtimeSinceStartup;
+                bool confirm = Mobile.MobileInput.SecondTapConfirms(
+                    fromClick, Mobile.MobileInput.VirtualCursorActive, spellsListBox.SelectedIndex,
+                    mobileLastTappedIndex, now - mobileLastTapTime, 0.3f);
+                mobileLastTappedIndex = spellsListBox.SelectedIndex;
+                mobileLastTapTime = now;
+                if (confirm)
+                {
+                    if (buyMode)
+                        BuyButton_OnMouseClick(spellsListBox, Vector2.zero);
+                    else
+                        SpellsListBox_OnUseSelectedItem();
+                    return;
+                }
+            }
+
             UpdateSelection();
         }
 
