@@ -59,7 +59,6 @@ namespace DaggerfallWorkshop.Game.Questing
 
         #region Structures
 
-        [SerializeField]
         public struct MessageVariant
         {
             public List<TextFile.Token> tokens;

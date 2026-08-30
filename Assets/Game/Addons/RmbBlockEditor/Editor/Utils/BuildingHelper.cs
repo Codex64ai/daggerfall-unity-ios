@@ -11,6 +11,9 @@ using DaggerfallWorkshop.Game.Addons.RmbBlockEditor.Elements;
 using DaggerfallWorkshop.Utility.AssetInjection;
 using UnityEngine;
 using UnityEngine.UIElements;
+// Unity 6 introduced UnityEngine.UIElements.Tab, which collides with this editor's own
+// Tab element. The alias pins the reference to the type this file always meant.
+using Tab = DaggerfallWorkshop.Game.Addons.RmbBlockEditor.Elements.Tab;
 
 namespace DaggerfallWorkshop.Game.Addons.RmbBlockEditor
 {
