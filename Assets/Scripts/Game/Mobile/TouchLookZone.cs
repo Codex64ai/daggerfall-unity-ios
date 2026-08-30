@@ -119,6 +119,8 @@ namespace DaggerfallWorkshop.Game.Mobile
                     continue;
                 if (VirtualJoystick.IsFingerClaimed(t.fingerId))
                     continue;                          // a stick owns it
+                if (VirtualJoystick.ClaimsScreenPoint(t.position))
+                    continue;                          // stick territory wins, even before its Update
                 if (VirtualJoystick.IsOverInteractive(t.position))
                     continue;                          // buttons win
                 if (MobileClassicHud.ContainsScreenPoint(t.position))

@@ -57,6 +57,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         // Finger ids claimed across ALL sticks, so one finger can never drive two.
         static readonly HashSet<int> claimedFingers = new HashSet<int>();
+        static readonly HashSet<VirtualJoystick> activeJoysticks = new HashSet<VirtualJoystick>();
 
         /// <summary>Set by the layout editor: sticks read raw touches and bypass UGUI, so
         /// without this they keep claiming fingers (and walking the player) behind the
@@ -91,9 +92,36 @@ namespace DaggerfallWorkshop.Game.Mobile
             canvasGroup.alpha = idleAlpha;
         }
 
+        void OnEnable()
+        {
+            activeJoysticks.Add(this);
+        }
+
         void OnDisable()
         {
+            activeJoysticks.Remove(this);
             ForceRelease();
+        }
+
+        /// <summary>
+        /// True when a screen point belongs to any active stick's visual rect or
+        /// configured grab territory. The look zone uses this before claiming a new
+        /// finger, because its Update can run before the stick's Update in the same
+        /// frame. Stick territories must win that race.
+        /// </summary>
+        public static bool ClaimsScreenPoint(Vector2 screenPos)
+        {
+            foreach (VirtualJoystick joystick in activeJoysticks)
+            {
+                Camera cam = (joystick.parentCanvas != null &&
+                              joystick.parentCanvas.renderMode != RenderMode.ScreenSpaceOverlay)
+                    ? joystick.parentCanvas.worldCamera : null;
+                if (RectTransformUtility.RectangleContainsScreenPoint(joystick.rect, screenPos, cam) ||
+                    joystick.InClaimRegion(screenPos))
+                    return true;
+            }
+
+            return false;
         }
 
         void Update()
