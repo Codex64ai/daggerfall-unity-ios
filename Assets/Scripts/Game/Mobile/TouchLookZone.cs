@@ -115,7 +115,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             for (int i = 0; i < Input.touchCount; i++)
             {
                 Touch t = Input.GetTouch(i);
-                if (t.phase != TouchPhase.Began)
+                if (t.phase != TouchPhase.Began && t.phase != TouchPhase.Moved)
                     continue;
                 if (VirtualJoystick.IsFingerClaimed(t.fingerId))
                     continue;                          // a stick owns it

@@ -149,7 +149,11 @@ namespace DaggerfallWorkshop.Game.Mobile
                     if (t.phase == TouchPhase.Began && MobileClassicHud.ContainsScreenPoint(t.position))
                         continue;
 
-                    if (t.phase != TouchPhase.Began || claimedFingers.Contains(t.fingerId))
+                    // A touch may begin while the keyboard HUD is still hidden. Once
+                    // the handover restores this object, adopt its first movement
+                    // sample instead of losing the gesture forever.
+                    if ((t.phase != TouchPhase.Began && t.phase != TouchPhase.Moved) ||
+                        claimedFingers.Contains(t.fingerId))
                         continue;
 
                     bool onStick = RectTransformUtility.RectangleContainsScreenPoint(rect, t.position, cam);

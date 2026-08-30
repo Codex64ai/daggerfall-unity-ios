@@ -488,8 +488,20 @@ namespace DaggerfallWorkshop.Game.Mobile
             // Any touch means the player is back on the glass.
             if (Input.touchCount > 0)
             {
+                // PollKeyboard runs before the pointer poll that normally performs
+                // this handover. Clear the stale keyboard pointer here as well, so
+                // ApplyHudVisibility can restore the gameplay layer before the
+                // touch's first movement sample is dispatched.
+                if (MobileInput.PointerActive)
+                {
+                    MobileInput.PointerActive = false;
+                    MobileInput.PointerDelta = Vector2.zero;
+                }
+
                 if (keyboardActive)
                     SetKeyboardActive(false);
+                else
+                    ApplyHudVisibility();
                 return;
             }
 
