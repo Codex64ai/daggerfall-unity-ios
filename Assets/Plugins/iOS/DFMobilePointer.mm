@@ -42,6 +42,7 @@ static NSUInteger diagnosticStyleRequests = 0;
 static NSUInteger diagnosticUnlocksWhileHeld = 0;
 static NSUInteger diagnosticUnlocksWhileIdle = 0;
 static BOOL nativeDirectTouchActive = NO;
+static NSMutableSet *activeDirectTouches = nil;
 static BOOL windowSizeLocked = NO;
 static BOOL windowSizeLockApplied = NO;
 
@@ -151,20 +152,46 @@ static void DFMobilePointerClassifyTouches(UIEvent *event)
     if (event.type != UIEventTypeTouches)
         return;
 
-    BOOL directTouch = NO;
+    // TRACK THE LIVE FINGERS, DO NOT ANSWER FROM ONE EVENT.
+    //
+    // This used to assign the flag from whichever touches event arrived last, which
+    // is wrong the moment a trackpad is also connected. The Magic Keyboard's own
+    // pointer is delivered as UITouchTypeIndirectPointer inside touches events that
+    // carry no direct touch at all, and those events interleave with real finger
+    // events many times a second. Each one reset the flag to NO, so a finger on the
+    // glass was reported as absent for most frames.
+    //
+    // C# never saw a stable handover: touchOwnsPointer would not latch,
+    // MobileInput.PointerActive stayed true, and ApplyHudVisibility kept the gameplay
+    // layer switched off - which disables the look stick and the look zone. That is
+    // the camera stick doing nothing after a handover from the keyboard. The capture
+    // shows the state directly: pointerActive=True, hudGameplay=False, touchOwns=False
+    // for forty-five seconds with a touch on screen.
+    //
+    // An event that carries direct touches describes every live one, so rebuild from
+    // it. An event that carries none is the pointer's own stream and says nothing
+    // about fingers, so leave the set alone.
+    BOOL sawDirect = NO;
+    NSMutableSet *live = [NSMutableSet set];
     for (UITouch *touch in event.allTouches)
     {
         if (touch.type != UITouchTypeDirect)
             continue;
+
+        sawDirect = YES;
         if (touch.phase == UITouchPhaseEnded || touch.phase == UITouchPhaseCancelled)
             continue;
 
-        directTouch = YES;
-        diagnosticDirectTouches++;
-        break;
+        [live addObject:[NSValue valueWithNonretainedObject:touch]];
     }
 
-    nativeDirectTouchActive = directTouch;
+    if (sawDirect)
+    {
+        activeDirectTouches = live;
+        diagnosticDirectTouches++;
+    }
+
+    nativeDirectTouchActive = activeDirectTouches.count > 0;
 }
 
 static void DFMobilePointerWindowSendEvent(UIWindow *window, SEL selector, UIEvent *event)

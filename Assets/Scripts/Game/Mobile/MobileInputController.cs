@@ -241,6 +241,14 @@ namespace DaggerfallWorkshop.Game.Mobile
         // pointer must not reclaim it on the first zero-delta read after release.
         // Cleared only by demonstrable hardware-pointer activity or a keyboard key.
         bool touchOwnsPointer;
+
+#if UNITY_IOS && !UNITY_EDITOR
+        // The native bridge's verdict on whether a real finger is on the glass, kept
+        // for the frame so PollKeyboard can consult it before the pointer poll runs.
+        // Unity's own touch list cannot answer this: it reports the Magic Keyboard's
+        // indirect pointer as a Direct touch.
+        bool nativeDirectTouchPresent;
+#endif
 #if UNITY_IOS && !UNITY_EDITOR
         float directTouchSince = -1f;
 #endif
@@ -489,8 +497,21 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (!autoHideOnKeyboard)
                 return;
 
-            // Any touch means the player is back on the glass.
-            if (Input.touchCount > 0)
+            // A REAL finger means the player is back on the glass.
+            //
+            // Not Input.touchCount: that includes the Magic Keyboard's own pointer,
+            // which iPadOS delivers as an indirect-pointer touch and Unity reports as
+            // Direct. Reading it raw let the trackpad cancel keyboard mode by itself
+            // while it was merely being moved - the capture shows keyboard flipping
+            // true/false almost every second through the whole session - and drop the
+            // pointer below on the same beat. The native bridge sees the real UITouch
+            // type; this is its verdict from the previous frame's poll.
+            bool fingerOnGlass = Input.touchCount > 0;
+#if UNITY_IOS && !UNITY_EDITOR
+            fingerOnGlass = nativeDirectTouchPresent;
+#endif
+
+            if (fingerOnGlass)
             {
                 // PollKeyboard runs before the pointer poll that normally performs
                 // this handover. Clear the stale keyboard pointer here as well, so
@@ -966,9 +987,6 @@ namespace DaggerfallWorkshop.Game.Mobile
         void PollHardwarePointer()
         {
             bool wasActive = MobileInput.PointerActive;
-#if UNITY_IOS && !UNITY_EDITOR
-            bool nativeDirectTouchPresent = false;
-#endif
 
 #if UNITY_IOS && !UNITY_EDITOR
             // WHICH TOUCHES ARE FINGERS IS NOT A QUESTION UNITY CAN ANSWER.
