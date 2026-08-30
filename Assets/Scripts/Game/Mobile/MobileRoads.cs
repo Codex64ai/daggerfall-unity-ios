@@ -56,7 +56,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public static bool Enabled
         {
-            get { return PlayerPrefs.GetInt(enabledPref, 0) == 1; }
+            // The Mods window's entry is the truth when it exists (MobileMods); the pref here
+            // is a mirror for the moments before ModManager is up.
+            get { return MobileMods.RoadsAndTravel; }
             set
             {
                 PlayerPrefs.SetInt(enabledPref, value ? 1 : 0);

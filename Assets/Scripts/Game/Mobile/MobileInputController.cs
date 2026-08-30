@@ -287,6 +287,10 @@ namespace DaggerfallWorkshop.Game.Mobile
             // Mobile Settings lives in the pause menu; the window subclass adds the button.
             MobilePauseOptionsWindow.Register();
 
+            // The Mods window's choice for roads & real travel, into the live flags, before the
+            // first travel popup or terrain tile can ask.
+            MobileMods.ApplySaved();
+
             ApplyAttackThreshold();
 
             // Real mouse/trackpad support. Unity's iOS player has none (see MobilePointer);

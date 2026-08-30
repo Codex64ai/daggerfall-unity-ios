@@ -824,10 +824,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// </summary>
         static void TestRoadsInstallSurvivesSceneSwap()
         {
-            bool savedPref = MobileRoads.Enabled;
+            bool savedPref = MobileMods.RoadsAndTravel;
             try
             {
-                MobileRoads.Enabled = true;
+                MobileMods.RoadsAndTravel = true;
                 DaggerfallUnity dfUnity = DaggerfallUnity.Instance;
                 dfUnity.TerrainTexturing = new DefaultTerrainTexturing();
                 Check(!MobileRoads.Active, "roads: default texturing reads as not active");
@@ -846,14 +846,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 MobileRoads.InstallOnLiveInstance();
                 Check(MobileRoads.Active, "roads: re-installed after the swap");
 
-                MobileRoads.Enabled = false;
+                MobileMods.RoadsAndTravel = false;
                 dfUnity.TerrainTexturing = new DefaultTerrainTexturing();
                 MobileRoads.InstallOnLiveInstance();
                 Check(!MobileRoads.Active, "roads: not installed while the preference is off");
             }
             finally
             {
-                MobileRoads.Enabled = savedPref;
+                MobileMods.RoadsAndTravel = savedPref;
                 if (DaggerfallUnity.HasInstance)
                     DaggerfallUnity.Instance.TerrainTexturing = new DefaultTerrainTexturing();
             }

@@ -161,16 +161,42 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
 
             mods = new List<Mod>();
 
+            // MOBILE: compiled-in mods register here, so they sit in the Mods window like any
+            // .dfmod and their Enabled state persists through Mods.json with the rest.
+            RaiseOnRegisterBuiltInMods();
+
             if (Directory.Exists(ModDirectory))
-            {
                 FindModsFromDirectory();
-                LoadModSettings();
-                SortMods();
-            }
             else
-            {
                 Debug.LogWarningFormat("Mod system is enabled but directory {0} doesn't exist.", ModDirectory);
-            }
+
+            LoadModSettings();
+            SortMods();
+        }
+
+        // MOBILE: registration point for mods that are compiled into the player.
+        public delegate void OnRegisterBuiltInModsHandler(ModManager manager);
+        public static event OnRegisterBuiltInModsHandler OnRegisterBuiltInMods;
+
+        void RaiseOnRegisterBuiltInMods()
+        {
+            if (OnRegisterBuiltInMods != null)
+                OnRegisterBuiltInMods(this);
+        }
+
+        /// <summary>
+        /// MOBILE: add a mod that has no .dfmod file. It appears in the Mods window, its Enabled
+        /// state is saved to Mods.json, and it has no loaders or assets of its own - the code it
+        /// stands for reads its Enabled flag directly.
+        /// </summary>
+        public void RegisterBuiltInMod(Mod mod)
+        {
+            if (mod == null || mod.ModInfo == null || string.IsNullOrEmpty(mod.ModInfo.ModTitle))
+                return;
+            if (GetModIndex(mod.ModInfo.ModTitle) >= 0)
+                return;
+            mod.LoadPriority = mods.Count;
+            mods.Add(mod);
         }
 
         #endregion
