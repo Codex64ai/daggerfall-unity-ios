@@ -218,11 +218,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 // fullscreen mode; the classic bar's map icon had been covering for it.
                 ("AUTOMAP",   InputManager.Actions.AutoMap),
                 ("REST",      InputManager.Actions.Rest),
+                // Foot / horse / cart / ship. The classic bar has a legs button for this; the
+                // fullscreen HUD had nothing, so a player who bought a horse could never
+                // mount it by touch. Wordless on purpose - it wears the bar's own legs art.
+                ("TRANSPORT", InputManager.Actions.Transport),
             };
             var secondaryRects = new Dictionary<string, RectTransform>();
             foreach (var entry in secondary)
             {
-                GameObject b = CreateActionButton(drawerGo, entry.label + "Button", entry.label,
+                string caption = entry.label == "TRANSPORT" ? "" : entry.label;
+                GameObject b = CreateActionButton(drawerGo, entry.label + "Button", caption,
                     entry.action, MobileActionButton.PressMode.Tap,
                     new Vector2(1f, 0f), Vector2.zero, new Vector2(150f, 150f));
                 b.GetComponent<MobileActionButton>().ownerDrawer = drawer;
@@ -251,6 +256,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // what classic Daggerfall used as the character-sheet button.
             secondaryRects["SHEET"].gameObject.AddComponent<MobileGameArtIcon>().source =
                 MobileGameArtIcon.ArtSource.PlayerPortrait;
+
+            // Transport wears the classic bar's legs glyph (MAIN00I0.IMG).
+            secondaryRects["TRANSPORT"].gameObject.AddComponent<MobileGameArtIcon>().source =
+                MobileGameArtIcon.ArtSource.Transport;
 
             UnityEditor.Events.UnityEventTools.AddPersistentListener(
                 menuToggleButton.onClick, drawer.Toggle);
@@ -389,6 +398,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 Elem("Automap",   secondaryRects["AUTOMAP"],   0.48f, 0f, new Vector2(0.20f, 4.40f),
                      classicHidden: true),
                 Elem("Rest",      secondaryRects["REST"],      0.48f, 0f, new Vector2(0.20f, 4.93f),
+                     classicHidden: true),
+                // Top of the drawer column, in the slot the settings gear used to hold.
+                // Hidden in classic mode: the bar's legs button already opens the window.
+                Elem("Transport", secondaryRects["TRANSPORT"], 0.48f, 0f, new Vector2(0.20f, 5.46f),
                      classicHidden: true),
             };
 
