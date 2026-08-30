@@ -49,6 +49,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestPointerKeepsCursorOverKeyboard();
             TestPointerDeltaScale();
             TestPointerLockDecision();
+            TestPointerDrainDecision();
             TestPointerHoverToScreen();
             TestPointerScrollTicks();
             TestPointerFingerRule();
@@ -443,6 +444,20 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(!MobilePointer.ShouldLock(true, true, false, false), "menu open -> unlocked");
             Check(!MobilePointer.ShouldLock(true, false, true, false), "paused -> unlocked");
             Check(!MobilePointer.ShouldLock(true, false, false, true), "engine cursor visible -> unlocked");
+        }
+
+        /// <summary>
+        /// Regression for the first device build: the cursor-stage pump ran before the
+        /// gameplay pump every frame and drained the deltas in live play, so the pointer
+        /// locked and then never moved. Draining is legal in exactly one state - paused with
+        /// no classic window open.
+        /// </summary>
+        static void TestPointerDrainDecision()
+        {
+            Check(!MobilePointer.ShouldDrainInCursorStage(false, false), "live play -> never drain (the camera owns the deltas)");
+            Check(MobilePointer.ShouldDrainInCursorStage(false, true), "paused, no window -> drain");
+            Check(!MobilePointer.ShouldDrainInCursorStage(true, true), "menu open -> menu pump owns it, no drain here");
+            Check(!MobilePointer.ShouldDrainInCursorStage(true, false), "menu open unpaused -> no drain here");
         }
 
         /// <summary>

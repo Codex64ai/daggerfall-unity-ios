@@ -40,7 +40,8 @@ static BOOL  wantLock = NO;
 static float accumDX = 0.0f;
 static float accumDY = 0.0f;
 static float accumScroll = 0.0f;
-static int   buttonMask = 0;          // 1 = left, 2 = right, 4 = middle
+static int   buttonMask = 0;          // 1 = left, 2 = right, 4 = middle, 8 = any auxiliary
+static int   auxHeld = 0;             // count of auxiliary buttons currently down
 
 static BOOL  hoverValid = NO;
 static float hoverNX = 0.5f;
@@ -165,6 +166,21 @@ static void DFPointerAttachMouse(GCMouse *mouse) API_AVAILABLE(ios(14.0))
         };
     }
 
+    // Side buttons, and any wheel-click the device reports as auxiliary rather than
+    // middle. Never an action - but a click on one MUST register as a pointer button, or
+    // iPadOS's touch for that click is taken for a finger and the touch HUD comes back
+    // (device-proven on the first mouse build: holding a side button unlocked the pointer).
+    if (input.auxiliaryButtons != nil)
+    {
+        for (GCControllerButtonInput *aux in input.auxiliaryButtons)
+        {
+            aux.pressedChangedHandler = ^(GCControllerButtonInput *b, float value, BOOL pressed) {
+                if (pressed) auxHeld++; else auxHeld = MAX(auxHeld - 1, 0);
+                if (auxHeld > 0) buttonMask |= 8; else buttonMask &= ~8;
+            };
+        }
+    }
+
     // "Scroll is a dpad with undefined range" - accumulate and let the C# side turn it
     // into classic-UI steps.
     input.scroll.valueChangedHandler = ^(GCControllerDirectionPad *dpad, float xValue, float yValue) {
@@ -172,8 +188,9 @@ static void DFPointerAttachMouse(GCMouse *mouse) API_AVAILABLE(ios(14.0))
     };
 
     attachedMice++;
-    NSLog(@"[DFPointer] mouse attached: %@ (right=%d middle=%d)",
-          mouse.vendorName ?: @"?", input.rightButton != nil, input.middleButton != nil);
+    NSLog(@"[DFPointer] mouse attached: %@ (right=%d middle=%d aux=%lu)",
+          mouse.vendorName ?: @"?", input.rightButton != nil, input.middleButton != nil,
+          (unsigned long)input.auxiliaryButtons.count);
 }
 
 static void DFPointerAttachAll() API_AVAILABLE(ios(14.0))
@@ -216,6 +233,7 @@ void DFPointerInit()
                     usingBlock:^(NSNotification *note) {
             attachedMice = MAX(attachedMice - 1, 0);
             buttonMask = 0;       // a button held at unplug must not stay held forever
+            auxHeld = 0;
             NSLog(@"[DFPointer] mouse disconnected (%d remain)", attachedMice);
         }];
 
@@ -263,7 +281,7 @@ void DFPointerConsumeDelta(float *dx, float *dy)
     accumDY = 0.0f;
 }
 
-/// Bitmask: 1 = left, 2 = right, 4 = middle.
+/// Bitmask: 1 = left, 2 = right, 4 = middle, 8 = any auxiliary button.
 int DFPointerButtons()
 {
     return buttonMask;

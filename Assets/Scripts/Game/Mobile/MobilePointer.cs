@@ -36,6 +36,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         public const int LeftMask = 1;
         public const int RightMask = 2;
         public const int MiddleMask = 4;
+        /// <summary>Any auxiliary button (side buttons, a wheel-click the mouse reports as aux).
+        /// Never bound to an action; it exists so a click on one is not mistaken for a finger.</summary>
+        public const int AuxMask = 8;
 
         /// <summary>
         /// Unity's "Mouse X/Y" axes are raw counts x 0.1 (ProjectSettings/InputManager.asset
@@ -211,6 +214,18 @@ namespace DaggerfallWorkshop.Game.Mobile
         public static bool ShouldLock(bool mouseActive, bool menuOpen, bool gamePaused, bool engineCursorVisible)
         {
             return mouseActive && !menuOpen && !gamePaused && !engineCursorVisible;
+        }
+
+        /// <summary>
+        /// The cursor-stage pump may swallow movement only while the game is paused with no
+        /// classic window open - the single state in which the gameplay pump never runs. In
+        /// menus hover owns the position (the menu pump drains itself), and in live play the
+        /// deltas belong to the camera. Draining there is the bug that made the first mouse
+        /// build lock the pointer and then never move.
+        /// </summary>
+        public static bool ShouldDrainInCursorStage(bool menuOpen, bool gamePaused)
+        {
+            return !menuOpen && gamePaused;
         }
 
         /// <summary>Normalised hover (0..1, bottom-left origin) to screen pixels, clamped.</summary>
