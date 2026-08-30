@@ -777,11 +777,16 @@ namespace DaggerfallWorkshop.Game.Mobile
                     break;
                 }
             }
+            // Kept for the log line below: on iPadOS Unity can list things that are not
+            // gamepads (the iOS 26 Simulator reports one with nothing attached), and a
+            // phantom "controller" hides the touch HUD. Only computed on a state change.
+            string joystickNames = null;
 
             if (found == controllerConnected)
                 return;
 
             controllerConnected = found;
+            joystickNames = "[" + string.Join(", ", names) + "]";
 
             // MobileInput.VirtualCursorActive is forced false while this is true, so the classic
             // UI pointer reverts to InputManager.UsingController instead of our touch cursor.
@@ -819,9 +824,10 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             ApplyHudVisibility();
 
-            Debug.Log(found
+            Debug.Log((found
                 ? "[MobileInput] gamepad connected - touch HUD hidden, controller cursor active"
-                : "[MobileInput] gamepad disconnected - touch HUD restored");
+                : "[MobileInput] gamepad disconnected - touch HUD restored") +
+                " joysticks=" + joystickNames);
         }
 
         /// <summary>Single place that decides which HUD layer is visible.</summary>
