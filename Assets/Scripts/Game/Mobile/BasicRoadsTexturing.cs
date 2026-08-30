@@ -20,6 +20,8 @@ using Unity.Collections;
 using Unity.Jobs;
 using DaggerfallConnect.Arena2;
 using DaggerfallWorkshop;
+using DaggerfallConnect;
+using DaggerfallWorkshop.Utility;
 
 namespace BasicRoads
 {
@@ -220,6 +222,24 @@ namespace BasicRoads
             return assignTilesHandle;
         }
 
+        /// <summary>MOBILE: winter, in a climate whose terrain atlas turns to snow (temperate, mountain).</summary>
+        static bool TracksReadAsRoads(int worldClimate)
+        {
+            if (!DaggerfallUnity.HasInstance || DaggerfallUnity.Instance.WorldTime == null)
+                return false;
+            if (DaggerfallUnity.Instance.WorldTime.Now.SeasonValue != DaggerfallDateTime.Seasons.Winter)
+                return false;
+            try
+            {
+                DFLocation.ClimateBaseType climate = MapsFile.GetWorldClimateSettings(worldClimate).ClimateType;
+                return climate == DFLocation.ClimateBaseType.Temperate || climate == DFLocation.ClimateBaseType.Mountain;
+            }
+            catch (System.Exception)
+            {
+                return true;
+            }
+        }
+
         public JobHandle SchedulePaintRoadsJob(ref MapPixelData mapData, ref NativeArray<byte> tileData, JobHandle dependencies)
         {
             // Assign tile data to terrain, painting paths in the process
@@ -235,6 +255,19 @@ namespace BasicRoads
                 roadCorners = (byte)(InRange(pathsIndex) ? (pathsData[roads][pathsIndex + 1] & 0x5) | (pathsData[roads][pathsIndex - 1] & 0x50) : 0);
                 trackDataPt = pathsData[tracks][pathsIndex];
                 trackCorners = (byte)(InRange(pathsIndex) ? (pathsData[tracks][pathsIndex + 1] & 0x5) | (pathsData[tracks][pathsIndex - 1] & 0x50) : 0);
+            }
+
+            // MOBILE: under snow, tracks disappear. Track tiles are dirt/grass blends (and "no
+            // change" on dirt), and the winter atlas paints every one of those as snow - so a
+            // journey following a track in Morning Star walks on blank white while roads (46/47/55,
+            // still distinct in the winter set) show fine (device report). In winter, in climates
+            // that actually get snow, tracks are painted with the road tiles instead.
+            if (TracksReadAsRoads(mapData.worldClimate))
+            {
+                roadDataPt |= trackDataPt;
+                roadCorners |= trackCorners;
+                trackDataPt = 0;
+                trackCorners = 0;
             }
 
             byte riverDataPt = pathsData[rivers][pathsIndex];

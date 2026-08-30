@@ -733,6 +733,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             SampleSpeed();
             ApplySpawnSuppression(SpeedCautious);
+            LogPixelPaths();
             pilot.Update();
 
             // pilot.Update() may have arrived and stopped us mid-frame.
@@ -1108,6 +1109,23 @@ namespace DaggerfallWorkshop.Game.Mobile
             PlayerEntity player = GameManager.HasInstance ? GameManager.Instance.PlayerEntity : null;
             if (player != null && player.PreventEnemySpawns != travellingCautiously)
                 player.PreventEnemySpawns = travellingCautiously;
+        }
+
+        DFPosition lastLoggedPixel;
+
+        /// <summary>One console line per map pixel entered: what the road data says is here.</summary>
+        void LogPixelPaths()
+        {
+            PlayerGPS gps = GameManager.Instance.PlayerGPS;
+            if (gps == null)
+                return;
+            DFPosition px = gps.CurrentMapPixel;
+            if (lastLoggedPixel != null && lastLoggedPixel.X == px.X && lastLoggedPixel.Y == px.Y)
+                return;
+            lastLoggedPixel = new DFPosition(px.X, px.Y);
+            Debug.Log(string.Format("[Journey] pixel {0},{1}: road=0x{2:X2} track=0x{3:X2} {4}",
+                px.X, px.Y, MobileRoadNetwork.RoadsAt(px.X, px.Y), MobileRoadNetwork.TracksAt(px.X, px.Y),
+                FollowingRoad ? "following the route" : "direct"));
         }
 
         void CheckEnemies()
