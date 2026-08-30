@@ -132,6 +132,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         [Tooltip("Touch pixels -> mouse-axis units. Lower = slower camera. Also scales gesture travel.")]
         public float touchToMouseScale = 0.15f;
 
+        [Tooltip("Same conversion for the Magic Keyboard trackpad. The pointer delta " +
+                 "arrives in screen pixels, exactly like a touch drag, so matching " +
+                 "touchToMouseScale makes the same on-screen travel turn the camera by " +
+                 "the same amount on both. Raise it if the trackpad should be quicker " +
+                 "than a thumb.")]
+        public float pointerToMouseScale = 0.15f;
+
         [Tooltip("Look-stick turn rate at full deflection, in mouse-axis units per second. " +
                  "~270 matches a brisk drag across the screen.")]
         public float lookStickSpeed = 220f;
@@ -1613,7 +1620,12 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             if (MobileInput.PointerActive)
             {
-                Vector2 pointerDelta = MobileInput.PointerDelta;
+                // SCALED, LIKE THE TOUCH PATH. This went to the axes raw while a touch
+                // drag was multiplied by touchToMouseScale first, so the trackpad turned
+                // the camera several times faster than a finger covering the same
+                // distance - and the engine's own sensitivity setting scales both alike,
+                // so turning it to minimum could not close the gap.
+                Vector2 pointerDelta = MobileInput.PointerDelta * pointerToMouseScale;
                 if (pointerDelta.sqrMagnitude > 0f)
                     inputManager.SetMobileMouseAxes(pointerDelta.x, pointerDelta.y);
                 if (pointerDiagnosticFrames % 60 == 0)

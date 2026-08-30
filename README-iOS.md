@@ -108,7 +108,7 @@ load in a way that looks like a bug.
 | **Hand-and-ring button** | Activate - doors, NPCs, loot (aims from the centre crosshair) |
 | **WEAPON / SPELL / JUMP / CROUCH** | Always-visible action row |
 | **MENU** | Drawer with Pause (save/load/exit), Inventory, Status, Map, Rest, and TUNE |
-| **TUNE** | Live settings: sensitivity, swipe distance, control size/opacity, layout editor |
+| **TUNE** | Live settings: sensitivity, trackpad sensitivity, swipe distance, control size/opacity, layout editor |
 | **Hold during videos** | Skip cutscene |
 | **Classic menus** | Direct touch - tap buttons; the on-screen keyboard appears for text fields |
 
@@ -208,6 +208,12 @@ The Magic Keyboard trackpad is supported on iPad during both gameplay and classi
 During gameplay, the app requests UIKit pointer lock and hides the hardware pointer, while
 `GCMouseInput.mouseMovedHandler` supplies raw relative movement to the camera. The pointer
 is released when a classic menu opens so menu hit-testing and window interaction work normally.
+
+Trackpad look is scaled by **TUNE -> Trackpad sensitivity**, separately from the touch
+sticks. The two need their own settings because Daggerfall Unity's own mouse sensitivity
+multiplies both alike, so it cannot close a gap between them. The default matches a touch
+drag: the same distance of on-screen travel turns the camera by the same amount either way.
+Raise it if the trackpad should be quicker than a thumb.
 
 Both trackpad buttons are read from `GCMouse` rather than from Unity. This is not a
 preference - a locked pointer has no screen position, so iPadOS delivers no located touch

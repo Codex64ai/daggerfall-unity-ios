@@ -166,6 +166,11 @@ namespace DaggerfallWorkshop.Game.Mobile
                 },
                 "touchui");
 
+            AddSlider(panel, ref y, rowH, "Trackpad sensitivity", 0.02f, 0.60f,
+                () => controller != null ? controller.pointerToMouseScale : 0.15f,
+                v => { if (controller != null) controller.pointerToMouseScale = v; },
+                "trackpadsens", "0.00");
+
             AddSlider(panel, ref y, rowH, "Palm rejection (inches)", 0f, 1.0f,
                 () => lookZone != null ? lookZone.cornerDeadMarginInches : 0.45f,
                 v => { if (lookZone != null) lookZone.cornerDeadMarginInches = v; },

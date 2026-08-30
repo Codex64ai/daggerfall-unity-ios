@@ -43,6 +43,10 @@ static NSUInteger diagnosticUnlocksWhileHeld = 0;
 static NSUInteger diagnosticUnlocksWhileIdle = 0;
 static BOOL nativeDirectTouchActive = NO;
 static NSMutableSet *activeDirectTouches = nil;
+
+// Screen scale, cached because the GCMouse handler runs at HID rate and must not
+// walk the view hierarchy per event. Refreshed wherever the bridge is touched.
+static CGFloat pointerScreenScale = 1.0;
 static BOOL windowSizeLocked = NO;
 static BOOL windowSizeLockApplied = NO;
 
@@ -239,8 +243,14 @@ static void InstallGameControllerMouse()
                 if (!pointerLockRequested || directTouchActive)
                     return;
 
-                pointerDelta.x += deltaX;
-                pointerDelta.y += deltaY;
+                // POINTS TO PIXELS. The other two delta sources - the hover recognizer
+                // and the indirect touch stream - already multiply by screen.scale, so
+                // they speak in Unity pixels like Screen.width does. GCMouse hands back
+                // raw HID points, and mixing the two meant the same physical movement
+                // produced a delta of a different size depending on which source was
+                // live: locked gameplay reads GCMouse, menus read hover.
+                pointerDelta.x += deltaX * pointerScreenScale;
+                pointerDelta.y += deltaY * pointerScreenScale;
                 pointerActive = YES;
                 diagnosticGameControllerDeltas++;
             };
@@ -397,6 +407,10 @@ static void EnsurePointerBridge()
         UIView *view = UnityGetGLView();
         if (view == nil)
             return;
+
+        CGFloat scale = view.window.screen.scale;
+        if (scale > 0)
+            pointerScreenScale = scale;
 
         if (hoverRecognizer == nil)
         {
