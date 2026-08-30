@@ -143,10 +143,7 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
                     ? MobileContentPath.UserFolder("Mods")
                     : Path.Combine(Application.streamingAssetsPath, "Mods");
             }
-        }
 
-        void Start()
-        {
             SetupSingleton();
 
             if (Instance == this)
@@ -535,6 +532,17 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
                     lines.Add(line);
             }
             return lines;
+        }
+        
+        /// <summary>
+        /// Goes through all mods and checks if any of them contain a quest with a given name.
+        /// </summary>
+        /// <param name="questName">Name of the quest</param>
+        public bool AnyModContainsQuest(string questName)
+        {
+            return GetAllModsWithContributes(x => x.LooseQuestsList != null)
+                .Any(mod => mod.ModInfo.Contributes.LooseQuestsList
+                    .Any(looseQuest => looseQuest == questName));
         }
 
         #endregion
@@ -967,32 +975,56 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
             List<string> spellIcons = null;
             List<string> booksMapping = null;
             List<string> questLists = null;
+            List<string> looseQuestsList = null;
 
             foreach (var file in modInfo.Files)
             {
                 var directory = Path.GetDirectoryName(file);
 
                 if (!string.IsNullOrEmpty(directory) && directory.EndsWith("SpellIcons"))
+                {
                     AddNameToList(ref spellIcons, file);
-                else if (!string.IsNullOrEmpty(directory) && directory.EndsWith("Books/Mapping"))
-                    AddNameToList(ref booksMapping, file);
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(directory) && directory.EndsWith("Mapping"))
+                {
+                    var parentDirectory = Path.GetDirectoryName(directory);
+                    if (!string.IsNullOrEmpty(parentDirectory) && parentDirectory.EndsWith("Books"))
+                    {
+                        AddNameToList(ref booksMapping, file);
+                        continue;
+                    }
+                }
 
                 if (automaticallyRegisterQuestLists)
                 {
                     var name = Path.GetFileNameWithoutExtension(file);
-                    if (!string.IsNullOrEmpty(name) && name.StartsWith("QuestList-"))
-                        AddNameToList(ref questLists, name.Substring(10));
+                    if (string.IsNullOrEmpty(name) || !name.StartsWith("QuestList-"))
+                    {
+                        continue;
+                    }
+
+                    AddNameToList(ref questLists, name.Substring(10));
+
+                    var questListPath = Path.GetDirectoryName(file);
+
+                    foreach (var looseQuest in modInfo.Files.Where(f => Path.GetDirectoryName(f) == questListPath && f != file))
+                    {
+                        AddNameToList(ref looseQuestsList, looseQuest);
+                    }
                 }
             }
 
-            if (spellIcons == null && booksMapping == null && questLists == null)
+            if (spellIcons == null && booksMapping == null && questLists == null && looseQuestsList == null)
                 return;
 
             modInfo.Contributes = new ModContributes
             {
                 SpellIcons = spellIcons?.ToArray(),
                 BooksMapping = booksMapping?.ToArray(),
-                QuestLists = questLists?.ToArray()
+                QuestLists = questLists?.ToArray(),
+                LooseQuestsList = looseQuestsList?.ToArray()
             };
         }
 

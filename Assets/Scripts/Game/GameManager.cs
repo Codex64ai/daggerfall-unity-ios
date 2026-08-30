@@ -705,10 +705,8 @@ namespace DaggerfallWorkshop.Game
             const float restingDistance = 12f;
 
             bool areEnemiesNearby = false;
-            DaggerfallEntityBehaviour[] entityBehaviours = FindObjectsOfType<DaggerfallEntityBehaviour>();
-            for (int i = 0; i < entityBehaviours.Length; i++)
+            foreach (DaggerfallEntityBehaviour entityBehaviour in ActiveGameObjectDatabase.GetActiveEnemyBehaviours())
             {
-                DaggerfallEntityBehaviour entityBehaviour = entityBehaviours[i];
                 if (entityBehaviour.EntityType == EntityTypes.EnemyMonster || entityBehaviour.EntityType == EntityTypes.EnemyClass)
                 {
                     EnemySenses enemySenses = entityBehaviour.GetComponent<EnemySenses>();
@@ -738,11 +736,10 @@ namespace DaggerfallWorkshop.Game
             }
 
             // Also check for enemy spawners that might emit an enemy
-            FoeSpawner[] spawners = FindObjectsOfType<FoeSpawner>();
-            for (int i = 0; i < spawners.Length; i++)
+            foreach (FoeSpawner spawner in ActiveGameObjectDatabase.GetActiveFoeSpawners())
             {
                 // Is a spawner inside min distance?
-                if (Vector3.Distance(spawners[i].transform.position, PlayerController.transform.position) < spawnDistance)
+                if (Vector3.Distance(spawner.transform.position, PlayerController.transform.position) < spawnDistance)
                 {
                     areEnemiesNearby = true;
                     break;
@@ -761,10 +758,8 @@ namespace DaggerfallWorkshop.Game
         public int HowManyEnemiesOfType(MobileTypes type, bool stopLookingIfFound = false, bool includingPacified = false)
         {
             int numberOfEnemies = 0;
-            DaggerfallEntityBehaviour[] entityBehaviours = FindObjectsOfType<DaggerfallEntityBehaviour>();
-            for (int i = 0; i < entityBehaviours.Length; i++)
-            {
-                DaggerfallEntityBehaviour entityBehaviour = entityBehaviours[i];
+            foreach (DaggerfallEntityBehaviour entityBehaviour in ActiveGameObjectDatabase.GetActiveEnemyBehaviours())
+            { 
                 if (entityBehaviour.EntityType == EntityTypes.EnemyMonster || entityBehaviour.EntityType == EntityTypes.EnemyClass)
                 {
                     EnemyEntity entity = entityBehaviour.Entity as EnemyEntity;
@@ -783,11 +778,10 @@ namespace DaggerfallWorkshop.Game
             }
 
             // Also check for enemy spawners that might emit an enemy
-            FoeSpawner[] spawners = FindObjectsOfType<FoeSpawner>();
-            for (int i = 0; i < spawners.Length; i++)
+            foreach (FoeSpawner spawner in ActiveGameObjectDatabase.GetActiveFoeSpawners())
             {
                 // Is a spawner inside min distance?
-                if (spawners[i].FoeType == type)
+                if (spawner.FoeType == type)
                 {
                     numberOfEnemies++;
                     if (stopLookingIfFound)
@@ -803,18 +797,12 @@ namespace DaggerfallWorkshop.Game
         /// </summary>
         public void ClearEnemies()
         {
-            DaggerfallEntityBehaviour[] entityBehaviours = FindObjectsOfType<DaggerfallEntityBehaviour>();
-            for (int i = 0; i < entityBehaviours.Length; i++)
-            {
-                DaggerfallEntityBehaviour entityBehaviour = entityBehaviours[i];
-                if (entityBehaviour.EntityType == EntityTypes.EnemyMonster || entityBehaviour.EntityType == EntityTypes.EnemyClass)
-                    Destroy(entityBehaviour.gameObject);
-            }
+            foreach (GameObject enemyObject in ActiveGameObjectDatabase.GetActiveEnemyObjects())
+                Destroy(enemyObject);
 
             // Also check for enemy spawners that might emit an enemy
-            FoeSpawner[] spawners = FindObjectsOfType<FoeSpawner>();
-            for (int i = 0; i < spawners.Length; i++)
-                Destroy(spawners[i].gameObject);
+            foreach (GameObject spawnerObject in ActiveGameObjectDatabase.GetActiveFoeSpawnerObjects())
+                Destroy(spawnerObject);
         }
 
         /// <summary>
@@ -822,10 +810,8 @@ namespace DaggerfallWorkshop.Game
         /// </summary>
         public void MakeEnemiesHostile()
         {
-            DaggerfallEntityBehaviour[] entityBehaviours = FindObjectsOfType<DaggerfallEntityBehaviour>();
-            for (int i = 0; i < entityBehaviours.Length; i++)
-            {
-                DaggerfallEntityBehaviour entityBehaviour = entityBehaviours[i];
+            foreach (DaggerfallEntityBehaviour entityBehaviour in ActiveGameObjectDatabase.GetActiveEnemyBehaviours())
+            { 
                 if (entityBehaviour.EntityType == EntityTypes.EnemyMonster || entityBehaviour.EntityType == EntityTypes.EnemyClass)
                 {
                     EnemyMotor enemyMotor = entityBehaviour.GetComponent<EnemyMotor>();
