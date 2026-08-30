@@ -1,0 +1,12 @@
+{
+    "ModTitle": "iOS Pilot",
+    "ModVersion": "1.0",
+    "ModAuthor": "Codex64ai",
+    "ContactInfo": "github.com/Codex64ai/daggerfall-unity-ios",
+    "DFUnity_Version": "1.0.0",
+    "ModDescription": "Pipeline test mod for the iOS port: replaces the start menu background (PICK03I0.IMG) so an iOS-built .dfmod can be verified end to end. Safe to disable or delete.",
+    "GUID": "b6f6ed19-7f0e-4c33-9e26-0c1a5c3d2a41",
+    "Files": [
+        "Assets/Game/Mods/IOSPilot/PICK03I0.IMG.png"
+    ]
+}
