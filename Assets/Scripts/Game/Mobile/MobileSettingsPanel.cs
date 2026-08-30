@@ -350,9 +350,33 @@ namespace DaggerfallWorkshop.Game.Mobile
                 () => controller != null ? (int)controller.InputMode : 0,
                 v => { if (controller != null) controller.InputMode = (MobileInputMode)v; RefreshHeader(); });
 
+            AddNote(c, ref y, rowW, "With touch off, a four-finger tap brings it back.");
+
+            AddToggle(c, ref y, rowW, rowH, "Click to attack (mouse & controller)",
+                () => controller != null && controller.clickToAttack,
+                v => { if (controller != null) { controller.clickToAttack = v; controller.RefreshSwingMode(); } },
+                "clickattack");
             AddNote(c, ref y, rowW,
-                "With touch off, a four-finger tap brings it back. Attacks follow the launcher's " +
-                "Weapon swing mode for mouse, keyboard and controller; touch always swipes.");
+                "Right button or pad button attacks on the press, no drag. Off: follow the " +
+                "launcher's Weapon swing mode.");
+
+            AddToggle(c, ref y, rowW, rowH, "Tap to attack (touch)",
+                () => controller != null && controller.tapToAttack,
+                v => { if (controller != null) { controller.tapToAttack = v; controller.RefreshSwingMode(); } },
+                "tapattack");
+            AddNote(c, ref y, rowW,
+                "A quick tap in combat attacks and swipes only look. Off: swipe to attack, " +
+                "the direction of the swipe picks the strike.");
+
+            // Daggerfall's cursor mode (Return on a keyboard): arrow shown, camera parked, click
+            // on world objects. Touch clears it automatically when it takes over, so this is
+            // the rare deliberate use. Live state, not a preference.
+            AddToggle(c, ref y, rowW, rowH, "Cursor mode (arrow, camera parked)",
+                () => GameManager.HasInstance && GameManager.Instance.PlayerMouseLook != null &&
+                      GameManager.Instance.PlayerMouseLook.cursorActive,
+                v => { if (GameManager.HasInstance && GameManager.Instance.PlayerMouseLook != null)
+                           GameManager.Instance.PlayerMouseLook.cursorActive = v; },
+                null);
 
             AddSlider(c, ref y, rowW, rowH, "Look sensitivity", 0.04f, 0.45f,
                 () => controller != null ? controller.touchToMouseScale : 0.15f,
@@ -813,6 +837,8 @@ namespace DaggerfallWorkshop.Game.Mobile
                 // Toggles normally read their pref when the panel is first built, so a saved
                 // "Show diagnostics" did nothing until the panel was opened.
                 controller.showGestureDebug = PlayerPrefs.GetInt(prefix + "debug", controller.showGestureDebug ? 1 : 0) == 1;
+                controller.clickToAttack = PlayerPrefs.GetInt(prefix + "clickattack", controller.clickToAttack ? 1 : 0) == 1;
+                controller.tapToAttack = PlayerPrefs.GetInt(prefix + "tapattack", controller.tapToAttack ? 1 : 0) == 1;
                 controller.pointerFlipY = PlayerPrefs.GetInt(prefix + "pointerflipy", controller.pointerFlipY ? 1 : 0) == 1;
                 controller.lookStickSpeed = PlayerPrefs.GetFloat(prefix + "stickspeed", controller.lookStickSpeed);
                 if (controller.virtualMouse != null)

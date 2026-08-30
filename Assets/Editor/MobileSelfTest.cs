@@ -295,6 +295,18 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobileInput.ResolveSwingMode(2, false, false) == 2, "hold-to-attack kept too");
             Check(MobileInput.ResolveSwingMode(1, true, true) == 1, "window open -> player's own value, so saves keep it");
             Check(MobileInput.ResolveSwingMode(0, false, false) == 0, "vanilla stays vanilla");
+
+            // The port's own switches.
+            Check(MobileInput.ResolveSwingMode(0, false, false, true, false) == 1,
+                  "click-to-attack on: pointer/pad get click mode even when the launcher says vanilla");
+            Check(MobileInput.ResolveSwingMode(2, false, false, false, false) == 2,
+                  "click-to-attack off: pointer/pad keep the launcher's choice");
+            Check(MobileInput.ResolveSwingMode(1, true, false, true, false) == 0,
+                  "touch without tap-to-attack still swipes");
+            Check(MobileInput.ResolveSwingMode(0, true, false, true, true) == 1,
+                  "tap-to-attack on: touch runs click mode");
+            Check(MobileInput.ResolveSwingMode(0, true, true, true, true) == 0,
+                  "window open -> launcher value regardless of switches");
         }
 
         /// <summary>A queued click must produce exactly one Down frame and one Up frame.</summary>

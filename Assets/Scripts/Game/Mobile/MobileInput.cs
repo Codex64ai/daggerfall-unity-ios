@@ -157,15 +157,29 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         /// <summary>
-        /// Which WeaponSwingMode the engine should see. Touch swipes need mode 0 (hold and
-        /// drag: the drag IS the strike direction; modes 1 and 2 pick a random one), so mode
-        /// 0 is imposed only while touch drives gameplay. Everyone else - mouse, keyboard, pad -
-        /// gets the mode they chose in the launcher, which is where "click to attack" lives.
+        /// Which WeaponSwingMode the engine should see. Mode 0 is hold-and-drag (the drag is
+        /// the strike direction); mode 1 is click-to-attack (random direction on press).
+        ///
+        /// Touch swipes need 0, so touch imposes 0 - unless the player turned on tap-to-attack,
+        /// in which case a tap is a click and touch runs in 1. A pointer or pad gets 1 when
+        /// click-to-attack is on (the port's own setting, default on: right button or pad
+        /// button attacks on press, no drag), otherwise whatever the launcher says.
         ///
         /// Never while a classic window is open: settings.ini is only ever written from
         /// windows (pause menu, controls screens), and the value on disk must be the player's,
         /// not our override. Nothing swings with a window open anyway.
         /// </summary>
+        public static int ResolveSwingMode(int userMode, bool touchDrivesGameplay, bool menuOpen,
+                                           bool clickToAttack, bool tapToAttack)
+        {
+            if (menuOpen)
+                return userMode;
+            if (touchDrivesGameplay)
+                return tapToAttack ? 1 : 0;
+            return clickToAttack ? 1 : userMode;
+        }
+
+        /// <summary>Launcher-following form: touch swipes, everyone else keeps their own mode.</summary>
         public static int ResolveSwingMode(int userMode, bool touchDrivesGameplay, bool menuOpen)
         {
             if (touchDrivesGameplay && !menuOpen)

@@ -116,6 +116,14 @@ namespace DaggerfallWorkshop.Game.Mobile
                  "mouse. Off = never touch the setting.")]
         public bool forceGestureSwingMode = true;
 
+        [Tooltip("Mouse and controller attack on the button PRESS (WeaponSwingMode 1), whatever the " +
+                 "launcher says. Off = follow the launcher's Weapon swing mode. Mobile Settings > Input.")]
+        public bool clickToAttack = true;
+
+        [Tooltip("Touch: a quick tap in combat attacks, swipes only look. Off = swipes attack " +
+                 "(the touch default). Mobile Settings > Input.")]
+        public bool tapToAttack = false;
+
         [Header("Auto Combat")]
         [Tooltip("Treat a drawn weapon as combat mode, so swipes attack without needing the " +
                  "on-screen COMBAT button. Without this, drawing a weapon by any other means " +
@@ -184,6 +192,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         // When the pointer last did anything (button or movement). A touch that lands inside
         // pointerTouchGrace of it is the pointer's own click, not a finger.
         float lastPointerActivity = -10f;
+        bool touchWasDriving;
 
         // The player's declared input mode. Persisted here rather than through the settings
         // panel's own pref plumbing because the HUD must honour it before the panel has ever
@@ -940,12 +949,19 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// the player's own choice while a classic window is open so settings.ini can only
         /// ever be written with their value. See MobileInput.ResolveSwingMode.
         /// </summary>
+        /// <summary>Re-run the swing-mode decision now (Mobile Settings changed a switch).</summary>
+        public void RefreshSwingMode()
+        {
+            ApplySwingMode();
+        }
+
         void ApplySwingMode()
         {
             if (!forceGestureSwingMode)
                 return;
 
-            int want = MobileInput.ResolveSwingMode(userSwingMode, Effective.TouchHud, MobileInput.MenuMode);
+            int want = MobileInput.ResolveSwingMode(userSwingMode, Effective.TouchHud, MobileInput.MenuMode,
+                                                    clickToAttack, tapToAttack);
             if (DaggerfallUnity.Settings.WeaponSwingMode != want)
                 DaggerfallUnity.Settings.WeaponSwingMode = want;
 
@@ -1296,17 +1312,25 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
 
             if (!Effective.TouchHud)
+            {
+                touchWasDriving = false;
                 return;
+            }
 
             // Daggerfall's cursor mode (Return on a keyboard) parks the camera and shows the
-            // arrow. Touch has its own menu cursor and no key to toggle this back, so a player
-            // who pressed Return with a keyboard and then unplugged it found the look stick dead
-            // (device report). Touch play simply never runs with cursor mode on.
-            if (GameManager.HasInstance && GameManager.Instance.PlayerMouseLook != null &&
-                GameManager.Instance.PlayerMouseLook.cursorActive)
+            // arrow. Touch has no key to toggle it back, so a player who pressed Return with a
+            // keyboard and then went back to touch found the look stick dead (device report).
+            // Cleared once, at the moment touch takes over - not every frame, so the toggle in
+            // Mobile Settings > Input can still turn it on deliberately from touch.
+            if (!touchWasDriving)
             {
-                GameManager.Instance.PlayerMouseLook.cursorActive = false;
-                Debug.Log("[MobileInput] cursor mode cleared for touch play");
+                touchWasDriving = true;
+                if (GameManager.HasInstance && GameManager.Instance.PlayerMouseLook != null &&
+                    GameManager.Instance.PlayerMouseLook.cursorActive)
+                {
+                    GameManager.Instance.PlayerMouseLook.cursorActive = false;
+                    Debug.Log("[MobileInput] cursor mode cleared: touch took over");
+                }
             }
 
             PumpMovement(inputManager);
@@ -1402,12 +1426,24 @@ namespace DaggerfallWorkshop.Game.Mobile
             bool bowDrawing = bowFingerDown &&
                               Time.unscaledTime - bowHoldStart >= bowDrawMinHold;
 
-            if (combat && !bow && lookZone.IsDragging)
-                swingHoldUntil = Time.unscaledTime + swingHoldExtension;
+            // TAP TO ATTACK (Mobile Settings > Input, off by default): the engine runs in
+            // click mode for touch, so a quick tap is the click and a drag only looks. The
+            // swipe hold below must not arm, or every look-drag would be an attack.
+            if (tapToAttack)
+            {
+                if (combat && !bow && lookZone.ConsumeTap())
+                    QueueAction(InputManager.Actions.SwingWeapon);
+            }
+            else
+            {
+                lookZone.ConsumeTap();      // never let a stale tap fire later
+                if (combat && !bow && lookZone.IsDragging)
+                    swingHoldUntil = Time.unscaledTime + swingHoldExtension;
+            }
 
             // Swipe-swing (blades) and bow-draw are separate states: only the swipe one
             // may suppress the look stick.
-            bool swipeWindow = combat && !bow && Time.unscaledTime < swingHoldUntil;
+            bool swipeWindow = !tapToAttack && combat && !bow && Time.unscaledTime < swingHoldUntil;
             bool swingWindow = swipeWindow || bowDrawing;
 
             // Right stick: rate-based look, always and only. Excluded while a swipe-swing

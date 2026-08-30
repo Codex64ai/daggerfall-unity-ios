@@ -59,6 +59,16 @@ namespace DaggerfallWorkshop.Game.Mobile
         int directFingerId = -1;
         Vector2 directLastPos;
 
+        // Tap detection (device path): a press that lifts quickly without travelling is a
+        // tap, consumed once by the controller for tap-to-attack. Never a swipe.
+        [Tooltip("A touch that lifts within this many seconds and moves less than tapMaxInches is a tap.")]
+        public float tapMaxSeconds = 0.25f;
+        [Tooltip("Total travel allowed for a tap, in inches.")]
+        public float tapMaxInches = 0.12f;
+        float directDownTime;
+        Vector2 directDownPos;
+        bool tapPending;
+
         bool DirectTouchActive
         {
             get { return Input.touchSupported && !Application.isEditor; }
@@ -95,6 +105,10 @@ namespace DaggerfallWorkshop.Game.Mobile
                     if (VirtualJoystick.IsFingerClaimed(t.fingerId) ||
                         t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)
                     {
+                        if (t.phase == TouchPhase.Ended &&
+                            Time.unscaledTime - directDownTime <= tapMaxSeconds &&
+                            (t.position - directDownPos).magnitude <= MobileInput.InchesToPixels(tapMaxInches))
+                            tapPending = true;
                         directFingerId = -1;
                         return;
                     }
@@ -130,8 +144,18 @@ namespace DaggerfallWorkshop.Game.Mobile
 
                 directFingerId = t.fingerId;
                 directLastPos = t.position;
+                directDownPos = t.position;
+                directDownTime = Time.unscaledTime;
                 return;
             }
+        }
+
+        /// <summary>True once per completed tap (see tapMaxSeconds / tapMaxInches), then cleared.</summary>
+        public bool ConsumeTap()
+        {
+            bool tap = tapPending;
+            tapPending = false;
+            return tap;
         }
 
         public void OnPointerDown(PointerEventData eventData)
@@ -214,6 +238,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             activePointerId = pointerIdNone;
             directFingerId = -1;
             accumulated = Vector2.zero;
+            tapPending = false;
         }
 
         /// <summary>Read and clear this frame's accumulated pixel delta.</summary>
