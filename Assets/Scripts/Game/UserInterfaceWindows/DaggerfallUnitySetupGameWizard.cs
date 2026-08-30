@@ -508,6 +508,16 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
             versionLabel.TextColor = secondaryTextColor;
             optionsPanel.Components.Add(versionLabel);
 
+            // MOBILE: say which build this is, beside the version - players comparing against
+            // desktop DFU could not tell they were running the iOS port.
+            TextLabel portLabel = new TextLabel(DaggerfallUI.DefaultFont);
+            portLabel.Text = "iOS port";
+            portLabel.Position = new Vector2(202, 40);
+            portLabel.TextScale = 1.0f;
+            portLabel.ShadowPosition = Vector2.zero;
+            portLabel.TextColor = DaggerfallUI.DaggerfallDefaultTextColor;
+            optionsPanel.Components.Add(portLabel);
+
             // Add settings path text
             if (!DaggerfallUnity.Settings.HideLoginName)
             {

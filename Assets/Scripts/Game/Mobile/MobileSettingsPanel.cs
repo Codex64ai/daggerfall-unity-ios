@@ -457,21 +457,21 @@ namespace DaggerfallWorkshop.Game.Mobile
             AddNote(c, ref y, rowW,
                 "Built into this port. Each can be switched on or off here; none is needed to play.");
 
-            // ONE switch for roads and real travel, by request: they are one experience. Real
-            // travel walks the player along the road network, so roads without travel are
-            // scenery and travel without roads is a straight line across country.
+            // TWO switches since 2026-08-30 (device decision): roads without the travel
+            // system is a real preference, and travel without drawn roads still follows the
+            // road DATA, which ships with the code whether or not the terrain is painted.
             //
-            // The travel half applies live (it is consulted when the player next travels).
-            // The roads half is read once before the first scene loads - terrain already
-            // built this session cannot be repainted - so it records an intent for the next
-            // launch, and the note below says so while the two disagree.
-            // Same switch as the launcher's options page (MobileMods owns the preference).
+            // Travel applies live (it is consulted when the player next travels). Roads are
+            // read once before the first scene loads - terrain already built this session
+            // cannot be repainted - so that switch records an intent for the next launch,
+            // and the note below says so while the two disagree. Same switches as the
+            // launcher's Mods window (MobileMods owns the preferences).
             Text roadsNote = null;
-            AddToggle(c, ref y, rowW, rowH, "Roads & real travel",
-                () => MobileMods.RoadsAndTravel,
+            AddToggle(c, ref y, rowW, rowH, "Roads & tracks",
+                () => MobileMods.Roads,
                 v =>
                 {
-                    MobileMods.RoadsAndTravel = v;
+                    MobileMods.Roads = v;
                     if (roadsNote != null)
                         roadsNote.text = RoadsStatusText();
                 },
@@ -481,10 +481,17 @@ namespace DaggerfallWorkshop.Game.Mobile
             refreshDynamic += () => { if (roadsNote != null) roadsNote.text = RoadsStatusText(); };
 
             AddNote(c, ref y, rowW,
-                "Fast travel becomes a journey: you walk to your destination along Daggerfall's " +
-                "roads and tracks, at a time compression you control, and can stop anywhere. " +
-                "Roads and tracks are drawn on the terrain (Hazelnut's Basic Roads, MIT), and " +
-                "routes follow them.");
+                "Daggerfall's roads and tracks drawn on the terrain (Hazelnut's Basic Roads, MIT).");
+
+            AddToggle(c, ref y, rowW, rowH, "Real travel",
+                () => MobileMods.RealTravel,
+                v => MobileMods.RealTravel = v,
+                null);
+
+            AddNote(c, ref y, rowW,
+                "Fast travel becomes a journey: you walk to your destination at a time " +
+                "compression you control and can stop anywhere. Cautious journeys follow " +
+                "roads and tracks even when Roads & tracks is off and they are not drawn.");
 
             FinishSection(c, y);
         }

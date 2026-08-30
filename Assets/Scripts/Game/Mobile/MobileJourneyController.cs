@@ -584,10 +584,12 @@ namespace DaggerfallWorkshop.Game.Mobile
                 return;
             }
 
-            if (!MobileRoads.Enabled || !MobileRoadNetwork.Available)
+            // Road DATA is independent of road DRAWING: cautious journeys follow the network
+            // even when Roads & tracks is off and the roads are invisible (the mod description
+            // says so). Only missing data forces the straight line.
+            if (!MobileRoadNetwork.Available)
             {
-                Debug.Log("[Journey] route: roads " + (MobileRoads.Enabled ? "data unavailable" : "switched off") +
-                          " - direct travel");
+                Debug.Log("[Journey] route: road data unavailable - direct travel");
                 return;
             }
 

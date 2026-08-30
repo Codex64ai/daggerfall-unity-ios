@@ -851,10 +851,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// </summary>
         static void TestRoadsInstallSurvivesSceneSwap()
         {
-            bool savedPref = MobileMods.RoadsAndTravel;
+            bool savedPref = MobileMods.Roads;
             try
             {
-                MobileMods.RoadsAndTravel = true;
+                MobileMods.Roads = true;
                 DaggerfallUnity dfUnity = DaggerfallUnity.Instance;
                 dfUnity.TerrainTexturing = new DefaultTerrainTexturing();
                 Check(!MobileRoads.Active, "roads: default texturing reads as not active");
@@ -873,14 +873,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 MobileRoads.InstallOnLiveInstance();
                 Check(MobileRoads.Active, "roads: re-installed after the swap");
 
-                MobileMods.RoadsAndTravel = false;
+                MobileMods.Roads = false;
                 dfUnity.TerrainTexturing = new DefaultTerrainTexturing();
                 MobileRoads.InstallOnLiveInstance();
                 Check(!MobileRoads.Active, "roads: not installed while the preference is off");
             }
             finally
             {
-                MobileMods.RoadsAndTravel = savedPref;
+                MobileMods.Roads = savedPref;
                 if (DaggerfallUnity.HasInstance)
                     DaggerfallUnity.Instance.TerrainTexturing = new DefaultTerrainTexturing();
             }
@@ -943,26 +943,29 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "keyboard: no plugin in the editor -> fall back to Unity");
         }
 
-        /// <summary>The one switch behind roads and real travel drives both flags, both ways.</summary>
+        /// <summary>Two switches since the 2026-08-30 split: each drives only its own flag.</summary>
         static void TestModsSwitchOwnsBothPrefs()
         {
-            bool saved = MobileMods.RoadsAndTravel;
+            bool savedRoads = MobileMods.Roads;
+            bool savedTravel = MobileMods.RealTravel;
             try
             {
-                MobileMods.RoadsAndTravel = true;
-                Check(MobileRoads.Enabled && MobileJourneyController.JourneyModeEnabled,
-                      "mods: switch on -> roads pref and journey mode both on");
-                MobileMods.RoadsAndTravel = false;
-                Check(!MobileRoads.Enabled && !MobileJourneyController.JourneyModeEnabled,
-                      "mods: switch off -> both off");
-                MobileMods.RoadsAndTravel = true;
+                MobileMods.Roads = true;
+                MobileMods.RealTravel = false;
+                Check(MobileRoads.Enabled && !MobileJourneyController.JourneyModeEnabled,
+                      "mods: roads alone - scenery without the journey system");
+                MobileMods.Roads = false;
+                MobileMods.RealTravel = true;
+                Check(!MobileRoads.Enabled && MobileJourneyController.JourneyModeEnabled,
+                      "mods: travel alone - journeys follow road data invisibly");
                 MobileJourneyController.JourneyModeEnabled = false;      // a stale flag
                 MobileMods.ApplySaved();
                 Check(MobileJourneyController.JourneyModeEnabled, "mods: ApplySaved re-asserts the saved choice");
             }
             finally
             {
-                MobileMods.RoadsAndTravel = saved;
+                MobileMods.Roads = savedRoads;
+                MobileMods.RealTravel = savedTravel;
             }
         }
 

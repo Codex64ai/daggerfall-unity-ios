@@ -50,12 +50,13 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         /// <summary>
         /// Player preference, owned by MobileMods (the Mods window entry when it exists, a pref
-        /// mirror before then). Changing it does NOT affect the running session - see the note
-        /// on the class about partially painted worlds.
+        /// mirror before then). This is the DRAWING switch only - the road network data is
+        /// always available to Real travel. Changing it does NOT affect the running session -
+        /// see the note on the class about partially painted worlds.
         /// </summary>
         public static bool Enabled
         {
-            get { return MobileMods.RoadsAndTravel; }
+            get { return MobileMods.Roads; }
         }
 
         /// <summary>True when the preference no longer matches what is installed.</summary>
