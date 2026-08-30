@@ -1156,6 +1156,10 @@ namespace DaggerfallWorkshop.Game
             if (Mobile.MobileInput.PointerActive && button == 1)
                 return Mobile.MobileInput.GetPointerSecondaryButtonDown();
 
+            // No mouse exists while touch owns input - see GetPollKey.
+            if (Mobile.MobileInput.TouchInputActive)
+                return false;
+
             return Input.GetMouseButtonDown(button) || (EnableController && GetKeyDown(joystickUICache[button], false));
         }
 
@@ -1170,6 +1174,9 @@ namespace DaggerfallWorkshop.Game
             if (Mobile.MobileInput.PointerActive && button == 1)
                 return Mobile.MobileInput.GetPointerSecondaryButtonUp();
 
+            if (Mobile.MobileInput.TouchInputActive)
+                return false;
+
             return Input.GetMouseButtonUp(button) || (EnableController && GetKeyUp(joystickUICache[button], false));
         }
 
@@ -1183,6 +1190,9 @@ namespace DaggerfallWorkshop.Game
 
             if (Mobile.MobileInput.PointerActive && button == 1)
                 return Mobile.MobileInput.GetPointerSecondaryButton();
+
+            if (Mobile.MobileInput.TouchInputActive)
+                return false;
 
             return Input.GetMouseButton(button) || (EnableController && GetKey(joystickUICache[button], false));
         }
@@ -1788,6 +1798,23 @@ namespace DaggerfallWorkshop.Game
                     return Mobile.MobileInput.GetPointerButton();
                 if (Mobile.MobileInput.PointerActive && k == KeyCode.Mouse1)
                     return Mobile.MobileInput.GetPointerSecondaryButton();
+
+                // WHILE TOUCH OWNS INPUT THERE IS NO MOUSE TO READ.
+                //
+                // Anything the platform still reports on a mouse button here is a
+                // leftover from the trackpad that just handed over. SwingWeapon is bound
+                // to Mouse1, and a stale read holds the attack down: PlayerMouseLook
+                // suppresses camera look while SwingWeapon is held, and the look axes the
+                // touch layer injects feed WeaponManager's gesture tracker instead. The
+                // camera stick then reads as an attack button rather than a camera.
+                //
+                // The old PointerAtEdge guard used to blanket-suppress Mouse1 and hid
+                // this; replacing it with a PointerActive-gated read left the raw key
+                // exposed on exactly the path where no mouse exists.
+                if (Mobile.MobileInput.TouchInputActive &&
+                    (k == KeyCode.Mouse0 || k == KeyCode.Mouse1 || k == KeyCode.Mouse2))
+                    return false;
+
                 return Input.GetKey(k);
             }
             else

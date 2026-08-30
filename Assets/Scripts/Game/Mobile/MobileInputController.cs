@@ -1319,7 +1319,8 @@ namespace DaggerfallWorkshop.Game.Mobile
                 "touchOwns={6} hudGameplay={7} touches={8} [{9}] claimed={10} " +
                 "lookHeld={11} lookValue=({12:0.##},{13:0.##}) lookFinger={14} lookPointer={15} " +
                 "moveHeld={16} moveFinger={17} " +
-                "zoneDragging={18} zoneFinger={19} zonePointer={20} combat={21}\n",
+                "zoneDragging={18} zoneFinger={19} zonePointer={20} combat={21} " +
+                "swingAction={22} swingBind={23} rawMouse1={24} lookX={25:0.##} lookY={26:0.##}\n",
                 System.DateTime.UtcNow, MobileInput.Mode, touchUIEnabled, keyboardActive,
                 controllerConnected, MobileInput.PointerActive, touchOwnsPointer,
                 gameplayLayer != null && gameplayLayer.activeSelf, Input.touchCount, phases,
@@ -1334,7 +1335,21 @@ namespace DaggerfallWorkshop.Game.Mobile
                 lookZone != null && lookZone.IsDragging,
                 lookZone != null ? lookZone.DirectFingerId : -99,
                 lookZone != null ? lookZone.PointerId : -99,
-                MobileInput.CombatMode));
+                MobileInput.CombatMode,
+                // The decisive one. PlayerMouseLook suppresses camera look entirely while
+                // SwingWeapon is held, and routes the injected axes to the weapon gesture
+                // instead - a held SwingWeapon with a live look stick IS "the camera stick
+                // acts as an attack button". swingBind says which key is answering for it
+                // and rawMouse1 whether the platform is still reporting that key down with
+                // no mouse in the player's hands.
+                InputManager.HasInstance &&
+                    InputManager.Instance.HasAction(InputManager.Actions.SwingWeapon),
+                InputManager.HasInstance
+                    ? InputManager.Instance.GetBinding(InputManager.Actions.SwingWeapon)
+                    : KeyCode.None,
+                Input.GetKey(KeyCode.Mouse1),
+                InputManager.HasInstance ? InputManager.Instance.LookX : 0f,
+                InputManager.HasInstance ? InputManager.Instance.LookY : 0f));
         }
 
         void LogMenuDiagnostics()
