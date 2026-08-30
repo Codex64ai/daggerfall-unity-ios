@@ -512,8 +512,21 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
             // Add settings path text
             if (!DaggerfallUnity.Settings.HideLoginName)
             {
+                // One row below the last option in the right-hand column.
+                //
+                // Options run from optionPos = 60 in 12px rows, so the right column now
+                // ends with the weapon swing mode slider at y = 128 - label at 120,
+                // slider 8px under it, value indicator alongside. At the old y = 130 the
+                // slider and the "Settings folder" header drew over each other.
+                //
+                // A row here is the 8px this block already uses between its own two
+                // labels, not the 12px of an option row. There is only one row of slack:
+                // the mod note sits at InteriorHeight - 24 = 156 and is wide enough to
+                // run under the centred path text, so 142 would clear the slider only to
+                // collide with that instead. Another option in either column needs the
+                // panel to grow rather than this to move again.
                 Panel settingsPanel = new Panel();
-                settingsPanel.Position = new Vector2(0, 130);
+                settingsPanel.Position = new Vector2(0, 138);
                 settingsPanel.Size = new Vector2(318, 16);
                 settingsPanel.HorizontalAlignment = HorizontalAlignment.Center;
 
