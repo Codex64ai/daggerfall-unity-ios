@@ -47,8 +47,6 @@ namespace DaggerfallWorkshop.Game.Mobile
         // ... but I could move them still").
         [System.NonSerialized] public bool forceOpen;
 
-        public bool IsOpen { get { return open || forceOpen; } }
-
         void Start()
         {
             Apply();

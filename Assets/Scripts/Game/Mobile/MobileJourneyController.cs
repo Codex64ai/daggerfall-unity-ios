@@ -46,9 +46,10 @@ namespace DaggerfallWorkshop.Game.Mobile
         // fixedDeltaTime MUST scale with it - Unity's physics step is fixed, so leaving it at
         // 0.02 while timeScale is 20 gives physics 20x the simulated distance per step and
         // the player tunnels through terrain and walks over water.
-        // Lowered from 20/50 on device evidence: 21x already outran terrain streaming on an
-        // M4 iPad and produced untextured ground. The throttle below is the real protection,
-        // but a lower ceiling means fewer people meet the problem at all.
+        // Historical note: 21x once outran terrain streaming on an M4 iPad and produced
+        // untextured ground; the streaming throttle (SustainableCompression) is the protection
+        // that made the per-transport ceilings below viable. This default is the value a
+        // journey has before any transport has been considered.
         public const int DefaultTimeCompression = 20;
         public const int MinTimeCompression = 1;
 
@@ -250,6 +251,12 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (IsTravelling)
                 Stop(JourneyEnd.Cancelled);
 
+            // Static engine events, and this is a per-scene object: without these the handlers
+            // pile up across return-to-menu cycles and fire on destroyed instances.
+            SaveLoadManager.OnLoad -= OnSaveLoaded;
+            StartGameBehaviour.OnNewGame -= ForgetDestination;
+            GameManager.OnEncounter -= OnEncounter;
+
             StreamingWorld.OnUpdateTerrainsStart -= OnTerrainBuildStart;
             StreamingWorld.OnUpdateTerrainsEnd -= OnTerrainBuildEnd;
 
@@ -353,7 +360,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         void Start()
         {
             // A destination is meaningless across a save load or a new character.
-            SaveLoadManager.OnLoad += (saveData) => ForgetDestination();
+            SaveLoadManager.OnLoad += OnSaveLoaded;
             StartGameBehaviour.OnNewGame += ForgetDestination;
             GameManager.OnEncounter += OnEncounter;
 
@@ -447,9 +454,8 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (exhaustedPlayer != null)
                 exhaustedPlayer.OnExhausted += OnPlayerExhausted;
 
-            // (route and routeStep were reset HERE, after PlanRoute() had just filled them -
-            // so every journey walked to the first road pixel and then went straight. The
-            // roads rendered and nobody walked on them. Device report, 2026-08-30.)
+            // Historically the route was reset here, after PlanRoute() had just filled it, so
+            // journeys walked to the first road pixel and then went straight. Do not reset it.
             offeredPlaces.Clear();
 
             // The place we are setting out FROM must not be offered as somewhere to stop.
@@ -466,8 +472,9 @@ namespace DaggerfallWorkshop.Game.Mobile
             SuppressJourneyNoise();
             SuppressWeather();
 
-            // Set out at the ceiling for this way of travelling; Slower on the bar still works.
-            TimeCompression = CapForTransport(CurrentTransport());
+            // Set out at the speed the player last chose for this way of travelling (the
+            // ceiling until they choose otherwise), so a Slower tap survives the next journey.
+            TimeCompression = LoadPreferredCompression(CurrentTransport());
             SetTimeScale(TimeCompression);
             ShowJourneyWindow();
             return true;
@@ -1255,6 +1262,11 @@ namespace DaggerfallWorkshop.Game.Mobile
             // resume rather than making the player pick the same place again.
         }
 
+        void OnSaveLoaded(SaveData_v1 saveData)
+        {
+            ForgetDestination();
+        }
+
         void ForgetDestination()
         {
             destinationValid = false;
@@ -1271,17 +1283,26 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         /// <summary>
         /// Pure, static, and therefore testable headlessly. Below 1x time would run backwards;
-        /// far above 50x the player outruns terrain streaming and walks into unloaded world.
+        /// above the transport ceiling the player outruns terrain streaming and walks into unloaded world.
         /// </summary>
         public static int ClampCompression(int scale)
         {
             return Mathf.Clamp(scale, MinTimeCompression, MaxTimeCompression);
         }
 
-        /// <summary>Pure form for tests: the ceiling depends on how the player travels.</summary>
-        public static int ClampCompression(int scale, TransportModes mode)
+        const string speedPrefPrefix = "DFMobile.journeyspeed.";
+
+        /// <summary>The player's last chosen speed for this transport, clamped to its ceiling; the ceiling if none.</summary>
+        public static int LoadPreferredCompression(TransportModes mode)
         {
-            return Mathf.Clamp(scale, MinTimeCompression, CapForTransport(mode));
+            int cap = CapForTransport(mode);
+            int saved = PlayerPrefs.GetInt(speedPrefPrefix + mode, cap);
+            return Mathf.Clamp(saved, MinTimeCompression, cap);
+        }
+
+        static void SavePreferredCompression(TransportModes mode, int scale)
+        {
+            PlayerPrefs.SetInt(speedPrefPrefix + mode, scale);
         }
 
         void SetTimeScale(int scale)
@@ -1323,12 +1344,13 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         /// <summary>
         /// Change travel speed, taking effect immediately if a journey is already running.
-        /// Clamped: below 1x time would run backwards, and far above 50x the player outruns
+        /// Clamped: below 1x time would run backwards, and above the transport ceiling the player outruns
         /// terrain streaming and walks into unloaded world.
         /// </summary>
         public void SetTimeCompression(int scale)
         {
             TimeCompression = ClampCompression(scale);
+            SavePreferredCompression(CurrentTransport(), TimeCompression);
 
             if (IsTravelling)
                 SetTimeScale(SustainableCompression());

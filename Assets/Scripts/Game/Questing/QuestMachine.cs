@@ -1673,6 +1673,7 @@ namespace DaggerfallWorkshop.Game.Questing
             if (lines == null)
             {
                 // Get path to localized quest file and check it exists
+                // MOBILE: user content from the app's Documents folder (see MobileContentPath).
                 string path = MobileContentPath.Override(
                     Path.Combine(Application.streamingAssetsPath, textFolderName, questsFolderName, filename));
                 if (!File.Exists(path))

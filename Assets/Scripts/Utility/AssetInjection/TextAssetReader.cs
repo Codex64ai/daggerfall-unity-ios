@@ -38,6 +38,7 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
             if (relativePath == null)
                 throw new ArgumentNullException("relativePath");
 
+            // MOBILE: user content from the app's Documents folder (see MobileContentPath).
             string path = MobileContentPath.Override(
                 Path.Combine(Application.streamingAssetsPath, relativePath));
             if (File.Exists(path))
@@ -100,6 +101,7 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
 
             // MERGED, not overridden: this call concatenates a whole directory, so player
             // files are appended to the shipped ones rather than replacing the folder.
+            // MOBILE: user content from the app's Documents folder (see MobileContentPath).
             foreach (string path in MobileContentPath.UserFiles(
                          relativeDirectory, extension != null ? string.Format("*.{0}", extension) : "*"))
                 content.Add(File.ReadAllText(path));

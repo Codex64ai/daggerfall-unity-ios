@@ -179,13 +179,6 @@ namespace DaggerfallWorkshop.Game.Mobile
             return clickToAttack ? 1 : userMode;
         }
 
-        /// <summary>Launcher-following form: touch swipes, everyone else keeps their own mode.</summary>
-        public static int ResolveSwingMode(int userMode, bool touchDrivesGameplay, bool menuOpen)
-        {
-            if (touchDrivesGameplay && !menuOpen)
-                return 0;
-            return userMode;
-        }
 
         /// <summary>
         /// True while a physical mouse or trackpad is being used. With the pointer plugin
@@ -371,11 +364,6 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             if (Valid(button))
                 latched[button] = value;
-        }
-
-        public static bool IsLatched(int button)
-        {
-            return Valid(button) && latched[button];
         }
 
         static bool Valid(int button)

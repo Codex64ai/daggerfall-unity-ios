@@ -27,8 +27,6 @@ namespace DaggerfallWorkshop.Game.Mobile
     /// </summary>
     public static class MobileRoads
     {
-        const string enabledPref = "dfumobile.roads";
-
         // One texturing instance for the whole process. It holds the path data (four large
         // byte arrays), so it is built once and re-attached to each DaggerfallUnity that comes
         // along rather than rebuilt per scene.
@@ -51,19 +49,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         /// <summary>
-        /// Player preference. Setting it does NOT affect the running session - see the note on
-        /// the class about partially painted worlds.
+        /// Player preference, owned by MobileMods (the Mods window entry when it exists, a pref
+        /// mirror before then). Changing it does NOT affect the running session - see the note
+        /// on the class about partially painted worlds.
         /// </summary>
         public static bool Enabled
         {
-            // The Mods window's entry is the truth when it exists (MobileMods); the pref here
-            // is a mirror for the moments before ModManager is up.
             get { return MobileMods.RoadsAndTravel; }
-            set
-            {
-                PlayerPrefs.SetInt(enabledPref, value ? 1 : 0);
-                PlayerPrefs.Save();
-            }
         }
 
         /// <summary>True when the preference no longer matches what is installed.</summary>

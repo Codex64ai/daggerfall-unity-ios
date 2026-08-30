@@ -182,8 +182,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         // window during a scene change, when GameManager.Instance is mid-rebuild; touching
         // it that early throws or - worse - caches a stale PlayerMouseLook that belongs to
         // the previous scene's player object.
-        static PlayerGPS Gps { get { return GameManager.Instance.PlayerGPS; } }
-        static PlayerMouseLook MouseLook { get { return GameManager.Instance.PlayerMouseLook; } }
+        // Null when the game scene is gone (scene transition mid-journey); every caller checks.
+        static PlayerGPS Gps { get { return GameManager.HasInstance ? GameManager.Instance.PlayerGPS : null; } }
+        static PlayerMouseLook MouseLook { get { return GameManager.HasInstance ? GameManager.Instance.PlayerMouseLook : null; } }
         static InputManager Input { get { return InputManager.Instance; } }
 
         /// <summary>Call once per frame while the journey runs.</summary>
@@ -419,6 +420,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             get
             {
+                if (Gps == null)
+                    return 0f;
                 if (!IsPlayerReady())
                     return 0f;
 
@@ -524,6 +527,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public bool NudgeForward(float worldUnits)
         {
+            if (Gps == null)
+                return false;
             return TeleportTo(Gps.WorldX + Mathf.Sin(journeyYaw * Mathf.Deg2Rad) * worldUnits,
                               Gps.WorldZ + Mathf.Cos(journeyYaw * Mathf.Deg2Rad) * worldUnits);
         }
@@ -561,7 +566,6 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         /// <summary>True while steering around an obstacle rather than at the target.</summary>
-        public bool WorkingAroundObstacle { get { return sidestepUntil > 0f; } }
 
         public delegate void OnBlockedHandler();
         public event OnBlockedHandler OnBlocked;

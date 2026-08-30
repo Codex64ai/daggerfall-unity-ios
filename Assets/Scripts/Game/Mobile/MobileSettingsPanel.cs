@@ -81,8 +81,6 @@ namespace DaggerfallWorkshop.Game.Mobile
             ApplyAll();
         }
 
-        public bool IsOpen { get { return open; } }
-
         /// <summary>
         /// MobileHudBuilder puts MobileControllerProbe on the same object as the controller,
         /// so this needs no separate wiring field.
@@ -513,13 +511,14 @@ namespace DaggerfallWorkshop.Game.Mobile
                 "On-screen readout of touches, sticks, input mode and the pointer plugin. " +
                 "Applies from the next launch too.");
 
-            // Escape hatch for a controller whose buttons report unexpected numbers: the
-            // player can run the probe from a shipping build and send back the summary,
-            // instead of needing a special build.
-            AddToggle(c, ref y, rowW, rowH, "Controller probe overlay",
-                () => Probe != null && Probe.active,
-                v => { if (Probe != null) Probe.active = v; },
-                "ctrlprobe");
+            // The controller probe is a development tool: only offered in development builds.
+            if (Debug.isDebugBuild)
+            {
+                AddToggle(c, ref y, rowW, rowH, "Controller probe overlay",
+                    () => Probe != null && Probe.active,
+                    v => { if (Probe != null) Probe.active = v; },
+                    "ctrlprobe");
+            }
 
             FinishSection(c, y);
         }

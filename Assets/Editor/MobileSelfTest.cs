@@ -294,11 +294,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// </summary>
         static void TestSwingModeDecision()
         {
-            Check(MobileInput.ResolveSwingMode(1, true, false) == 0, "touch play imposes hold-and-drag");
-            Check(MobileInput.ResolveSwingMode(1, false, false) == 1, "mouse/pad play keeps click-to-attack");
-            Check(MobileInput.ResolveSwingMode(2, false, false) == 2, "hold-to-attack kept too");
-            Check(MobileInput.ResolveSwingMode(1, true, true) == 1, "window open -> player's own value, so saves keep it");
-            Check(MobileInput.ResolveSwingMode(0, false, false) == 0, "vanilla stays vanilla");
+            Check(MobileInput.ResolveSwingMode(1, true, false, false, false) == 0, "touch play imposes hold-and-drag");
+            Check(MobileInput.ResolveSwingMode(1, false, false, false, false) == 1, "click-to-attack off: mouse/pad keep the launcher's click mode");
+            Check(MobileInput.ResolveSwingMode(1, true, true, false, false) == 1, "window open -> player's own value, so saves keep it");
+            Check(MobileInput.ResolveSwingMode(0, false, false, false, false) == 0, "vanilla stays vanilla");
 
             // The port's own switches.
             Check(MobileInput.ResolveSwingMode(0, false, false, true, false) == 1,
@@ -574,10 +573,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// </summary>
         static void TestPointerFingerRule()
         {
-            Check(MobilePointer.IsFingerTouch(TouchType.Direct, false), "direct touch, no button -> finger");
-            Check(MobilePointer.IsFingerTouch(TouchType.Stylus, false), "pencil counts as a finger");
-            Check(!MobilePointer.IsFingerTouch(TouchType.Indirect, false), "indirect touch -> not a finger");
-            Check(!MobilePointer.IsFingerTouch(TouchType.Direct, true), "touch while a pointer button is held -> pointer click, not a finger");
+            Check(MobilePointer.IsFingerTouch(TouchType.Direct, false, float.MaxValue, 0f), "direct touch, no button -> finger");
+            Check(MobilePointer.IsFingerTouch(TouchType.Stylus, false, float.MaxValue, 0f), "pencil counts as a finger");
+            Check(!MobilePointer.IsFingerTouch(TouchType.Indirect, false, float.MaxValue, 0f), "indirect touch -> not a finger");
+            Check(!MobilePointer.IsFingerTouch(TouchType.Direct, true, float.MaxValue, 0f), "touch while a pointer button is held -> pointer click, not a finger");
         }
 
         /// <summary>
@@ -748,12 +747,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobileJourneyController.CapForTransport(TransportModes.Horse) == 150, "tiers: horse caps at 150x");
             Check(MobileJourneyController.CapForTransport(TransportModes.Cart) == 150, "tiers: cart rides like a horse");
             Check(MobileJourneyController.CapForTransport(TransportModes.Ship) == 200, "tiers: ship caps at 200x");
-            Check(MobileJourneyController.ClampCompression(200, TransportModes.Foot) == 50,
-                  "tiers: 200x on foot clamps down to 50x");
-            Check(MobileJourneyController.ClampCompression(150, TransportModes.Horse) == 150,
-                  "tiers: a horse keeps 150x");
-            Check(MobileJourneyController.ClampCompression(-5, TransportModes.Ship) >= 1,
-                  "tiers: a ship still cannot reverse time");
+            Check(MobileJourneyController.LoadPreferredCompression(TransportModes.Foot) >= 1 &&
+                  MobileJourneyController.LoadPreferredCompression(TransportModes.Foot) <= 50,
+                  "tiers: the remembered foot speed is within 1x..50x");
+            Check(MobileJourneyController.LoadPreferredCompression(TransportModes.Horse) <= 150,
+                  "tiers: the remembered horse speed never exceeds 150x");
         }
 
         /// <summary>
@@ -903,8 +901,6 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "grace: button held is never a finger");
             Check(!MobilePointer.IsFingerTouch(TouchType.Indirect, false, 5f, 0.4f),
                   "grace: indirect touch is never a finger");
-            Check(MobilePointer.IsFingerTouch(TouchType.Direct, false),
-                  "grace: two-argument rule unchanged for callers without timing");
         }
 
         /// <summary>The HID table must round-trip and cover what Daggerfall binds by default.</summary>

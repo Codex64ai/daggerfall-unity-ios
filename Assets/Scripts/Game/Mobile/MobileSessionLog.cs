@@ -48,6 +48,10 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         public static void Poll()
         {
+            // Development builds only. A release build must not write telemetry into the
+            // player's Documents folder, silently and forever.
+            if (!Debug.isDebugBuild)
+                return;
             if (failed || !MobileInput.Enabled || samples >= maxSamples)
                 return;
 

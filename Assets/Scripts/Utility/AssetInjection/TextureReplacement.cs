@@ -1056,6 +1056,7 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
                 path += extension;
 
             // Prefer a copy the player added under Documents (iOS only; no-op elsewhere).
+            // MOBILE: user content from the app's Documents folder (see MobileContentPath).
             path = MobileContentPath.Override(path);
 
             if (File.Exists(path))

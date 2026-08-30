@@ -85,7 +85,6 @@ namespace DaggerfallWorkshop.Game.Mobile
                 }
                 PlayerPrefs.SetInt(travelPref, value ? 1 : 0);
                 PlayerPrefs.Save();
-                MobileRoads.Enabled = value;
                 MobileJourneyController.JourneyModeEnabled = value;
             }
         }
@@ -98,8 +97,6 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             bool on = RoadsAndTravel;
             MobileJourneyController.JourneyModeEnabled = on;
-            if (MobileRoads.Enabled != on)
-                MobileRoads.Enabled = on;
             if ((PlayerPrefs.GetInt(travelPref, 0) == 1) != on)
             {
                 PlayerPrefs.SetInt(travelPref, on ? 1 : 0);

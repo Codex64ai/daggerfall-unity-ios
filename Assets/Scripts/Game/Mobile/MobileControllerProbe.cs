@@ -40,7 +40,6 @@ namespace DaggerfallWorkshop.Game.Mobile
         public const int NumAxes = 16;                 // InputManager.numAxes is private; same value.
         const int numButtons = 20;                     // JoystickButton0..19
         const float axisTrigger = 0.5f;                // deviation from rest that counts as "pressed"
-        const float axisIdle = 0.2f;                   // deviation below which we call it released
         const int calibrationFrames = 30;
 
         // A candidate must persist this many consecutive frames before it is recorded.

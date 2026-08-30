@@ -85,6 +85,7 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
             if (DaggerfallUnity.Settings.AssetInjection)
             {
                 // Seek from loose files
+                // MOBILE: user content from the app's Documents folder (see MobileContentPath).
                 string path = MobileContentPath.Override(Path.Combine(soundPath, name + extension));
                 if (File.Exists(path))
                 {
@@ -190,6 +191,7 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
             if (DaggerfallUnity.Settings.AssetInjection)
             {
                 // Seek from loose files
+                // MOBILE: user content from the app's Documents folder (see MobileContentPath).
                 string path = MobileContentPath.Override(Path.Combine(soundPath, name));
                 if (File.Exists(path))
                 {

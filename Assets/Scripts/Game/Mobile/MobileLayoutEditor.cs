@@ -42,8 +42,6 @@ namespace DaggerfallWorkshop.Game.Mobile
         MobileHudLayout.Element selectedElement;
         GameObject selectedButton;
 
-        public bool IsOpen { get { return open; } }
-
         #region Enter / Exit
 
         public void Enter()

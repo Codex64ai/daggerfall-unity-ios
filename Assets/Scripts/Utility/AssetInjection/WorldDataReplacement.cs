@@ -54,6 +54,7 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
         /// </summary>
         static string[] MergeWithUserFiles(string[] shippedFiles, string pattern)
         {
+            // MOBILE: user content from the app's Documents folder (see MobileContentPath).
             string[] extra = MobileContentPath.UserFiles(worldData, pattern);
             if (extra.Length == 0)
                 return shippedFiles;
@@ -243,6 +244,7 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
                 TextAsset locationReplacementJsonAsset;
 
                 // Seek from loose files
+                // MOBILE: user content from the app's Documents folder (see MobileContentPath).
                 if (File.Exists(MobileContentPath.Override(Path.Combine(worldDataPath, fileName))))
                 {
                     string locationReplacementJson = File.ReadAllText(
@@ -375,6 +377,7 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
                 TextAsset blockReplacementJsonAsset;
 
                 // Seek from loose files
+                // MOBILE: user content from the app's Documents folder (see MobileContentPath).
                 if (File.Exists(MobileContentPath.Override(Path.Combine(worldDataPath, fileName))))
                 {
                     string blockReplacementJson = File.ReadAllText(

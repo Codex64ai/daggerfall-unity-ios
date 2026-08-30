@@ -113,6 +113,7 @@ namespace DaggerfallWorkshop.Game.Questing
             // ones - this is a recursive scan, so overriding the folder would hide whatever
             // ships. Each pack keeps its own absolute path, so its quests load from wherever
             // it actually lives. No-op off iOS.
+            // MOBILE: user content from the app's Documents folder (see MobileContentPath).
             string[] userLists = MobileContentPath.UserFiles("QuestPacks", QuestListPattern, true);
             if (userLists.Length > 0)
             {
@@ -296,6 +297,7 @@ namespace DaggerfallWorkshop.Game.Questing
 
             // A quest pack the player installed takes precedence, so a pack can override a
             // classic quest by name without touching the shipped copy.
+            // MOBILE: user content from the app's Documents folder (see MobileContentPath).
             string userQuestFolder = MobileContentPath.Override(QuestMachine.QuestSourceFolder);
             if (userQuestFolder != QuestMachine.QuestSourceFolder &&
                 File.Exists(Path.Combine(userQuestFolder, questFileName)))

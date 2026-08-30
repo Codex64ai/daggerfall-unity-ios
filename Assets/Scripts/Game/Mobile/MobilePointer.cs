@@ -38,7 +38,6 @@ namespace DaggerfallWorkshop.Game.Mobile
         public const int MiddleMask = 4;
         /// <summary>Any auxiliary button (side buttons, a wheel-click the mouse reports as aux).
         /// Never bound to an action; it exists so a click on one is not mistaken for a finger.</summary>
-        public const int AuxMask = 8;
 
         /// <summary>
         /// Unity's "Mouse X/Y" axes are raw counts x 0.1 (ProjectSettings/InputManager.asset
@@ -249,17 +248,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             return tick;
         }
 
-        /// <summary>
-        /// A touch hands control back to the touch layer only if it is a finger (or pencil):
-        /// not an indirect device, and not arriving while a pointer button is held - iPadOS
-        /// delivers pointer clicks as touches.
-        /// </summary>
-        public static bool IsFingerTouch(TouchType type, bool anyPointerButtonHeld)
-        {
-            return IsFingerTouch(type, anyPointerButtonHeld, float.MaxValue, 0f);
-        }
-
-        /// <summary>
+/// <summary>
         /// Seconds since the last pointer button or movement decides borderline touches.
         /// UIKit's touch for a click and GameController's button report arrive on different
         /// paths, so the touch can be seen a frame before the button - and a right-click

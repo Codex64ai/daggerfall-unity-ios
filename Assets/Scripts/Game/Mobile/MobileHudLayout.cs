@@ -127,13 +127,6 @@ namespace DaggerfallWorkshop.Game.Mobile
             return prefPrefix + name + ProfileSuffix + field;
         }
 
-        public static bool HasOverride(string name)
-        {
-            return PlayerPrefs.HasKey(Key(name, ".mx")) ||
-                   PlayerPrefs.HasKey(Key(name, ".scale")) ||
-                   PlayerPrefs.HasKey(Key(name, ".hidden"));
-        }
-
         public static void SetMarginOverride(string name, Vector2 marginInches)
         {
             PlayerPrefs.SetFloat(Key(name, ".mx"), marginInches.x);

@@ -51,3 +51,6 @@ sysinfo.txt
 /mono_crash.mem.*.blob
 *.bak
 *.bak2
+
+# Per-user editor state (window layouts, search settings)
+UserSettings/

@@ -57,6 +57,7 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
                     name = name.Substring(0, index);
 
                 // Seek from loose files
+                // MOBILE: user content from the app's Documents folder (see MobileContentPath).
                 string path = MobileContentPath.Override(Path.Combine(moviePath, name + videoExtension));
                 if (File.Exists(path))
                 {

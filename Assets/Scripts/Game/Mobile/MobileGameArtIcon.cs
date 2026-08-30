@@ -24,8 +24,6 @@
 
 using UnityEngine;
 using UnityEngine.UI;
-using DaggerfallConnect;
-using DaggerfallConnect.Arena2;
 using DaggerfallConnect.Utility;
 using DaggerfallWorkshop.Game.Entity;
 using DaggerfallWorkshop.Game.MagicAndEffects.MagicEffects;
@@ -99,6 +97,10 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (image == null || !GameManager.HasInstance)
                 return;
 
+            // Scene reloads destroy the cached textures while the flag says loaded; reload.
+            if (modeArtLoaded && stealTexture == null)
+                modeArtLoaded = false;
+
             // Custom mode art wins: the classic icons carry the bar's stone background,
             // which reads as a panel behind a button that should be a bare glyph.
             if (source == ArtSource.InteractionMode && modeSprites != null && modeSprites.Length >= 4)
@@ -135,6 +137,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// <summary>Index into modeSprites, matching PlayerActivateModes' own order.</summary>
         static int ModeIndex()
         {
+            if (GameManager.Instance.PlayerActivate == null)
+                return 1;
             switch (GameManager.Instance.PlayerActivate.CurrentMode)
             {
                 case PlayerActivateModes.Steal: return 0;
@@ -169,6 +173,8 @@ namespace DaggerfallWorkshop.Game.Mobile
                 }
             }
 
+            if (GameManager.Instance.PlayerActivate == null)
+                return grabTexture;
             switch (GameManager.Instance.PlayerActivate.CurrentMode)
             {
                 case PlayerActivateModes.Steal: return stealTexture;
@@ -183,7 +189,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         Texture2D GetPortraitTexture()
         {
             PlayerEntity player = GameManager.Instance.PlayerEntity;
-            if (player == null || player.RaceTemplate == null)
+            if (player == null || player.RaceTemplate == null || GameManager.Instance.PlayerEffectManager == null)
                 return null;
 
             try

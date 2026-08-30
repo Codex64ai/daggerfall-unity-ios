@@ -2,20 +2,25 @@
 // License:         MIT License
 //
 // Notes:
-//   Central brain for touch input. Owns the mode state machine and pushes touch
-//   state into InputManager using its existing public API:
+//   The port's input hub. One MonoBehaviour in the game scene that decides, every frame, WHO
+//   IS DRIVING and feeds Daggerfall Unity's InputManager accordingly:
 //
-//     ApplyHorizontalForce / ApplyVerticalForce  <- virtual joystick
-//     SetMobileMouseAxes                         <- touch drag (drives BOTH camera
-//                                                   look and weapon gestures, exactly
-//                                                   like the PC mouse does)
-//     AddAction                                  <- virtual buttons
+//     touch      - virtual sticks, swipe attacks, action buttons and the menu cursor
+//                  (PollCursorStage / PollGameplayStage, called from InputManager.Update)
+//     pointer    - a real mouse or trackpad through MobilePointer (native GCMouse plugin):
+//                  look deltas, buttons, hover cursor, pointer lock
+//     keyboard   - detection via typed characters and MobileHardwareKeyboard (GCKeyboard)
+//     controller - detection via Input.GetJoystickNames, then DFU's own pad support
 //
-//   Because mouseX/mouseY feed both PlayerMouseLook.ApplyLook() and
-//   WeaponManager.TrackMouseAttack(), one injected channel reproduces PC behaviour
-//   with no changes to either script. PlayerMouseLook.cs:247 already suppresses
-//   camera look while Actions.SwingWeapon is held in WeaponSwingMode 0, so swipes
-//   do not yank the camera mid-swing.
+//   The player's declared input mode (MobileInputMode: Auto / Touch / Keyboard & mouse /
+//   Controller) is resolved with the raw detection through MobileInput.ResolveInput into the
+//   effective flags everything else reads. It also owns: the weapon swing mode the engine
+//   sees (hold-and-drag for touch, click for pointer/pad - ApplySwingMode), the attack
+//   threshold calibration in inches (Calibration region), hold-to-skip for videos, the
+//   four-finger touch-restore gesture, and the optional diagnostics overlay (OnGUI).
+//
+//   Registration side effects at Start: the pause menu gains Mobile Settings
+//   (MobilePauseOptionsWindow), the roads/travel switch is applied (MobileMods).
 //
 
 using UnityEngine;
@@ -230,8 +235,6 @@ namespace DaggerfallWorkshop.Game.Mobile
         #endregion
 
         #region Properties
-
-        public bool CombatModeWanted { get { return combatModeWanted; } }
 
         #endregion
 
@@ -952,17 +955,17 @@ namespace DaggerfallWorkshop.Game.Mobile
             ApplySwingMode();
         }
 
-        /// <summary>
-        /// Hold-and-drag (0) while touch swings, the player's own choice otherwise, and always
-        /// the player's own choice while a classic window is open so settings.ini can only
-        /// ever be written with their value. See MobileInput.ResolveSwingMode.
-        /// </summary>
         /// <summary>Re-run the swing-mode decision now (Mobile Settings changed a switch).</summary>
         public void RefreshSwingMode()
         {
             ApplySwingMode();
         }
 
+        /// <summary>
+        /// Hold-and-drag (0) while touch swings, the player's own choice otherwise, and always
+        /// the player's own choice while a classic window is open so settings.ini can only
+        /// ever be written with their value. See MobileInput.ResolveSwingMode.
+        /// </summary>
         void ApplySwingMode()
         {
             if (!forceGestureSwingMode)

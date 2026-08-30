@@ -143,7 +143,7 @@ namespace DaggerfallWorkshop.Game.Mobile
                     if (inRegion)
                         RecenterUnder(t.position, cam);   // snap the stick to the thumb
 
-                    Debug.Log(string.Format("[Stick:{0}] claimed finger {1} at {2} ({3})",
+                    if (Debug.isDebugBuild) Debug.Log(string.Format("[Stick:{0}] claimed finger {1} at {2} ({3})",
                         name, t.fingerId, t.position, inRegion ? "region" : "rect"));
 
                     UpdateFromScreenPoint(t.position, cam);
@@ -308,7 +308,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (directFingerId >= 0)
             {
                 claimedFingers.Remove(directFingerId);
-                Debug.Log("[Stick:" + name + "] released finger " + directFingerId);
+                if (Debug.isDebugBuild) Debug.Log("[Stick:" + name + "] released finger " + directFingerId);
             }
             directFingerId = -1;
             activePointerId = pointerIdNone;

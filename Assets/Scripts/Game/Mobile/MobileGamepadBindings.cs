@@ -227,11 +227,6 @@ namespace DaggerfallWorkshop.Game.Mobile
         // sweeps.
         static readonly List<KeyCode> appliedCodes = new List<KeyCode>();
 
-        public static bool IsApplied { get { return appliedCodes.Count > 0; } }
-
-        /// <summary>The left trigger keycode, exposed so the HUD can show a modifier hint.</summary>
-        public static KeyCode ModifierKey { get { return LT; } }
-
         /// <summary>
         /// Apply both layers as secondary bindings, for this session only.
         ///
@@ -387,6 +382,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public static void WatchUnknownButtons()
         {
+            // Development builds only: this writes a file into the player's Documents.
+            if (!Debug.isDebugBuild)
+                return;
             if (!MobileInput.Enabled || watchLinesWritten >= maxWatchLines)
                 return;
 
@@ -442,18 +440,6 @@ namespace DaggerfallWorkshop.Game.Mobile
         #endregion
 
         #region Reporting
-
-        /// <summary>Human-readable dump of the layout, for the settings panel and logs.</summary>
-        public static string Describe()
-        {
-            var sb = new System.Text.StringBuilder();
-            List<Bind> all = BaseLayer();
-            all.AddRange(ModifierLayer());
-            for (int i = 0; i < all.Count; i++)
-                sb.AppendLine(all[i].label);
-
-            return sb.ToString();
-        }
 
         #endregion
     }

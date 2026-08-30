@@ -195,8 +195,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         // Named speeds rather than a fixed increment. A +5 step needed six taps to get from
         // the default to the maximum, on a control the player uses while travelling; these are
         // three taps end to end and every stop is a round number they can reason about.
-        // The top two are reckless-only; SetTimeCompression clamps them away on cautious
-        // travel, so the button simply stops climbing rather than needing a separate list.
+        // The ceiling depends on the transport (50x foot, 150x mount, 200x ship);
+        // SetTimeCompression clamps to it, so the button simply stops climbing.
         static readonly int[] speedSteps = { 1, 5, 10, 20, 30, 50, 100, 200 };
 
         void StepCompression(int direction)
