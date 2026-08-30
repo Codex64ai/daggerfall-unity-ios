@@ -79,8 +79,16 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public static bool PhysicalInputActive
         {
-            get { return ControllerActive || KeyboardActive; }
+            get { return ControllerActive || KeyboardActive || MouseActive; }
         }
+
+        /// <summary>
+        /// True while a physical mouse or trackpad is being used. Detected from movement on
+        /// the raw mouse axes, never from button state - iPadOS reports a phantom Mouse0
+        /// permanently held, which is exactly the trap that broke door activation once
+        /// already. Touching the screen clears it, the same as the keyboard.
+        /// </summary>
+        public static bool MouseActive { get; set; }
 
         /// <summary>Set by MobileInputController when a hardware key is pressed.</summary>
         public static bool KeyboardActive { get; set; }

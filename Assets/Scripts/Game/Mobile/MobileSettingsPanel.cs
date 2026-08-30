@@ -202,6 +202,15 @@ namespace DaggerfallWorkshop.Game.Mobile
             // scene loads, so the toggle records an intent for next launch rather than changing
             // anything now. Flipping it mid-session would leave already-built terrain painted
             // the old way and roads would stop at an invisible line.
+            // Self-persisting (null key): the controller owns this pref because the HUD must
+            // honour it before this panel has ever been built. Four-finger tap restores it if
+            // turned off with no mouse attached - the gear this panel opens from is itself on
+            // the touch HUD.
+            AddToggle(panel, ref y, rowH, "Touch controls (4-finger tap restores)",
+                () => controller == null || controller.TouchControlsEnabled,
+                v => { if (controller != null) controller.TouchControlsEnabled = v; },
+                null);
+
             AddToggle(panel, ref y, rowH, "Roads and tracks (restart)",
                 () => MobileRoads.Enabled,
                 v => MobileRoads.Enabled = v,

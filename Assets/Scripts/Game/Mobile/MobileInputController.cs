@@ -153,6 +153,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         float nextControllerPoll;
         float nextTouchAssert;
         bool keyboardActive;
+        bool mouseActive;
+
+        // Master switch for the touch interface, requested for mouse/keyboard-first players.
+        // Persisted here rather than through the settings panel's own pref plumbing because
+        // the HUD must honour it before the panel has ever been built.
+        const string touchControlsPref = "DFMobile.touchcontrols";
+        bool touchControlsEnabled = true;
         float vidHoldStart = -1f;
         bool vidSkipQueued;
         float swingHoldUntil;
@@ -180,6 +187,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         void Awake()
         {
+            touchControlsEnabled = PlayerPrefs.GetInt(touchControlsPref, 1) == 1;
             // A second controller (e.g. one placed in both scenes) would clobber the
             // singleton and then reset globals when it was torn down.
             if (instance != null && instance != this)
@@ -354,6 +362,8 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
 
             PollKeyboard();
+            PollMouse();
+            PollTouchRestoreGesture();
             PollController();
 
             // Classic bottom-bar touch routing. Runs even with a controller connected -
@@ -400,6 +410,87 @@ namespace DaggerfallWorkshop.Game.Mobile
             // never populate Input.inputString.
             if (!keyboardActive && Input.inputString.Length > 0)
                 SetKeyboardActive(true);
+        }
+
+        /// <summary>
+        /// A physical mouse or trackpad stands the touch layer down, the same as a keyboard.
+        /// This regressed when touch was added - the touch layer overwrote the mouse axes
+        /// every frame and its virtual cursor fought the real pointer, so a mouse that worked
+        /// before the port stopped working after it.
+        ///
+        /// Detection is movement on the raw mouse axes and nothing else. With
+        /// simulateMouseWithTouches forced off, touches never reach those axes, so movement
+        /// there can only be a real pointer - the same "only the real device produces this"
+        /// principle as the keyboard's inputString check. Never button state: iPadOS reports a
+        /// phantom Mouse0 permanently held, the trap that broke doors once already. And not in
+        /// the editor, where the mouse legitimately drives the touch overlay for testing.
+        /// </summary>
+        void PollMouse()
+        {
+            if (Application.isEditor)
+                return;
+
+            if (Input.touchCount > 0)
+            {
+                if (mouseActive)
+                    SetMouseActive(false);
+                return;
+            }
+
+            if (!mouseActive &&
+                (Mathf.Abs(Input.GetAxisRaw("Mouse X")) > 0.01f ||
+                 Mathf.Abs(Input.GetAxisRaw("Mouse Y")) > 0.01f))
+            {
+                SetMouseActive(true);
+            }
+        }
+
+        void SetMouseActive(bool value)
+        {
+            mouseActive = value;
+            MobileInput.MouseActive = value;
+
+            // Same hand-back as the keyboard: the virtual cursor and touch buttons must not
+            // linger over a session being driven by a real pointer.
+            if (value)
+                MobileInput.Relinquish();
+
+            ApplyHudVisibility();
+        }
+
+        public bool MouseActive { get { return mouseActive; } }
+
+        /// <summary>
+        /// The touch interface as a whole. OFF hides the touch HUD and stops the touch pumps,
+        /// for players driving the game with a mouse and keyboard.
+        ///
+        /// THE ESCAPE HATCH MATTERS: the TUNE gear lives on the touch HUD, so a touch-only
+        /// player who turns this off has just removed the only control that could turn it
+        /// back on. A four-finger tap - a gesture nothing else in the port uses - restores it.
+        /// Without that, this toggle is a soft brick on any iPad without a paired mouse.
+        /// </summary>
+        public bool TouchControlsEnabled
+        {
+            get { return touchControlsEnabled; }
+            set
+            {
+                touchControlsEnabled = value;
+                PlayerPrefs.SetInt(touchControlsPref, value ? 1 : 0);
+                PlayerPrefs.Save();
+                ApplyHudVisibility();
+            }
+        }
+
+        void PollTouchRestoreGesture()
+        {
+            if (touchControlsEnabled)
+                return;
+
+            if (Input.touchCount >= 4)
+            {
+                TouchControlsEnabled = true;
+                DaggerfallUI.AddHUDText("Touch controls restored.", 2f);
+            }
         }
 
         void SetKeyboardActive(bool value)
@@ -517,7 +608,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// <summary>Single place that decides which HUD layer is visible.</summary>
         void ApplyHudVisibility()
         {
-            bool touchAllowed = !controllerConnected && !keyboardActive;
+            bool touchAllowed = touchControlsEnabled && !controllerConnected && !keyboardActive && !mouseActive;
             bool menu = MobileInput.Mode == MobileControlMode.Menu;
 
             SetLayer(gameplayLayer, touchAllowed && !menu);
@@ -830,7 +921,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public void PollGameplayStage(InputManager inputManager)
         {
-            if (inputManager == null || MobileInput.MenuMode || controllerConnected || keyboardActive)
+            if (inputManager == null || !touchControlsEnabled || MobileInput.MenuMode || controllerConnected || keyboardActive || mouseActive)
                 return;
 
             PumpMovement(inputManager);
