@@ -73,6 +73,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestNightDecision();
             TestRoadData();
             TestRoadsInstallSurvivesSceneSwap();
+            TestModsSwitchOwnsBothPrefs();
             TestRoadDirectionReciprocity();
             TestRoadRouting();
             TestWaypointOvershoot();
@@ -898,6 +899,29 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             bool held;
             Check(!MobileHardwareKeyboard.TryGetKey(KeyCode.W, out held) && !held,
                   "keyboard: no plugin in the editor -> fall back to Unity");
+        }
+
+        /// <summary>The one switch behind roads and real travel drives both flags, both ways.</summary>
+        static void TestModsSwitchOwnsBothPrefs()
+        {
+            bool saved = MobileMods.RoadsAndTravel;
+            try
+            {
+                MobileMods.RoadsAndTravel = true;
+                Check(MobileRoads.Enabled && MobileJourneyController.JourneyModeEnabled,
+                      "mods: switch on -> roads pref and journey mode both on");
+                MobileMods.RoadsAndTravel = false;
+                Check(!MobileRoads.Enabled && !MobileJourneyController.JourneyModeEnabled,
+                      "mods: switch off -> both off");
+                MobileMods.RoadsAndTravel = true;
+                MobileJourneyController.JourneyModeEnabled = false;      // a stale flag
+                MobileMods.ApplySaved();
+                Check(MobileJourneyController.JourneyModeEnabled, "mods: ApplySaved re-asserts the saved choice");
+            }
+            finally
+            {
+                MobileMods.RoadsAndTravel = saved;
+            }
         }
 
         /// <summary>

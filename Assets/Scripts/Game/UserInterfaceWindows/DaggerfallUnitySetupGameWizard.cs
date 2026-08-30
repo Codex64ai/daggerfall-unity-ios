@@ -68,6 +68,7 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
         HorizontalSlider weaponSwingMode;
         Checkbox sdfFontRendering;
         Checkbox enableController;
+        Checkbox mobileRoadsTravel;      // MOBILE
         Checkbox retro320x200WorldRendering;
 
         Color unselectedTextColor = new Color(0.6f, 0.6f, 0.6f, 1f);
@@ -388,6 +389,28 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
 
         float optionPos = 12f;
         float optionSpacing = 12f;
+        /// <summary>MOBILE: a checkbox with literal text, for the port's own switches.</summary>
+        Checkbox AddMobileOption(float x, string label, string tooltip, bool isChecked)
+        {
+            Checkbox checkbox = new Checkbox();
+            checkbox.Label.Text = label;
+            checkbox.Label.TextColor = selectedTextColor;
+            checkbox.CheckBoxColor = selectedTextColor;
+            checkbox.ToolTip = defaultToolTip;
+            checkbox.ToolTipText = tooltip;
+            checkbox.IsChecked = isChecked;
+            checkbox.Position = new Vector2(x, optionPos);
+            optionsPanel.Components.Add(checkbox);
+            optionPos += optionSpacing;
+
+            return checkbox;
+        }
+
+        private void MobileRoadsTravel_OnToggleState()
+        {
+            Mobile.MobileMods.RoadsAndTravel = mobileRoadsTravel.IsChecked;
+        }
+
         Checkbox AddOption(float x, string key, bool isChecked)
         {
             Checkbox checkbox = new Checkbox();
@@ -560,6 +583,13 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
 
             enableController = AddOption(x, "enableController", DaggerfallUnity.Settings.EnableController);
             enableController.OnToggleState += EnableController_OnToggleState;
+
+            // MOBILE: the port's built-in mod, where players look for mods. Set here it lands
+            // before the game scene loads, so roads need no restart.
+            mobileRoadsTravel = AddMobileOption(x, "Roads & real travel",
+                "Walk to your destination along Daggerfall's roads and tracks, drawn on the terrain (Basic Roads).",
+                Mobile.MobileMods.RoadsAndTravel);
+            mobileRoadsTravel.OnToggleState += MobileRoadsTravel_OnToggleState;
 
             weaponSwingMode = AddSlider(x, "weaponSwingMode", "weaponSwingModeInfo", DaggerfallUnity.Settings.WeaponSwingMode, TextManager.Instance.GetLocalizedTextList("weaponSwingModes", TextCollections.TextSettings));
                         

@@ -467,17 +467,17 @@ namespace DaggerfallWorkshop.Game.Mobile
             // The roads half is read once before the first scene loads - terrain already
             // built this session cannot be repainted - so it records an intent for the next
             // launch, and the note below says so while the two disagree.
+            // Same switch as the launcher's options page (MobileMods owns the preference).
             Text roadsNote = null;
             AddToggle(c, ref y, rowW, rowH, "Roads & real travel",
-                () => MobileJourneyController.JourneyModeEnabled,
+                () => MobileMods.RoadsAndTravel,
                 v =>
                 {
-                    MobileJourneyController.JourneyModeEnabled = v;
-                    MobileRoads.Enabled = v;
+                    MobileMods.RoadsAndTravel = v;
                     if (roadsNote != null)
                         roadsNote.text = RoadsStatusText();
                 },
-                "journeymode");
+                null);
 
             roadsNote = AddNote(c, ref y, rowW, RoadsStatusText());
             refreshDynamic += () => { if (roadsNote != null) roadsNote.text = RoadsStatusText(); };
@@ -857,17 +857,9 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (joystick != null)
                 joystick.floating = PlayerPrefs.GetInt(prefix + "floatstick", joystick.floating ? 1 : 0) == 1;
 
-            // Needed before the panel is ever opened, and more so than the rest: the travel
-            // popup asks whether journey mode is on the first time the player travels, which
-            // is usually long before they go looking through settings.
-            MobileJourneyController.JourneyModeEnabled =
-                PlayerPrefs.GetInt(prefix + "journeymode",
-                                   MobileJourneyController.JourneyModeEnabled ? 1 : 0) == 1;
-
-            // Roads and real travel are one switch now. A player from a build where they were
-            // two follows their travel choice; the Mods section says if a restart is due.
-            if (MobileRoads.Enabled != MobileJourneyController.JourneyModeEnabled)
-                MobileRoads.Enabled = MobileJourneyController.JourneyModeEnabled;
+            // Needed before the panel is ever opened: the travel popup asks whether journey mode
+            // is on the first time the player travels, long before they open settings.
+            MobileMods.ApplySaved();
         }
 
         void ApplyAll()

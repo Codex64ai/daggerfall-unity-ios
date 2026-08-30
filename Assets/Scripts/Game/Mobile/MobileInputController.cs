@@ -864,8 +864,12 @@ namespace DaggerfallWorkshop.Game.Mobile
                 }
             }
 
+            // The launcher's Enable Controller is the player's word on pads (device report: it
+            // was being overridden by detection). Off there = no pad is ever detected here;
+            // choosing Controller in Mobile Settings still forces it on, as an explicit choice.
             controllerDetected = false;
-            string[] names = autoDetectController ? Input.GetJoystickNames() : new string[0];
+            bool padsAllowed = autoDetectController && DaggerfallUnity.Settings.EnableController;
+            string[] names = padsAllowed ? Input.GetJoystickNames() : new string[0];
             for (int i = 0; i < names.Length; i++)
             {
                 if (!string.IsNullOrEmpty(names[i]))
