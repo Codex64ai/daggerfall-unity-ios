@@ -480,6 +480,10 @@ namespace DaggerfallWorkshop.Game.Mobile
             {
                 controller.touchToMouseScale = PlayerPrefs.GetFloat(prefix + "look", controller.touchToMouseScale);
                 controller.swipeDistanceInches = PlayerPrefs.GetFloat(prefix + "swipe", controller.swipeDistanceInches);
+                // Toggles normally read their pref when the panel is first built, so a saved
+                // "Show diagnostics" did nothing until TUNE was opened - and with a pointer or
+                // pad active the touch HUD (and its TUNE button) is hidden, so it never was.
+                controller.showGestureDebug = PlayerPrefs.GetInt(prefix + "debug", controller.showGestureDebug ? 1 : 0) == 1;
             }
             if (layout != null)
                 layout.hudScale = PlayerPrefs.GetFloat(prefix + "hudscale", layout.hudScale);
