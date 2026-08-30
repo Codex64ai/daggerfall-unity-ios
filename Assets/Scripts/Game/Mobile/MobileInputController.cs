@@ -550,9 +550,15 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             if (!MobileInput.MenuMode)
             {
-                // Paused with no classic window: nothing to steer, but drain the deltas so
-                // they do not burst into the camera the moment play resumes.
-                MobilePointer.ConsumeDelta();
+                // DEVICE-PROVEN BUG (first mouse build): this ran every frame of normal play,
+                // and PollCursorStage precedes PollGameplayStage in InputManager.Update - so
+                // it drained every delta before the gameplay pump could read one. The pointer
+                // locked, then nothing moved and nothing swung. Drain ONLY while the game is
+                // paused with no classic window (the one case the gameplay pump never runs),
+                // so movement during a pause cannot burst into the camera on resume.
+                bool paused = GameManager.HasInstance && GameManager.IsGamePaused;
+                if (MobilePointer.ShouldDrainInCursorStage(MobileInput.MenuMode, paused))
+                    MobilePointer.ConsumeDelta();
                 return;
             }
 
