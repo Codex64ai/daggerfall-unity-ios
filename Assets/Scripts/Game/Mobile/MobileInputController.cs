@@ -852,6 +852,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         public void PollCursorStage()
         {
             PollHardwarePointer();
+            LogMenuDiagnostics();
 
 #if UNITY_IOS && !UNITY_EDITOR
             bool gameplayPointer = MobileInput.PointerActive && !IsClassicMenuOpen();
@@ -1092,6 +1093,62 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         int pointerDiagnosticFrames;
         string pointerDiagnosticPath;
+        float nextMenuDiagnostic;
+
+        /// <summary>
+        /// One line a second while a classic menu owns the screen, into the same file as
+        /// the pointer diagnostics.
+        ///
+        /// A window that takes no input from touch OR from the trackpad is not an input
+        /// problem in either device - both arrive through InputManager.MousePosition and
+        /// GetMouseButton, so this records what those are actually reporting, and which
+        /// window is on top to receive them. A top window that is not the one on screen,
+        /// a frozen cursor position, or buttons that never read down each point somewhere
+        /// different.
+        /// </summary>
+        void LogMenuDiagnostics()
+        {
+            if (!IsClassicMenuOpen())
+            {
+                nextMenuDiagnostic = 0f;
+                return;
+            }
+
+            if (Time.unscaledTime < nextMenuDiagnostic)
+                return;
+
+            nextMenuDiagnostic = Time.unscaledTime + 1f;
+
+            string topWindowName = "none";
+            int windowCount = 0;
+            if (DaggerfallUI.HasInstance && DaggerfallUI.UIManager != null)
+            {
+                windowCount = DaggerfallUI.UIManager.WindowCount;
+                IUserInterfaceWindow topWindow = DaggerfallUI.UIManager.TopWindow;
+                if (topWindow != null)
+                    topWindowName = topWindow.GetType().Name;
+            }
+
+            Vector3 mousePosition = Vector3.zero;
+            bool mouseHeld = false, mouseDown = false;
+            if (InputManager.HasInstance)
+            {
+                mousePosition = InputManager.Instance.MousePosition;
+                mouseHeld = InputManager.Instance.GetMouseButton(0);
+                mouseDown = InputManager.Instance.GetMouseButtonDown(0);
+            }
+
+            AppendPointerDiagnostic(string.Format(
+                "{0:O} MENU top={1} windows={2} mode={3} virtualCursor={4} pointer={5} " +
+                "touch={6} mouse=({7:0.#},{8:0.#}) held={9} down={10} cursor=({11:0.#},{12:0.#}) " +
+                "screen=({13}x{14}) touches={15} paused={16}\n",
+                System.DateTime.UtcNow, topWindowName, windowCount, MobileInput.Mode,
+                MobileInput.VirtualCursorActive, MobileInput.PointerActive,
+                MobileInput.TouchInputActive, mousePosition.x, mousePosition.y,
+                mouseHeld, mouseDown, MobileInput.CursorPosition.x, MobileInput.CursorPosition.y,
+                Screen.width, Screen.height, Input.touchCount,
+                GameManager.HasInstance && GameManager.IsGamePaused));
+        }
 
         void LogPointerDiagnostics(float deltaX, float deltaY, bool buttonHeld)
         {
