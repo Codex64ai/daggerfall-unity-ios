@@ -70,7 +70,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         [DllImport("__Internal")] static extern void DFMobilePointerDiagnostics(
             out uint windowEvents, out uint indirectTouches, out uint nonZeroDeltas,
             out uint hoverEvents, out uint gameControllerDeltas,
-            out int lastEventType, out bool locked);
+            out int lastEventType, out bool locked, out uint lockRecoveries);
 #endif
         #region Singleton
 
@@ -130,6 +130,10 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         [Tooltip("Distance from the screen edge where pointer edge-look begins, in pixels.")]
         public float pointerEdgeMargin = 12f;
+
+        [Tooltip("How long a screen touch may mute the Magic Keyboard trackpad before it is " +
+                 "assumed to be a touch iPadOS claimed for a system gesture and never ended.")]
+        public float maximumDirectTouchMute = 2f;
 
         [Tooltip("PHYSICAL swipe distance needed to trigger an attack, in inches. Physical rather " +
                  "than a screen fraction because 18% of an iPhone is ~1in while 18% of a 13in iPad " +
@@ -208,6 +212,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         bool keyboardActive;
         bool pointerPositionInitialized;
         bool indirectPointerActive;
+#if UNITY_IOS && !UNITY_EDITOR
+        float directTouchSince = -1f;
+#endif
         Vector2 previousPointerPosition;
         Vector2 lastPointerDirection;
         float vidHoldStart = -1f;
@@ -878,15 +885,38 @@ namespace DaggerfallWorkshop.Game.Mobile
             bool wasActive = MobileInput.PointerActive;
 
 #if UNITY_IOS && !UNITY_EDITOR
-            bool directTouchActive = false;
+            // A finger on the screen mutes the trackpad, because the two would
+            // otherwise both drive the camera. Only a LIVE finger may do that: a touch
+            // that has already ended still appears in Input.touches for its final
+            // frame, and a press that lands on the display edge can be claimed by an
+            // iPadOS system gesture and never report an end at all. Either one used to
+            // latch the mute on and leave the camera deaf to the trackpad for the rest
+            // of the session.
+            bool directTouchPresent = false;
             for (int touchIndex = 0; touchIndex < Input.touchCount; touchIndex++)
             {
-                if (Input.GetTouch(touchIndex).type != TouchType.Indirect)
-                {
-                    directTouchActive = true;
-                    break;
-                }
+                // Qualified: the Input System package declares its own TouchPhase in a
+                // namespace this file already imports.
+                UnityEngine.Touch touch = Input.GetTouch(touchIndex);
+                if (touch.type == TouchType.Indirect)
+                    continue;
+                if (touch.phase == UnityEngine.TouchPhase.Ended ||
+                    touch.phase == UnityEngine.TouchPhase.Canceled)
+                    continue;
+
+                directTouchPresent = true;
+                break;
             }
+
+            if (!directTouchPresent)
+                directTouchSince = -1f;
+            else if (directTouchSince < 0f)
+                directTouchSince = Time.unscaledTime;
+
+            // The touch UI is hidden while the pointer owns gameplay, so a finger held
+            // down this long is not a control input - it is a touch iPadOS abandoned.
+            bool directTouchActive = directTouchPresent &&
+                Time.unscaledTime - directTouchSince <= maximumDirectTouchMute;
             DFMobilePointerSetDirectTouchActive(directTouchActive);
             directTouchInputActive = directTouchActive;
             if (directTouchActive)
@@ -925,16 +955,12 @@ namespace DaggerfallWorkshop.Game.Mobile
                 if (!wasActive)
                     ApplyHudVisibility();
 
-                bool directTouch = false;
-                for (int i = 0; i < Input.touchCount; i++)
-                {
-                    if (Input.GetTouch(i).type != TouchType.Indirect)
-                    {
-                        directTouch = true;
-                        break;
-                    }
-                }
-                if (!directTouch)
+                // Falling through to the Input System path below overwrites the pointer
+                // with an absolute screen position, which is only correct while a finger
+                // is driving it. Reuse the live-touch test from above rather than
+                // repeating it: an ended touch counted here would hand the camera a
+                // stale position for a frame.
+                if (!directTouchPresent)
                     return;
 
             }
@@ -1050,28 +1076,30 @@ namespace DaggerfallWorkshop.Game.Mobile
 
 #if UNITY_IOS && !UNITY_EDITOR
             uint windowEvents, indirectTouches, nonZeroDeltas, hoverEvents, gameControllerDeltas;
+            uint lockRecoveries;
             int lastEventType;
             bool locked;
             DFMobilePointerDiagnostics(out windowEvents, out indirectTouches, out nonZeroDeltas,
                                        out hoverEvents, out gameControllerDeltas,
-                                       out lastEventType, out locked);
+                                       out lastEventType, out locked, out lockRecoveries);
             Debug.Log(string.Format(
                 "[DFPointerDiag] lock={0} native/systemDelta=({1:0.##},{2:0.##}) held={3} " +
                 "windowEvents={4} indirectTouches={5} nonZero={6} hover={7} lastEventType={8} " +
-                "rawAxes=({9:0.##},{10:0.##})",
+                "rawAxes=({9:0.##},{10:0.##}) lockRecoveries={11}",
                 locked, deltaX, deltaY, buttonHeld, windowEvents, indirectTouches,
                 nonZeroDeltas, hoverEvents, lastEventType,
-                Input.GetAxisRaw("Mouse X"), Input.GetAxisRaw("Mouse Y")));
+                Input.GetAxisRaw("Mouse X"), Input.GetAxisRaw("Mouse Y"), lockRecoveries));
 
             string line = string.Format(
                 "{0:O} lock={1} delta=({2:0.##},{3:0.##}) held={4} windowEvents={5} " +
                 "indirectTouches={6} nonZero={7} hover={8} gcDeltas={9} lastEventType={10} " +
                 "rawAxes=({11:0.##},{12:0.##}) inputSystemEvents={13} inputSystemNonZero={14} " +
-                "queuedDelta=({15:0.##},{16:0.##})\n",
+                "queuedDelta=({15:0.##},{16:0.##}) atEdge={17} directTouch={18} lockRecoveries={19}\n",
                 System.DateTime.UtcNow, locked, deltaX, deltaY, buttonHeld, windowEvents,
                 indirectTouches, nonZeroDeltas, hoverEvents, gameControllerDeltas, lastEventType,
                 Input.GetAxisRaw("Mouse X"), Input.GetAxisRaw("Mouse Y"), inputSystemMouseEvents,
-                inputSystemNonZeroMouseEvents, inputSystemEventDelta.x, inputSystemEventDelta.y);
+                inputSystemNonZeroMouseEvents, inputSystemEventDelta.x, inputSystemEventDelta.y,
+                MobileInput.PointerAtEdge, directTouchInputActive, lockRecoveries);
             AppendPointerDiagnostic(line);
             Debug.Log(string.Format("[DFPointerDiag] inputSystemEvents={0} inputSystemNonZero={1} queuedDelta=({2:0.##},{3:0.##})",
                 inputSystemMouseEvents, inputSystemNonZeroMouseEvents,
@@ -1119,6 +1147,13 @@ namespace DaggerfallWorkshop.Game.Mobile
                 lastPointerDirection = new Vector2(Mathf.Sign(delta.x), Mathf.Sign(delta.y));
 
             if (delta.sqrMagnitude > 0.01f || IsClassicMenuOpen())
+                return delta;
+
+            // Only turn the camera for a pointer UIKit is really holding against the
+            // edge. While the pointer is locked its reported position is frozen
+            // wherever the lock caught it, so trusting the position alone spun the
+            // view on its own whenever that happened to be a border pixel.
+            if (!MobileInput.PointerAtEdge)
                 return delta;
 
             bool atHorizontalEdge = position.x <= pointerEdgeMargin ||

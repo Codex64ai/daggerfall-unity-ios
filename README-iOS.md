@@ -206,12 +206,19 @@ During gameplay, the app requests UIKit pointer lock and hides the hardware poin
 `GCMouseInput.mouseMovedHandler` supplies raw relative movement to the camera. The pointer
 is released when a classic menu opens so menu hit-testing and window interaction work normally.
 
-This is playable but not yet flawless on iPadOS 26. Avoid deliberately steering the pointer
-to the scene edges: iPadOS can still expose the Dock gesture there, and an edge click can
-interrupt camera look until a menu is opened and closed. Touching the display while the
-trackpad is locked can also produce stray camera movement. Weapon mouse-button bindings
-remain available, but a click may still cause an occasional camera snap or temporary look
-lock. The touch HUD or controller controls remain the reliable fallback for those moments.
+The hardware pointer stays hidden for the whole of gameplay, weapon swings included. The
+hidden pointer style is applied by the pointer interaction itself rather than by the lock,
+so a moment where iPadOS takes the lock back - an edge affordance, the Dock gesture - no
+longer flashes the system cursor over the game.
+
+When iPadOS does take the lock, the app now asks for it back on its own. UIKit only
+reacquires the pointer on a `NO -> YES` transition of `prefersPointerLocked`, so the bridge
+performs that transition; this used to require opening and closing a menu by hand.
+
+Still not flawless on iPadOS 26. Steering the pointer into the scene edges can expose the
+Dock gesture, and a touchscreen contact while the trackpad is locked mutes the trackpad for
+as long as the finger is down. The touch HUD or controller controls remain the reliable
+fallback for those moments.
 
 **If your controller maps wrongly:** Unity's legacy joystick numbering - and especially
 its trigger and d-pad *axis* numbering - varies by controller model and by iOS version,
@@ -366,18 +373,21 @@ plain text and safe to delete.
   does not recognise. If your controller has a button that does nothing, this file will
   name it. Sending it in is the fastest way to get that controller supported properly.
 - `DaggerfallPointerDiagnostics.log` - throttled Magic Keyboard diagnostics: UIKit lock
-  state, raw `GCMouse` deltas, indirect-pointer events, hover events, and Unity axis state.
-  It is intended for diagnosing camera-look or pointer-lock regressions.
+  state, lock reacquisitions, raw `GCMouse` deltas, indirect-pointer events, hover events,
+  edge and direct-touch state, and Unity axis state. It is intended for diagnosing
+  camera-look or pointer-lock regressions.
 
 ## Known limitations
 
 - **Magic Keyboard pointer edges.** Camera movement works without holding the pointer button
   through the native `GCMouse` raw-delta backend. UIKit pointer lock prevents normal window
-  resizing during gameplay, but iPadOS may still expose the Dock at the bottom edge; an edge
-  click can interrupt look until a menu round-trip restores it. A touchscreen contact while
-  the trackpad is locked may inject stray camera motion. Weapon-button transitions can still
-  occasionally snap the view or leave look temporarily locked. The diagnostic log above can
-  distinguish a stopped native mouse stream from a game-side camera issue.
+  resizing during gameplay, but iPadOS may still expose the Dock at the bottom edge. A lost
+  lock is now reclaimed automatically instead of needing a menu round-trip, at up to two
+  attempts a second, so an edge click costs a moment of look rather than the rest of the
+  session. A touchscreen contact still mutes the trackpad while the finger is down; a touch
+  iPadOS claims for a system gesture and never ends is released after
+  `maximumDirectTouchMute` seconds. The diagnostic log above can distinguish a stopped
+  native mouse stream from a game-side camera issue.
 - **Touch controls setting.** The startup Options screen contains a persistent **Touch
   controls** toggle. The same preference is available from the in-game TUNE panel and can be
   changed without rebuilding.

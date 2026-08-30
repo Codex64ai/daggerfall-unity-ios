@@ -17,6 +17,7 @@ static BOOL pointerHidden = NO;
 static BOOL pointerLockRequested = NO;
 static BOOL directTouchActive = NO;
 static BOOL pointerButtonHeld = NO;
+static BOOL pointerSecondaryButtonHeld = NO;
 static BOOL pointerAtEdge = NO;
 static int pointerClickFrames = 0;
 static UIHoverGestureRecognizer *hoverRecognizer = nil;
@@ -30,6 +31,17 @@ static NSUInteger diagnosticHoverEvents = 0;
 static UIEventType diagnosticLastEventType = UIEventTypeTouches;
 static NSUInteger diagnosticGameControllerDeltas = 0;
 static GCMouse *gameControllerMouse = nil;
+static id pointerLockObserver = nil;
+static Class pointerLockPreferenceClass = nil;
+static BOOL pointerLockOverrideOff = NO;
+static BOOL pointerLockRecoveryScheduled = NO;
+static NSTimeInterval pointerLockRecoveryTime = 0;
+static NSUInteger diagnosticLockRecoveries = 0;
+
+// UIKit drops the lock the moment it needs the pointer for something of its own
+// (an edge affordance, a system gesture). Retry no faster than this so a scene
+// that legitimately cannot lock - Split View, backgrounded - is not hammered.
+static const NSTimeInterval pointerLockRecoveryInterval = 0.5;
 
 @interface DFMobilePointerDelegate : NSObject <UIPointerInteractionDelegate>
 - (void)pointerTap:(UITapGestureRecognizer *)recognizer;
@@ -67,6 +79,18 @@ static GCMouse *gameControllerMouse = nil;
 
 static DFMobilePointerDelegate *pointerDelegate = nil;
 
+// The pointer counts as "on the edge" only while UIKit is actually drawing it
+// there. Recomputed from every position sample rather than latched, because the
+// hover recognizer that used to be its only source is disabled during gameplay -
+// a latched value would outlive the press that set it.
+static void DFMobilePointerUpdateEdge(CGPoint location, CGSize bounds)
+{
+    const CGFloat edgeInset = 2.0;
+    pointerAtEdge = location.x <= edgeInset || location.y <= edgeInset ||
+                    location.x >= bounds.width - edgeInset ||
+                    location.y >= bounds.height - edgeInset;
+}
+
 static void DFMobilePointerRecordEvent(UIEvent *event, UIView *view)
 {
     if (!pointerLockRequested || event == nil || view == nil)
@@ -88,6 +112,7 @@ static void DFMobilePointerRecordEvent(UIEvent *event, UIView *view)
             diagnosticNonZeroDeltas++;
         pointerPosition = CGPointMake(current.x * scale,
                                       (view.bounds.size.height - current.y) * scale);
+        DFMobilePointerUpdateEdge(current, view.bounds.size);
         pointerActive = YES;
     }
 }
@@ -118,7 +143,7 @@ static void InstallGameControllerMouse()
     if (@available(iOS 14.0, *))
     {
         GCMouse *currentMouse = GCMouse.current;
-        if (currentMouse == nil)
+        if (currentMouse == nil || currentMouse == gameControllerMouse)
             return;
 
         gameControllerMouse = currentMouse;
@@ -136,7 +161,82 @@ static void InstallGameControllerMouse()
                 diagnosticGameControllerDeltas++;
             };
 
+            // The button state has to come from here. While UIKit holds the pointer
+            // locked the indirect touch stream stops carrying position changes, and
+            // Unity's Input System never sees the Magic Keyboard trackpad at all -
+            // pointerButtonHeld was left permanently NO, so every read reported an
+            // unpressed pointer for the whole of a swing.
+            mouseInput.leftButton.pressedChangedHandler =
+                ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+                    (void)button;
+                    (void)value;
+                    pointerButtonHeld = pressed;
+                };
+
+            GCControllerButtonInput *rightButton = mouseInput.rightButton;
+            if (rightButton != nil)
+            {
+                rightButton.pressedChangedHandler =
+                    ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+                        (void)button;
+                        (void)value;
+                        pointerSecondaryButtonHeld = pressed;
+                    };
+            }
         }
+    }
+}
+
+static BOOL DFMobilePointerIsLocked()
+{
+    if (@available(iOS 14.0, *))
+    {
+        UIWindowScene *scene = UnityGetGLView().window.windowScene;
+        return scene.pointerLockState != nil && scene.pointerLockState.locked;
+    }
+    return NO;
+}
+
+static void UpdatePointerLockPreference()
+{
+    if (@available(iOS 14.0, *))
+        [UnityGetGLView().window.rootViewController setNeedsUpdateOfPrefersPointerLocked];
+}
+
+// Reacquire a lock UIKit has taken away from us.
+//
+// Asking again for a preference UIKit already holds does nothing: it knows we
+// prefer the pointer locked and dropped the lock deliberately, so
+// setNeedsUpdateOfPrefersPointerLocked re-reads the same YES and stops there.
+// Only a NO -> YES transition makes it lock again, which is why the camera used
+// to come back only after a trip into a menu and out - the one thing in the game
+// that toggled the preference. Do that transition here instead.
+static void RecoverPointerLock()
+{
+    if (@available(iOS 14.0, *))
+    {
+        if (!pointerLockRequested || pointerLockRecoveryScheduled)
+            return;
+        if ([UIApplication sharedApplication].applicationState != UIApplicationStateActive)
+            return;
+        if (DFMobilePointerIsLocked())
+            return;
+
+        NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+        if (now - pointerLockRecoveryTime < pointerLockRecoveryInterval)
+            return;
+
+        pointerLockRecoveryTime = now;
+        pointerLockRecoveryScheduled = YES;
+        diagnosticLockRecoveries++;
+
+        pointerLockOverrideOff = YES;
+        UpdatePointerLockPreference();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            pointerLockOverrideOff = NO;
+            UpdatePointerLockPreference();
+            pointerLockRecoveryScheduled = NO;
+        });
     }
 }
 
@@ -144,7 +244,7 @@ static BOOL DFMobilePointerPrefersLocked(id object, SEL selector)
 {
     (void)object;
     (void)selector;
-    return pointerLockRequested;
+    return pointerLockRequested && !pointerLockOverrideOff;
 }
 
 static void InstallPointerLockPreference(UIView *view)
@@ -167,6 +267,9 @@ static void InstallPointerLockPreference(UIView *view)
     }
 
     Class controllerClass = [controller class];
+    if (pointerLockPreferenceClass == controllerClass)
+        return;
+
     SEL selector = @selector(prefersPointerLocked);
     if (!class_addMethod(controllerClass, selector, (IMP)DFMobilePointerPrefersLocked, "c@:"))
     {
@@ -174,6 +277,8 @@ static void InstallPointerLockPreference(UIView *view)
         if (method != nil)
             method_setImplementation(method, (IMP)DFMobilePointerPrefersLocked);
     }
+
+    pointerLockPreferenceClass = controllerClass;
     [controller setNeedsUpdateOfPrefersPointerLocked];
 }
 
@@ -192,12 +297,35 @@ static void EnsurePointerBridge()
             hoverRecognizer = [[UIHoverGestureRecognizer alloc] initWithTarget:view
                                                                            action:@selector(df_mobilePointerHover:)];
             [view addGestureRecognizer:hoverRecognizer];
+
+            if (@available(iOS 14.0, *))
+            {
+                if (pointerLockObserver == nil)
+                {
+                    // UIKit announces the moment it takes the pointer back, which is
+                    // the moment to ask for it again.
+                    pointerLockObserver = [[NSNotificationCenter defaultCenter]
+                        addObserverForName:UIPointerLockStateDidChangeNotification
+                                    object:nil
+                                     queue:[NSOperationQueue mainQueue]
+                                usingBlock:^(NSNotification *notification) {
+                                    (void)notification;
+                                    // Re-resolve the cursor for the mode we are in
+                                    // before asking for the lock back, so the gap
+                                    // between the two is not a visible pointer.
+                                    if (pointerInteraction != nil)
+                                        [pointerInteraction invalidate];
+                                    RecoverPointerLock();
+                                }];
+                }
+            }
         }
 
         if (pointerDelegate == nil)
         {
             pointerDelegate = [[DFMobilePointerDelegate alloc] init];
             pointerInteraction = [[UIPointerInteraction alloc] initWithDelegate:pointerDelegate];
+            pointerInteraction.enabled = YES;
             [view addInteraction:pointerInteraction];
 
             tapRecognizer = [[UITapGestureRecognizer alloc]
@@ -220,10 +348,7 @@ static void EnsurePointerBridge()
 {
     diagnosticHoverEvents++;
     CGPoint location = [recognizer locationInView:self];
-    const CGFloat edgeInset = 2.0;
-    pointerAtEdge = location.x <= edgeInset || location.y <= edgeInset ||
-                    location.x >= self.bounds.size.width - edgeInset ||
-                    location.y >= self.bounds.size.height - edgeInset;
+    DFMobilePointerUpdateEdge(location, self.bounds.size);
     CGFloat scale = self.window.screen.scale;
     CGPoint normalized = CGPointMake(location.x * scale,
                                      (self.bounds.size.height - location.y) * scale);
@@ -248,7 +373,12 @@ bool DFMobilePointerRead(float *x, float *y, float *dx, float *dy, bool *buttonH
     *dx = (float)pointerDelta.x;
     *dy = (float)pointerDelta.y;
     *buttonHeld = pointerButtonHeld || pointerClickFrames > 0;
-    *atEdge = pointerAtEdge;
+    // A locked pointer has no screen position to be on the edge of, and a held
+    // button is a swing in progress. Reporting an edge in either case suppressed
+    // the swing button for as long as the state stayed stale, which - with the
+    // hover recognizer disabled during gameplay - was forever.
+    *atEdge = pointerAtEdge && !pointerButtonHeld && !pointerSecondaryButtonHeld &&
+              !DFMobilePointerIsLocked();
     if (pointerClickFrames > 0)
         pointerClickFrames--;
     pointerDelta = CGPointZero;
@@ -257,41 +387,63 @@ bool DFMobilePointerRead(float *x, float *y, float *dx, float *dy, bool *buttonH
 
 void DFMobilePointerDiagnostics(unsigned int *windowEvents, unsigned int *indirectTouches,
                                 unsigned int *nonZeroDeltas, unsigned int *hoverEvents,
-                                unsigned int *gameControllerDeltas, int *lastEventType, bool *locked)
+                                unsigned int *gameControllerDeltas, int *lastEventType, bool *locked,
+                                unsigned int *lockRecoveries)
 {
+    *lockRecoveries = (unsigned int)diagnosticLockRecoveries;
     *windowEvents = (unsigned int)diagnosticWindowEvents;
     *indirectTouches = (unsigned int)diagnosticIndirectTouches;
     *nonZeroDeltas = (unsigned int)diagnosticNonZeroDeltas;
     *hoverEvents = (unsigned int)diagnosticHoverEvents;
     *lastEventType = (int)diagnosticLastEventType;
     *gameControllerDeltas = (unsigned int)diagnosticGameControllerDeltas;
-    UIView *view = UnityGetGLView();
-    UIWindowScene *scene = view.window.windowScene;
-    *locked = scene.pointerLockState != nil && scene.pointerLockState.locked;
+    *locked = DFMobilePointerIsLocked();
 }
 
 void DFMobilePointerSetHidden(bool hidden)
 {
     EnsurePointerBridge();
-    if (pointerLockRequested != hidden)
+
+    BOOL changed = pointerLockRequested != (BOOL)hidden;
+    if (changed)
         pointerDelta = CGPointZero;
     pointerHidden = hidden;
     pointerLockRequested = hidden;
+
     InstallPointerLockPreference(UnityGetGLView());
     // GCMouse.current can remain nil until the trackpad is first actuated. Retry
     // here on every mode transition/poll without replacing an existing handler.
     InstallGameControllerMouse();
-    // A hover recognizer consumes the absolute, screen-space pointer stream. That
-    // stream is intentionally stationary once UIKit locks the pointer, and keeping
-    // the recognizer enabled prevents Unity's Input System from receiving the
-    // relative HID events that games need. Let Unity own the locked stream; restore
-    // the recognizer for menu hit-testing.
-    if (hoverRecognizer != nil)
-        hoverRecognizer.enabled = !hidden;
-    if (@available(iOS 13.4, *) && pointerInteraction != nil)
+
+    // This runs once per frame, so everything below is transition-only. Asking
+    // UIKit to reevaluate the lock or invalidating the pointer interaction every
+    // frame makes it re-resolve the cursor continuously, which is visible as the
+    // system pointer flickering back in over the game.
+    if (changed)
     {
-        pointerInteraction.enabled = !hidden;
-        [pointerInteraction invalidate];
+        UpdatePointerLockPreference();
+
+        // A hover recognizer consumes the absolute, screen-space pointer stream.
+        // That stream is intentionally stationary once UIKit locks the pointer, and
+        // keeping the recognizer enabled prevents Unity's Input System from
+        // receiving the relative HID events that games need. Let Unity own the
+        // locked stream; restore the recognizer for menu hit-testing.
+        if (hoverRecognizer != nil)
+            hoverRecognizer.enabled = !hidden;
+
+        if (@available(iOS 13.4, *))
+        {
+            // The interaction stays installed for both modes and the delegate picks
+            // the style, so the hidden style still applies when iPadOS drops the
+            // lock mid-swing. Disabling it here used to hand the cursor straight
+            // back to the system the moment the trackpad button went down.
+            if (pointerInteraction != nil)
+                [pointerInteraction invalidate];
+        }
+    }
+    else if (hidden)
+    {
+        RecoverPointerLock();
     }
 }
 
