@@ -583,30 +583,14 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             MobileInput.TouchInputActive = touchAllowed;
 
-            // WHILE THE FINGER IS THE CURSOR, DRAWING A CURSOR IS NOISE.
+            // NO CURSOR SPRITE WHILE TOUCH OWNS THE INPUT. RELATIVE MODE INCLUDED.
             //
-            // In the default direct-touch mode the virtual cursor is placed exactly at
-            // the touch position, so the sprite only ever appears under the fingertip
-            // that put it there - and on iOS a pointer the player cannot move except by
-            // touching the thing they wanted anyway reads as a stray artifact. Suppress
-            // it so touch is the whole interface.
-            //
-            // Relative mode is the exception and keeps its cursor. There the finger
-            // drives the cursor at a distance, with acceleration, so the sprite is the
-            // only thing telling the player what they are about to click. Hiding it
-            // would leave them aiming blind.
-            bool fingerIsTheCursor = virtualMouse == null || virtualMouse.absoluteMode;
-            MobileInput.VirtualCursorVisible = !(touchAllowed && fingerIsTheCursor);
-        }
-
-        /// <summary>
-        /// Re-evaluate which input layer is live. Call after changing anything
-        /// ApplyHudVisibility reads but cannot observe for itself - the virtual cursor's
-        /// absoluteMode, for one, which the settings panel can flip at any time.
-        /// </summary>
-        public void RefreshInputLayers()
-        {
-            ApplyHudVisibility();
+            // In direct-touch mode the cursor sits exactly under the fingertip that put
+            // it there, so it shows nothing the player cannot already see. Relative mode
+            // has a better claim to one - the finger drives the cursor at a distance -
+            // but a drawn pointer is troublesome enough on iOS to be worth losing there
+            // too. Touch is the whole interface.
+            MobileInput.VirtualCursorVisible = !touchAllowed;
         }
 
         public void SetTouchUIEnabled(bool value)
