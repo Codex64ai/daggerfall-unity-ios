@@ -58,6 +58,32 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             get { return System.Environment.GetEnvironmentVariable("DFU_IOS_SIM") == "1"; }
         }
 
+        /// <summary>
+        /// Sets ProjectSettings.iOSSimulatorArchitecture to ARM64 via the serialized object,
+        /// since PlayerSettings.iOS exposes no property for it. Logs what it found.
+        /// </summary>
+        static void SetSimulatorArchitectureArm64(System.Text.StringBuilder log)
+        {
+            const int arm64 = 1;
+            Object[] assets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/ProjectSettings.asset");
+            if (assets == null || assets.Length == 0)
+            {
+                log.AppendLine("  sim architecture   = COULD NOT LOAD ProjectSettings.asset (left as is)");
+                return;
+            }
+            var so = new SerializedObject(assets[0]);
+            SerializedProperty prop = so.FindProperty("iOSSimulatorArchitecture");
+            if (prop == null)
+            {
+                log.AppendLine("  sim architecture   = iOSSimulatorArchitecture field not found (left as is)");
+                return;
+            }
+            int before = prop.intValue;
+            prop.intValue = arm64;
+            so.ApplyModifiedPropertiesWithoutUndo();
+            log.AppendLine("  sim architecture   = ARM64 (was " + before + "; 0 = X64, 1 = ARM64)");
+        }
+
         [MenuItem("Tools/Daggerfall Mobile/Apply iOS Player Settings")]
         public static void ApplyIOSSettings()
         {
@@ -106,6 +132,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // build must not leave the SDK setting sticky for the next device build.
             PlayerSettings.iOS.sdkVersion = IsSimulator ? iOSSdkVersion.SimulatorSDK : iOSSdkVersion.DeviceSDK;
             log.AppendLine("  sdk                = " + PlayerSettings.iOS.sdkVersion);
+
+            // Simulator builds must be arm64. Unity defaults the simulator architecture to
+            // x86_64 (enum value 0), which the iOS 26 simulator runtime refuses outright -
+            // Rosetta simulators are gone ("Requested architecture (x86_64) is not one of
+            // the devices supported architectures: (arm64)", 2026-08-30). There is no public
+            // PlayerSettings.iOS accessor for this in 6000.3, so it goes through the
+            // serialized field. 0 = X64, 1 = ARM64. Ignored by device builds.
+            SetSimulatorArchitectureArm64(log);
             log.AppendLine("  target device          = iPhone + iPad");
 
             // --- rendering --------------------------------------------------------
