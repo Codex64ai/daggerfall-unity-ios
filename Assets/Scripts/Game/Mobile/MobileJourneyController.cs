@@ -17,6 +17,7 @@ using DaggerfallConnect;
 using DaggerfallConnect.Arena2;
 using DaggerfallConnect.Utility;
 using DaggerfallWorkshop.Game.Entity;
+using DaggerfallWorkshop.Game.Formulas;
 using DaggerfallWorkshop.Game.Serialization;
 using DaggerfallWorkshop.Game.UserInterface;
 using DaggerfallWorkshop.Game.UserInterfaceWindows;
@@ -51,20 +52,40 @@ namespace DaggerfallWorkshop.Game.Mobile
         public const int DefaultTimeCompression = 20;
         public const int MinTimeCompression = 1;
 
-        // Cautious travel is watchable travel: 50x is about the fastest the world can still
-        // be seen going by. Reckless throws that away along with the safety, and the trade is
-        // honest - at 200x the player outruns terrain streaming badly and the journey becomes
-        // a blur of throttle bursts. That is the player's choice to make, not ours to forbid.
-        public const int MaxCautiousCompression = 50;
-        public const int MaxRecklessCompression = 200;
+        // The ceiling follows HOW the player travels, not how carefully (device decision,
+        // 2026-08-30). On foot 50x is about the fastest the world can still be seen going by;
+        // a horse or cart covers ground quickly enough that 150x still reads as riding; a
+        // ship gets 200x. Terrain streaming throttles below these when it must
+        // (SustainableCompression), so a high cap is a permission, not a promise.
+        public const int MaxFootCompression = 50;
+        public const int MaxMountCompression = 150;
+        public const int MaxShipCompression = 200;
+
+        /// <summary>Pure: the speed ceiling for a way of travelling.</summary>
+        public static int CapForTransport(TransportModes mode)
+        {
+            switch (mode)
+            {
+                case TransportModes.Horse:
+                case TransportModes.Cart:
+                    return MaxMountCompression;
+                case TransportModes.Ship:
+                    return MaxShipCompression;
+                default:
+                    return MaxFootCompression;
+            }
+        }
+
+        static TransportModes CurrentTransport()
+        {
+            if (GameManager.HasInstance && GameManager.Instance.TransportManager != null)
+                return GameManager.Instance.TransportManager.TransportMode;
+            return TransportModes.Foot;
+        }
 
         public static int MaxTimeCompression
         {
-            get
-            {
-                return (HasInstance && !Instance.SpeedCautious)
-                    ? MaxRecklessCompression : MaxCautiousCompression;
-            }
+            get { return CapForTransport(CurrentTransport()); }
         }
 
         // Speed used while the streaming world is catching up, and how long terrain must stay
@@ -149,7 +170,10 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         public bool FollowingRoad { get { return route != null && routeStep < route.Count; } }
-        bool askedToCampTonight;
+        bool nightHandled;              // this night's stop already decided
+        bool travellingOnToInn;         // inn mode, dark, no town yet: stop at the next one
+        bool resumeAfterRestQueued;     // the camp rest screen closed; pick the journey up
+        DaggerfallRestWindow restWindow;
         bool wasNight;
         ContentReader.MapSummary destinationSummary;
         string destinationName;
@@ -423,9 +447,10 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (exhaustedPlayer != null)
                 exhaustedPlayer.OnExhausted += OnPlayerExhausted;
 
+            // (route and routeStep were reset HERE, after PlanRoute() had just filled them -
+            // so every journey walked to the first road pixel and then went straight. The
+            // roads rendered and nobody walked on them. Device report, 2026-08-30.)
             offeredPlaces.Clear();
-            route = null;
-            routeStep = 0;
 
             // The place we are setting out FROM must not be offered as somewhere to stop.
             // Resuming a journey after stopping in a town would otherwise ask, immediately and
@@ -433,12 +458,16 @@ namespace DaggerfallWorkshop.Game.Mobile
             PlayerGPS startGps = GameManager.Instance.PlayerGPS;
             if (startGps != null && startGps.HasCurrentLocation)
                 offeredPlaces.Add(startGps.CurrentMapID);
-            askedToCampTonight = false;
+            nightHandled = false;
             wasNight = false;
+            travellingOnToInn = false;
 
             diseaseCount = GameManager.Instance.PlayerEffectManager.DiseaseCount;
             SuppressJourneyNoise();
             SuppressWeather();
+
+            // Set out at the ceiling for this way of travelling; Slower on the bar still works.
+            TimeCompression = CapForTransport(CurrentTransport());
             SetTimeScale(TimeCompression);
             ShowJourneyWindow();
             return true;
@@ -540,8 +569,20 @@ namespace DaggerfallWorkshop.Game.Mobile
             route = null;
             routeStep = 0;
 
-            if (!MobileRoads.Enabled || !MobileRoadNetwork.Available)
+            // Roads are cautious travel's choice: the long way round, in company, on a known
+            // path. Reckless travel is the straight line across country (device decision).
+            if (!SpeedCautious)
+            {
+                Debug.Log("[Journey] route: reckless travel, heading straight for the destination");
                 return;
+            }
+
+            if (!MobileRoads.Enabled || !MobileRoadNetwork.Available)
+            {
+                Debug.Log("[Journey] route: roads " + (MobileRoads.Enabled ? "data unavailable" : "switched off") +
+                          " - direct travel");
+                return;
+            }
 
             PlayerGPS gps = GameManager.Instance.PlayerGPS;
             if (gps == null)
@@ -554,22 +595,46 @@ namespace DaggerfallWorkshop.Game.Mobile
             DFPosition to = MobileRoadNetwork.NearestPathPixel(target.X, target.Y, snapRadius);
 
             if (from == null || to == null)
+            {
+                Debug.Log(string.Format("[Journey] route: no road within {0} pixels of {1} - direct travel",
+                                        snapRadius, from == null ? "the start" : "the destination"));
                 return;
+            }
 
             List<DFPosition> found = MobileRoadNetwork.FindRoute(from.X, from.Y, to.X, to.Y);
-
-            // Worth following only if the road actually saves walking. A three-pixel road
-            // reached by a twenty-pixel trudge across country is a worse journey than simply
-            // heading for the destination, so compare the route against the detours it costs.
             int detour = Distance(here, from) + Distance(to, target);
-            if (found == null || found.Count < 2 || found.Count < detour)
+            int straight = Distance(here, target);
+
+            if (found == null)
+            {
+                Debug.Log("[Journey] route: the network does not connect start and destination - direct travel");
                 return;
+            }
+
+            if (!RouteWorthTaking(found.Count, detour, straight))
+            {
+                Debug.Log(string.Format("[Journey] route: rejected (road {0} px, off-road {1} px, straight {2} px) - direct travel",
+                                        found.Count, detour, straight));
+                return;
+            }
 
             route = found;
             routeStep = 0;
             pilot.SetWaypoint(route[0]);
 
+            Debug.Log(string.Format("[Journey] route: following the road, {0} px of road, {1} px off-road at the ends",
+                                    found.Count, detour));
             DaggerfallUI.AddHUDText("You set out along the road.", 3f);
+        }
+
+        /// <summary>
+        /// Pure. A road is worth taking when it exists and reaching it does not cost more
+        /// walking than the whole trip would in a straight line. The old rule demanded the
+        /// road stretch be longer than the off-road ends, which binned most medium trips.
+        /// </summary>
+        public static bool RouteWorthTaking(int routeLength, int detour, int straightLine)
+        {
+            return routeLength >= 2 && detour <= Mathf.Max(straightLine, 1);
         }
 
         /// <summary>
@@ -627,6 +692,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             if (pilot == null)
             {
+                if (resumeAfterRestQueued)
+                {
+                    resumeAfterRestQueued = false;
+                    ResumeAfterRest();
+                    return;
+                }
+
                 // WATCHDOG. Nothing in this game runs above 1x time except a journey, so a
                 // compressed scale with no journey running means something escaped - and the
                 // consequence is severe, because the player's own movement is scaled too and a
@@ -748,6 +820,19 @@ namespace DaggerfallWorkshop.Game.Mobile
             offeredPlaces.Add(mapId);
             string name = gps.CurrentLocation.Name;
 
+            // Walking on to the next inn after dark: this is it.
+            if (SleepModeInn && travellingOnToInn && !nightHandled &&
+                DaggerfallUnity.Instance.WorldTime != null && DaggerfallUnity.Instance.WorldTime.Now.IsNight)
+            {
+                PlayerEntity player = GameManager.Instance.PlayerEntity;
+                nightHandled = true;
+                if (player != null && player.GoldPieces >= InnCost())
+                    SpendNightAtInn(name);
+                else
+                    BeginCampNight("You cannot afford a room in " + name + ", so you make camp outside the walls.");
+                return true;
+            }
+
             AskToInterrupt("You are passing " + name + ". Stop here?",
                            "You continue past " + name + ".");
             return true;
@@ -761,10 +846,42 @@ namespace DaggerfallWorkshop.Game.Mobile
                    type == DFRegion.LocationTypes.Tavern;
         }
 
+        public enum NightAction
+        {
+            None,           // daytime, or tonight already dealt with
+            Camp,           // camp out where we stand
+            Inn,            // take a room here
+            CampNoGold,     // wanted an inn, cannot pay: camp instead
+            TravelOn,       // inn mode, no town here: walk on to the next one
+        }
+
         /// <summary>
-        /// Offer to make camp at dusk. Asked once per night, and only when the player chose to
-        /// camp out rather than take inns - someone paying for lodging has already said they
-        /// would rather not sleep in a field.
+        /// Pure: what nightfall means for this journey. "Camp out" camps; "inns" takes a room
+        /// where there is one and walks on to the next town where there is not - and camps if
+        /// the purse is empty. Once per night.
+        /// </summary>
+        public static NightAction DecideNight(bool night, bool handledTonight, bool sleepModeInn,
+                                              bool inSettlement, int gold, int innCost)
+        {
+            if (!night || handledTonight)
+                return NightAction.None;
+            if (!sleepModeInn)
+                return NightAction.Camp;
+            if (!inSettlement)
+                return NightAction.TravelOn;
+            return gold >= innCost ? NightAction.Inn : NightAction.CampNoGold;
+        }
+
+        /// <summary>Vanilla lodging: 5 gold a night, free with a knightly order's privileges.</summary>
+        static int InnCost()
+        {
+            var order = GameManager.Instance.GuildManager.GetGuild(FactionFile.GuildGroups.KnightlyOrder);
+            return (order != null && order.FreeTavernRooms()) ? 0 : 5;
+        }
+
+        /// <summary>
+        /// Nightfall does what the travel popup's option says (device report: it used to only
+        /// ask, then leave the player to rest by hand and re-open the map). See DecideNight.
         /// </summary>
         bool CheckNightfall()
         {
@@ -773,23 +890,133 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             bool night = DaggerfallUnity.Instance.WorldTime.Now.IsNight;
 
-            // Reset at dawn so tomorrow night asks again.
+            // Reset at dawn so tomorrow night is decided afresh.
             if (!night)
             {
                 wasNight = false;
-                askedToCampTonight = false;
+                nightHandled = false;
+                travellingOnToInn = false;
                 return false;
             }
-
-            if (wasNight || askedToCampTonight || SleepModeInn)
-                return false;
-
             wasNight = true;
-            askedToCampTonight = true;
 
-            AskToInterrupt("Night is falling. Make camp here?",
-                           "You travel on through the night.");
-            return true;
+            PlayerGPS gps = GameManager.Instance.PlayerGPS;
+            bool inSettlement = gps != null && gps.HasCurrentLocation && IsSettlement(gps.CurrentLocationType);
+            PlayerEntity player = GameManager.Instance.PlayerEntity;
+
+            NightAction action = DecideNight(night, nightHandled, SleepModeInn, inSettlement,
+                                             player != null ? player.GoldPieces : 0, InnCost());
+            switch (action)
+            {
+                case NightAction.Camp:
+                    nightHandled = true;
+                    BeginCampNight("Night is falling. You make camp.");
+                    return true;
+
+                case NightAction.CampNoGold:
+                    nightHandled = true;
+                    BeginCampNight("You cannot afford a room, so you make camp outside the walls.");
+                    return true;
+
+                case NightAction.Inn:
+                    nightHandled = true;
+                    SpendNightAtInn(gps.CurrentLocation.Name);
+                    return false;       // the journey carries on at dawn, still running
+
+                case NightAction.TravelOn:
+                    if (!travellingOnToInn)
+                    {
+                        travellingOnToInn = true;
+                        DaggerfallUI.AddHUDText("Night is falling. You travel on to the next inn.", 3f);
+                    }
+                    return false;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Camp: the journey stops (destination kept), Daggerfall's own Rest screen comes up so
+        /// the player chooses how long to sleep and the game applies its normal wilderness
+        /// rules, and when that screen closes the journey resumes by itself.
+        /// </summary>
+        void BeginCampNight(string message)
+        {
+            Stop(JourneyEnd.Resting);
+            DaggerfallUI.AddHUDText(message, 3f);
+
+            if (!DaggerfallUI.HasInstance)
+                return;
+
+            restWindow = new DaggerfallRestWindow(DaggerfallUI.UIManager);
+            restWindow.OnClose += OnRestWindowClosed;
+            DaggerfallUI.UIManager.PushWindow(restWindow);
+            Debug.Log("[Journey] night: camping; will resume when the rest screen closes");
+        }
+
+        void OnRestWindowClosed()
+        {
+            if (restWindow != null)
+                restWindow.OnClose -= OnRestWindowClosed;
+            restWindow = null;
+            // Resume on the next Update, once the UI stack has settled: resuming from inside
+            // the close would push the travel bar under a window still on its way out.
+            resumeAfterRestQueued = true;
+        }
+
+        /// <summary>
+        /// Inn: pay for the room, sleep until dawn with the same hourly recovery the Rest screen
+        /// applies (the Rest screen itself refuses to run inside a town), and carry straight on.
+        /// The journey never stops, so there is nothing for the player to re-open.
+        /// </summary>
+        void SpendNightAtInn(string townName)
+        {
+            PlayerEntity player = GameManager.Instance.PlayerEntity;
+            int cost = InnCost();
+            if (player != null && cost > 0)
+                player.GoldPieces = Mathf.Max(0, player.GoldPieces - cost);
+
+            DaggerfallDateTime now = DaggerfallUnity.Instance.WorldTime.Now;
+            int hoursToDawn = HoursUntilDawn(now.Hour);
+            for (int h = 0; h < hoursToDawn; h++)
+            {
+                now.RaiseTime(DaggerfallDateTime.SecondsPerHour);
+                if (player != null)
+                {
+                    player.CurrentHealth += FormulaHelper.CalculateHealthRecoveryRate(player);
+                    player.CurrentFatigue += FormulaHelper.CalculateFatigueRecoveryRate(player.MaxFatigue);
+                    player.CurrentMagicka += FormulaHelper.CalculateSpellPointRecoveryRate(player);
+                }
+                Questing.QuestMachine.Instance.Tick();
+            }
+
+            travellingOnToInn = false;
+            DaggerfallUI.AddHUDText(cost > 0
+                ? string.Format("You take a room at the inn in {0} ({1} gold) and set out again at dawn.", townName, cost)
+                : string.Format("You spend the night at the inn in {0} and set out again at dawn.", townName), 4f);
+            Debug.Log("[Journey] night: inn at " + townName + ", slept " + hoursToDawn + "h");
+        }
+
+        /// <summary>Pure: whole hours from this hour to the next dawn (DaggerfallDateTime.DawnHour).</summary>
+        public static int HoursUntilDawn(int hour)
+        {
+            int dawn = DaggerfallDateTime.DawnHour;
+            return hour < dawn ? dawn - hour : 24 - hour + dawn;
+        }
+
+        /// <summary>After a camp rest: pick the journey back up, unless something is waiting outside the tent.</summary>
+        void ResumeAfterRest()
+        {
+            if (!destinationValid || IsTravelling)
+                return;
+
+            if (GameManager.HasInstance && GameManager.Instance.AreEnemiesNearby())
+            {
+                DaggerfallUI.AddHUDText("Something is nearby. Your journey waits.", 3f);
+                return;
+            }
+
+            if (Resume())
+                DaggerfallUI.AddHUDText("You break camp and travel on.", 3f);
         }
 
         /// <summary>
@@ -896,6 +1123,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             Arrived,        // reached the destination; nothing left to resume
             Interrupted,    // stopped en route; destination kept so travel can resume
+            Resting,        // camping for the night; destination kept, resumes by itself
             Cancelled,      // player gave up; destination discarded
         }
 
@@ -942,6 +1170,10 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             destinationValid = false;
             destinationName = null;
+            resumeAfterRestQueued = false;
+            if (restWindow != null)
+                restWindow.OnClose -= OnRestWindowClosed;
+            restWindow = null;
         }
 
         #endregion
@@ -957,11 +1189,10 @@ namespace DaggerfallWorkshop.Game.Mobile
             return Mathf.Clamp(scale, MinTimeCompression, MaxTimeCompression);
         }
 
-        /// <summary>Pure form for tests: the ceiling depends on the travel speed chosen.</summary>
-        public static int ClampCompression(int scale, bool cautious)
+        /// <summary>Pure form for tests: the ceiling depends on how the player travels.</summary>
+        public static int ClampCompression(int scale, TransportModes mode)
         {
-            return Mathf.Clamp(scale, MinTimeCompression,
-                cautious ? MaxCautiousCompression : MaxRecklessCompression);
+            return Mathf.Clamp(scale, MinTimeCompression, CapForTransport(mode));
         }
 
         void SetTimeScale(int scale)
@@ -1026,9 +1257,6 @@ namespace DaggerfallWorkshop.Game.Mobile
             SpeedCautious = popup.SpeedCautious;
             SleepModeInn = popup.SleepModeInn;
 
-            // Reckless raises the ceiling; switching back to cautious must pull an existing
-            // 200x setting down with it, or the next cautious journey inherits a speed it is
-            // not allowed to use.
             TimeCompression = ClampCompression(TimeCompression);
         }
 

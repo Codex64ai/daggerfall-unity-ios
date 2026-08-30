@@ -69,6 +69,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestJourneyArrivalRect();
             TestJourneyCompressionClamp();
             TestJourneySpeedTiers();
+            TestRouteRule();
+            TestNightDecision();
             TestRoadData();
             TestRoadsInstallSurvivesSceneSwap();
             TestRoadDirectionReciprocity();
@@ -734,28 +736,57 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "compression: the default is itself legal");
         }
 
-
         /// <summary>
-        /// Reckless travel unlocks the high speeds; cautious must not inherit them. Getting
-        /// this wrong either forbids what the player asked for or lets a cautious journey run
-        /// at a speed the world cannot stream.
+        /// The ceiling follows the transport (device decision): 50x on foot, 150x mounted,
+        /// 200x by ship. Cautious vs reckless no longer changes speed.
         /// </summary>
         static void TestJourneySpeedTiers()
         {
-            Check(MobileJourneyController.ClampCompression(200, false) == 200,
-                  "tiers: reckless allows 200x");
-            Check(MobileJourneyController.ClampCompression(200, true) ==
-                  MobileJourneyController.MaxCautiousCompression,
-                  "tiers: cautious clamps 200x down to its own ceiling");
-            Check(MobileJourneyController.ClampCompression(50, true) == 50,
-                  "tiers: cautious still allows its maximum");
-            Check(MobileJourneyController.ClampCompression(-5, false) >= 1,
-                  "tiers: reckless still cannot reverse time");
-            Check(MobileJourneyController.MaxRecklessCompression >
-                  MobileJourneyController.MaxCautiousCompression,
-                  "tiers: reckless ceiling is genuinely higher");
+            Check(MobileJourneyController.CapForTransport(TransportModes.Foot) == 50, "tiers: foot caps at 50x");
+            Check(MobileJourneyController.CapForTransport(TransportModes.Horse) == 150, "tiers: horse caps at 150x");
+            Check(MobileJourneyController.CapForTransport(TransportModes.Cart) == 150, "tiers: cart rides like a horse");
+            Check(MobileJourneyController.CapForTransport(TransportModes.Ship) == 200, "tiers: ship caps at 200x");
+            Check(MobileJourneyController.ClampCompression(200, TransportModes.Foot) == 50,
+                  "tiers: 200x on foot clamps down to 50x");
+            Check(MobileJourneyController.ClampCompression(150, TransportModes.Horse) == 150,
+                  "tiers: a horse keeps 150x");
+            Check(MobileJourneyController.ClampCompression(-5, TransportModes.Ship) >= 1,
+                  "tiers: a ship still cannot reverse time");
         }
 
+        /// <summary>
+        /// The road rule that replaced "the road must be longer than the off-road ends" - which
+        /// binned most medium trips. Plus the reset that used to wipe the planned route is a
+        /// code-shape bug the tests cannot see; it is documented in Resume().
+        /// </summary>
+        static void TestRouteRule()
+        {
+            Check(MobileJourneyController.RouteWorthTaking(30, 10, 35), "route: a road with short off-road ends is taken");
+            Check(MobileJourneyController.RouteWorthTaking(3, 10, 12), "route: a short road is still taken if reaching it is cheap");
+            Check(!MobileJourneyController.RouteWorthTaking(30, 40, 20), "route: refused when the detour outweighs the trip");
+            Check(!MobileJourneyController.RouteWorthTaking(1, 0, 5), "route: a one-pixel route is not a route");
+        }
+
+        /// <summary>Nightfall decision table: what the travel popup's option means at dusk.</summary>
+        static void TestNightDecision()
+        {
+            var N = MobileJourneyController.NightAction.None;
+            Check(MobileJourneyController.DecideNight(false, false, false, false, 100, 5) == N, "night: daytime does nothing");
+            Check(MobileJourneyController.DecideNight(true, true, false, false, 100, 5) == N, "night: decided once per night");
+            Check(MobileJourneyController.DecideNight(true, false, false, true, 100, 5) == MobileJourneyController.NightAction.Camp,
+                  "night: camp out camps, even in a town");
+            Check(MobileJourneyController.DecideNight(true, false, true, true, 100, 5) == MobileJourneyController.NightAction.Inn,
+                  "night: inns mode in a town takes a room");
+            Check(MobileJourneyController.DecideNight(true, false, true, false, 100, 5) == MobileJourneyController.NightAction.TravelOn,
+                  "night: inns mode in the wild walks on to the next town");
+            Check(MobileJourneyController.DecideNight(true, false, true, true, 3, 5) == MobileJourneyController.NightAction.CampNoGold,
+                  "night: inns mode without the gold camps outside the walls");
+            Check(MobileJourneyController.DecideNight(true, false, true, true, 0, 0) == MobileJourneyController.NightAction.Inn,
+                  "night: free rooms (knightly order) cost nothing");
+            Check(MobileJourneyController.HoursUntilDawn(18) == 12 && MobileJourneyController.HoursUntilDawn(2) == 4 &&
+                  MobileJourneyController.HoursUntilDawn(23) == 7,
+                  "night: hours to dawn wrap past midnight");
+        }
 
         /// <summary>The ported path data is present and looks like a road network.</summary>
         static void TestRoadData()
