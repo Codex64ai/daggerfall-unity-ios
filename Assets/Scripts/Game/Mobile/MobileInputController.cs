@@ -41,6 +41,10 @@ namespace DaggerfallWorkshop.Game.Mobile
         // Mouse.current.delta: the latter may already be consumed by the time the
         // game's Update loop reaches PollHardwarePointer().
         Vector2 inputSystemEventDelta;
+        // Unscaled-time stamp of the last real input-system mouse event. The sentinel
+        // means "never saw one" and is treated as fresh, so a pointer is only declared
+        // gone after it was demonstrably alive and then fell silent.
+        float lastInputSystemEventAt = float.MinValue;
         bool directTouchInputActive;
         uint inputSystemMouseEvents;
         uint inputSystemNonZeroMouseEvents;
@@ -49,6 +53,11 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             if (!(device is Mouse) || Mouse.current == null)
                 return;
+
+            // A live input-system mouse event means the hardware pointer is still
+            // present; refresh the ownership timeout even while the touch mute is
+            // eating the delta itself.
+            lastInputSystemEventAt = Time.unscaledTime;
 
             if (directTouchInputActive)
                 return;
@@ -185,6 +194,15 @@ namespace DaggerfallWorkshop.Game.Mobile
         [Tooltip("Hide the touch HUD when a hardware keyboard is used, the same way a gamepad " +
                  "does. Touching the screen brings it back.")]
         public bool autoHideOnKeyboard = true;
+
+        [Tooltip("How long the hardware pointer may go completely silent before the touch layer " +
+                 "takes ownership back. This is what makes a detached Magic Keyboard hand control " +
+                 "back to the glass on its own: UIKit keeps reporting the pointer as present after " +
+                 "the keyboard is gone, so without a timeout the ghost trackpad would keep the " +
+                 "pointer's ownership forever and touch would never come back. Applied in " +
+                 "PollHardwarePointer against Input System silence - there is no native twin " +
+                 "in DFMobilePointer.mm to keep in step with.")]
+        public float pointerIdleTimeout = 1f;
 
         [Header("Controller")]
         [Tooltip("Detect a connected gamepad, hide the touch HUD, and hand input back to " +
@@ -1019,7 +1037,22 @@ namespace DaggerfallWorkshop.Game.Mobile
 
 #if ENABLE_INPUT_SYSTEM
             Mouse systemMouse = Mouse.current;
+#if UNITY_IOS && !UNITY_EDITOR
+            // A detached Magic Keyboard keeps reporting Mouse.current as "added" -
+            // UIKit never unmounts the phantom pointer - and this block used to claim
+            // ownership every frame on that alone, returning before the direct-touch
+            // handover below could ever run. A live finger on the glass is the
+            // strongest signal: if the native bridge saw one, this Input System path
+            // must not claim. Absent a finger, the pointer still has to show recent
+            // activity (updated this frame, or an event within pointerIdleTimeout)
+            // or it is treated as gone.
+            bool inputSystemFresh = systemMouse != null && (systemMouse.wasUpdatedThisFrame ||
+                (lastInputSystemEventAt != float.MinValue &&
+                 Time.unscaledTime - lastInputSystemEventAt <= pointerIdleTimeout));
+            if (systemMouse != null && systemMouse.added && inputSystemFresh && !directTouchPresent)
+#else
             if (systemMouse != null && systemMouse.added)
+#endif
             {
                 Vector2 systemPosition = systemMouse.position.ReadValue();
                 Vector2 systemDelta = pointerPositionInitialized
@@ -1117,6 +1150,24 @@ namespace DaggerfallWorkshop.Game.Mobile
                 return;
             }
 
+#if ENABLE_INPUT_SYSTEM && UNITY_IOS && !UNITY_EDITOR
+            // The parked position of a phantom pointer (keyboard detached) freezes on
+            // screen here; without this, menus keep a dead cursor and gameplay keeps
+            // edge-drifting until a finger lands. Once the input system has been
+            // silent past pointerIdleTimeout, treat the pointer as gone so the layer
+            // can hand back to touch.
+            if (systemMouse != null && !inputSystemFresh)
+            {
+                pointerPositionInitialized = false;
+                indirectPointerActive = false;
+                if (wasActive)
+                {
+                    MobileInput.PointerActive = false;
+                    ApplyHudVisibility();
+                }
+                return;
+            }
+#endif
             Vector2 position = Input.mousePosition;
             Vector2 delta = pointerPositionInitialized ? position - previousPointerPosition : Vector2.zero;
             previousPointerPosition = position;

@@ -50,6 +50,14 @@ static BOOL windowSizeLockApplied = NO;
 // that legitimately cannot lock - Split View, backgrounded - is not hammered.
 static const NSTimeInterval pointerLockRecoveryInterval = 0.5;
 
+// A detach is the one case a phantom pointer stream survives: GCMouse stops
+// delivering, the indirect-touch stream goes quiet, and the hover recognizer -
+// disabled during gameplay - can no longer clear pointerActive. The pointer then
+// reads as active forever with frozen deltas, ahead of every gate C# has. Track
+// device presence so the phantom is killed at the source, not fought per frame.
+static BOOL pointerDisconnected = NO;
+static BOOL deviceObserversInstalled = NO;
+
 @interface DFMobilePointerDelegate : NSObject <UIPointerInteractionDelegate>
 - (void)pointerTap:(UITapGestureRecognizer *)recognizer;
 @end
@@ -65,7 +73,7 @@ static const NSTimeInterval pointerLockRecoveryInterval = 0.5;
 
 - (void)pointerTap:(UITapGestureRecognizer *)recognizer
 {
-    if (pointerHidden)
+    if (pointerHidden || pointerDisconnected)
         return;
 
     // UIKit delivers some Magic Keyboard clicks as a tap without exposing a
@@ -103,7 +111,7 @@ static void DFMobilePointerUpdateEdge(CGPoint location, CGSize bounds)
 
 static void DFMobilePointerRecordEvent(UIEvent *event, UIView *view)
 {
-    if (!pointerLockRequested || event == nil || view == nil)
+    if (!pointerLockRequested || event == nil || view == nil || pointerDisconnected)
         return;
 
     for (UITouch *touch in event.allTouches)
@@ -199,6 +207,8 @@ static void InstallGameControllerMouse()
                 // directly: the classification happens here but the watchdog that
                 // releases a touch iPadOS abandoned lives up there, and gating on the
                 // raw flag would put the mute beyond its reach.
+                if (pointerDisconnected)
+                    return;
                 if (!pointerLockRequested || directTouchActive)
                     return;
 
@@ -232,6 +242,30 @@ static void InstallGameControllerMouse()
             }
         }
     }
+}
+
+static void DFMobilePointerHandleDeviceDisconnect(void)
+{
+    if (pointerDisconnected)
+        return;
+    pointerDisconnected = YES;
+
+    // Kill the phantom stream at the source. Position is deliberately kept so a
+    // reconnect does not produce a giant synthetic jump; everything else is
+    // latched state that must not outlive the device that produced it.
+    pointerActive = NO;
+    pointerButtonHeld = NO;
+    pointerSecondaryButtonHeld = NO;
+    pointerClickFrames = 0;
+    pointerDelta = CGPointZero;
+}
+
+static void DFMobilePointerHandleDeviceConnect(void)
+{
+    pointerDisconnected = NO;
+    // The first post-reconnect hover computes its delta against the pre-detach
+    // position; reset so that read starts clean instead of as one big jump.
+    pointerDelta = CGPointZero;
 }
 
 static BOOL DFMobilePointerIsLocked()
@@ -375,6 +409,29 @@ static void EnsurePointerBridge()
             }
         }
 
+        if (@available(iOS 14.0, *))
+        {
+            if (!deviceObserversInstalled)
+            {
+                deviceObserversInstalled = YES;
+                NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+                [center addObserverForName:GCMouseDidDisconnectNotification
+                                    object:nil
+                                     queue:[NSOperationQueue mainQueue]
+                                usingBlock:^(NSNotification *note) {
+                                    (void)note;
+                                    DFMobilePointerHandleDeviceDisconnect();
+                                }];
+                [center addObserverForName:GCMouseDidConnectNotification
+                                    object:nil
+                                     queue:[NSOperationQueue mainQueue]
+                                usingBlock:^(NSNotification *note) {
+                                    (void)note;
+                                    DFMobilePointerHandleDeviceConnect();
+                                }];
+            }
+        }
+
         if (pointerDelegate == nil)
         {
             pointerDelegate = [[DFMobilePointerDelegate alloc] init];
@@ -401,6 +458,11 @@ static void EnsurePointerBridge()
 - (void)df_mobilePointerHover:(UIHoverGestureRecognizer *)recognizer
 {
     diagnosticHoverEvents++;
+    // A stale hover can outlive the device that produced it. Once the pointer
+    // source is gone its movements are phantom, so feed them nowhere - the
+    // pointer must stay dead until a real device reconnects.
+    if (pointerDisconnected)
+        return;
     CGPoint location = [recognizer locationInView:self];
     DFMobilePointerUpdateEdge(location, self.bounds.size);
     CGFloat scale = self.window.screen.scale;
