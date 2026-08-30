@@ -21,6 +21,7 @@ namespace DaggerfallWorkshop.Game.Mobile
     /// action buttons, drawn later, win the raycast and their touches never leak here.
     /// </summary>
     [RequireComponent(typeof(RectTransform))]
+    [DefaultExecutionOrder(100)]
     public class TouchLookZone : MonoBehaviour,
         IPointerDownHandler, IDragHandler, IPointerUpHandler
     {

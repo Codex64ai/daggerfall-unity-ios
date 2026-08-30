@@ -1559,6 +1559,12 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             Vector2 delta = lookZone.ConsumeDelta() * touchToMouseScale;
 
+            // The right stick is camera-only. Keep this explicit rather than relying
+            // solely on the look zone winning its touch race: an active look stick
+            // must never open the swipe/bow gesture channel, even if another update
+            // path still reports the full-screen zone as dragging for one frame.
+            bool lookStickHeld = lookJoystick != null && lookJoystick.IsHeld;
+
             // Swing state first, so the stick's look contribution can be gated on it.
             // SWIPES ARE THE ONLY ATTACK INPUT - the right stick never swings. (Flick-to-
             // swing existed briefly and device feedback was unanimous: the stick should
@@ -1578,7 +1584,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             // left, repeatedly (device report: "it just shoots non stop when trying to
             // aim"). The extension is what makes a flick resolve for a blade; for a bow it
             // is exactly wrong, because release must be immediate and deliberate.
-            bool bowFingerDown = combat && bow && lookZone.IsDragging;
+            bool bowFingerDown = combat && bow && lookZone.IsDragging && !lookStickHeld;
             if (bowFingerDown)
             {
                 if (bowHoldStart < 0f)
@@ -1592,12 +1598,13 @@ namespace DaggerfallWorkshop.Game.Mobile
             bool bowDrawing = bowFingerDown &&
                               Time.unscaledTime - bowHoldStart >= bowDrawMinHold;
 
-            if (combat && !bow && lookZone.IsDragging)
+            if (combat && !bow && lookZone.IsDragging && !lookStickHeld)
                 swingHoldUntil = Time.unscaledTime + swingHoldExtension;
 
             // Swipe-swing (blades) and bow-draw are separate states: only the swipe one
             // may suppress the look stick.
-            bool swipeWindow = combat && !bow && Time.unscaledTime < swingHoldUntil;
+            bool swipeWindow = combat && !bow && !lookStickHeld &&
+                               Time.unscaledTime < swingHoldUntil;
             bool swingWindow = swipeWindow || bowDrawing;
 
             // Right stick: rate-based look, always and only. Excluded while a swipe-swing
@@ -1605,7 +1612,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             // Excluded during a swipe so the aiming thumb cannot contaminate the attack
             // direction - but a bow has no direction to contaminate, and aiming while drawn
             // is the whole point, so the stick stays live for it.
-            if (lookJoystick != null && lookJoystick.IsHeld && !swipeWindow)
+            if (lookStickHeld && !swipeWindow)
             {
                 Vector2 stick = lookJoystick.Value;
                 stick = new Vector2(stick.x * Mathf.Abs(stick.x), stick.y * Mathf.Abs(stick.y));

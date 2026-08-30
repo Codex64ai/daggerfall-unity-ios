@@ -12,6 +12,7 @@ namespace DaggerfallWorkshop.Game.Mobile
     /// the knob child as 'handle'. Value.y = forward/back, Value.x = strafe, both -1..1.
     /// </summary>
     [RequireComponent(typeof(RectTransform))]
+    [DefaultExecutionOrder(-100)]
     public class VirtualJoystick : MonoBehaviour,
         IPointerDownHandler, IDragHandler, IPointerUpHandler
     {
