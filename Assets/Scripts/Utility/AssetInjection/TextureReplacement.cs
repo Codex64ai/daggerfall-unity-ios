@@ -451,8 +451,13 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
         public static void CustomizeMaterial(int archive, int record, int frame, Material material)
         {
             // MetallicGloss map
+            // MOBILE: these maps used to be sought among loose files ONLY, so a mod that ships them
+            // inside an asset bundle - which is the only shape a mod can take on iOS, where loose
+            // .dfmod code cannot run - had them silently ignored. Loose files are still tried first
+            // and are imported exactly as before (mipmaps on); mods are only a fallback, matching the
+            // loose-beats-mods order in TryImportTexture(path, name, ...).
             Texture2D metallicGloss;
-            if (TryImportTextureFromLooseFiles(archive, record, frame, TextureMap.MetallicGloss, true, out metallicGloss))
+            if (TryImportMaterialMap(archive, record, frame, TextureMap.MetallicGloss, out metallicGloss))
             {
                 metallicGloss.filterMode = MainFilterMode;
                 material.EnableKeyword(KeyWords.MetallicGlossMap);
@@ -461,8 +466,9 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
             }
 
             // Height Map
+            // MOBILE: mod-aware for the same reason as MetallicGloss above.
             Texture2D height;
-            if (TryImportTextureFromLooseFiles(archive, record, frame, TextureMap.Height, true, out height))
+            if (TryImportMaterialMap(archive, record, frame, TextureMap.Height, out height))
             {
                 height.filterMode = MainFilterMode;
                 material.EnableKeyword(KeyWords.HeightMap);
@@ -1001,17 +1007,66 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
                     return true;
 
                 // Seek from mods
-                if (ModManager.Instance && ModManager.Instance.TryGetAsset(name, null, out tex))
-                {
-                    if (!readOnly && !tex.isReadable)
-                        Debug.LogWarning($"Texture {name} is not readable.");
-
+                if (TryImportTextureFromMods(name, readOnly, out tex))
                     return true;
-                }
             }
 
             tex = null;
             return false;
+        }
+
+        /// <summary>
+        /// Seek texture from mods only, by the name <see cref="GetName(int, int, int, TextureMap, DyeColors)"/>
+        /// gives it (for example <c>108_2-0_Normal</c>), which is also how converted asset bundles name it.
+        /// </summary>
+        /// <remarks>
+        /// Split out of <see cref="TryImportTexture(string, string, bool, TextureMap?, out Texture2D)"/> so callers
+        /// that must keep their own loose-file lookup - see <see cref="CustomizeMaterial"/>, whose loose-file import
+        /// uses mipmaps - can still fall through to mods without duplicating the lookup. Callers are responsible for
+        /// trying loose files FIRST, preserving the loose-beats-mods precedence used everywhere in this class.
+        /// </remarks>
+        /// <param name="name">Name of texture.</param>
+        /// <param name="readOnly">Only used to warn: readability of bundled textures is set by the mod author.</param>
+        /// <param name="tex">Imported texture.</param>
+        /// <returns>True if texture imported.</returns>
+        private static bool TryImportTextureFromMods(string name, bool readOnly, out Texture2D tex)
+        {
+            if (DaggerfallUnity.Settings.AssetInjection &&
+                ModManager.Instance && ModManager.Instance.TryGetAsset(name, null, out tex))
+            {
+                if (!readOnly && !tex.isReadable)
+                    Debug.LogWarning($"Texture {name} is not readable.");
+
+                return true;
+            }
+
+            tex = null;
+            return false;
+        }
+
+        /// <summary>
+        /// Seek one of the extra material maps applied by <see cref="CustomizeMaterial"/> from loose files
+        /// first and then from mods.
+        /// </summary>
+        /// <remarks>
+        /// Not simply <see cref="TryImportTexture(string, string, bool, TextureMap?, out Texture2D)"/> because that
+        /// one imports loose files WITHOUT mipmaps, while these maps have always been imported WITH them. Keeping the
+        /// original loose-file call intact means this change cannot alter what a loose-file setup already renders.
+        /// </remarks>
+        /// <param name="archive">Archive index.</param>
+        /// <param name="record">Record index.</param>
+        /// <param name="frame">Texture frame.</param>
+        /// <param name="textureMap">Texture type.</param>
+        /// <param name="tex">Imported texture.</param>
+        /// <returns>True if texture imported.</returns>
+        private static bool TryImportMaterialMap(int archive, int record, int frame, TextureMap textureMap, out Texture2D tex)
+        {
+            // Loose files win, exactly as before.
+            if (TryImportTextureFromLooseFiles(archive, record, frame, textureMap, true, out tex))
+                return true;
+
+            // Then mods, under the same name a converted bundle stores it by.
+            return TryImportTextureFromMods(GetName(archive, record, frame, textureMap), true, out tex);
         }
 
         /// <summary>

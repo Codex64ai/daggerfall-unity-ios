@@ -93,6 +93,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestModExtractorSurvivesBadPaths();
             TestConverterGuardRules();
             TestMaterialTextureNaming();
+            TestMaterialMapLookupNaming();
             TestConversionRefusesEmptyResult();
             TestChunkedConversion();
             TestRoadDirectionReciprocity();
@@ -150,6 +151,62 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobileContentPath.Remap(shipped + "/Sound/a.wav", shipped, user,
                       p => p == "/docs/Sound/a.wav") == "/docs/Sound/a.wav",
                   "remap strips the leading separator");
+        }
+
+        /// <summary>
+        /// The name the engine asks a mod for when it wants an extra material map.
+        ///
+        /// CustomizeMaterial() now falls through to mods for MetallicGloss and Height, and that
+        /// fallback is a lookup BY NAME inside an asset bundle: if the name the engine builds and
+        /// the name the converter stored ever drift apart, the map is simply never found and there
+        /// is no error to notice. This pins both sides against each other on the desktop, which is
+        /// as far as it can be verified without a device.
+        /// </summary>
+        static void TestMaterialMapLookupNaming()
+        {
+            // The engine side, exactly as CustomizeMaterial asks for it.
+            Check(TextureReplacement.GetName(108, 2, 0, TextureMap.Normal) == "108_2-0_Normal",
+                  "GetName builds the documented map name",
+                  TextureReplacement.GetName(108, 2, 0, TextureMap.Normal));
+            Check(TextureReplacement.GetName(108, 2, 0, TextureMap.Height) == "108_2-0_Height"
+                  && TextureReplacement.GetName(108, 2, 0, TextureMap.MetallicGloss) == "108_2-0_MetallicGloss",
+                  "Height and MetallicGloss follow the same rule");
+
+            // Albedo carries no suffix, so a map lookup can never collide with the base texture.
+            Check(TextureReplacement.GetName(108, 2, 0) == "108_2-0",
+                  "the albedo name carries no map suffix");
+
+            // THE CONTRACT: the converter names bundle entries by DfuTextureName, the engine looks
+            // them up by GetName. Same inputs must give the same string or the maps are invisible.
+            string[] maps = { "Normal", "Height", "MetallicGloss", "Emission" };
+            TextureMap[] enums = { TextureMap.Normal, TextureMap.Height, TextureMap.MetallicGloss, TextureMap.Emission };
+            bool agree = MobileModExtractor.DfuTextureName(108, 2, 0, string.Empty)
+                         == TextureReplacement.GetName(108, 2, 0);
+            string mismatch = "";
+            for (int i = 0; i < maps.Length; i++)
+            {
+                string converter = MobileModExtractor.DfuTextureName(108, 2, 0, maps[i]);
+                string engine = TextureReplacement.GetName(108, 2, 0, enums[i]);
+                if (converter != engine)
+                {
+                    agree = false;
+                    mismatch = converter + " != " + engine;
+                }
+            }
+            Check(agree, "converted bundle names match the names CustomizeMaterial looks up", mismatch);
+
+            // Zero padding is the easiest way for the two to drift, so pin a low archive too.
+            Check(MobileModExtractor.DfuTextureName(6, 0, 0, "Height") == TextureReplacement.GetName(6, 0, 0, TextureMap.Height)
+                  && TextureReplacement.GetName(6, 0, 0, TextureMap.Height) == "006_0-0_Height",
+                  "a single-digit archive is zero-padded on both sides",
+                  TextureReplacement.GetName(6, 0, 0, TextureMap.Height));
+
+            // These three are linear; importing them as sRGB would visibly wreck the shading.
+            Check(TextureReplacement.IsLinearTextureMap(TextureMap.Normal)
+                  && TextureReplacement.IsLinearTextureMap(TextureMap.Height)
+                  && TextureReplacement.IsLinearTextureMap(TextureMap.MetallicGloss)
+                  && !TextureReplacement.IsLinearTextureMap(TextureMap.Albedo),
+                  "the extra material maps are linear and albedo is not");
         }
 
         /// <summary>
