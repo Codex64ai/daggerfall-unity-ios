@@ -441,7 +441,8 @@ env DFU_MOD_IN="$HOME/Downloads/dream - sound.dfmod" DFU_MOD_OUT="$HOME/dev/dfu-
 
 `DFU_MOD_IN` is required; `DFU_MOD_OUT` defaults to `~/dev/dfu-mods` and
 `DFU_MOD_TARGETS` to `iOS`. `DFU_MOD_AUDIO_TIMEOUT` (default 10) and `DFU_MOD_TIMEOUT`
-(default 14400) are the watchdog's seconds-per-clip and seconds-per-run caps. The rebuilt
+(default 14400) are the watchdog's seconds-per-clip and seconds-per-run caps, and
+`DFU_MOD_SWEEP_MB` (default 256, `0` disables) is the memory-sweep budget described below. The rebuilt
 bundle lands in `$DFU_MOD_OUT/iOS/`, ready to copy to the device.
 
 **No `-quit` and no `-nographics`**, and neither is an oversight.
@@ -487,14 +488,24 @@ from a silent game. Known limits, in the order they bite:
   `AudioClip(async)`; if you see that key in a summary, the converter was not given the
   main loop back.
 - **Large texture packs need a machine with plenty of RAM, and this is the real limit.**
-  In the editor, releasing a bundle texture does not actually free it, so the decoded copy
-  of every texture accumulates until the whole bundle is unloaded at the end. Measured on
-  DREAM's `hud & menu` module - 92MB in, 330 textures, many of them 1920x1200 - peak
-  resident was **1.63GB against a ~1.0GB idle editor, so ~0.6GB for the module itself**.
-  That is roughly 7x the module's own file size. Scaling that shape to the ~1.7GB texture
-  module suggests something in the region of 10GB on top of the editor, which is not
-  comfortable on a 16GB machine. Convert the big ones on the largest machine you have, one
-  module at a time, and watch memory rather than assuming it will fit.
+  Measured on DREAM's `hud & menu` module - 92MB in, 330 textures, many 1920x1200 - peak
+  resident ran **1.4-1.8GB against a ~1.0GB idle editor**, and the summary line reports
+  that module as holding **476MB of asset memory** - about 5.2x its own file size. On the
+  ~1.7GB texture module that ratio projects to roughly **9GB of asset memory** on top of
+  the editor, which will not fit on a 16GB machine without splitting the module. Convert
+  the big ones on the largest machine you have, one at a time, and watch memory rather
+  than assuming it fits.
+
+  There is a periodic memory sweep (`DFU_MOD_SWEEP_MB`, default 256, `0` disables) that
+  asks Unity to reclaim released assets once that many megabytes have gone by. **Measured,
+  it does not help at this size**: peaks were 1438 and 1769MB with it off, 1746MB at a
+  256MB budget (1 sweep) and 1789MB at a 32MB budget (13 sweeps) - all inside the same
+  run-to-run band, with wall clock identical at 32s throughout. So it is neither a win nor
+  a cost here, and the peak on a module this size is an early transient rather than
+  accumulation. It is left on because accumulation is the only term that grows with the
+  module and the largest pack is ~19x this one - but that is an extrapolation, not a
+  result. Read the "holding NNNMB of asset memory" figure in the summary to judge whether
+  it could matter for a given module.
 - **Textures and audio change file extension.** Textures are re-encoded as `.png` and
   clips as `.wav`, which moves a texture's runtime lookup name with it (DFU keys on the
   short name *with* extension for textures, extensionless for audio). The summary counts
@@ -502,13 +513,20 @@ from a silent game. Known limits, in the order they bite:
 - **Not supported at all:** video (`VideoClip`), prefabs and model replacements. Those are
   counted in the summary and left out of the rebuilt bundle, and the rest of the mod
   converts around them.
-- **A mod carrying C# code does not convert at all** - it is not a partial conversion with
-  the scripts dropped. The rebuild refuses a manifest listing `.cs` or `.dll.bytes`
-  outright, so you get no bundle and a non-zero exit rather than an asset-only bundle.
-  (Separately, a bundle asset actually *named* `.cs` is refused at extraction time and
-  counted as `code-file-refused`: the extraction root lives inside `Assets/`, so writing
-  one would hand a stranger's source to Unity's compiler mid-run.) Such mods need their
-  assets repackaged by hand, without the script entries in the manifest.
+- **A mod carrying script code converts its assets; the code rides along and never runs.**
+  iOS has no JIT, so DFU skips mod script compilation entirely at runtime - the assets
+  load and the code does not execute. Which is the desirable outcome, and it is what
+  happens; the three shapes differ only in whether you get a bundle at all:
+  - **Source-script mods convert, exit 0.** DFU's own Mod Builder ships C# as `.cs.txt`
+    text assets, so the rebuild's script guard (which matches `.cs` and `.dll.bytes`)
+    never fires on them. The script text is carried inside the converted bundle, inert.
+  - **Precompiled `.dll.bytes` mods are the one shape refused outright.** The rebuild
+    throws on that manifest entry, so there is no bundle and the exit code is non-zero.
+    Repackage those by hand without the assembly entry if you want the art.
+  - **A bundle asset actually named `.cs` is refused during extraction**, counted as
+    `code-file-refused`, and the rest of the mod still converts. That refusal is about
+    this machine rather than about iOS: the extraction root lives inside `Assets/`, so
+    writing one would hand a stranger's source to Unity's compiler mid-conversion.
 
 ## Diagnostics
 
