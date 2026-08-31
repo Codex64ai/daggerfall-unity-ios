@@ -1648,10 +1648,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // streamed, the whole module is unconvertible and this report is the only place
             // anyone would find that out - so it is counted per load type and warned about per
             // clip, never silently totalled.
-            int streamSkipped, packedSkipped, noData;
+            int streamSkipped, packedSkipped, noData, asyncSkipped;
             report.skippedByType.TryGetValue("AudioClip(streaming)", out streamSkipped);
             report.skippedByType.TryGetValue("AudioClip(compressed)", out packedSkipped);
             report.skippedByType.TryGetValue("AudioClip(nodata)", out noData);
+            report.skippedByType.TryGetValue("AudioClip(async)", out asyncSkipped);
             Check(streamSkipped == 1, "a Streaming clip is skipped loudly, not silently dropped",
                   "AudioClip(streaming)=" + streamSkipped);
             Check(packedSkipped == 1,
@@ -1659,9 +1660,37 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "AudioClip(compressed)=" + packedSkipped);
             Check(noData == 0, "no clip reached the GetData backstop: the load type caught both",
                   "AudioClip(nodata)=" + noData);
+
+            // RESIDENCY, which is a different question from load type and was learned the
+            // expensive way: DecompressOnLoad says how a clip is DECODED, not that it is decoded
+            // yet. DREAM's sound module lost 34 of 340 clips to this - every long ambient loop,
+            // each with Preload Audio Data off - and each reported "GetData failed on a
+            // DecompressOnLoad clip", which named the wrong thing entirely.
+            //
+            // fixture_async.wav is the same 440Hz tone as the others with Load In Background set
+            // in its .meta, which is exactly what DREAM's ambients have. It is the regression
+            // pin for the half of that defect this converter can see: the clip is NOT resident,
+            // its load is asynchronous, and an asynchronous load can only be completed by
+            // Unity's main loop - which a synchronous -executeMethod is blocking. So it is
+            // refused IMMEDIATELY under its own key rather than waited on: the 30s-per-clip wait
+            // this replaced turned one module into a 17-minute stall that still reported the
+            // wrong cause. AudioClip(async) is deliberately not AudioClip(nodata), because it
+            // says "the driver could not", not "the clip cannot" - the same file converts the
+            // moment the converter is stepped across editor ticks instead of blocking them.
+            Check(asyncSkipped == 1,
+                  "a Load-In-Background clip is refused at once under its own key, not mis-blamed",
+                  "AudioClip(async)=" + asyncSkipped + " AudioClip(nodata)=" + noData);
+            Check(report.extracted.Find(p => p.EndsWith("fixture_async.wav")) == null,
+                  "the asynchronous clip really is absent from the extraction");
             Check(report.extracted.Find(p => p.EndsWith("fixture_stream.wav")) == null
                   && report.extracted.Find(p => p.EndsWith("fixture_packed.wav")) == null,
                   "the unreadable clips really are absent from the extraction");
+            // Four audio fixtures now: one that converts, and three that cannot, each for its
+            // own distinct reason and each counted separately. A module's report says which.
+            Check(streamSkipped + packedSkipped + asyncSkipped == 3 && noData == 0,
+                  "each way a clip can be unreadable is counted apart from the others",
+                  "streaming=" + streamSkipped + " compressed=" + packedSkipped
+                      + " async=" + asyncSkipped + " nodata=" + noData);
             Check(!report.notesByType.ContainsKey("AudioClip(streaming)")
                   && !report.notesByType.ContainsKey("AudioClip(compressed)"),
                   "a skip is a loss, so it is never filed as a note about a survivor");
@@ -1678,8 +1707,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // itself - so deleting the release, or letting one branch escape the try/finally
             // that performs it, drives them apart. This fixture deliberately exercises the
             // awkward paths as well as the happy one: two clips refused on load type, one
-            // texture losing a collision, six assets written. If any of those paths stopped
-            // releasing, this is what would notice.
+            // refused on residency, one texture losing a collision, six assets written. If any
+            // of those paths stopped releasing, this is what would notice.
             Check(report.loaded > 0 && report.released == report.loaded,
                   "every bundle asset the loop loaded was released again, on every path",
                   "released=" + report.released + " loaded=" + report.loaded);

@@ -49,6 +49,22 @@
 // this side: the fix is the source audio, or a desktop rebuild of that module with its clips
 // set to DecompressOnLoad.
 //
+// AND ONE MORE THING, WHICH IS ABOUT HOW THIS TOOL IS DRIVEN RATHER THAN ABOUT ANY MOD.
+// DecompressOnLoad says how a clip is decoded, not that it is decoded yet: a clip with
+// Preload Audio Data off arrives with no samples, and has to be asked for them. That much this
+// does. But a clip that ALSO has Load In Background set loads asynchronously, and an
+// asynchronous load is integrated by Unity's main loop - which a synchronous -executeMethod is
+// by definition blocking. Measured against DREAM's sound module: the operation reaches progress
+// 1.00 and never flips isDone; Thread.Sleep, QueuePlayerLoopUpdate, DisplayProgressBar,
+// AssetDatabase.Refresh, a synchronous LoadAsset and UnloadUnusedAssets all leave it Loading
+// after 30s, and EditorApplication.wantsToQuit is never called under -quit so the quit cannot
+// be deferred. Returning to EditorApplication.update completes the same load in two ticks and
+// 0.14s. Those clips are therefore counted under "AudioClip(async)" and refused immediately
+// rather than waited on, and converting them needs the driver changed - Convert/ConvertFromEnv
+// stepping the extraction across editor ticks and calling EditorApplication.Exit when done,
+// which means running WITHOUT -quit. That is a change to this tool's documented command line,
+// so it is written down here rather than made silently.
+//
 // Textures are not all colour. A compressed normal map has had its blue channel thrown away
 // and the remaining two swizzled into whichever channels its block format codes best, so
 // extracting one byte-for-byte produces an image that is not a normal map at all; DFU's
@@ -140,6 +156,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
                 // One output FILE may be claimed by only one bundle asset; see Claim().
                 var claimed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                bool loggedAudioLoad = false;   // see TryEnsureAudioData: logged once, counted always
 
                 foreach (string assetName in ab.GetAllAssetNames())
                 {
@@ -248,17 +265,57 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                                 continue;
                             }
 
+                            // DecompressOnLoad says how the clip is decoded, NOT that it is
+                            // decoded right now, and the difference cost 34 of DREAM's 340 sound
+                            // effects on the first real conversion: every long ambient loop came
+                            // back "GetData failed on a DecompressOnLoad clip", because its
+                            // samples were simply not resident yet. DFU's own runtime already
+                            // knew this - SoundReplacement does "if (audioClip.preloadAudioData
+                            // || audioClip.LoadAudioData())" before touching a mod clip - and
+                            // this is the same dance, done here.
+                            string audioDetail;
+                            if (!TryEnsureAudioData(clip, notes, out audioDetail))
+                            {
+                                // An asynchronous load is a DRIVER limitation, not a property of
+                                // the clip, so it gets its own key: the same file converts fine
+                                // the moment the converter is driven from EditorApplication
+                                // .update instead of blocking it. Anything else here is the clip.
+                                Skipped(report, clip.loadInBackground
+                                    ? "AudioClip(async)" : "AudioClip(nodata)");
+                                Debug.LogWarning($"[MobileModExtractor] skipped {assetName}: " +
+                                    $"{audioDetail}. The clip reports {clip.samples} samples " +
+                                    $"across {clip.channels} channels but will not hand them " +
+                                    "over, so it is skipped rather than written as silence." +
+                                    (clip.loadInBackground
+                                        ? " An asynchronous load can only be completed by Unity's" +
+                                          " main loop, which -executeMethod is blocking; this clip" +
+                                          " needs the converter driven across editor ticks."
+                                        : string.Empty));
+                                continue;
+                            }
+                            if (audioDetail != null && !loggedAudioLoad)
+                            {
+                                // Once per conversion, not once per clip: a module where every
+                                // clip needs this would otherwise bury its own report. The count
+                                // is in the summary line either way.
+                                loggedAudioLoad = true;
+                                Debug.Log($"[MobileModExtractor] {assetName}: {audioDetail}. " +
+                                    "Further clips needing the same are counted in the report " +
+                                    "rather than logged one by one.");
+                            }
+
                             var samples = new float[clip.samples * clip.channels];
                             if (!clip.GetData(samples, 0))
                             {
-                                // Backstop: the load type said this should have worked. Something
-                                // else did not - a clip with no samples, or a Unity-version change
-                                // in what GetData accepts - and either way it is a loss, not a note.
+                                // Backstop: the load type said this should have worked, and the
+                                // samples are resident. Something else did not - a clip with no
+                                // samples, or a Unity-version change in what GetData accepts -
+                                // and either way it is a loss, not a note.
                                 Skipped(report, "AudioClip(nodata)");
                                 Debug.LogWarning($"[MobileModExtractor] skipped {assetName}: GetData " +
-                                    $"failed on a {clip.loadType} clip ({clip.samples} samples, " +
-                                    $"{clip.channels} channels), which is not supposed to happen; " +
-                                    "the clip is skipped rather than written as silence.");
+                                    $"failed on a resident {clip.loadType} clip ({clip.samples} " +
+                                    $"samples, {clip.channels} channels), which is not supposed to " +
+                                    "happen; the clip is skipped rather than written as silence.");
                                 continue;
                             }
 
@@ -648,6 +705,75 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 byte[] buffer = stream.GetBuffer();
                 return buffer.Length == stream.Length ? buffer : stream.ToArray();
             }
+        }
+
+        /// <summary>Makes a clip's samples actually resident, and says what it had to do.
+        ///
+        /// AudioClipLoadType.DecompressOnLoad describes how a clip is decoded, NOT whether it is
+        /// decoded YET - different questions, and conflating them cost 34 of DREAM's 340 sound
+        /// effects on the first real conversion. Every one was a long ambient loop reporting
+        /// "GetData failed on a DecompressOnLoad clip"; every one had preloadAudioData=False, so
+        /// its samples were simply not there. DFU's own runtime has always done this dance
+        /// before using a mod clip (SoundReplacement: "if (audioClip.preloadAudioData ||
+        /// audioClip.LoadAudioData())"), and this is the same dance.
+        ///
+        /// A clip whose importer sets Load In Background cannot be recovered here AT ALL, and
+        /// that is measured rather than assumed. Its load is asynchronous, and an asynchronous
+        /// load is integrated by Unity's main loop - the very thing a synchronous -executeMethod
+        /// is blocking. Against the real module: the operation reaches progress 1.00 and never
+        /// flips isDone; 30s of Thread.Sleep, EditorApplication.QueuePlayerLoopUpdate,
+        /// EditorUtility.DisplayProgressBar, AssetDatabase.Refresh, a synchronous LoadAsset and
+        /// Resources.UnloadUnusedAssets all leave it Loading; EditorApplication.wantsToQuit is
+        /// never even called under -quit, so the quit cannot be deferred either. Simply
+        /// RETURNING to EditorApplication.update completes the identical load in two ticks and
+        /// 0.14s - which is the fix, and it is a change to how the converter is driven rather
+        /// than something this method can do. See the file header.
+        ///
+        /// So such a clip is refused immediately instead of waited on. Waiting cannot succeed,
+        /// and the 30s-per-clip version of this wait turned one module into a 17-minute stall
+        /// that reported the wrong cause.
+        ///
+        /// Loading on demand does not undo the memory work of the previous round: Release runs
+        /// from the loop's finally on every path, including the failures here, so whatever this
+        /// makes resident is handed straight back. Peak stays one clip.
+        ///
+        /// <paramref name="detail"/> is null when the clip was already resident and there was
+        /// nothing to do, and otherwise describes what happened - success or failure - so the
+        /// caller can log the first one and count the rest.</summary>
+        static bool TryEnsureAudioData(AudioClip clip, List<string> notes, out string detail)
+        {
+            detail = null;
+            if (clip.loadState == AudioDataLoadState.Loaded)
+                return true;
+
+            string state = $"preloadAudioData={clip.preloadAudioData}, " +
+                           $"loadInBackground={clip.loadInBackground}, loadState={clip.loadState}";
+
+            if (clip.loadInBackground)
+            {
+                detail = $"samples are not resident and load asynchronously ({state})";
+                return false;
+            }
+
+            if (!clip.LoadAudioData())
+            {
+                detail = $"samples are not resident ({state}) and LoadAudioData() refused";
+                return false;
+            }
+
+            // No wait loop on purpose. A non-background clip loads synchronously, so it is
+            // already resident here; if it is not, the load went asynchronous after all and no
+            // amount of blocking in this method will ever integrate it (see above).
+            if (clip.loadState != AudioDataLoadState.Loaded)
+            {
+                detail = $"samples are not resident ({state}) and the load did not complete " +
+                         $"synchronously (ended in {clip.loadState})";
+                return false;
+            }
+
+            notes.Add("audio-loaded-on-demand");
+            detail = $"samples were not resident ({state}); loaded on demand";
+            return true;
         }
 
         /// <summary>Hands one bundle asset's native memory back the moment this tool is done
