@@ -21,6 +21,22 @@
 // because AssetBundle.GetAllAssetNames lowercases them while Mod.FindAssetNames matches
 // case-sensitively - an asset the manifest does not list cannot have its casing recovered.
 //
+// Audio comes back as 16-bit PCM .wav and nothing else. A bundle keeps an AudioClip as decoded
+// samples, not as the file the author imported, so there is no original to copy out - the
+// container is rebuilt around the samples (EncodeWav) and a source .ogg therefore changes its
+// runtime lookup name to .wav, counted like the texture case.
+//
+// AND IT ONLY REACHES CLIPS THE AUTHOR IMPORTED AS DecompressOnLoad. AudioClip.GetData reads
+// decoded PCM, so a Streaming clip (samples never in memory) and a CompressedInMemory one
+// (samples still encoded, with no API that returns the encoded bytes) are both unreachable.
+// DecompressOnLoad is Unity's own default, so a clip nobody configured converts fine; a clip
+// somebody DID configure - which is what a large mod's music tends to be - may not. Those are
+// skipped, counted under "AudioClip(streaming)" / "AudioClip(compressed)" and warned about
+// individually, because for a music module that skip may be the entire module and the operator
+// has to learn it from the report rather than from a silent game. There is no workaround on
+// this side: the fix is the source audio, or a desktop rebuild of that module with its clips
+// set to DecompressOnLoad.
+//
 // Textures are not all colour. A compressed normal map has had its blue channel thrown away
 // and the remaining two swizzled into whichever channels its block format codes best, so
 // extracting one byte-for-byte produces an image that is not a normal map at all; DFU's
@@ -63,9 +79,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
     /// must never be summed together: skippedByType counts assets that did NOT reach the
     /// extraction - an unsupported type, a colliding output path, a path that escaped the root,
     /// a write that failed - so its total is a genuine loss report and is what a caller should
-    /// show as "N assets skipped". notesByType counts assets that WERE extracted but needed
-    /// something said about them: a texture re-encoded to .png under a new runtime lookup name,
-    /// or a path whose capitalisation the source manifest did not record.</summary>
+    /// show as "N assets skipped" - and for audio it is the ONLY record that a clip could not be
+    /// decoded at all, so it has to be read per key and not merely totalled. notesByType counts
+    /// assets that WERE extracted but needed something said about them: a texture re-encoded to
+    /// .png (or a clip to .wav) under a new runtime lookup name, or a path whose capitalisation
+    /// the source manifest did not record.</summary>
     public class ExtractReport
     {
         public string manifestPath;
@@ -150,6 +168,82 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                         if (!Claim(claimed, outPath, assetName, report))
                             continue;
                         if (!TryWriteFile(outPath, textAsset.bytes, outputRoot, assetName, report))
+                            continue;
+                        report.extracted.Add(outPath);
+                        CommitNotes(report, notes);
+                    }
+                    else if (obj is AudioClip clip)
+                    {
+                        // Same rule as textures, and for the same reason. A bundle keeps an
+                        // AudioClip as samples, not as the author's file, so the extraction has
+                        // to re-author a container - and the only one that can be written from
+                        // raw samples without an encoder is PCM WAV. A source .ogg therefore
+                        // comes back as .wav, which moves DFU's runtime lookup key (the short
+                        // name WITH its extension) with it. Counted, not left silent.
+                        if (!outPath.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
+                        {
+                            notes.Add("extension-rewritten");
+                            Debug.LogWarning($"[MobileModExtractor] {assetName} is re-encoded as .wav, " +
+                                "so its runtime lookup name changes with it");
+                            outPath = Path.ChangeExtension(outPath, ".wav");
+                        }
+
+                        // THE LIMIT OF THIS WHOLE APPROACH. AudioClip.GetData reads DECODED
+                        // PCM, and only a DecompressOnLoad clip has any: Unity's own message is
+                        // "Cannot get data on compressed samples for audio clip ... Changing the
+                        // load type to DecompressOnLoad on the audio clip will fix this". A
+                        // Streaming clip never had its samples in memory; a CompressedInMemory
+                        // one holds them still encoded, and there is no API that hands the
+                        // encoded bytes back either. Neither is recoverable here at all.
+                        //
+                        // Unity's own default for an audio import is DecompressOnLoad, so the
+                        // clip an author never thought about DOES convert. The one an author
+                        // thought about may not: CompressedInMemory and Streaming are exactly
+                        // what a large mod's music gets set to, and a music module is where a
+                        // whole-mod loss would land.
+                        //
+                        // They are refused up front rather than left to fail inside GetData for
+                        // two reasons: GetData logs a Unity error per clip, and a music mod with
+                        // a thousand of them would bury the report that matters under a thousand
+                        // stack traces; and the load type is the actual diagnosis, so it belongs
+                        // in the warning. Each is counted under its own key, because the two need
+                        // different things from the mod author.
+                        //
+                        // Both refusals come BEFORE Claim on purpose: a clip whose samples
+                        // cannot be read is not a writer, and letting it reserve the output path
+                        // would cost a sibling that could actually have been written there (a
+                        // streaming "song.ogg" beside a readable "song.wav" is one mod away).
+                        if (clip.loadType != AudioClipLoadType.DecompressOnLoad)
+                        {
+                            Skipped(report, clip.loadType == AudioClipLoadType.Streaming
+                                ? "AudioClip(streaming)" : "AudioClip(compressed)");
+                            Debug.LogWarning($"[MobileModExtractor] skipped {assetName}: its " +
+                                $"load type is {clip.loadType}, and AudioClip.GetData can only " +
+                                "read a clip imported as DecompressOnLoad. The samples are not " +
+                                "reachable through any API here, so this clip cannot be " +
+                                "converted from the bundle at all - it has to come from the " +
+                                "module's source audio, or from a rebuild of the desktop mod " +
+                                "with this clip set to DecompressOnLoad.");
+                            continue;
+                        }
+
+                        var samples = new float[clip.samples * clip.channels];
+                        if (!clip.GetData(samples, 0))
+                        {
+                            // Backstop: the load type said this should have worked. Something
+                            // else did not - a clip with no samples, or a Unity-version change
+                            // in what GetData accepts - and either way it is a loss, not a note.
+                            Skipped(report, "AudioClip(nodata)");
+                            Debug.LogWarning($"[MobileModExtractor] skipped {assetName}: GetData " +
+                                $"failed on a {clip.loadType} clip ({clip.samples} samples, " +
+                                $"{clip.channels} channels), which is not supposed to happen; " +
+                                "the clip is skipped rather than written as silence.");
+                            continue;
+                        }
+                        if (!Claim(claimed, outPath, assetName, report))
+                            continue;
+                        if (!TryWriteFile(outPath, EncodeWav(samples, clip.channels, clip.frequency),
+                                outputRoot, assetName, report))
                             continue;
                         report.extracted.Add(outPath);
                         CommitNotes(report, notes);
@@ -344,6 +438,65 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 (byte)Mathf.RoundToInt((x * 0.5f + 0.5f) * 255f),
                 (byte)Mathf.RoundToInt((y * 0.5f + 0.5f) * 255f),
                 (byte)Mathf.RoundToInt((z * 0.5f + 0.5f) * 255f), 255);
+        }
+
+        /// <summary>Wraps raw float samples in a canonical 44-byte RIFF/WAVE header as 16-bit
+        /// little-endian PCM - the one audio container that can be written from samples alone,
+        /// with no encoder. This is the whole of the audio extraction: an AssetBundle stores an
+        /// AudioClip as decoded samples and keeps nothing of the file the author imported, so
+        /// there is no original to copy out and a container has to be built around them.
+        ///
+        /// 16-bit is not a compromise here. It is the width Unity's own importer decodes to for
+        /// everything it does not keep as float, it is what the converted mod is re-encoded FROM
+        /// (MobileConvertedModImporter puts it straight back into Vorbis), and it halves an
+        /// intermediate that is already hundreds of megabytes for a music pack.
+        ///
+        /// Samples are clamped rather than cast. GetData can hand back values outside [-1,1] -
+        /// a hot master, or any DSP that overshot - and the naive cast WRAPS: 1.5 scales to
+        /// 49150, which truncates to -16386 and turns a loud peak into an equally loud click of
+        /// the opposite sign. A NaN is flattened to silence for the same reason: casting one to
+        /// an integer is undefined and yields whatever the platform's conversion happens to do.
+        /// </summary>
+        public static byte[] EncodeWav(float[] samples, int channels, int frequency)
+        {
+            if (samples == null)
+                samples = new float[0];
+            // A clip that reports nonsense must still produce a file a decoder can open.
+            channels = Mathf.Max(1, channels);
+            frequency = Mathf.Max(1, frequency);
+
+            const short formatPcm = 1;
+            const short bitsPerSample = 16;
+            short blockAlign = (short)(channels * (bitsPerSample / 8));
+            int byteRate = frequency * blockAlign;
+            int dataBytes = samples.Length * (bitsPerSample / 8);
+
+            var stream = new MemoryStream(44 + dataBytes);
+            // BinaryWriter is little-endian on every runtime .NET defines, which is exactly
+            // what RIFF wants; nothing here needs a byte order swap.
+            using (var w = new BinaryWriter(stream))
+            {
+                w.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));
+                w.Write(36 + dataBytes);              // everything after this field
+                w.Write(System.Text.Encoding.ASCII.GetBytes("WAVE"));
+                w.Write(System.Text.Encoding.ASCII.GetBytes("fmt "));
+                w.Write(16);                          // PCM fmt chunk size
+                w.Write(formatPcm);
+                w.Write((short)channels);
+                w.Write(frequency);
+                w.Write(byteRate);
+                w.Write(blockAlign);
+                w.Write(bitsPerSample);
+                w.Write(System.Text.Encoding.ASCII.GetBytes("data"));
+                w.Write(dataBytes);
+                foreach (float sample in samples)
+                {
+                    float s = float.IsNaN(sample) ? 0f : Mathf.Clamp(sample, -1f, 1f);
+                    w.Write((short)Mathf.RoundToInt(s * short.MaxValue));
+                }
+                w.Flush();
+                return stream.ToArray();
+            }
         }
 
         /// <summary>The asset did not make it into the extraction.</summary>
@@ -623,6 +776,35 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             return ParseList(Env(NoMipVar), DefaultNoMipMarkers);
         }
 
+        /// <summary>Vorbis quality for converted audio. 0.7 rather than Unity's 1.0: the top of
+        /// the scale spends bandwidth on detail a phone speaker or a pair of earbuds cannot
+        /// resolve, and this is applied to every clip in a 74MB sound pack and a 273MB music
+        /// one at once.</summary>
+        public const float VorbisQuality = 0.7f;
+
+        /// <summary>Above this, a clip is treated as a song and streamed; below it, as a sound
+        /// effect and kept compressed in memory. The split matters in both directions - a
+        /// resident song is megabytes the device does not get back, and a streamed sound effect
+        /// misses the frame it was triggered on - so neither setting is safe as a blanket rule.
+        ///
+        /// It is measured on the EXTRACTED file, which this converter always writes as
+        /// uncompressed 16-bit PCM, so it is really a duration threshold wearing a size: 2MB is
+        /// about 12 seconds of mono 22kHz or 6 seconds of stereo 44.1kHz. That is comfortably
+        /// above any sound effect and far below any song, which is exactly where a threshold
+        /// that has to separate the two wants to sit.</summary>
+        public const long StreamingThresholdBytes = 2 * 1024 * 1024;
+
+        /// <summary>The song/effect split, as a decision rather than an expression buried in the
+        /// postprocessor - the streaming half is unreachable from a small test fixture, and an
+        /// untested branch on the memory-critical path is the thing this suite exists to
+        /// prevent.</summary>
+        public static AudioClipLoadType LoadTypeForSize(long fileBytes)
+        {
+            return fileBytes > StreamingThresholdBytes
+                ? AudioClipLoadType.Streaming            // songs
+                : AudioClipLoadType.CompressedInMemory;  // sound effects
+        }
+
         static string Env(string name) { return Environment.GetEnvironmentVariable(name); }
 
         /// <summary>True when this asset is minified in use and should carry mipmaps.</summary>
@@ -794,11 +976,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             var importer = (AudioImporter)assetImporter;
             var settings = importer.defaultSampleSettings;
             settings.compressionFormat = AudioCompressionFormat.Vorbis;
-            settings.quality = 0.7f;
-            long size = new FileInfo(assetPath).Length;
-            settings.loadType = size > 2 * 1024 * 1024
-                ? AudioClipLoadType.Streaming            // songs
-                : AudioClipLoadType.CompressedInMemory;  // sound effects
+            settings.quality = MobileConvertedModPolicy.VorbisQuality;
+            settings.loadType = MobileConvertedModPolicy.LoadTypeForSize(
+                new FileInfo(assetPath).Length);
             importer.defaultSampleSettings = settings;
         }
     }

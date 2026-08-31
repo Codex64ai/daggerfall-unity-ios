@@ -12,6 +12,9 @@
         "Assets/Editor/TestFixtures/ExtractorFixture/fixture_tex.tga",
         "Assets/Editor/TestFixtures/ExtractorFixture/fixture_wall_Normal.png",
         "Assets/Editor/TestFixtures/ExtractorFixture/fixture_wall_Height.png",
-        "Assets/Editor/TestFixtures/ExtractorFixture/fixture_lone.tga"
+        "Assets/Editor/TestFixtures/ExtractorFixture/fixture_lone.tga",
+        "Assets/Editor/TestFixtures/ExtractorFixture/fixture_beep.wav",
+        "Assets/Editor/TestFixtures/ExtractorFixture/fixture_stream.wav",
+        "Assets/Editor/TestFixtures/ExtractorFixture/fixture_packed.wav"
     ]
 }

@@ -19,6 +19,7 @@
 //
 // Place in Assets/Editor/
 
+using System;
 using DaggerfallWorkshop.Game.Mobile;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
 using FullSerializer;
@@ -84,6 +85,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestModBundleRoundTrip();
             TestModScriptSkipRule();
             TestNormalReconstructRule();
+            TestWavEncoderRule();
             TestConvertedModImportPolicy();
             TestModExtractorRoundTrip();
             TestModExtractorPathContainment();
@@ -1146,6 +1148,71 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         }
 
         /// <summary>
+        /// The WAV container the extractor writes, as a pure function. A bundle's AudioClip is
+        /// float samples in memory and nothing else - whatever the author imported is gone - so
+        /// the extraction has to build a file format from scratch, and a header that is wrong by
+        /// one field produces a file every tool refuses or, worse, one that decodes at the wrong
+        /// rate. The layout is the standard 44-byte canonical RIFF/WAVE: "RIFF", size-8, "WAVE",
+        /// "fmt " with 16 bytes of PCM fields, then "data" with the payload size.
+        /// </summary>
+        static void TestWavEncoderRule()
+        {
+            // The brief's shape check: four mono samples at 8kHz is 44 header bytes + 8 payload,
+            // and +1.0 is the top of the 16-bit range.
+            byte[] wav = MobileModExtractor.EncodeWav(new float[] { 0f, 1f, -1f, 0f }, 1, 8000);
+            Check(wav.Length == 44 + 8 && wav[0] == (byte)'R'
+                  && BitConverter.ToInt16(wav, 46) == short.MaxValue,
+                  "EncodeWav writes 16-bit PCM with RIFF header", "len=" + wav.Length);
+
+            // Every field of the header, by offset. These are what a decoder actually reads;
+            // a plausible-looking file with byteRate or blockAlign wrong plays at the wrong
+            // speed rather than failing loudly, which is the failure mode worth pinning.
+            Check(System.Text.Encoding.ASCII.GetString(wav, 0, 4) == "RIFF"
+                  && System.Text.Encoding.ASCII.GetString(wav, 8, 4) == "WAVE"
+                  && System.Text.Encoding.ASCII.GetString(wav, 12, 4) == "fmt "
+                  && System.Text.Encoding.ASCII.GetString(wav, 36, 4) == "data",
+                  "canonical chunk ids at the canonical offsets");
+            Check(BitConverter.ToInt32(wav, 4) == wav.Length - 8
+                  && BitConverter.ToInt32(wav, 40) == 8,
+                  "RIFF size is the file minus 8; data size is the payload",
+                  "riff=" + BitConverter.ToInt32(wav, 4) + " data=" + BitConverter.ToInt32(wav, 40));
+            Check(BitConverter.ToInt32(wav, 16) == 16 && BitConverter.ToInt16(wav, 20) == 1
+                  && BitConverter.ToInt16(wav, 34) == 16,
+                  "fmt chunk is 16 bytes, format tag 1 (PCM), 16 bits per sample");
+            Check(BitConverter.ToInt16(wav, 22) == 1 && BitConverter.ToInt32(wav, 24) == 8000
+                  && BitConverter.ToInt32(wav, 28) == 8000 * 1 * 2
+                  && BitConverter.ToInt16(wav, 32) == 1 * 2,
+                  "mono 8kHz: byteRate = freq*channels*2, blockAlign = channels*2",
+                  "byteRate=" + BitConverter.ToInt32(wav, 28) + " align=" + BitConverter.ToInt16(wav, 32));
+
+            // Stereo changes two derived fields and nothing else; getting them from the channel
+            // count rather than assuming mono is the difference between a stereo song and a
+            // stereo song played at half speed.
+            byte[] st = MobileModExtractor.EncodeWav(new float[] { 0f, 0f, 0f, 0f }, 2, 44100);
+            Check(BitConverter.ToInt16(st, 22) == 2 && BitConverter.ToInt32(st, 28) == 44100 * 2 * 2
+                  && BitConverter.ToInt16(st, 32) == 4 && st.Length == 44 + 8,
+                  "stereo derives byteRate and blockAlign from the channel count",
+                  "byteRate=" + BitConverter.ToInt32(st, 28) + " align=" + BitConverter.ToInt16(st, 32));
+
+            // Clamping is not decoration. AudioClip.GetData can hand back samples outside
+            // [-1,1] - a mod mastered hot, or any DSP that overshot - and the naive cast wraps:
+            // 1.5*32767 is 49150, which truncates to -16386 and turns a loud peak into a loud
+            // click of the opposite sign. Clamp, do not wrap.
+            byte[] hot = MobileModExtractor.EncodeWav(new float[] { 1.5f, -1.5f, float.NaN }, 1, 8000);
+            Check(BitConverter.ToInt16(hot, 44) == short.MaxValue
+                  && BitConverter.ToInt16(hot, 46) == -short.MaxValue,
+                  "samples past full scale clamp instead of wrapping round",
+                  "hi=" + BitConverter.ToInt16(hot, 44) + " lo=" + BitConverter.ToInt16(hot, 46));
+            Check(BitConverter.ToInt16(hot, 48) == 0, "a NaN sample becomes silence, not a garbage byte",
+                  "nan=" + BitConverter.ToInt16(hot, 48));
+
+            // An empty clip is a legal one: header only, and no decoder is asked to read past it.
+            byte[] empty = MobileModExtractor.EncodeWav(new float[0], 1, 22050);
+            Check(empty.Length == 44 && BitConverter.ToInt32(empty, 40) == 0,
+                  "an empty clip still produces a valid header-only file", "len=" + empty.Length);
+        }
+
+        /// <summary>
         /// The converted-mod import policy, as pure rules. This is the memory-critical part of
         /// the pipeline: against 1.72GB of DREAM textures plus ~3.7GB of sprite modules on an
         /// 8GB iPad, the size cap, the mipmap decision and the ASTC block size are the three
@@ -1230,6 +1297,36 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobileConvertedModPolicy.ParseList(null, markers) == markers
                   && MobileConvertedModPolicy.ParseList("  ", markers) == markers,
                   "unset or blank keeps DFU's derived defaults");
+
+            // The audio half of the policy: songs stream, effects sit compressed in memory.
+            // Both directions cost something real if they are got wrong - a resident song is
+            // megabytes the device never gets back, a streamed effect misses the frame it was
+            // triggered on - and the streaming side is the only part of this policy that is
+            // NOT what Unity would have done anyway, which makes it the part worth a test. It
+            // is checked here rather than through a fixture because reaching it needs a file
+            // over 2MB, and committing 2MB of silence to prove a comparison is not a trade
+            // this repo should make.
+            const long mb = 1024 * 1024;
+            Check(MobileConvertedModPolicy.LoadTypeForSize(64 * 1024)
+                      == AudioClipLoadType.CompressedInMemory,
+                  "a sound effect stays compressed in memory, never streamed");
+            Check(MobileConvertedModPolicy.LoadTypeForSize(30 * mb) == AudioClipLoadType.Streaming,
+                  "a song streams instead of sitting resident");
+            // The threshold is read against the extraction's own output, which is always
+            // uncompressed 16-bit PCM, so it is a duration rule wearing a size: 2MB is ~12s of
+            // mono 22kHz. Both sides of the boundary are pinned so a later "just round it up"
+            // cannot quietly move songs into memory.
+            Check(MobileConvertedModPolicy.LoadTypeForSize(MobileConvertedModPolicy.StreamingThresholdBytes)
+                      == AudioClipLoadType.CompressedInMemory
+                  && MobileConvertedModPolicy.LoadTypeForSize(
+                      MobileConvertedModPolicy.StreamingThresholdBytes + 1)
+                      == AudioClipLoadType.Streaming,
+                  "the boundary itself is an effect; one byte past it is a song");
+            Check(MobileConvertedModPolicy.StreamingThresholdBytes == 2 * mb
+                  && Mathf.Abs(MobileConvertedModPolicy.VorbisQuality - 0.7f) < 0.001f,
+                  "the audio policy's two constants are the argued-for ones",
+                  MobileConvertedModPolicy.StreamingThresholdBytes + "B q"
+                      + MobileConvertedModPolicy.VorbisQuality);
         }
 
         /// <summary>
@@ -1256,7 +1353,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // 2. Extract it back.
             var report = MobileModExtractor.Extract(built[0], extractRoot);
             Check(File.Exists(report.manifestPath), "extractor writes a manifest", report.manifestPath);
-            Check(report.extracted.Count == 5, "extractor writes four textures + textasset",
+            Check(report.extracted.Count == 6, "extractor writes four textures + textasset + audio clip",
                   "extracted=" + report.extracted.Count);
 
             // 3. Path tail and short names preserved.
@@ -1264,6 +1361,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             string txt = report.extracted.Find(p => p.EndsWith("fixture_data.json"));
             string nrm = report.extracted.Find(p => p.EndsWith("fixture_wall_Normal.png"));
             string hgt = report.extracted.Find(p => p.EndsWith("fixture_wall_Height.png"));
+            string wav = report.extracted.Find(p => p.EndsWith("fixture_beep.wav"));
             // Mod.FindAssetNames accepts an asset whose directory ENDS WITH the requested one
             // and compares with a case-sensitive CompareOrdinal, while callers pass literal
             // capitalised paths ("Assets/Textures"). AssetBundle.GetAllAssetNames hands back
@@ -1488,6 +1586,161 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     nrmImp.textureType, nrmImp.sRGBTexture,
                     hgtImp.textureType, hgtImp.sRGBTexture));
 
+            // 3e. AUDIO. A bundle holds an AudioClip as decoded float samples and nothing
+            // else - the author's .wav/.ogg source is not in there - so extraction means
+            // re-authoring a container around the samples. The header checks below are the
+            // cheap half; the tone check after them is the half that matters, because a WAV of
+            // pure silence has a perfectly correct header, the right length and the right name.
+            Check(wav != null && File.Exists(wav), "audio clip extracted as .wav", wav ?? "missing");
+            byte[] wavBytes = wav != null ? File.ReadAllBytes(wav) : new byte[0];
+            Check(wavBytes.Length > 44
+                  && wavBytes[0] == (byte)'R' && wavBytes[1] == (byte)'I'
+                  && wavBytes[2] == (byte)'F' && wavBytes[3] == (byte)'F',
+                  "extracted audio is a RIFF file with a payload", "bytes=" + wavBytes.Length);
+
+            var clip = wav != null ? AssetDatabase.LoadAssetAtPath<AudioClip>(wav) : null;
+            Check(clip != null && clip.frequency == 22050 && clip.channels == 1,
+                  "extracted clip re-imports at the fixture's rate and channel count",
+                  clip == null ? "no clip" : clip.frequency + "Hz x" + clip.channels);
+            Check(clip != null && clip.length > 0.24f && clip.length < 0.26f,
+                  "extracted clip is the fixture's 0.25s",
+                  clip == null ? "no clip" : clip.length.ToString("F4") + "s");
+
+            // THE CHECK THAT MATTERS for audio. Correlate the written PCM against the fixture's
+            // own 440Hz generator (sin and cos, so phase does not matter) and against a decoy
+            // frequency that is not in the fixture at all. Silence, a DC offset, a half-rate
+            // header or samples that wrapped instead of clamping all leave the 440Hz magnitude
+            // far from the fixture's 0.8 amplitude; only real, correctly-rated audio lands on it.
+            double sin440 = 0, cos440 = 0, sinDecoy = 0, cosDecoy = 0, peak = 0;
+            int frames = Mathf.Max(0, (wavBytes.Length - 44) / 2);
+            for (int i = 0; i < frames; i++)
+            {
+                double v = BitConverter.ToInt16(wavBytes, 44 + i * 2) / 32767.0;
+                if (Math.Abs(v) > peak) peak = Math.Abs(v);
+                double t = i / 22050.0;
+                sin440 += v * Math.Sin(2 * Math.PI * 440 * t);
+                cos440 += v * Math.Cos(2 * Math.PI * 440 * t);
+                sinDecoy += v * Math.Sin(2 * Math.PI * 1300 * t);
+                cosDecoy += v * Math.Cos(2 * Math.PI * 1300 * t);
+            }
+            double mag440 = frames > 0 ? 2 * Math.Sqrt(sin440 * sin440 + cos440 * cos440) / frames : 0;
+            double magDecoy = frames > 0 ? 2 * Math.Sqrt(sinDecoy * sinDecoy + cosDecoy * cosDecoy) / frames : 0;
+            Check(frames > 5000 && frames < 6000, "extracted PCM holds ~0.25s of 22050Hz mono frames",
+                  "frames=" + frames);
+            Check(mag440 > 0.5 && mag440 < 1.0 && magDecoy < 0.1,
+                  "extracted audio still IS the fixture's 440Hz tone",
+                  "440Hz=" + mag440.ToString("F3") + " decoy1300Hz=" + magDecoy.ToString("F3")
+                      + " peak=" + peak.ToString("F3"));
+
+            // THE LOUD SKIPS, and the reason this test carries three audio fixtures that are
+            // byte-for-byte the same sound. AudioClip.GetData reads DECODED PCM, so it serves
+            // only a clip the author imported as DecompressOnLoad; Unity says so itself
+            // ("Cannot get data on compressed samples for audio clip ... Changing the load type
+            // to DecompressOnLoad on the audio clip will fix this"). The other two load types
+            // are therefore not extractable AT ALL by this route, and the only difference
+            // between these three fixtures is the load type in their .meta - so a skip here can
+            // have no other cause.
+            //
+            // Unity's default is DecompressOnLoad, so the clip an author never configured does
+            // convert - fixture_beep.wav carries Unity's own generated .meta and is the proof.
+            // But music is the part of a mod an author DOES configure, and both of the settings
+            // they would reach for are unreadable. If DREAM's 273MB music module turns out to be
+            // streamed, the whole module is unconvertible and this report is the only place
+            // anyone would find that out - so it is counted per load type and warned about per
+            // clip, never silently totalled.
+            int streamSkipped, packedSkipped, noData;
+            report.skippedByType.TryGetValue("AudioClip(streaming)", out streamSkipped);
+            report.skippedByType.TryGetValue("AudioClip(compressed)", out packedSkipped);
+            report.skippedByType.TryGetValue("AudioClip(nodata)", out noData);
+            Check(streamSkipped == 1, "a Streaming clip is skipped loudly, not silently dropped",
+                  "AudioClip(streaming)=" + streamSkipped);
+            Check(packedSkipped == 1,
+                  "a CompressedInMemory clip is skipped loudly too, for the same reason",
+                  "AudioClip(compressed)=" + packedSkipped);
+            Check(noData == 0, "no clip reached the GetData backstop: the load type caught both",
+                  "AudioClip(nodata)=" + noData);
+            Check(report.extracted.Find(p => p.EndsWith("fixture_stream.wav")) == null
+                  && report.extracted.Find(p => p.EndsWith("fixture_packed.wav")) == null,
+                  "the unreadable clips really are absent from the extraction");
+            Check(!report.notesByType.ContainsKey("AudioClip(streaming)")
+                  && !report.notesByType.ContainsKey("AudioClip(compressed)"),
+                  "a skip is a loss, so it is never filed as a note about a survivor");
+
+            // 3f. The audio half of the import policy - MobileConvertedModImporter.OnPreprocessAudio -
+            // which nothing in the suite could reach until audio was extracted, because the
+            // postprocessor is scoped to the extraction root and nothing had ever landed an
+            // AudioClip there. Songs must stream (a megabyte-per-minute resident song is what
+            // the memory budget cannot afford) and sound effects must not (a streamed effect
+            // stutters on its first frame), and that split is decided by file size here.
+            var clipImp = wav != null ? AssetImporter.GetAtPath(wav) as AudioImporter : null;
+            var sampleSettings = clipImp != null ? clipImp.defaultSampleSettings
+                                                 : default(AudioImporterSampleSettings);
+            // Two of the three are proof rather than pins: measured against the live control
+            // below, Unity 6 defaults a .wav to DecompressOnLoad at quality 1.0, so the load
+            // type and the quality here are both the postprocessor's doing. Vorbis happens to
+            // coincide with Unity's default and is a regression pin only. The Streaming branch
+            // for songs cannot be reached by any fixture small enough to commit, so it is
+            // pinned as a pure rule in TestConvertedModImportPolicy instead.
+            Check(clipImp != null && sampleSettings.compressionFormat == AudioCompressionFormat.Vorbis,
+                  "converted audio is Vorbis, not raw PCM",
+                  clipImp == null ? "no importer" : sampleSettings.compressionFormat.ToString());
+            Check(clipImp != null && sampleSettings.loadType == AudioClipLoadType.CompressedInMemory,
+                  "a small clip is a sound effect: compressed in memory, never streamed",
+                  clipImp == null ? "no importer" : sampleSettings.loadType.ToString());
+            Check(clipImp != null && Mathf.Abs(sampleSettings.quality - 0.7f) < 0.001f,
+                  "converted audio carries the policy's Vorbis quality",
+                  clipImp == null ? "no importer" : sampleSettings.quality.ToString("F3"));
+
+            // Non-defaultness, PROVEN rather than claimed - the trap the texture block above
+            // documents in its own words ("those three would pass with the postprocessor
+            // deleted"). The source fixture is the same bytes as the extracted file but lives
+            // outside the extraction root, so the postprocessor never sees it, and its .meta is
+            // deliberately left at guid-only - which is exactly how Unity 6 records "every
+            // importer setting is at its default". Reading both importers and requiring them to
+            // differ is what turns the three checks above into evidence that the policy ran,
+            // without this test having to hard-code Unity's defaults and rot when they move.
+            // NON-DEFAULTNESS, PROVEN AGAINST A LIVE CONTROL rather than against a remembered
+            // value. fixture_beep.wav is the same bytes as the extracted file, sits outside the
+            // extraction root so the postprocessor never sees it, and carries the .meta UNITY
+            // ITSELF generated - so its importer is Unity's defaults, read at run time. Reading
+            // them instead of hard-coding them is what keeps this from rotting when Unity's
+            // defaults move, and it is what corrected this task's own first guess about what
+            // they were.
+            const string defaultFixture =
+                "Assets/Editor/TestFixtures/ExtractorFixture/fixture_beep.wav";
+            var srcImp = AssetImporter.GetAtPath(defaultFixture) as AudioImporter;
+            var srcSettings = srcImp != null ? srcImp.defaultSampleSettings
+                                             : default(AudioImporterSampleSettings);
+            string audioSettings = srcImp == null || clipImp == null ? "no importer"
+                : "default=" + srcSettings.compressionFormat + "/" + srcSettings.loadType
+                  + "/q" + srcSettings.quality.ToString("F2")
+                  + " converted=" + sampleSettings.compressionFormat + "/"
+                  + sampleSettings.loadType + "/q" + sampleSettings.quality.ToString("F2");
+            Check(srcImp != null && clipImp != null
+                  && Mathf.Abs(srcSettings.quality - sampleSettings.quality) > 0.001f,
+                  "the converted clip's Vorbis quality is not the importer default",
+                  audioSettings);
+            Check(srcImp != null && clipImp != null
+                  && srcSettings.loadType != sampleSettings.loadType,
+                  "the converted clip's load type is not the importer default either",
+                  audioSettings);
+            // And the source really is readable, which is what makes it a control AND what
+            // makes the three skips above attributable to the load type and nothing else.
+            Check(srcImp != null && srcSettings.loadType == AudioClipLoadType.DecompressOnLoad,
+                  "Unity's default load type is DecompressOnLoad, so an unconfigured clip converts",
+                  audioSettings);
+
+            if (clipImp != null)
+                Debug.Log(string.Format("[MobileSelfTest] converted-mod audio policy produced: " +
+                    "format={0} loadType={1} quality={2} -> clip {3}Hz x{4} {5}s " +
+                    "(Unity's defaults for the same file: format={6} loadType={7} quality={8})",
+                    sampleSettings.compressionFormat, sampleSettings.loadType, sampleSettings.quality,
+                    clip == null ? 0 : clip.frequency, clip == null ? 0 : clip.channels,
+                    clip == null ? 0f : clip.length,
+                    srcImp == null ? "?" : srcSettings.compressionFormat.ToString(),
+                    srcImp == null ? "?" : srcSettings.loadType.ToString(),
+                    srcImp == null ? "?" : srcSettings.quality.ToString("F2")));
+
             // 4. Rewritten manifest points at extracted files, keeps identity.
             ModInfo info = null;
             ModManager._serializer.TryDeserialize(
@@ -1495,7 +1748,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(info != null && info.ModTitle == "Extractor Fixture"
                   && info.GUID == "0d2c4a68-9e1f-4b7a-8c35-6d0e2f4a6b8c",
                   "manifest identity preserved");
-            Check(info != null && info.Files.Count == 5
+            Check(info != null && info.Files.Count == 6
                   && info.Files.TrueForAll(f => File.Exists(f)),
                   "manifest Files rewritten to extracted paths");
 
