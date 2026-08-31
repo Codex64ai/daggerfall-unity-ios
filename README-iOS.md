@@ -470,7 +470,8 @@ from a silent game. Known limits, in the order they bite:
   decoded samples, and `AudioClip.GetData` only reads samples of a clip the author
   imported as `DecompressOnLoad`. That is Unity's default, so sound-effect packs convert
   fine - DREAM 2026's sound module is **340 of 340 clips, 0 skipped, in 33 seconds**
-  (10.1MB out, from 1100 seconds of audio). Music is the part an author *does* configure,
+  (10.1MB out, from 1100 seconds of audio); its `hud & menu` texture module is **332 of
+  332 assets in 32 seconds** (92MB in, 23MB out). Music is the part an author *does* configure,
   and `CompressedInMemory` or `Streaming` clips are unreachable through this route -
   DREAM's music module is 81 clips and this converter gets none of them, so it **fails
   with exit 1 and writes no bundle** rather than handing you a `.dfmod` that installs and
@@ -485,11 +486,15 @@ from a silent game. Known limits, in the order they bite:
   A clip that never loads is abandoned after `DFU_MOD_AUDIO_TIMEOUT` and counted as
   `AudioClip(async)`; if you see that key in a summary, the converter was not given the
   main loop back.
-- **Large texture packs need a machine with plenty of RAM.** Measured: in the editor,
-  releasing a bundle texture does not actually free it, so the decoded copy of every
-  texture accumulates until the whole bundle is unloaded at the end. A ~1.7GB texture
-  module is a real risk on a 16GB machine. Convert the big ones on the largest machine
-  you have, and one module at a time.
+- **Large texture packs need a machine with plenty of RAM, and this is the real limit.**
+  In the editor, releasing a bundle texture does not actually free it, so the decoded copy
+  of every texture accumulates until the whole bundle is unloaded at the end. Measured on
+  DREAM's `hud & menu` module - 92MB in, 330 textures, many of them 1920x1200 - peak
+  resident was **1.63GB against a ~1.0GB idle editor, so ~0.6GB for the module itself**.
+  That is roughly 7x the module's own file size. Scaling that shape to the ~1.7GB texture
+  module suggests something in the region of 10GB on top of the editor, which is not
+  comfortable on a 16GB machine. Convert the big ones on the largest machine you have, one
+  module at a time, and watch memory rather than assuming it will fit.
 - **Textures and audio change file extension.** Textures are re-encoded as `.png` and
   clips as `.wav`, which moves a texture's runtime lookup name with it (DFU keys on the
   short name *with* extension for textures, extensionless for audio). The summary counts
