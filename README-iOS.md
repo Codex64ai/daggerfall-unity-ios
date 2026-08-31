@@ -524,6 +524,23 @@ from a silent game. Known limits, in the order they bite:
   before this fix, re-convert it** - the old bundle has every texture non-readable and will
   freeze the UI. A conversion whose extraction folder has no such file warns once and
   imports non-readable.
+- **Classic UI art keeps its exact dimensions and its format; world textures do not.** DFU
+  does pixel-exact arithmetic on `.IMG`/`.CIF`/`.RCI` art: `DaggerfallTalkWindow` slices its
+  background with `GetPixels` rects computed as classic 320x200 coordinates scaled by the
+  *replacement* texture's own width, and `SpellIconCollection` refuses a block-compressed
+  atlas whose icons are not a multiple of 4. DREAM's talk art is 1920x1200 - exactly 6x the
+  classic canvas, so every rect lands on an integer - and clamping it to 1024 made that 3.2x,
+  truncating every one of them: the talk window opened with blank panels and dead buttons.
+  So that art is never downscaled, is left uncompressed where the author left it
+  uncompressed, and takes **ASTC 4x4** when a compressed source must be re-encoded (iOS
+  cannot decode BC7). The same applies to any texture the author left *both* uncompressed
+  and readable, whatever it is called - two independent signals that code reads its pixels.
+  World textures have no such contract and keep the memory-optimised policy (1024 cap, ASTC
+  6x6), which is where the gigabytes are.
+
+  **This makes converted UI-heavy modules much bigger**: `hud & menu` went from 22.8MB to
+  93.4MB, roughly its source size of 91.6MB. That is the cost of the UI working. It is a
+  device-storage cost, not a runtime-memory one for world content.
 - **Textures and audio change file extension.** Textures are re-encoded as `.png` and
   clips as `.wav`, which moves a texture's runtime lookup name with it (DFU keys on the
   short name *with* extension for textures, extensionless for audio). The summary counts
