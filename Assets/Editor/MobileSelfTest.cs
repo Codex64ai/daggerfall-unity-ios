@@ -1589,9 +1589,40 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // not proof it ran. The four below are not Unity defaults and cannot pass by
             // accident: npotScale defaults to ToNearest, maxTextureSize to 2048, and a texture
             // has no iOS platform override at all until something writes one.
-            Check(texImp != null && !texImp.isReadable
+            Check(texImp != null
                   && texImp.textureCompression == TextureImporterCompression.Compressed,
-                  "converted textures are compressed and keep no CPU-side copy");
+                  "converted textures are compressed");
+
+            // THE READ/WRITE FLAG IS THE AUTHOR'S, AND THE CONVERTER MUST NOT OVERRIDE IT.
+            // Forcing it off saved a CPU-side copy and froze the game on a device: DFU's
+            // TryImportTexture only LOGS when a non-readable texture reaches a caller that needs
+            // pixels and returns it anyway, and ImageReader's GetPixels32 then throws - every
+            // frame, inside the UI draw loop, which looks like a hang and is not one. DFU says
+            // whose call it is in its own remark: "It is up to mod authors to ensure that
+            // textures from asset bundles have `Read/Write Enabled` flag set when required."
+            // 202 of the 330 textures in DREAM's hud & menu module have it set.
+            //
+            // The two fixtures are the same 64x64 image and differ ONLY in that flag, so this
+            // pair can have no other explanation. fixture_readable.png is also the one that
+            // proves EncodeToPNG's null path, which is why it is readable in the first place.
+            var rdblImp = rdbl != null ? AssetImporter.GetAtPath(rdbl) as TextureImporter : null;
+            Check(rdblImp != null && rdblImp.isReadable,
+                  "a texture whose author marked it readable comes out READABLE",
+                  rdblImp == null ? "no importer" : "isReadable=" + rdblImp.isReadable);
+            Check(texImp != null && !texImp.isReadable,
+                  "a texture whose author did not stays non-readable, keeping the memory saving",
+                  texImp == null ? "no importer" : "isReadable=" + texImp.isReadable);
+            // And the carrier itself: a dot-prefixed file, so Unity never imports it as an asset
+            // and it can never reach a rebuilt bundle.
+            string sidecar = Path.Combine(extractRoot, MobileModExtractor.ReadableSidecarName);
+            Check(File.Exists(sidecar), "the extraction records the author's flags for the import",
+                  sidecar);
+            Check(File.Exists(sidecar) && File.ReadAllText(sidecar).Contains("fixture_readable.png")
+                  && !File.ReadAllText(sidecar).Contains("fixture_tex.png"),
+                  "and it lists exactly the readable one",
+                  File.Exists(sidecar) ? File.ReadAllText(sidecar).Replace("\n", " | ") : "missing");
+            Check(!report.extracted.Exists(p => p.EndsWith(MobileModExtractor.ReadableSidecarName)),
+                  "the sidecar is not an extracted asset and cannot reach the bundle");
             Check(texImp != null && texImp.npotScale == TextureImporterNPOTScale.None,
                   "converted textures keep their exact dimensions (DFU uv metadata depends on it)",
                   texImp == null ? "no importer" : texImp.npotScale.ToString());

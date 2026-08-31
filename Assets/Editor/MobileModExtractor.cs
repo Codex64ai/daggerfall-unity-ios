@@ -206,6 +206,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 bool loggedAudioLoad = false;   // see EnsureAudioData: logged once, counted always
                 long sweepBudget = SweepBudgetBytes();
                 DateTime lastYield = DateTime.UtcNow;
+                // Which textures the AUTHOR marked Read/Write Enabled. See ReadableSidecarName.
+                var readableTextures = new List<string>();
 
                 foreach (string assetName in ab.GetAllAssetNames())
                 {
@@ -273,6 +275,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                                 continue;
                             report.extracted.Add(outPath);
                             CommitNotes(report, notes);
+                            if (tex2d.isReadable)
+                                readableTextures.Add(outPath);
                         }
                         else if (obj is TextAsset textAsset)
                         {
@@ -465,6 +469,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                         yield return null;
                     }
                 }
+
+                // The author's readable flags, written where the import policy can find them.
+                // This has to happen BEFORE AssetDatabase.Refresh below, because that is what
+                // triggers the import that consults it.
+                WriteReadableSidecar(outputRoot, readableTextures, report);
 
                 // Manifest identity is preserved; only Files points at the extraction.
                 modInfo.Files = new List<string>(report.extracted);
@@ -1290,6 +1299,73 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             return string.Join(", ", parts.ToArray());
         }
 
+        /// <summary>Name of the file that carries the author's Read/Write Enabled flags from the
+        /// extraction to the import.
+        ///
+        /// It starts with a dot on purpose: Unity's AssetDatabase ignores dot-prefixed files
+        /// entirely, so this never becomes an asset, never gets a .meta, and can never end up
+        /// inside a rebuilt bundle. It is a note the extractor leaves for the postprocessor, not
+        /// content.</summary>
+        public const string ReadableSidecarName = ".readable-textures.txt";
+
+        /// <summary>Records which extracted textures came from a source the author had marked
+        /// Read/Write Enabled.
+        ///
+        /// WHY THIS EXISTS AT ALL. MobileConvertedModImporter used to force isReadable=false on
+        /// every converted texture, to save the CPU-side copy. That broke DFU on a device:
+        /// TextureReplacement.TryImportTexture only LOGS when a non-readable texture reaches a
+        /// caller that needs pixels and hands it over anyway, and ImageReader then calls
+        /// GetPixels32 on it - which throws, every frame, inside the UI draw loop. DFU says whose
+        /// call this is in its own remark (TextureReplacement.cs): "It is up to mod authors to
+        /// ensure that textures from asset bundles have `Read/Write Enabled` flag set when
+        /// required." The author's flag is therefore ground truth, and 202 of the 330 textures in
+        /// DREAM's hud &amp; menu module have it set.
+        ///
+        /// WHY A SIDECAR rather than fixing the flag up after import. The postprocessor cannot
+        /// see the source bundle - by import time it is gone - so the information has to be
+        /// carried. Re-importing each texture a second time with the corrected flag would work
+        /// and would double the ASTC compression bill for every texture in a multi-gigabyte
+        /// pack, which is the most expensive part of a conversion. A static map in memory would
+        /// be cheaper still and would not survive the reimport that a cache invalidation or a
+        /// GetVersion bump causes, silently reverting the fix later. A file next to the assets
+        /// survives both and is inspectable by hand.</summary>
+        static void WriteReadableSidecar(string outputRoot, List<string> readable,
+            ExtractReport report)
+        {
+            var lines = new List<string>();
+            foreach (string path in readable)
+            {
+                string rel = RelativeToRoot(path, outputRoot);
+                if (rel != null)
+                    lines.Add(rel);
+            }
+            lines.Sort(StringComparer.Ordinal);   // stable file across identical conversions
+            TryWriteFile(Path.Combine(outputRoot, ReadableSidecarName),
+                System.Text.Encoding.UTF8.GetBytes(string.Join("\n", lines.ToArray())),
+                outputRoot, "the readable-texture list", report);
+        }
+
+        /// <summary>An extracted asset's path relative to its extraction root, with forward
+        /// slashes - the spelling the sidecar stores and the importer looks up.</summary>
+        public static string RelativeToRoot(string path, string root)
+        {
+            if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(root))
+                return null;
+            string full, fullRoot;
+            try
+            {
+                full = Path.GetFullPath(path).Replace('\\', '/');
+                fullRoot = Path.GetFullPath(root).Replace('\\', '/');
+            }
+            catch (Exception) { return null; }
+            if (!fullRoot.EndsWith("/", StringComparison.Ordinal))
+                fullRoot += "/";
+            if (full.Length <= fullRoot.Length
+                || !full.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
+                return null;
+            return full.Substring(fullRoot.Length);
+        }
+
         /// <summary>The asset did not make it into the extraction.</summary>
         static void Skipped(ExtractReport report, string key) { Bump(report.skippedByType, key); }
 
@@ -1570,6 +1646,85 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         public static readonly string[] DefaultNoMipMarkers =
             { ".img", ".cif", ".rci", "/textures/img/", "/textures/cifrci/" };
 
+        // One parsed sidecar per converted mod, remembered with the file's stamp so an edit or a
+        // re-conversion is picked up without an editor restart. Import runs per asset and there
+        // are thousands of them; re-reading the file each time would be the expensive way to get
+        // the same answer.
+        static readonly Dictionary<string, KeyValuePair<string, HashSet<string>>> readableCache =
+            new Dictionary<string, KeyValuePair<string, HashSet<string>>>(StringComparer.Ordinal);
+        static readonly HashSet<string> warnedMissingSidecar = new HashSet<string>(StringComparer.Ordinal);
+
+        /// <summary>True when the mod author had Read/Write Enabled set on the texture this
+        /// asset was extracted from.
+        ///
+        /// A readable texture keeps a CPU-side copy, so it costs roughly double - and that is
+        /// exactly why this is not our decision to make. DFU's own contract
+        /// (TextureReplacement.cs) puts it on the mod author: "It is up to mod authors to ensure
+        /// that textures from asset bundles have `Read/Write Enabled` flag set when required."
+        /// Overriding it saved memory and froze the game.
+        ///
+        /// A missing sidecar means the extraction predates this mechanism, and there is no
+        /// honest default: false can crash the game and true can double a multi-gigabyte pack.
+        /// So it keeps the memory-cheap answer and says so ONCE per mod, naming the folder,
+        /// because "re-convert this mod" is the actual fix and a silent guess is what caused
+        /// this bug in the first place.</summary>
+        public static bool SourceWasReadable(string assetPath)
+        {
+            string path = (assetPath ?? string.Empty).Replace('\\', '/');
+            if (!path.StartsWith(Root, StringComparison.Ordinal))
+                return false;
+            int slash = path.IndexOf('/', Root.Length);
+            if (slash < 0)
+                return false;
+
+            string modRoot = path.Substring(0, slash);
+            string relative = path.Substring(slash + 1);
+            string sidecar = modRoot + "/" + MobileModExtractor.ReadableSidecarName;
+
+            string stamp;
+            try
+            {
+                var info = new FileInfo(sidecar);
+                stamp = info.Exists ? info.LastWriteTimeUtc.Ticks + ":" + info.Length : null;
+            }
+            catch (Exception) { stamp = null; }
+
+            if (stamp == null)
+            {
+                if (warnedMissingSidecar.Add(modRoot))
+                    Debug.LogWarning($"[MobileConvertedModPolicy] no {MobileModExtractor.ReadableSidecarName} " +
+                        $"in '{modRoot}', so the mod author's Read/Write Enabled flags are not " +
+                        "known; importing its textures non-readable, which is the memory-cheap " +
+                        "answer and the one that can make DFU throw on UI art. Re-convert this " +
+                        "mod to restore the flags.");
+                return false;
+            }
+
+            KeyValuePair<string, HashSet<string>> cached;
+            if (!readableCache.TryGetValue(modRoot, out cached) || cached.Key != stamp)
+            {
+                var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                try
+                {
+                    foreach (string line in File.ReadAllLines(sidecar))
+                    {
+                        string entry = line.Trim();
+                        if (entry.Length > 0)
+                            set.Add(entry);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[MobileConvertedModPolicy] could not read '{sidecar}': " +
+                        $"{ex.GetType().Name}. Importing this mod's textures non-readable.");
+                }
+                cached = new KeyValuePair<string, HashSet<string>>(stamp, set);
+                readableCache[modRoot] = cached;
+            }
+
+            return cached.Value.Contains(relative);
+        }
+
         public static int MaxTextureSize()
         {
             return ParseSize(Env(MaxSizeVar), DefaultMaxTextureSize);
@@ -1739,8 +1894,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
     /// there the assets are small and wanted on the CPU, here every default that keeps a second
     /// copy of a texture around is a copy the device cannot afford.
     ///
-    /// isReadable false drops the CPU-side mirror of every texture, which is pure waste for
-    /// content only the GPU ever samples and would otherwise double the cost. npotScale None
+    /// isReadable follows the MOD AUTHOR's Read/Write Enabled flag, and does not force anything.
+    /// Dropping the CPU-side mirror looks like pure waste avoided - it is a second copy of every
+    /// texture, so a readable one costs roughly double - but forcing it off froze the game on a
+    /// device: DFU hands a non-readable texture to callers that need pixels with only a log, and
+    /// ImageReader's GetPixels32 then throws every frame inside the UI draw loop. DFU's own
+    /// remark says whose call it is ("It is up to mod authors to ensure that textures from asset
+    /// bundles have `Read/Write Enabled` flag set when required"), so the memory it costs is the
+    /// author's decision and not this converter's. See MobileModExtractor.ReadableSidecarName. npotScale None
     /// keeps exact dimensions, since DFU's XML/uv metadata is written against the authored size
     /// and rescaling silently misaligns it. Normal maps are typed from the DFU *_Normal suffix so
     /// Unity compresses them as normal maps and shaders unpack them correctly; the other two
@@ -1762,7 +1923,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // ones - the scope check below runs per import, long after the version is compared - so
         // bumping it costs a full re-import. Change it when the policy changes, not otherwise.
         // An environment lever moving does NOT move this: reconvert the mod instead.
-        public override uint GetVersion() { return 2; }
+        public override uint GetVersion() { return 3; }
 
         static bool InScope(string assetPath)
         {
@@ -1775,7 +1936,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             if (!InScope(assetPath)) return;
             var importer = (TextureImporter)assetImporter;
             importer.npotScale = TextureImporterNPOTScale.None;   // exact sizes: DFU XML/uv metadata depends on them
-            importer.isReadable = false;                          // no CPU copy - memory matters here
+            // THE AUTHOR'S FLAG, NOT OURS. This used to be a flat isReadable=false to save the
+            // CPU-side copy, and that broke DFU on a device: a non-readable texture handed to a
+            // caller that needs pixels only produces a LOG from TryImportTexture, which returns
+            // it anyway, and ImageReader then calls GetPixels32 on it - throwing every frame
+            // inside the UI draw loop. The visible symptom is a frozen UI smeared with cursor
+            // trails, which looks like a hang and is not one. See ReadableSidecar.
+            importer.isReadable = MobileConvertedModPolicy.SourceWasReadable(assetPath);
             importer.textureCompression = TextureImporterCompression.Compressed;
             importer.maxTextureSize = MobileConvertedModPolicy.MaxTextureSize();
             importer.mipmapEnabled = MobileConvertedModPolicy.MipmapsAllowed()
