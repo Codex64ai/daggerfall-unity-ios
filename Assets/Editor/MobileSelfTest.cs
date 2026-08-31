@@ -1356,7 +1356,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // 2. Extract it back.
             var report = MobileModExtractor.Extract(built[0], extractRoot);
             Check(File.Exists(report.manifestPath), "extractor writes a manifest", report.manifestPath);
-            Check(report.extracted.Count == 6, "extractor writes four textures + textasset + audio clip",
+            Check(report.extracted.Count == 7, "extractor writes five textures + textasset + audio clip",
                   "extracted=" + report.extracted.Count);
 
             // 3. Path tail and short names preserved.
@@ -1365,6 +1365,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             string nrm = report.extracted.Find(p => p.EndsWith("fixture_wall_Normal.png"));
             string hgt = report.extracted.Find(p => p.EndsWith("fixture_wall_Height.png"));
             string wav = report.extracted.Find(p => p.EndsWith("fixture_beep.wav"));
+            string rdbl = report.extracted.Find(p => p.EndsWith("fixture_readable.png"));
             // Mod.FindAssetNames accepts an asset whose directory ENDS WITH the requested one
             // and compares with a case-sensitive CompareOrdinal, while callers pass literal
             // capitalised paths ("Assets/Textures"). AssetBundle.GetAllAssetNames hands back
@@ -1441,6 +1442,51 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(loaded && worst <= dxtTolerance, "extracted pixels match the fixture pattern",
                   "worst channel delta=" + worst + " at " + worstAt);
             UnityEngine.Object.DestroyImmediate(decoded);
+
+            // 3b-bis. THE READABLE-AND-COMPRESSED CASE, which is what real mod art actually is
+            // and which every fixture above misses. fixture_readable.png is fixture_tex.png with
+            // Read/Write Enabled ticked and nothing else changed, so it arrives in the bundle
+            // block-compressed AND readable - and Texture2D.EncodeToPNG serialises only a few
+            // uncompressed layouts, so on that texture it returns NULL. Silently: it does not
+            // throw, so a fast path that treats only exceptions as a decline hands the null
+            // straight out, and the write turns it into "ArgumentNullException: Value cannot be
+            // null" with no texture named anywhere in it.
+            //
+            // That is not a hypothetical either. It cost 180 of the 330 textures in DREAM's
+            // "hud & menu" module - every readable BC7 one - while the other 150 converted, so
+            // the module looked like a partial success rather than a bug. The pixel comparison
+            // is the half that matters: it proves the blit actually took over and produced the
+            // real image, rather than the null merely being swapped for a blank.
+            Check(rdbl != null && File.Exists(rdbl),
+                  "a readable COMPRESSED texture extracts at all (EncodeToPNG returns null on it)",
+                  rdbl ?? "missing");
+            int noContent;
+            report.skippedByType.TryGetValue("no-content", out noContent);
+            Check(noContent == 0 && !report.skippedByType.ContainsKey("write-failed"),
+                  "and it does not arrive at the write as a null buffer",
+                  "no-content=" + noContent);
+            var rdec = new Texture2D(2, 2);
+            bool rLoaded = rdbl != null && rdec.LoadImage(File.ReadAllBytes(rdbl));
+            Check(rLoaded && rdec.width == 64 && rdec.height == 64,
+                  "extracted readable-compressed png decodes at 64x64",
+                  rLoaded ? rdec.width + "x" + rdec.height : "did not decode");
+            Color32[] rpx = rLoaded ? rdec.GetPixels32() : new Color32[0];
+            int rWorst = 0;
+            string rWorstAt = "none";
+            for (int i = 0; rLoaded && i < samples.GetLength(0); i++)
+            {
+                int x = samples[i, 0], y = samples[i, 1];
+                Color32 got = rpx[(63 - y) * 64 + x];       // GetPixels32 is bottom-up
+                int d = Mathf.Max(Mathf.Abs(got.r - 4 * x % 256),
+                        Mathf.Max(Mathf.Abs(got.g - 4 * y % 256),
+                                  Mathf.Abs(got.b - (x ^ y) * 4 % 256)));
+                if (d > rWorst) { rWorst = d; rWorstAt = string.Format("({0},{1}) got {2},{3},{4}",
+                    x, y, got.r, got.g, got.b); }
+            }
+            Check(rLoaded && rWorst <= dxtTolerance,
+                  "the blit took over and produced the real image, not a blank",
+                  "worst channel delta=" + rWorst + " at " + rWorstAt);
+            UnityEngine.Object.DestroyImmediate(rdec);
 
             // 3c. THE SAME CHECK FOR NORMAL MAPS, where "the bytes came out" is even further
             // from "the asset survived". Unity does not store a normal map as an image of one:
@@ -1710,7 +1756,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // itself - so deleting the release, or letting one branch escape the try/finally
             // that performs it, drives them apart. This fixture deliberately exercises the
             // awkward paths as well as the happy one: two clips refused on load type, one
-            // refused on residency, one texture losing a collision, six assets written. If any
+            // refused on residency, one texture losing a collision, seven assets written. If any
             // of those paths stopped releasing, this is what would notice.
             Check(report.loaded > 0 && report.released == report.loaded,
                   "every bundle asset the loop loaded was released again, on every path",
@@ -1904,7 +1950,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(info != null && info.ModTitle == "Extractor Fixture"
                   && info.GUID == "0d2c4a68-9e1f-4b7a-8c35-6d0e2f4a6b8c",
                   "manifest identity preserved");
-            Check(info != null && info.Files.Count == 6
+            Check(info != null && info.Files.Count == 7
                   && info.Files.TrueForAll(f => File.Exists(f)),
                   "manifest Files rewritten to extracted paths");
 

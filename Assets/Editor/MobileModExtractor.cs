@@ -634,7 +634,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
                 foreach (string built in driverBuilt)
                     Debug.Log("[MobileModExtractor] built " + built);
-                Debug.Log($"[MobileModExtractor] done in {elapsed:F1}s.");
+                // Re-read the clock: `elapsed` above was sampled BEFORE the step that just ran,
+                // and a module with no audio to wait on does all of its work inside the very
+                // first one - which reported a 30-second conversion as "done in 0.0s".
+                Debug.Log("[MobileModExtractor] done in " +
+                    (DateTime.UtcNow - driverStarted).TotalSeconds.ToString("F1") + "s.");
                 FinishDriver(driverBuilt.Count > 0 ? 0 : 1);
             }
             catch (Exception ex)
@@ -1171,6 +1175,21 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         static bool TryWriteFile(string path, byte[] bytes, string outputRoot, string sourceName,
             ExtractReport report)
         {
+            // Nothing should reach here with no bytes - every producer either returns content or
+            // throws. But this is the one place every write passes through, and the cost of a
+            // recurrence differs enormously: as a named skip it costs one asset and says which,
+            // whereas File.WriteAllBytes turns it into "ArgumentNullException: Value cannot be
+            // null", an error about an argument that names nothing. That exact confusion cost a
+            // whole module once (see TexturePng.Encode).
+            if (bytes == null)
+            {
+                Skipped(report, "no-content");
+                Debug.LogWarning($"[MobileModExtractor] {sourceName} produced no bytes to write " +
+                    $"to '{path}'; skipping it rather than writing an empty file. This is a bug " +
+                    "in whatever produced it, not a property of the mod - please report it.");
+                return false;
+            }
+
             if (!IsInsideRoot(path, outputRoot))
             {
                 Skipped(report, "path-escape");
@@ -1250,17 +1269,31 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// they are encoded - how a swizzled normal map gets its blue channel back.</param>
         public static byte[] Encode(Texture2D src, bool linear, Func<Color32, Color32> perPixel = null)
         {
+            // The fast path is an optimisation and is allowed to decline, in EITHER of the two
+            // ways it can. It can throw - and it can RETURN NULL, which is what EncodeToPNG does
+            // for a format it cannot serialise, silently and without complaint. That second case
+            // is not exotic: EncodeToPNG handles only a few uncompressed layouts, so a texture
+            // that is readable AND block-compressed hits it every time, and "readable and
+            // block-compressed" is what a real mod's art actually is - 180 of the 330 textures in
+            // DREAM's hud & menu module are readable BC7. Treating only the throw as a decline
+            // let those 180 return null from here, which surfaced three layers away as
+            // "ArgumentNullException: Value cannot be null" out of File.WriteAllBytes, blamed on
+            // the write. The fixtures never caught it because they are RGB24/RGBA32, the one
+            // family EncodeToPNG does handle.
+            byte[] fast = null;
             if (src.isReadable)
             {
                 try
                 {
-                    if (perPixel == null)
-                        return src.EncodeToPNG();
-                    return EncodePixels(Transform(src.GetPixels32(), perPixel),
-                                        src.width, src.height, linear);
+                    fast = perPixel == null
+                        ? src.EncodeToPNG()
+                        : EncodePixels(Transform(src.GetPixels32(), perPixel),
+                                       src.width, src.height, linear);
                 }
                 catch (Exception) { /* fall through to GPU path */ }
             }
+            if (fast != null && fast.Length > 0)
+                return fast;
             // Graphics.Blit against the null device is a silent no-op: ReadPixels then returns
             // a uniform grey and the extraction looks entirely successful - right name, right
             // path, right size, no pixels. Corrupting a mod quietly is worse than not
@@ -1268,9 +1301,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null)
                 throw new InvalidOperationException(
                     "Cannot decode texture '" + src.name + "' (format " + src.format +
-                    ", not readable): decoding a compressed or non-readable bundle texture needs a " +
-                    "real graphics device, and this Unity process has none. Re-run the extraction " +
-                    "WITHOUT the -nographics flag ('-batchmode -quit' on its own is fine).");
+                    ", isReadable " + src.isReadable + "): this texture cannot be encoded " +
+                    "directly - a compressed one never can, whether or not it is readable - so " +
+                    "it has to be decoded by a GPU blit, and this Unity process has no graphics " +
+                    "device. Re-run the conversion WITHOUT the -nographics flag ('-batchmode' " +
+                    "on its own is right; see README-iOS.md).");
 
             var rt = RenderTexture.GetTemporary(src.width, src.height, 0,
                 RenderTextureFormat.ARGB32,
@@ -1287,6 +1322,17 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 tmp.Apply();
                 byte[] png = tmp.EncodeToPNG();
                 UnityEngine.Object.DestroyImmediate(tmp);
+                // This method must never hand back null. A null here would travel silently to
+                // the write and arrive as "Value cannot be null" with no texture named in it -
+                // an error about an argument, three layers from the texture that caused it.
+                // tmp is RGBA32, which EncodeToPNG does handle, so this should be unreachable;
+                // if it ever is reached, say WHICH texture and in what state.
+                if (png == null || png.Length == 0)
+                    throw new InvalidOperationException(
+                        "Could not encode texture '" + src.name + "' to PNG even after a GPU " +
+                        "blit (source format " + src.format + ", graphicsFormat " +
+                        src.graphicsFormat + ", isReadable " + src.isReadable + ", " +
+                        src.width + "x" + src.height + ").");
                 return png;
             }
             finally

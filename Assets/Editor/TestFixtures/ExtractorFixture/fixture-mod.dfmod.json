@@ -16,6 +16,7 @@
         "Assets/Editor/TestFixtures/ExtractorFixture/fixture_beep.wav",
         "Assets/Editor/TestFixtures/ExtractorFixture/fixture_stream.wav",
         "Assets/Editor/TestFixtures/ExtractorFixture/fixture_packed.wav",
-        "Assets/Editor/TestFixtures/ExtractorFixture/fixture_async.wav"
+        "Assets/Editor/TestFixtures/ExtractorFixture/fixture_async.wav",
+        "Assets/Editor/TestFixtures/ExtractorFixture/fixture_readable.png"
     ]
 }
