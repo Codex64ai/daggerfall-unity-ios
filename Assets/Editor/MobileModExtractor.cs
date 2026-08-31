@@ -9,14 +9,21 @@
 // One mod at a time, from the command line (Convert is the same chain as a method call):
 //
 //   env DFU_MOD_IN="$HOME/Downloads/dream - sound.dfmod" DFU_MOD_OUT=$HOME/dev/dfu-mods \
-//   Unity -batchmode -quit -projectPath <proj> \
+//   Unity -batchmode -projectPath <proj> \
 //     -executeMethod DaggerfallWorkshop.Game.Mobile.EditorTools.MobileModExtractor.ConvertFromEnv
 //
-//   DFU_MOD_IN       the desktop .dfmod to convert              required
-//   DFU_MOD_OUT      where the rebuilt bundles are written      default ~/dev/dfu-mods
-//   DFU_MOD_TARGETS  comma-separated Unity BuildTarget names    default iOS
+//   DFU_MOD_IN            the desktop .dfmod to convert            required
+//   DFU_MOD_OUT           where the rebuilt bundles are written    default ~/dev/dfu-mods
+//   DFU_MOD_TARGETS       comma-separated Unity BuildTarget names  default iOS
+//   DFU_MOD_AUDIO_TIMEOUT seconds allowed for one clip's load      default 10
+//   DFU_MOD_TIMEOUT       seconds allowed for the whole run        default 14400
 //
-// No -nographics in that line, and it is not an oversight: see the GPU-blit note below.
+// NO -quit AND NO -nographics, and neither is an oversight. -nographics: see the GPU-blit note
+// below. -quit: the conversion has to hand control back to Unity between steps (see the audio
+// note), and -quit kills the process before the first frame of that ever runs - so it would
+// convert NOTHING and exit 0. ConvertFromEnv refuses it outright rather than letting that
+// happen, and exits by itself instead: 0 when a bundle was written, 1 on failure - including a
+// conversion that saved nothing, which never gets a bundle - and 2 if the watchdog gives up.
 //
 // v1 handles Texture2D, AudioClip and TextAsset (added per task); everything else is
 // skipped and counted in the report. Extraction output goes under Assets/Game/Mods/Converted/,
@@ -49,21 +56,20 @@
 // this side: the fix is the source audio, or a desktop rebuild of that module with its clips
 // set to DecompressOnLoad.
 //
-// AND ONE MORE THING, WHICH IS ABOUT HOW THIS TOOL IS DRIVEN RATHER THAN ABOUT ANY MOD.
-// DecompressOnLoad says how a clip is decoded, not that it is decoded yet: a clip with
-// Preload Audio Data off arrives with no samples, and has to be asked for them. That much this
-// does. But a clip that ALSO has Load In Background set loads asynchronously, and an
-// asynchronous load is integrated by Unity's main loop - which a synchronous -executeMethod is
-// by definition blocking. Measured against DREAM's sound module: the operation reaches progress
-// 1.00 and never flips isDone; Thread.Sleep, QueuePlayerLoopUpdate, DisplayProgressBar,
-// AssetDatabase.Refresh, a synchronous LoadAsset and UnloadUnusedAssets all leave it Loading
-// after 30s, and EditorApplication.wantsToQuit is never called under -quit so the quit cannot
-// be deferred. Returning to EditorApplication.update completes the same load in two ticks and
-// 0.14s. Those clips are therefore counted under "AudioClip(async)" and refused immediately
-// rather than waited on, and converting them needs the driver changed - Convert/ConvertFromEnv
-// stepping the extraction across editor ticks and calling EditorApplication.Exit when done,
-// which means running WITHOUT -quit. That is a change to this tool's documented command line,
-// so it is written down here rather than made silently.
+// AND RESIDENCY IS NOT LOAD TYPE, which is why this tool is shaped like a driver rather than
+// like a function. DecompressOnLoad says how a clip is decoded, not that it is decoded yet: a
+// clip with Preload Audio Data off arrives with no samples and has to be asked for them, and a
+// clip that ALSO has Load In Background set answers that request ASYNCHRONOUSLY - a load only
+// Unity's main loop can integrate. Measured against DREAM's sound module: the operation reaches
+// progress 1.00 and never flips isDone; Thread.Sleep, QueuePlayerLoopUpdate,
+// DisplayProgressBar, AssetDatabase.Refresh, a synchronous LoadAsset and UnloadUnusedAssets all
+// leave it Loading after 30s, and EditorApplication.wantsToQuit is never called under -quit so
+// the quit cannot even be deferred. Returning to EditorApplication.update completes the same
+// load in two ticks and 0.14s. That was 34 of 340 clips and 45% of that module's audio, so the
+// extraction is an iterator (ExtractSteps) that yields while it waits, ConvertFromEnv steps it
+// from EditorApplication.update, and the command line loses its -quit. Anything that still will
+// not load after DFU_MOD_AUDIO_TIMEOUT is counted under "AudioClip(async)", so a regression
+// here shows up as a number rather than as silence.
 //
 // Textures are not all colour. A compressed normal map has had its blue channel thrown away
 // and the remaining two swizzled into whichever channels its block format codes best, so
@@ -94,6 +100,7 @@
 // Place in Assets/Editor/
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
@@ -129,12 +136,40 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
     public static class MobileModExtractor
     {
+        /// <summary>Extracts a bundle without ever handing control back to Unity.
+        ///
+        /// Convenient, and it costs one thing: a clip whose audio data loads ASYNCHRONOUSLY can
+        /// never become resident while this call is on the stack, because the load is integrated
+        /// by the main loop this call is blocking. Those clips are refused at once under
+        /// "AudioClip(async)" rather than waited on - waiting cannot work here, and a wait that
+        /// cannot work is just a stall. ConvertFromEnv drives the same steps across editor ticks
+        /// and does get them; see ExtractSteps.</summary>
         public static ExtractReport Extract(string dfmodPath, string outputRoot)
+        {
+            var report = new ExtractReport();
+            IEnumerator steps = ExtractSteps(dfmodPath, outputRoot, report, false);
+            while (steps.MoveNext()) { }
+            return report;
+        }
+
+        /// <summary>The extraction, as steps rather than as one blocking call.
+        ///
+        /// It yields in exactly one place: waiting for a clip's asynchronous audio load. That is
+        /// the only thing here that Unity cannot finish while this code holds the main thread,
+        /// and it is worth the whole restructure because it is 45% of a real sound module's
+        /// audio (see the file header).
+        ///
+        /// <paramref name="canYield"/> says whether anyone is actually going to pump this. When
+        /// false - Extract, and therefore the self-test - an asynchronous load is refused
+        /// immediately instead of waited on, because nothing will ever integrate it. When true
+        /// the wait is real, and bounded by AudioLoadTimeoutSeconds so one bad clip cannot hang
+        /// a conversion that no longer has -quit to end it.</summary>
+        public static IEnumerator ExtractSteps(string dfmodPath, string outputRoot,
+            ExtractReport report, bool canYield)
         {
             if (!File.Exists(dfmodPath))
                 throw new FileNotFoundException("Desktop .dfmod not found", dfmodPath);
 
-            var report = new ExtractReport();
             AssetBundle ab = AssetBundle.LoadFromFile(dfmodPath);
             if (ab == null)
                 throw new InvalidDataException("Could not load AssetBundle (wrong platform or corrupt): " + dfmodPath);
@@ -167,6 +202,21 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     // actually happened and thrown away if it has not; see CommitNotes.
                     var notes = new List<string>();
                     string outPath = OutputPathFor(assetName, outputRoot, originalCase, notes);
+
+                    // Before the asset is even loaded: a path that Unity would COMPILE or LOAD
+                    // rather than import is refused outright. Leaving this to MobileModBuilder's
+                    // script guard would be too late by a whole compilation - the file would
+                    // already be in Assets/ and already built into the editor's assemblies.
+                    if (IsProjectCodeFile(outPath))
+                    {
+                        Skipped(report, "code-file-refused");
+                        Debug.LogWarning($"[MobileModExtractor] refusing to write {assetName} to " +
+                            $"'{outPath}': the extraction root is inside Assets/, so Unity would " +
+                            "compile or load that file rather than import it, and a .dfmod is " +
+                            "untrusted input. The asset is skipped; the rest of the mod converts.");
+                        continue;
+                    }
+
                     var obj = ab.LoadAsset<UnityEngine.Object>(assetName);
                     if (obj != null)
                         report.loaded++;
@@ -273,23 +323,27 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                             // knew this - SoundReplacement does "if (audioClip.preloadAudioData
                             // || audioClip.LoadAudioData())" before touching a mod clip - and
                             // this is the same dance, done here.
-                            string audioDetail;
-                            if (!TryEnsureAudioData(clip, notes, out audioDetail))
+                            var audio = new AudioLoad();
+                            IEnumerator load = EnsureAudioData(clip, notes, canYield, audio);
+                            while (load.MoveNext())
+                                yield return null;   // let Unity integrate the async load
+                            string audioDetail = audio.detail;
+                            if (!audio.ok)
                             {
-                                // An asynchronous load is a DRIVER limitation, not a property of
-                                // the clip, so it gets its own key: the same file converts fine
-                                // the moment the converter is driven from EditorApplication
-                                // .update instead of blocking it. Anything else here is the clip.
-                                Skipped(report, clip.loadInBackground
+                                // An asynchronous load that never arrived is a DRIVER problem,
+                                // not a property of the clip, so it keeps its own key: the same
+                                // file converts once the converter is stepped across editor
+                                // ticks. Anything else here is the clip itself.
+                                Skipped(report, audio.unreachable
                                     ? "AudioClip(async)" : "AudioClip(nodata)");
                                 Debug.LogWarning($"[MobileModExtractor] skipped {assetName}: " +
                                     $"{audioDetail}. The clip reports {clip.samples} samples " +
                                     $"across {clip.channels} channels but will not hand them " +
                                     "over, so it is skipped rather than written as silence." +
-                                    (clip.loadInBackground
-                                        ? " An asynchronous load can only be completed by Unity's" +
-                                          " main loop, which -executeMethod is blocking; this clip" +
-                                          " needs the converter driven across editor ticks."
+                                    (audio.unreachable
+                                        ? " An asynchronous load is completed only by Unity's main" +
+                                          " loop; run the converter WITHOUT -quit so it can be" +
+                                          " driven across editor ticks (see README-iOS.md)."
                                         : string.Empty));
                                 continue;
                             }
@@ -385,7 +439,6 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             foreach (string p in report.extracted)
                 AssetDatabase.ImportAsset(p, ImportAssetOptions.ForceUpdate);
             LogSummary(report, dfmodPath, outputRoot);
-            return report;
         }
 
         /// <summary>Desktop .dfmod in, iOS .dfmod out, in one call: extract the bundle to loose
@@ -399,8 +452,40 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         public static string[] Convert(string dfmodPath, string extractRoot, string bundleOutRoot,
             BuildTarget[] targets)
         {
-            ExtractReport report = Extract(dfmodPath, extractRoot);
-            string[] builtPaths = MobileModBuilder.BuildMod(report.manifestPath, bundleOutRoot, targets);
+            var built = new List<string>();
+            IEnumerator steps = ConvertSteps(dfmodPath, extractRoot, bundleOutRoot, targets,
+                false, built);
+            while (steps.MoveNext()) { }
+            return built.ToArray();
+        }
+
+        /// <summary>The whole conversion as steps, so ConvertFromEnv can drive it across editor
+        /// ticks; see ExtractSteps for why that matters.</summary>
+        public static IEnumerator ConvertSteps(string dfmodPath, string extractRoot,
+            string bundleOutRoot, BuildTarget[] targets, bool canYield, List<string> builtInto)
+        {
+            var report = new ExtractReport();
+            IEnumerator steps = ExtractSteps(dfmodPath, extractRoot, report, canYield);
+            while (steps.MoveNext())
+                yield return null;
+
+            // A conversion that saved nothing is a FAILURE, not a quiet success. Without this
+            // the rewritten manifest lists no files, BuildMod packs the manifest alone, and the
+            // operator gets a .dfmod that installs, loads, and does nothing at all - which is
+            // exactly what dream - music.dfmod produces (0 of 81 clips). A bundle that cannot
+            // possibly work must not be written, and the exit code has to say so, because the
+            // whole point of a per-mod exit code is that a shell loop over a mods folder stops.
+            if (report.extracted.Count == 0)
+                throw new InvalidDataException(
+                    "Converted nothing from " + Path.GetFileName(dfmodPath) + ": all " +
+                    Total(report.skippedByType) + " assets were skipped [" +
+                    Describe(report.skippedByType) + "]. Refusing to write a bundle that would " +
+                    "install, load and contain no content. The extraction under '" + extractRoot +
+                    "' is left in place so the skips can be inspected.");
+
+            string[] builtPaths = MobileModBuilder.BuildMod(report.manifestPath, bundleOutRoot,
+                targets);
+            builtInto.AddRange(builtPaths);
 
             // Extract has ALREADY logged the extraction summary - counts, the per-key breakdown
             // of both dictionaries, the loaded/released pair - and already escalated it to a
@@ -434,8 +519,6 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 Debug.LogWarning(line.ToString());
             else
                 Debug.Log(line.ToString());
-
-            return builtPaths;
         }
 
         /// <summary>Command-line entry point; see the CLI block at the top of this file. Mirrors
@@ -449,10 +532,47 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// would silently import with Unity's defaults (uncompressed, 2048 cap, normal maps typed
         /// as colour) and could be committed by accident. Both of those are worth more than the
         /// flexibility.</summary>
+        // The tick-driven conversion. Fields rather than locals because the work now spans
+        // editor frames: ConvertFromEnv arms the driver and returns, and DriverTick carries it.
+        static IEnumerator driverSteps;
+        static List<string> driverBuilt;
+        static DateTime driverStarted;
+
+        /// <summary>The command-line entry point. RUN THIS WITHOUT -quit.
+        ///
+        /// That is not a style preference, it is the whole reason this is shaped like a driver.
+        /// A clip whose audio data loads asynchronously becomes readable only when Unity's main
+        /// loop integrates the load, so the conversion has to hand control back between steps
+        /// rather than blocking - and -quit ends the process the moment this method returns,
+        /// before a single tick can run. On DREAM's sound module that is 34 of 340 clips and 45%
+        /// of the module's audio duration.
+        ///
+        /// So passing -quit is refused outright rather than tolerated. With it, this method
+        /// would arm the driver, return, and be killed before any of the work happened - a
+        /// conversion that writes nothing and exits 0, which is the worst outcome available.
+        ///
+        /// Exit codes are the contract for a shell loop over a mods folder: 0 only when a bundle
+        /// was actually written, 1 for a failure (including "converted nothing"), 2 when the
+        /// watchdog gave up.</summary>
         public static void ConvertFromEnv()
         {
             try
             {
+                foreach (string arg in Environment.GetCommandLineArgs())
+                {
+                    if (!string.Equals(arg, "-quit", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    Debug.LogError(
+                        "[MobileModExtractor] -quit is not compatible with ConvertFromEnv and " +
+                        "would silently convert NOTHING: audio clips that load asynchronously " +
+                        "become readable only when Unity's main loop runs, and -quit ends this " +
+                        "process before a single frame of it. Re-run the same command without " +
+                        "-quit; the converter exits by itself when it is done (0 on success, " +
+                        "1 on failure, 2 on timeout). See README-iOS.md.");
+                    EditorApplication.Exit(1);
+                    return;
+                }
+
                 string input = Environment.GetEnvironmentVariable("DFU_MOD_IN");
                 if (string.IsNullOrEmpty(input) || !File.Exists(input))
                     throw new InvalidOperationException(
@@ -472,14 +592,63 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
                 string extractRoot = "Assets/Game/Mods/Converted/" +
                     Path.GetFileNameWithoutExtension(input);
-                foreach (string built in Convert(input, extractRoot, outRoot, targets))
-                    Debug.Log("[MobileModExtractor] built " + built);
+
+                driverBuilt = new List<string>();
+                driverSteps = ConvertSteps(input, extractRoot, outRoot, targets, true, driverBuilt);
+                driverStarted = DateTime.UtcNow;
+                Debug.Log($"[MobileModExtractor] converting {Path.GetFileName(input)} " +
+                    $"(per-clip audio cap {AudioLoadTimeoutSeconds():F0}s, run cap " +
+                    $"{RunTimeoutSeconds() / 60:F0} min); this process exits by itself.");
+                EditorApplication.update += DriverTick;
             }
             catch (Exception ex)
             {
                 Debug.LogError("[MobileModExtractor] " + ex);
                 EditorApplication.Exit(1);
             }
+        }
+
+        /// <summary>One step of the conversion per editor frame - and, between steps, the only
+        /// thing standing between a stalled load and a batch-mode Unity that never exits.
+        ///
+        /// The run cap is checked here rather than inside the work because here is where it can
+        /// help: every wait in this converter yields, so a stall always comes back through this
+        /// method. It does not interrupt a single long-running step, and it is not meant to -
+        /// a texture module that legitimately takes an hour is not a stall.</summary>
+        static void DriverTick()
+        {
+            try
+            {
+                double elapsed = (DateTime.UtcNow - driverStarted).TotalSeconds;
+                if (elapsed > RunTimeoutSeconds())
+                {
+                    Debug.LogError($"[MobileModExtractor] giving up after {elapsed / 60:F1} " +
+                        $"minutes (DFU_MOD_TIMEOUT={RunTimeoutSeconds() / 60:F0} min). The " +
+                        "conversion is incomplete and no bundle should be trusted from this run.");
+                    FinishDriver(2);
+                    return;
+                }
+
+                if (driverSteps.MoveNext())
+                    return;   // more to do; Unity gets its frame back, which is the point
+
+                foreach (string built in driverBuilt)
+                    Debug.Log("[MobileModExtractor] built " + built);
+                Debug.Log($"[MobileModExtractor] done in {elapsed:F1}s.");
+                FinishDriver(driverBuilt.Count > 0 ? 0 : 1);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError("[MobileModExtractor] " + ex);
+                FinishDriver(1);
+            }
+        }
+
+        static void FinishDriver(int exitCode)
+        {
+            EditorApplication.update -= DriverTick;
+            driverSteps = null;
+            EditorApplication.Exit(exitCode);
         }
 
         static ModInfo ReadManifest(AssetBundle ab, string dfmodPath)
@@ -707,73 +876,174 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             }
         }
 
+        public const string AudioTimeoutVar = "DFU_MOD_AUDIO_TIMEOUT";
+        public const string RunTimeoutVar = "DFU_MOD_TIMEOUT";
+
+        /// <summary>Wall clock allowed for ONE clip's asynchronous audio load. Measured, not
+        /// picked: a 790,320-sample clip out of DREAM's sound module completes in two editor
+        /// ticks and 0.14s once the main loop is being handed back. Ten seconds is seventy times
+        /// that, which is slack enough for a far larger clip on a far slower disk and still tight
+        /// enough that a module full of genuinely stuck clips fails in minutes rather than
+        /// sitting there. It matters more than it used to: without -quit there is nothing else
+        /// to end the process.</summary>
+        public const double DefaultAudioLoadTimeoutSeconds = 10;
+
+        /// <summary>Wall clock allowed for a whole conversion before it is abandoned. This is a
+        /// backstop, not a schedule - the per-clip cap above is what actually catches a stall,
+        /// because a stall is a wait and every wait yields through here. Four hours is set
+        /// against the biggest thing anyone means to convert (a 1.72GB texture module) with room
+        /// to spare, on the principle that killing a legitimate long conversion would be a worse
+        /// failure than a slow one. Raise it with DFU_MOD_TIMEOUT for something larger.</summary>
+        public const double DefaultRunTimeoutSeconds = 4 * 60 * 60;
+
+        public static double AudioLoadTimeoutSeconds()
+        {
+            return ParseSeconds(Environment.GetEnvironmentVariable(AudioTimeoutVar),
+                DefaultAudioLoadTimeoutSeconds, AudioTimeoutVar);
+        }
+
+        public static double RunTimeoutSeconds()
+        {
+            return ParseSeconds(Environment.GetEnvironmentVariable(RunTimeoutVar),
+                DefaultRunTimeoutSeconds, RunTimeoutVar);
+        }
+
+        /// <summary>A positive number of seconds, or the default. A typo must not silently become
+        /// "no timeout", which is the one value a watchdog must never take.</summary>
+        public static double ParseSeconds(string raw, double fallback, string name)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return fallback;
+            double value;
+            if (double.TryParse(raw.Trim(), System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out value)
+                && value > 0 && !double.IsInfinity(value))
+                return value;
+            Debug.LogWarning($"[MobileModExtractor] {name}='{raw}' is not a positive number of " +
+                $"seconds; keeping {fallback}");
+            return fallback;
+        }
+
+        /// <summary>True when writing this path into the project would hand a stranger's mod to
+        /// a COMPILER or a LOADER rather than to an importer.
+        ///
+        /// The extraction root is inside Assets/, so anything written there is picked up by
+        /// Unity immediately: a .cs is compiled into the editor's own assemblies mid-run, a
+        /// .dll/.dylib/.so/.a is loaded as a plugin, an .asmdef or .asmref restructures
+        /// compilation, and an .rsp changes the compiler flags for the whole project. A .dfmod
+        /// is a file a stranger hands us, so none of those may ever be written, and the check
+        /// belongs here rather than in MobileModBuilder's script guard - by the time the builder
+        /// throws, the file is already on disk and already compiled.
+        ///
+        /// Note what is NOT on this list: ".cs.txt" and ".dll.bytes", the spellings DFU mods
+        /// actually use, whose extensions are .txt and .bytes. Those are inert TextAssets and
+        /// extract normally; MobileModBuilder still refuses to REBUILD a mod that carries them.
+        /// </summary>
+        public static bool IsProjectCodeFile(string path)
+        {
+            switch (Path.GetExtension(path ?? string.Empty).ToLowerInvariant())
+            {
+                case ".cs":                                   // compiled into the editor, live
+                case ".dll": case ".dylib": case ".so": case ".a":   // loaded as a plugin
+                case ".asmdef": case ".asmref":               // restructures compilation
+                case ".rsp":                                  // rewrites compiler flags
+                case ".jslib": case ".jspre":                 // linked into a WebGL build
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>What EnsureAudioData found out. An iterator cannot have an out parameter,
+        /// so the answer comes back in this instead.</summary>
+        class AudioLoad
+        {
+            public bool ok;
+            public bool unreachable;   // asynchronous, and nobody is pumping the main loop
+            public string detail;
+        }
+
         /// <summary>Makes a clip's samples actually resident, and says what it had to do.
         ///
         /// AudioClipLoadType.DecompressOnLoad describes how a clip is decoded, NOT whether it is
         /// decoded YET - different questions, and conflating them cost 34 of DREAM's 340 sound
-        /// effects on the first real conversion. Every one was a long ambient loop reporting
-        /// "GetData failed on a DecompressOnLoad clip"; every one had preloadAudioData=False, so
-        /// its samples were simply not there. DFU's own runtime has always done this dance
-        /// before using a mod clip (SoundReplacement: "if (audioClip.preloadAudioData ||
-        /// audioClip.LoadAudioData())"), and this is the same dance.
+        /// effects on the first real conversion. Every one reported "GetData failed on a
+        /// DecompressOnLoad clip"; every one had preloadAudioData=False, so its samples were
+        /// simply not there. DFU's own runtime has always done this dance before using a mod
+        /// clip (SoundReplacement: "if (audioClip.preloadAudioData || audioClip.LoadAudioData())").
         ///
-        /// A clip whose importer sets Load In Background cannot be recovered here AT ALL, and
-        /// that is measured rather than assumed. Its load is asynchronous, and an asynchronous
-        /// load is integrated by Unity's main loop - the very thing a synchronous -executeMethod
-        /// is blocking. Against the real module: the operation reaches progress 1.00 and never
-        /// flips isDone; 30s of Thread.Sleep, EditorApplication.QueuePlayerLoopUpdate,
-        /// EditorUtility.DisplayProgressBar, AssetDatabase.Refresh, a synchronous LoadAsset and
-        /// Resources.UnloadUnusedAssets all leave it Loading; EditorApplication.wantsToQuit is
-        /// never even called under -quit, so the quit cannot be deferred either. Simply
-        /// RETURNING to EditorApplication.update completes the identical load in two ticks and
-        /// 0.14s - which is the fix, and it is a change to how the converter is driven rather
-        /// than something this method can do. See the file header.
+        /// A Load In Background clip loads ASYNCHRONOUSLY, and an asynchronous load is integrated
+        /// by Unity's main loop. That is why this yields rather than sleeps: measured against the
+        /// real module, 30s of Thread.Sleep, QueuePlayerLoopUpdate, DisplayProgressBar,
+        /// AssetDatabase.Refresh, a synchronous LoadAsset and UnloadUnusedAssets ALL leave the
+        /// clip Loading, while simply returning to EditorApplication.update completes the same
+        /// load in two ticks and 0.14s. Yielding is the only thing that works.
         ///
-        /// So such a clip is refused immediately instead of waited on. Waiting cannot succeed,
-        /// and the 30s-per-clip version of this wait turned one module into a 17-minute stall
-        /// that reported the wrong cause.
+        /// When nobody is pumping (canYield false) the wait is skipped entirely rather than
+        /// spun: it could not succeed, and the 30s-per-clip version of that turned one module
+        /// into a 17-minute stall.
         ///
-        /// Loading on demand does not undo the memory work of the previous round: Release runs
-        /// from the loop's finally on every path, including the failures here, so whatever this
-        /// makes resident is handed straight back. Peak stays one clip.
-        ///
-        /// <paramref name="detail"/> is null when the clip was already resident and there was
-        /// nothing to do, and otherwise describes what happened - success or failure - so the
-        /// caller can log the first one and count the rest.</summary>
-        static bool TryEnsureAudioData(AudioClip clip, List<string> notes, out string detail)
+        /// Loading on demand does not undo the memory work: Release runs from the loop's finally
+        /// on every path including these, so whatever this makes resident is handed straight
+        /// back. Peak stays one clip.</summary>
+        static IEnumerator EnsureAudioData(AudioClip clip, List<string> notes, bool canYield,
+            AudioLoad outcome)
         {
-            detail = null;
+            outcome.ok = false;
+            outcome.unreachable = false;
+            outcome.detail = null;
+
             if (clip.loadState == AudioDataLoadState.Loaded)
-                return true;
+            {
+                outcome.ok = true;
+                yield break;
+            }
 
             string state = $"preloadAudioData={clip.preloadAudioData}, " +
                            $"loadInBackground={clip.loadInBackground}, loadState={clip.loadState}";
 
-            if (clip.loadInBackground)
+            if (clip.loadInBackground && !canYield)
             {
-                detail = $"samples are not resident and load asynchronously ({state})";
-                return false;
+                outcome.unreachable = true;
+                outcome.detail = $"samples are not resident and load asynchronously ({state}), " +
+                                 "and this run is not driven across editor ticks";
+                yield break;
             }
 
             if (!clip.LoadAudioData())
             {
-                detail = $"samples are not resident ({state}) and LoadAudioData() refused";
-                return false;
+                outcome.detail = $"samples are not resident ({state}) and LoadAudioData() refused";
+                yield break;
+            }
+            notes.Add("audio-loaded-on-demand");
+
+            if (clip.loadState == AudioDataLoadState.Loading)
+            {
+                notes.Add("audio-load-awaited");
+                DateTime started = DateTime.UtcNow;
+                while (clip.loadState == AudioDataLoadState.Loading)
+                {
+                    double waited = (DateTime.UtcNow - started).TotalSeconds;
+                    if (waited > AudioLoadTimeoutSeconds())
+                    {
+                        outcome.unreachable = true;
+                        outcome.detail = $"samples are not resident ({state}) and were still " +
+                                         $"loading after {waited:F1}s";
+                        yield break;
+                    }
+                    yield return null;   // the ONLY thing that lets Unity finish the load
+                }
             }
 
-            // No wait loop on purpose. A non-background clip loads synchronously, so it is
-            // already resident here; if it is not, the load went asynchronous after all and no
-            // amount of blocking in this method will ever integrate it (see above).
             if (clip.loadState != AudioDataLoadState.Loaded)
             {
-                detail = $"samples are not resident ({state}) and the load did not complete " +
-                         $"synchronously (ended in {clip.loadState})";
-                return false;
+                outcome.detail = $"samples are not resident ({state}) and the load ended in " +
+                                 $"{clip.loadState}";
+                yield break;
             }
 
-            notes.Add("audio-loaded-on-demand");
-            detail = $"samples were not resident ({state}); loaded on demand";
-            return true;
+            outcome.ok = true;
+            outcome.detail = $"samples were not resident ({state}); loaded on demand";
         }
 
         /// <summary>Hands one bundle asset's native memory back the moment this tool is done

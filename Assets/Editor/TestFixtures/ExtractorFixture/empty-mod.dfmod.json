@@ -1,0 +1,12 @@
+{
+    "ModTitle": "Extractor Empty Fixture",
+    "ModVersion": "1.0",
+    "ModAuthor": "Codex64ai",
+    "ContactInfo": "github.com/Codex64ai/daggerfall-unity-ios",
+    "DFUnity_Version": "1.0.0",
+    "ModDescription": "Synthetic manifest for the extractor self-test. Its only asset is a clip the extractor cannot read, so the conversion saves nothing and must FAIL rather than ship an empty bundle. Not a real mod.",
+    "GUID": "1a8f3c07-6b52-4d19-ae74-2c9b8f051d6e",
+    "Files": [
+        "Assets/Editor/TestFixtures/ExtractorFixture/fixture_stream.wav"
+    ]
+}

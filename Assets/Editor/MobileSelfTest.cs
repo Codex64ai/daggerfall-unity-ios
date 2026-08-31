@@ -24,6 +24,7 @@ using DaggerfallWorkshop.Game.Mobile;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
 using FullSerializer;
 using DaggerfallWorkshop.Utility.AssetInjection;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -90,6 +91,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestModExtractorRoundTrip();
             TestModExtractorPathContainment();
             TestModExtractorSurvivesBadPaths();
+            TestConverterGuardRules();
+            TestConversionRefusesEmptyResult();
             TestRoadDirectionReciprocity();
             TestRoadRouting();
             TestWaypointOvershoot();
@@ -1848,6 +1851,52 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     srcImp == null ? "?" : srcSettings.loadType.ToString(),
                     srcImp == null ? "?" : srcSettings.quality.ToString("F2")));
 
+            // 3g. THE WATCHDOG. Without -quit there is nothing left to end this process, so the
+            // one place the converter waits - an asynchronous audio load - has to be able to
+            // give up. Drive the same steps in yielding mode, but pumped by this loop rather
+            // than by the editor, so the load can never actually complete: exactly the stall the
+            // cap exists for. With the cap set to a second, the run must END, count the clip
+            // under AudioClip(async), and keep everything else.
+            //
+            // This also pins the accounting through the timeout path, which is the one most
+            // likely to leak: a clip abandoned mid-load still has to be released.
+            string previousCap = Environment.GetEnvironmentVariable(
+                MobileModExtractor.AudioTimeoutVar);
+            Environment.SetEnvironmentVariable(MobileModExtractor.AudioTimeoutVar, "1");
+            const string watchdogRoot = "Assets/Game/Mods/Converted/__watchdog__";
+            if (Directory.Exists(watchdogRoot)) { Directory.Delete(watchdogRoot, true); File.Delete(watchdogRoot + ".meta"); }
+            var watchdogReport = new ExtractReport();
+            var watchdogStarted = DateTime.UtcNow;
+            IEnumerator watchdogSteps = MobileModExtractor.ExtractSteps(
+                built[0], watchdogRoot, watchdogReport, true);
+            int pumped = 0;
+            while (watchdogSteps.MoveNext())
+            {
+                pumped++;
+                if ((DateTime.UtcNow - watchdogStarted).TotalSeconds > 60)
+                    break;      // the test's own backstop; reaching it IS the failure
+            }
+            double watchdogSeconds = (DateTime.UtcNow - watchdogStarted).TotalSeconds;
+            Environment.SetEnvironmentVariable(MobileModExtractor.AudioTimeoutVar, previousCap);
+
+            int watchdogAsync;
+            watchdogReport.skippedByType.TryGetValue("AudioClip(async)", out watchdogAsync);
+            Check(watchdogSeconds < 30, "a stalled audio load gives up instead of hanging the run",
+                  "finished in " + watchdogSeconds.ToString("F1") + "s after " + pumped + " pumps");
+            Check(watchdogAsync == 1, "the abandoned clip is counted, not silently dropped",
+                  "AudioClip(async)=" + watchdogAsync);
+            Check(watchdogReport.released == watchdogReport.loaded && watchdogReport.loaded > 0,
+                  "and it is still released, even though its load never finished",
+                  "released=" + watchdogReport.released + " loaded=" + watchdogReport.loaded);
+            Check(watchdogReport.extracted.Count == report.extracted.Count,
+                  "everything that does not depend on the stalled clip still converts",
+                  "extracted=" + watchdogReport.extracted.Count);
+            if (Directory.Exists(watchdogRoot))
+            {
+                Directory.Delete(watchdogRoot, true);
+                File.Delete(watchdogRoot + ".meta");
+            }
+
             // 4. Rewritten manifest points at extracted files, keeps identity.
             ModInfo info = null;
             ModManager._serializer.TryDeserialize(
@@ -1928,6 +1977,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // A distinct asset: Unity refuses to pack the same one into a bundle twice.
             const string escapePayload = "Assets/Editor/TestFixtures/ExtractorFixture/hostile_escape_payload.json";
             const string escapeName = "../dfu-extractor-escape.json";
+            // A third distinct asset, addressed inside the bundle as C# SOURCE. This is not a
+            // hypothetical: the extraction root lives under Assets/, so a .cs written there is
+            // compiled into the editor's own assemblies on the next refresh - during the very
+            // run that wrote it - which is a far worse outcome than the exception
+            // MobileModBuilder would eventually have thrown. addressableNames is what makes the
+            // repro honest: the bundle really does carry an asset named .cs, and the manifest
+            // really does list it, so the extractor's path logic resolves it exactly as it would
+            // an attacker's. (No .cs can be committed as a fixture for the obvious reason.)
+            const string scriptPayload = "Assets/Editor/TestFixtures/ExtractorFixture/hostile_script_payload.json";
+            const string scriptName = "assets/editor/testfixtures/extractorfixture/hostile_script.cs";
             const string bundleDir = "Temp/MobileModExtractorEscapeTest";
             const string extractRoot = "Assets/Game/Mods/Converted/__escape__";
             const string escapeTarget = "Assets/Game/Mods/Converted/dfu-extractor-escape.json";
@@ -1940,10 +1999,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // attacker's - through the manifest lookup, straight into an output path.
             var build = new AssetBundleBuild[1];
             build[0].assetBundleName = "hostile-mod.dfmod";
-            build[0].assetNames = new[] { payload, escapePayload, hostileManifest };
+            build[0].assetNames = new[] { payload, escapePayload, scriptPayload, hostileManifest };
             build[0].addressableNames = new[] {
                 "assets/editor/testfixtures/extractorfixture/hostile_payload.json",
                 escapeName,
+                scriptName,
                 "assets/editor/testfixtures/extractorfixture/hostile-mod.dfmod.json" };
 
             Directory.CreateDirectory(bundleDir);
@@ -1959,8 +2019,21 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(!File.Exists(escapeTarget) && !File.Exists("Assets/Game/Mods/Converted/" + Path.GetFileName(escapeName)),
                   "nothing was written outside the extraction root");
             Check(report.extracted.Count == 1 && report.extracted[0].EndsWith("hostile_payload.json"),
-                  "the legitimate asset still extracts alongside the refused one",
+                  "the legitimate asset still extracts alongside the refused ones",
                   "extracted=" + report.extracted.Count);
+
+            // MEASURED, not assumed: the path logic really does turn a bundle asset named .cs
+            // plus a manifest entry spelling it .cs into a .cs output path under Assets/. That
+            // is the hazard, and the refusal is what stops it - before the asset is even loaded,
+            // so nothing about it can reach disk. Relying on MobileModBuilder's script guard
+            // instead would be too late by a whole compilation.
+            int codeRefused;
+            report.skippedByType.TryGetValue("code-file-refused", out codeRefused);
+            Check(codeRefused == 1, "a bundle asset named .cs is refused before it can be written",
+                  "code-file-refused=" + codeRefused);
+            Check(Directory.GetFiles("Assets/Game/Mods/Converted", "*.cs",
+                      SearchOption.AllDirectories).Length == 0,
+                  "no C# source reached the project, where Unity would have compiled it");
 
             Directory.Delete(bundleDir, true);
             Directory.Delete(extractRoot, true);
@@ -1978,6 +2051,123 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// second would quietly overwrite the first and the rebuilt manifest would list it twice,
         /// which Unity then refuses to pack at all.
         /// </summary>
+        /// <summary>
+        /// The two rules that guard the converter's own process, as pure functions.
+        ///
+        /// The first decides what may never be written into the project at all. The extraction
+        /// root is under Assets/, so Unity treats whatever lands there as project content the
+        /// instant it appears: a .cs is compiled into the editor's live assemblies, a plugin
+        /// binary is loaded, an .asmdef restructures compilation and an .rsp rewrites compiler
+        /// flags project-wide. A .dfmod is a file a stranger hands us. The end-to-end proof that
+        /// the refusal fires is in TestModExtractorPathContainment; this pins the rule itself,
+        /// including the two spellings that must stay ALLOWED because they are what real DFU
+        /// mods carry and they are inert TextAssets.
+        ///
+        /// The second is the watchdog's clock. Without -quit there is nothing else to stop this
+        /// process, so a timeout that a typo could turn into "no timeout" would be worse than no
+        /// watchdog at all - it would look like one.
+        /// </summary>
+        static void TestConverterGuardRules()
+        {
+            Check(MobileModExtractor.IsProjectCodeFile("Assets/Game/Mods/Converted/x/Foo.cs"),
+                  "C# source is refused: Unity would compile it into the running editor");
+            Check(MobileModExtractor.IsProjectCodeFile("x/Foo.CS"), "the check ignores case");
+            Check(MobileModExtractor.IsProjectCodeFile("x/plug.dll")
+                  && MobileModExtractor.IsProjectCodeFile("x/plug.dylib")
+                  && MobileModExtractor.IsProjectCodeFile("x/plug.so")
+                  && MobileModExtractor.IsProjectCodeFile("x/plug.a"),
+                  "plugin binaries are refused: Unity would load them");
+            Check(MobileModExtractor.IsProjectCodeFile("x/Mod.asmdef")
+                  && MobileModExtractor.IsProjectCodeFile("x/Mod.asmref")
+                  && MobileModExtractor.IsProjectCodeFile("x/csc.rsp"),
+                  "assembly definitions and compiler response files are refused too");
+            // The allowed half matters just as much: these are the spellings DFU mods actually
+            // use for script content, they are inert TextAssets, and refusing them would break
+            // conversions for no safety gain. MobileModBuilder still refuses to REBUILD a mod
+            // that carries them, which is the right place for that decision.
+            Check(!MobileModExtractor.IsProjectCodeFile("x/Foo.cs.txt")
+                  && !MobileModExtractor.IsProjectCodeFile("x/Foo.dll.bytes"),
+                  "the .cs.txt / .dll.bytes spellings stay extractable - they are inert text");
+            Check(!MobileModExtractor.IsProjectCodeFile("x/tex.png")
+                  && !MobileModExtractor.IsProjectCodeFile("x/sound.wav")
+                  && !MobileModExtractor.IsProjectCodeFile("x/data.json")
+                  && !MobileModExtractor.IsProjectCodeFile(null),
+                  "ordinary content, and a null path, are not code");
+
+            // The watchdog clock. 10s is not a guess: a 790,320-sample clip from DREAM's sound
+            // module completes in two editor ticks and 0.14s once the main loop is being handed
+            // back, so the default is ~70x the measured worst case.
+            Check(MobileModExtractor.DefaultAudioLoadTimeoutSeconds == 10
+                  && MobileModExtractor.DefaultRunTimeoutSeconds == 4 * 60 * 60,
+                  "the measured per-clip cap and the whole-run backstop are the argued-for ones",
+                  MobileModExtractor.DefaultAudioLoadTimeoutSeconds + "s / "
+                      + MobileModExtractor.DefaultRunTimeoutSeconds / 3600 + "h");
+            Check(MobileModExtractor.ParseSeconds("2.5", 10, "T") == 2.5
+                  && MobileModExtractor.ParseSeconds(" 30 ", 10, "T") == 30,
+                  "a positive number of seconds is honoured, whitespace and all");
+            Check(MobileModExtractor.ParseSeconds(null, 10, "T") == 10
+                  && MobileModExtractor.ParseSeconds("", 10, "T") == 10
+                  && MobileModExtractor.ParseSeconds("soon", 10, "T") == 10
+                  && MobileModExtractor.ParseSeconds("0", 10, "T") == 10
+                  && MobileModExtractor.ParseSeconds("-5", 10, "T") == 10,
+                  "unset, garbage, zero and negative all keep the default - never 'no timeout'");
+        }
+
+        /// <summary>
+        /// A conversion that saved nothing must FAIL, not succeed quietly.
+        ///
+        /// This is the shape of the dream - music.dfmod case: every clip is unreadable, so
+        /// extracted is empty, the rewritten manifest lists no files, and a build from it packs
+        /// the manifest and nothing else. That bundle installs, loads, and contains no content -
+        /// and the operator has no way to tell from an exit code of 0. Worse for a shell loop
+        /// over a mods folder, which is how ten modules get converted: it would sail past.
+        ///
+        /// The fixture is the smallest possible version of it - one clip the extractor cannot
+        /// read - so the assertion is about the RULE rather than about any particular mod.
+        /// </summary>
+        static void TestConversionRefusesEmptyResult()
+        {
+            const string emptyManifest = "Assets/Editor/TestFixtures/ExtractorFixture/empty-mod.dfmod.json";
+            const string bundleDir = "Temp/MobileModExtractorEmptyTest";
+            const string outDir = "Temp/MobileModExtractorEmptyOut";
+            const string extractRoot = "Assets/Game/Mods/Converted/__empty__";
+            if (Directory.Exists(bundleDir)) Directory.Delete(bundleDir, true);
+            if (Directory.Exists(outDir)) Directory.Delete(outDir, true);
+            if (Directory.Exists(extractRoot)) { Directory.Delete(extractRoot, true); File.Delete(extractRoot + ".meta"); AssetDatabase.Refresh(); }
+
+            string[] built = MobileModBuilder.BuildMod(emptyManifest, bundleDir,
+                new[] { BuildTarget.StandaloneOSX });
+
+            bool threw = false;
+            string message = "no exception";
+            try
+            {
+                MobileModExtractor.Convert(built[0], extractRoot, outDir,
+                    new[] { BuildTarget.StandaloneOSX });
+            }
+            catch (Exception ex)
+            {
+                threw = true;
+                message = ex.Message;
+            }
+            Check(threw, "a conversion that extracted nothing fails instead of returning", message);
+            Check(threw && message.Contains("Converted nothing"),
+                  "and it says so in words an operator can act on", message);
+            // The point of failing is that no bundle exists to be installed by mistake.
+            Check(!Directory.Exists(outDir)
+                  || Directory.GetFiles(outDir, "*.dfmod", SearchOption.AllDirectories).Length == 0,
+                  "no bundle is written for a conversion that would contain nothing");
+
+            Directory.Delete(bundleDir, true);
+            if (Directory.Exists(outDir)) Directory.Delete(outDir, true);
+            if (Directory.Exists(extractRoot))
+            {
+                Directory.Delete(extractRoot, true);
+                File.Delete(extractRoot + ".meta");
+            }
+            AssetDatabase.Refresh();
+        }
+
         static void TestModExtractorSurvivesBadPaths()
         {
             const string clashManifest = "Assets/Editor/TestFixtures/ExtractorFixture/clash-mod.dfmod.json";
