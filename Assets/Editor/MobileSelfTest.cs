@@ -84,6 +84,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestModBundleRoundTrip();
             TestModScriptSkipRule();
             TestNormalReconstructRule();
+            TestConvertedModImportPolicy();
             TestModExtractorRoundTrip();
             TestModExtractorPathContainment();
             TestModExtractorSurvivesBadPaths();
@@ -1145,6 +1146,93 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         }
 
         /// <summary>
+        /// The converted-mod import policy, as pure rules. This is the memory-critical part of
+        /// the pipeline: against 1.72GB of DREAM textures plus ~3.7GB of sprite modules on an
+        /// 8GB iPad, the size cap, the mipmap decision and the ASTC block size are the three
+        /// numbers that decide whether the pack loads or iOS kills the app. They are read from
+        /// environment variables so they can be tuned against a device without a recompile,
+        /// which means the PARSING is now part of the policy: an operator typo that silently
+        /// fell back to "whatever the platform picks" would undo the whole point of naming them.
+        /// </summary>
+        static void TestConvertedModImportPolicy()
+        {
+            // Defaults, stated as assertions so a change to one is a deliberate act.
+            Check(MobileConvertedModPolicy.DefaultMaxTextureSize == 1024,
+                  "default cap is 1024, not Unity's never-downscale 2048",
+                  "" + MobileConvertedModPolicy.DefaultMaxTextureSize);
+            Check(MobileConvertedModPolicy.ParseAstcBlock(
+                      MobileConvertedModPolicy.DefaultAstcBlock, "6x6")
+                  == TextureImporterFormat.ASTC_6x6, "default iOS block is ASTC 6x6 (3.56 bpp)");
+
+            // Sizes. Unity accepts powers of two from 32 to 16384 and nothing else, so a typo
+            // must fall back loudly rather than become the policy.
+            Check(MobileConvertedModPolicy.ParseSize("2048", 1024) == 2048, "a valid cap is honoured");
+            Check(MobileConvertedModPolicy.ParseSize(" 512 ", 1024) == 512, "whitespace is tolerated");
+            Check(MobileConvertedModPolicy.ParseSize(null, 1024) == 1024, "unset keeps the default");
+            Check(MobileConvertedModPolicy.ParseSize("", 1024) == 1024, "empty keeps the default");
+            Check(MobileConvertedModPolicy.ParseSize("1000", 1024) == 1024, "a non-power-of-two is refused");
+            Check(MobileConvertedModPolicy.ParseSize("16", 1024) == 1024, "an absurdly small cap is refused");
+            Check(MobileConvertedModPolicy.ParseSize("banana", 1024) == 1024, "garbage is refused");
+
+            // Booleans, in the spellings a shell user actually types.
+            Check(MobileConvertedModPolicy.ParseBool("1", false)
+                  && MobileConvertedModPolicy.ParseBool("true", false)
+                  && MobileConvertedModPolicy.ParseBool("ON", false), "1/true/on are true");
+            Check(!MobileConvertedModPolicy.ParseBool("0", true)
+                  && !MobileConvertedModPolicy.ParseBool("no", true)
+                  && !MobileConvertedModPolicy.ParseBool("Off", true), "0/no/off are false");
+            Check(MobileConvertedModPolicy.ParseBool(null, true)
+                  && !MobileConvertedModPolicy.ParseBool("maybe", false), "unset and garbage keep the default");
+
+            // ASTC block sizes: the bytes-per-pixel lever.
+            Check(MobileConvertedModPolicy.ParseAstcBlock("4x4", "6x6") == TextureImporterFormat.ASTC_4x4
+                  && MobileConvertedModPolicy.ParseAstcBlock("8x8", "6x6") == TextureImporterFormat.ASTC_8x8
+                  && MobileConvertedModPolicy.ParseAstcBlock("12x12", "6x6") == TextureImporterFormat.ASTC_12x12,
+                  "every block size Unity defines is reachable");
+            Check(MobileConvertedModPolicy.ParseAstcBlock("7x7", "6x6") == TextureImporterFormat.ASTC_6x6,
+                  "a block size Unity does not define falls back rather than guessing");
+            Check(MobileConvertedModPolicy.ParseQuality("100", 50) == 100
+                  && MobileConvertedModPolicy.ParseQuality("-1", 50) == 50
+                  && MobileConvertedModPolicy.ParseQuality("101", 50) == 50,
+                  "compressor quality is clamped to 0-100 or refused");
+
+            // The mipmap rule. Mipmaps cost 33% resident across the whole pack, and 2D art
+            // drawn at 1:1 never samples them. Which assets those are is derived from DFU's own
+            // conventions, not invented: TextureReplacement serves IMG images and CIF/RCI
+            // images (paperdolls, portraits, weapon animations, UI) - and a MOD can only serve
+            // them under a short name carrying the original .IMG/.CIF/.RCI filename, because
+            // that name is the runtime lookup key (TryImportImage/TryImportCifRci ->
+            // ModManager.TryGetAsset). So the name is a real signal even though a bundled mod's
+            // internal directory layout is the author's own business.
+            string[] markers = MobileConvertedModPolicy.DefaultNoMipMarkers;
+            Check(MobileConvertedModPolicy.ShouldMipmap("Assets/Textures/004_0-0.png", markers),
+                  "a world texture is minified in use and keeps mipmaps");
+            Check(MobileConvertedModPolicy.ShouldMipmap("Assets/Textures/210_1-0_Normal.png", markers),
+                  "a billboard's normal map keeps mipmaps too");
+            Check(!MobileConvertedModPolicy.ShouldMipmap("Assets/UI/BOOK00I0.IMG.png", markers),
+                  "an IMG image is drawn 1:1 and gets none");
+            Check(!MobileConvertedModPolicy.ShouldMipmap("Assets/Art/TFAC00I0.RCI_0-0.png", markers),
+                  "a paperdoll/portrait RCI record gets none");
+            Check(!MobileConvertedModPolicy.ShouldMipmap("Assets/Art/WEAPON01.CIF_3-2.png", markers),
+                  "a CIF weapon frame gets none");
+            Check(!MobileConvertedModPolicy.ShouldMipmap("Assets/Textures/CifRci/anything.png", markers),
+                  "DFU's own CifRci directory is recognised as well as the name");
+            Check(MobileConvertedModPolicy.ShouldMipmap("Assets/Textures/Images/004_0-0.png", markers),
+                  "a folder merely called Images is not the .img marker");
+            // The rule is overridable wholesale, because the real pack's internal paths have not
+            // been inspected and a silently wrong guess is exactly what must not ship.
+            string[] custom = MobileConvertedModPolicy.ParseList(" /paperdoll/ , .ui ", markers);
+            Check(custom.Length == 2 && custom[0] == "/paperdoll/" && custom[1] == ".ui",
+                  "the no-mipmap list is overridable and trimmed");
+            Check(!MobileConvertedModPolicy.ShouldMipmap("Assets/x/Paperdoll/a.png", custom)
+                  && MobileConvertedModPolicy.ShouldMipmap("Assets/UI/BOOK00I0.IMG.png", custom),
+                  "an override replaces the defaults rather than adding to them");
+            Check(MobileConvertedModPolicy.ParseList(null, markers) == markers
+                  && MobileConvertedModPolicy.ParseList("  ", markers) == markers,
+                  "unset or blank keeps DFU's derived defaults");
+        }
+
+        /// <summary>
         /// The reverse direction of the mod pipeline. Third-party mods (DREAM-class) ship
         /// only as desktop AssetBundles, so iOS support means unpacking one back into loose
         /// project assets and repacking it. This packs a synthetic desktop .dfmod, extracts
@@ -1168,13 +1256,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // 2. Extract it back.
             var report = MobileModExtractor.Extract(built[0], extractRoot);
             Check(File.Exists(report.manifestPath), "extractor writes a manifest", report.manifestPath);
-            Check(report.extracted.Count == 3, "extractor writes both textures + textasset",
+            Check(report.extracted.Count == 5, "extractor writes four textures + textasset",
                   "extracted=" + report.extracted.Count);
 
             // 3. Path tail and short names preserved.
             string tex = report.extracted.Find(p => p.EndsWith("fixture_tex.png"));
             string txt = report.extracted.Find(p => p.EndsWith("fixture_data.json"));
             string nrm = report.extracted.Find(p => p.EndsWith("fixture_wall_Normal.png"));
+            string hgt = report.extracted.Find(p => p.EndsWith("fixture_wall_Height.png"));
             // Mod.FindAssetNames accepts an asset whose directory ENDS WITH the requested one
             // and compares with a case-sensitive CompareOrdinal, while callers pass literal
             // capitalised paths ("Assets/Textures"). AssetBundle.GetAllAssetNames hands back
@@ -1197,10 +1286,19 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             report.skippedByType.TryGetValue("collision", out collisions);
             Check(collisions == 1, "colliding output path reported, not overwritten",
                   "collision=" + collisions);
-            // A note, not a skip: the .tga's pixels DID reach the extraction, under a new name.
+            // The two counters answer different questions and the boundary between them is
+            // exactly here. fixture_lone.tga has no .png twin: it really is extracted, under a
+            // changed runtime lookup name, so it earns the note. fixture_tex.tga is ALSO an
+            // extension rewrite, but it loses the collision and never reaches disk - and a note
+            // is a claim about a survivor, so it must not be counted. One rewrite, not two: a
+            // note banked before the write would report an asset as both rewritten-and-extracted
+            // and skipped, in the same run.
+            string lone = report.extracted.Find(p => p.EndsWith("fixture_lone.png"));
+            Check(lone != null && File.Exists(lone),
+                  "a .tga with no .png twin is extracted as .png", lone ?? "missing");
             int rewritten;
             report.notesByType.TryGetValue("extension-rewritten", out rewritten);
-            Check(rewritten == 1, "non-png texture extension rewrite is reported",
+            Check(rewritten == 1, "only the rewrite that actually reached disk is noted",
                   "extension-rewritten=" + rewritten);
 
             // 3b. THE CHECK THAT MATTERS for textures. Everything above passes on a blank
@@ -1290,6 +1388,35 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "worst channel delta=" + nWorst + " at " + nWorstAt);
             UnityEngine.Object.DestroyImmediate(dn);
 
+            // 3c-bis. THE DEGAMMA PIN. The blit's gamma behaviour is decided by the SOURCE
+            // texture's graphics format, never by what the file is called. fixture_wall_Height
+            // is deliberately left sRGB - which is what a mod author who never touched the
+            // importer ships, and the real DREAM texture pack does contain *_Height assets - so
+            // a converter that picked "linear" from the "_Height" suffix would sample it
+            // degamma'd with nothing re-encoding on write. That is not a rounding error: a
+            // mid-tone 128 comes out as 55. The fixture is a ramp through every mid-tone, so
+            // any sRGB/linear mix-up in either direction lands far outside this tolerance.
+            var dh = new Texture2D(2, 2);
+            bool hLoaded = hgt != null && dh.LoadImage(File.ReadAllBytes(hgt));
+            Check(hLoaded && dh.width == 64 && dh.height == 64, "extracted height png decodes at 64x64",
+                  hLoaded ? dh.width + "x" + dh.height : "did not decode");
+            Color32[] hpx = hLoaded ? dh.GetPixels32() : new Color32[0];
+            int hWorst = 0;
+            string hWorstAt = "none";
+            for (int i = 0; hLoaded && i < samples.GetLength(0); i++)
+            {
+                int x = samples[i, 0], y = samples[i, 1];
+                Color32 got = hpx[(63 - y) * 64 + x];       // GetPixels32 is bottom-up
+                int want = ((x + y) * 2) % 256;            // the fixture's generator
+                int d = Mathf.Max(Mathf.Abs(got.r - want),
+                        Mathf.Max(Mathf.Abs(got.g - want), Mathf.Abs(got.b - want)));
+                if (d > hWorst) { hWorst = d; hWorstAt = string.Format("({0},{1}) got {2},{3},{4} want {5}",
+                    x, y, got.r, got.g, got.b, want); }
+            }
+            Check(hLoaded && hWorst <= 16, "sRGB-flagged height map survives without a degamma",
+                  "worst channel delta=" + hWorst + " at " + hWorstAt);
+            UnityEngine.Object.DestroyImmediate(dh);
+
             // 3d. The import policy that makes a multi-gigabyte pack fit on the device. The
             // extraction lands under Assets/Game/Mods/Converted/, which MobileConvertedModImporter
             // owns, so the settings below are the postprocessor's doing and not Unity's defaults.
@@ -1300,27 +1427,66 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(nrmImp != null && nrmImp.textureType == TextureImporterType.NormalMap,
                   "extracted *_Normal re-imports as a normal map",
                   nrmImp == null ? "no importer" : nrmImp.textureType.ToString());
+            var hgtImp = AssetImporter.GetAtPath(hgt) as TextureImporter;
+            Check(hgtImp != null && hgtImp.textureType == TextureImporterType.Default
+                  && !hgtImp.sRGBTexture,
+                  "extracted *_Height re-imports as linear data, not colour",
+                  hgtImp == null ? "no importer" : "sRGB=" + hgtImp.sRGBTexture);
             var texImp = AssetImporter.GetAtPath(tex) as TextureImporter;
-            Check(texImp != null && texImp.textureType == TextureImporterType.Default,
-                  "extracted colour texture stays a colour texture",
+            Check(texImp != null && texImp.textureType == TextureImporterType.Default
+                  && texImp.sRGBTexture,
+                  "extracted colour texture stays sRGB colour",
                   texImp == null ? "no importer" : texImp.textureType.ToString());
-            Check(texImp != null && !texImp.isReadable,
-                  "converted textures keep no CPU-side copy (isReadable false)");
-            Check(texImp != null && texImp.textureCompression == TextureImporterCompression.Compressed
-                  && texImp.mipmapEnabled,
-                  "converted textures are compressed and mipped");
+            // Unity already defaults isReadable false, Compressed and mipmapEnabled true, so
+            // those three would pass with the postprocessor deleted - they are regression pins,
+            // not proof it ran. The four below are not Unity defaults and cannot pass by
+            // accident: npotScale defaults to ToNearest, maxTextureSize to 2048, and a texture
+            // has no iOS platform override at all until something writes one.
+            Check(texImp != null && !texImp.isReadable
+                  && texImp.textureCompression == TextureImporterCompression.Compressed,
+                  "converted textures are compressed and keep no CPU-side copy");
             Check(texImp != null && texImp.npotScale == TextureImporterNPOTScale.None,
                   "converted textures keep their exact dimensions (DFU uv metadata depends on it)",
                   texImp == null ? "no importer" : texImp.npotScale.ToString());
+            // Against the policy's value, not a literal: this must keep passing when an operator
+            // is tuning the cap against a device, which is the whole reason it is an env var.
+            // The default itself (1024, below Unity's never-downscale 2048) is pinned in
+            // TestConvertedModImportPolicy.
+            Check(texImp != null && texImp.maxTextureSize == MobileConvertedModPolicy.MaxTextureSize(),
+                  "converted textures take their size cap from the policy",
+                  texImp == null ? "no importer" : "max=" + texImp.maxTextureSize
+                      + " policy=" + MobileConvertedModPolicy.MaxTextureSize());
+            var ios = texImp != null
+                ? texImp.GetPlatformTextureSettings(MobileConvertedModPolicy.IosPlatform) : null;
+            Check(ios != null && ios.overridden,
+                  "converted textures carry an explicit iOS override",
+                  ios == null ? "no settings" : "overridden=" + ios.overridden);
+            Check(ios != null && ios.format == MobileConvertedModPolicy.IosFormat()
+                  && ios.maxTextureSize == MobileConvertedModPolicy.MaxTextureSize()
+                  && ios.compressionQuality == MobileConvertedModPolicy.CompressionQuality(),
+                  "iOS override names the ASTC block, the cap and the compressor quality",
+                  ios == null ? "no settings"
+                    : ios.format + " " + ios.maxTextureSize + " q" + ios.compressionQuality);
+            // World textures ARE minified, so this one keeps its mipmaps; the 2D-art rule is
+            // exercised as a pure function in TestConvertedModImportPolicy, because no fixture
+            // path here can stand in for a real paperdoll's.
+            Check(texImp != null && texImp.mipmapEnabled,
+                  "a world texture keeps its mipmaps");
+            Check(texImp != null && !texImp.streamingMipmaps,
+                  "mipmap streaming stays off (QualitySettings has it disabled project-wide)");
             // The extraction root is deleted at the end of this test, so its .meta files never
             // survive to be inspected by hand. Record what the policy actually produced.
-            if (texImp != null && nrmImp != null)
+            if (texImp != null && nrmImp != null && hgtImp != null && ios != null)
                 Debug.Log(string.Format("[MobileSelfTest] converted-mod import policy produced: " +
-                    "colour type={0} readable={1} compression={2} mips={3} npot={4} sRGB={5}; " +
-                    "normal type={6} sRGB={7}",
+                    "colour type={0} readable={1} compression={2} mips={3} stream={4} npot={5} " +
+                    "sRGB={6} max={7}; iOS override={8} fmt={9} max={10} q={11}; " +
+                    "normal type={12} sRGB={13}; height type={14} sRGB={15}",
                     texImp.textureType, texImp.isReadable, texImp.textureCompression,
-                    texImp.mipmapEnabled, texImp.npotScale, texImp.sRGBTexture,
-                    nrmImp.textureType, nrmImp.sRGBTexture));
+                    texImp.mipmapEnabled, texImp.streamingMipmaps, texImp.npotScale,
+                    texImp.sRGBTexture, texImp.maxTextureSize,
+                    ios.overridden, ios.format, ios.maxTextureSize, ios.compressionQuality,
+                    nrmImp.textureType, nrmImp.sRGBTexture,
+                    hgtImp.textureType, hgtImp.sRGBTexture));
 
             // 4. Rewritten manifest points at extracted files, keeps identity.
             ModInfo info = null;
@@ -1329,7 +1495,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(info != null && info.ModTitle == "Extractor Fixture"
                   && info.GUID == "0d2c4a68-9e1f-4b7a-8c35-6d0e2f4a6b8c",
                   "manifest identity preserved");
-            Check(info != null && info.Files.Count == 3
+            Check(info != null && info.Files.Count == 5
                   && info.Files.TrueForAll(f => File.Exists(f)),
                   "manifest Files rewritten to extracted paths");
 

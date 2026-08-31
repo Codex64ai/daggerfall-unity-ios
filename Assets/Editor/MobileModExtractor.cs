@@ -28,8 +28,20 @@
 // rebuilds z and keeps them out of sRGB (see NormalUnswizzlerFor).
 //
 // MobileConvertedModImporter at the bottom of this file decides how the extraction is then
-// imported. That policy - compressed, not readable, mipped, normal maps typed - is what makes
-// a multi-gigabyte texture pack fit in an iPad's memory, so it is not cosmetic.
+// imported. That policy - compressed, not readable, size-capped, normal maps typed - is what
+// makes a multi-gigabyte texture pack fit in an iPad's memory, so it is not cosmetic. Its
+// levers are environment variables (MobileConvertedModPolicy), because they get tuned against
+// a real device and recompiling per attempt is the wrong loop:
+//
+//   DFU_MOD_MAXTEXSIZE   cap, power of two 32-16384          default 1024
+//   DFU_MOD_ASTC         iOS block size, 4x4|5x5|6x6|8x8|10x10|12x12   default 6x6
+//   DFU_MOD_TEX_QUALITY  compressor effort 0-100             default 50
+//   DFU_MOD_MIPS         master mipmap switch                default on
+//   DFU_MOD_NOMIP        path substrings that get no mipmaps default DFU's 2D art
+//   DFU_MOD_STREAM_MIPS  mipmap streaming                    default off (see the property)
+//
+// A change to one of these reaches a mod on its next conversion; Unity's import cache cannot
+// see an environment variable move, so re-convert rather than expecting a reimport.
 //
 // A .dfmod is untrusted input: it is a file a stranger hands us, and the manifest inside it is
 // the part of a mod an attacker fully controls. Every output path is therefore checked for
@@ -97,7 +109,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     if (assetName.EndsWith(ModManager.MODINFOEXTENSION, StringComparison.Ordinal))
                         continue; // rewritten below, not copied verbatim
 
-                    string outPath = OutputPathFor(assetName, outputRoot, originalCase, report);
+                    // Notes describe assets that SURVIVED, so they are held until the write has
+                    // actually happened and thrown away if it has not; see CommitNotes.
+                    var notes = new List<string>();
+                    string outPath = OutputPathFor(assetName, outputRoot, originalCase, notes);
                     var obj = ab.LoadAsset<UnityEngine.Object>(assetName);
                     if (obj is Texture2D tex2d)
                     {
@@ -105,25 +120,30 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                         // key with them (it is the short name WITH extension). Report it.
                         if (!outPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
                         {
-                            Noted(report, "extension-rewritten");
+                            notes.Add("extension-rewritten");
                             Debug.LogWarning($"[MobileModExtractor] {assetName} is re-encoded as .png, " +
                                 "so its runtime lookup name changes with it");
                             outPath = Path.ChangeExtension(outPath, ".png");
                         }
                         if (!Claim(claimed, outPath, assetName, report))
                             continue;
-                        // Colour maps are sRGB; normal, height and metallic/gloss maps carry
-                        // numbers rather than colours and must round-trip untouched by gamma
-                        // (DFU makes the same split in TextureReplacement.IsLinearTextureMap).
-                        // A compressed normal map additionally arrives swizzled with no blue
-                        // channel at all, so it needs rebuilding pixel by pixel.
+                        // Whether the blit degammas is decided by the SOURCE texture's graphics
+                        // format and by nothing else. Choosing it from the file NAME instead
+                        // looks equivalent and is not: a stranger's bundle can perfectly well
+                        // contain an sRGB-flagged "*_Height" (nothing forces a height map's
+                        // sRGBTexture off, and the importer default is on), and reading that
+                        // through a Linear RenderTexture degammas on sample with nothing
+                        // re-encoding on write - every mid-tone byte moved, silently. The name
+                        // rule still decides the DESTINATION policy, where it belongs, in
+                        // MobileConvertedModImporter. Here the source is the only authority.
+                        bool linear = !tex2d.isDataSRGB;
                         Func<Color32, Color32> unswizzle = IsNormalMapName(assetName)
-                            ? NormalUnswizzlerFor(tex2d.format, report) : null;
-                        if (!TryWriteFile(outPath,
-                                TexturePng.Encode(tex2d, IsLinearMapName(assetName), unswizzle),
+                            ? NormalUnswizzlerFor(tex2d.format, tex2d.isDataSRGB, notes) : null;
+                        if (!TryWriteFile(outPath, TexturePng.Encode(tex2d, linear, unswizzle),
                                 outputRoot, assetName, report))
                             continue;
                         report.extracted.Add(outPath);
+                        CommitNotes(report, notes);
                     }
                     else if (obj is TextAsset textAsset)
                     {
@@ -132,6 +152,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                         if (!TryWriteFile(outPath, textAsset.bytes, outputRoot, assetName, report))
                             continue;
                         report.extracted.Add(outPath);
+                        CommitNotes(report, notes);
                     }
                     else
                     {
@@ -192,14 +213,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// silently lose loose-file injection. Only when the manifest does not list the asset at
         /// all is the lowercase bundle path used, stripped of its "assets/" prefix.</summary>
         static string OutputPathFor(string bundleAssetName, string outputRoot,
-            Dictionary<string, string> originalCase, ExtractReport report)
+            Dictionary<string, string> originalCase, List<string> notes)
         {
             string tail = bundleAssetName.Replace('\\', '/');
             string original;
             if (originalCase.TryGetValue(tail.ToLowerInvariant(), out original))
                 return Path.Combine(outputRoot, original);
 
-            Noted(report, "unlisted-in-manifest");
+            notes.Add("unlisted-in-manifest");
             Debug.LogWarning($"[MobileModExtractor] {bundleAssetName} is not listed in the source " +
                 "manifest, so its original capitalisation cannot be recovered; DFU's case-sensitive " +
                 "directory lookups may not find it");
@@ -278,21 +299,30 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         ///
         /// The decision is made on the format because that is where the swizzle actually lives;
         /// an uncompressed or BC7 normal map already holds x,y,z in r,g,b and is passed through
-        /// unchanged. All three outcomes are counted so a real conversion can be checked rather
-        /// than trusted.</summary>
-        static Func<Color32, Color32> NormalUnswizzlerFor(TextureFormat format, ExtractReport report)
+        /// unchanged. An sRGB-flagged source is passed through too, and that check has to come
+        /// first: Unity never marks a NormalMap-typed texture sRGB, so an sRGB source named
+        /// "*_Normal" is an ordinary colour texture that merely shares the suffix, and
+        /// unswizzling its perfectly good rgb would be the corruption rather than the fix.
+        /// Every outcome is counted so a real conversion can be checked rather than trusted.</summary>
+        static Func<Color32, Color32> NormalUnswizzlerFor(TextureFormat format, bool sourceIsSRGB,
+            List<string> notes)
         {
+            if (sourceIsSRGB)
+            {
+                notes.Add("normal-srgb-source-kept-as-is");
+                return null;
+            }
             switch (format)
             {
                 case TextureFormat.DXT5:
                 case TextureFormat.DXT5Crunched:
-                    Noted(report, "normal-unswizzled-dxt5nm");
+                    notes.Add("normal-unswizzled-dxt5nm");
                     return c => ReconstructNormalPixel(c, true);
                 case TextureFormat.BC5:
-                    Noted(report, "normal-unswizzled-bc5");
+                    notes.Add("normal-unswizzled-bc5");
                     return c => ReconstructNormalPixel(c, false);
                 default:
-                    Noted(report, "normal-rgb-kept-as-is");
+                    notes.Add("normal-rgb-kept-as-is");
                     return null;
             }
         }
@@ -319,8 +349,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// <summary>The asset did not make it into the extraction.</summary>
         static void Skipped(ExtractReport report, string key) { Bump(report.skippedByType, key); }
 
-        /// <summary>The asset was extracted, but something about it is worth reporting.</summary>
-        static void Noted(ExtractReport report, string key) { Bump(report.notesByType, key); }
+        /// <summary>Records the notes gathered for one asset - and is called only once that
+        /// asset's bytes are on disk. Notes are the half of the report that describes SURVIVORS,
+        /// so a note banked before the write would let a texture that TryWriteFile then refused
+        /// be counted as "extracted, under a new name" in the same run that counts it as a
+        /// write-failure: two contradictory claims about one asset, in one report.</summary>
+        static void CommitNotes(ExtractReport report, List<string> notes)
+        {
+            foreach (string note in notes)
+                Bump(report.notesByType, note);
+        }
 
         static void Bump(Dictionary<string, int> counts, string key)
         {
@@ -480,37 +518,241 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         }
     }
 
+    /// <summary>The tunable half of the converted-mod import policy: the three settings that
+    /// actually decide whether a multi-gigabyte pack fits in an iPad's memory, plus the rules
+    /// that are content-dependent rather than universal.
+    ///
+    /// Every lever reads an environment variable, in the shape MobileModBuilder already uses for
+    /// DFU_MOD_OUT / DFU_MOD_TARGETS, because these will be tuned AGAINST A REAL DEVICE and a
+    /// loop that needs a recompile per attempt is the wrong loop. Values are read at import time,
+    /// so a converted mod picks up a change on its next conversion (extraction rewrites the files
+    /// and re-imports them); to re-apply a change to an already-converted mod, reconvert it or
+    /// delete its folder under the extraction root, since Unity's import cache has no idea an
+    /// environment variable moved.
+    ///
+    /// Nothing here is guessed silently. Where the right value depends on content this exposes
+    /// the rule instead of inventing one, and the defaults are argued for in the members below.
+    /// </summary>
+    internal static class MobileConvertedModPolicy
+    {
+        public const string Root = "Assets/Game/Mods/Converted/";
+
+        /// <summary>Unity's platform name for iOS texture overrides (BuildTargetGroup.iOS).</summary>
+        public const string IosPlatform = "iPhone";
+
+        public const string MaxSizeVar = "DFU_MOD_MAXTEXSIZE";
+        public const string MipsVar = "DFU_MOD_MIPS";
+        public const string StreamMipsVar = "DFU_MOD_STREAM_MIPS";
+        public const string NoMipVar = "DFU_MOD_NOMIP";
+        public const string AstcVar = "DFU_MOD_ASTC";
+        public const string QualityVar = "DFU_MOD_TEX_QUALITY";
+
+        /// <summary>1024, not Unity's 2048. This is the single biggest lever there is - it is
+        /// quadratic - and 2048 means "never downscale anything", which is not a memory policy.
+        /// A 2048 texture is ~1.87MB as ASTC 6x6 and ~0.47MB at 1024; against 1.72GB of DREAM
+        /// textures plus ~3.7GB of sprite modules on a device that jetsams an app somewhere
+        /// under 4GB, a 4x cut on the largest thing in the build is the difference the task
+        /// exists to make. It is also not a wild quality claim: an iPad's panel is ~2360 across,
+        /// so a wall filling a quarter of it is being sampled at roughly 600 pixels. Raise it
+        /// with DFU_MOD_MAXTEXSIZE=2048 when a specific pack proves it needs it.</summary>
+        public const int DefaultMaxTextureSize = 1024;
+
+        /// <summary>ASTC 6x6 = 3.56 bits/pixel, and is Unity's own iOS default for Compressed;
+        /// naming it explicitly is what makes it tunable rather than a platform accident. 8x8
+        /// (2.0 bpp) is the next lever if 1024 is not enough; 4x4 (8.0 bpp) is where to go if
+        /// normal maps band, since they share this setting.</summary>
+        public const string DefaultAstcBlock = "6x6";
+
+        /// <summary>Unity's "Normal" compressor quality. Quality here costs import time, not
+        /// bytes - the block size fixes the size - so it is safe to raise for a final pack.</summary>
+        public const int DefaultCompressionQuality = 50;
+
+        /// <summary>Substrings of an asset path that mean "this is 2D art drawn at 1:1, mipmaps
+        /// are 33% resident for nothing". Derived from DFU's own conventions rather than
+        /// invented: TextureReplacement keeps IMG images under Textures/Img and CIF/RCI images
+        /// (paperdolls, portraits, weapon animations, UI) under Textures/CifRci, and - which is
+        /// what makes this work for a bundled mod, whose internal directory layout is the
+        /// author's own - a mod can only serve those images at all under a short name carrying
+        /// the original .IMG/.CIF/.RCI filename, because that name is the runtime lookup key
+        /// (TryImportImage / TryImportCifRci -> ModManager.TryGetAsset).
+        ///
+        /// World textures and billboards are NOT in this list on purpose: those are minified
+        /// constantly and the sampling cost of having no mipmaps outweighs their third.
+        ///
+        /// This is the one rule whose correctness depends on content the converter has not been
+        /// pointed at yet, so it is overridable wholesale with DFU_MOD_NOMIP.</summary>
+        public static readonly string[] DefaultNoMipMarkers =
+            { ".img", ".cif", ".rci", "/textures/img/", "/textures/cifrci/" };
+
+        public static int MaxTextureSize()
+        {
+            return ParseSize(Env(MaxSizeVar), DefaultMaxTextureSize);
+        }
+
+        public static bool MipmapsAllowed()
+        {
+            return ParseBool(Env(MipsVar), true);
+        }
+
+        /// <summary>Off by default, and not because it looked risky. Mipmap streaming is a
+        /// QUALITY SETTING first: every level in this project's ProjectSettings/QualitySettings
+        /// .asset carries streamingMipmapsActive: 0, so the importer flag would be inert today -
+        /// it would cost a re-import and buy nothing. Turning the quality setting on is outside
+        /// this converter, and beyond that the streaming system picks mip levels from renderer
+        /// bounds, which is a question about how DFU assigns these textures to materials at
+        /// runtime that this task has not answered. Unverified, therefore off, therefore
+        /// exposed: DFU_MOD_STREAM_MIPS=1 once someone has checked both halves on a device.
+        /// </summary>
+        public static bool StreamingMipmaps()
+        {
+            return ParseBool(Env(StreamMipsVar), false);
+        }
+
+        public static int CompressionQuality()
+        {
+            return ParseQuality(Env(QualityVar), DefaultCompressionQuality);
+        }
+
+        public static TextureImporterFormat IosFormat()
+        {
+            return ParseAstcBlock(Env(AstcVar), DefaultAstcBlock);
+        }
+
+        public static string[] NoMipMarkers()
+        {
+            return ParseList(Env(NoMipVar), DefaultNoMipMarkers);
+        }
+
+        static string Env(string name) { return Environment.GetEnvironmentVariable(name); }
+
+        /// <summary>True when this asset is minified in use and should carry mipmaps.</summary>
+        public static bool ShouldMipmap(string assetPath, string[] noMipMarkers)
+        {
+            if (string.IsNullOrEmpty(assetPath) || noMipMarkers == null)
+                return true;
+            string path = assetPath.Replace('\\', '/');
+            foreach (string marker in noMipMarkers)
+            {
+                if (string.IsNullOrEmpty(marker))
+                    continue;
+                if (path.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0)
+                    return false;
+            }
+            return true;
+        }
+
+        /// <summary>A texture size Unity will accept: powers of two from 32 to 16384. An
+        /// operator typo must not quietly become a policy, so anything else keeps the default
+        /// and says so.</summary>
+        public static int ParseSize(string raw, int fallback)
+        {
+            if (string.IsNullOrEmpty(raw))
+                return fallback;
+            int value;
+            if (int.TryParse(raw.Trim(), out value) && value >= 32 && value <= 16384
+                && (value & (value - 1)) == 0)
+                return value;
+            Debug.LogWarning($"[MobileConvertedModPolicy] {MaxSizeVar}='{raw}' is not a power of " +
+                $"two between 32 and 16384; keeping {fallback}");
+            return fallback;
+        }
+
+        public static bool ParseBool(string raw, bool fallback)
+        {
+            if (string.IsNullOrEmpty(raw))
+                return fallback;
+            switch (raw.Trim().ToLowerInvariant())
+            {
+                case "1": case "true": case "yes": case "on": return true;
+                case "0": case "false": case "no": case "off": return false;
+                default:
+                    Debug.LogWarning($"[MobileConvertedModPolicy] '{raw}' is not a yes/no value; " +
+                        $"keeping {fallback}");
+                    return fallback;
+            }
+        }
+
+        public static int ParseQuality(string raw, int fallback)
+        {
+            if (string.IsNullOrEmpty(raw))
+                return fallback;
+            int value;
+            if (int.TryParse(raw.Trim(), out value) && value >= 0 && value <= 100)
+                return value;
+            Debug.LogWarning($"[MobileConvertedModPolicy] {QualityVar}='{raw}' is not 0-100; " +
+                $"keeping {fallback}");
+            return fallback;
+        }
+
+        /// <summary>Maps an ASTC block spelling ("6x6") to the importer format. Only the block
+        /// sizes Unity actually defines are accepted; a typo falls back rather than silently
+        /// leaving the platform to choose, which is the state this lever exists to end.</summary>
+        public static TextureImporterFormat ParseAstcBlock(string raw, string fallback)
+        {
+            string block = string.IsNullOrEmpty(raw) ? fallback : raw.Trim().ToLowerInvariant();
+            switch (block)
+            {
+                case "4x4": return TextureImporterFormat.ASTC_4x4;
+                case "5x5": return TextureImporterFormat.ASTC_5x5;
+                case "6x6": return TextureImporterFormat.ASTC_6x6;
+                case "8x8": return TextureImporterFormat.ASTC_8x8;
+                case "10x10": return TextureImporterFormat.ASTC_10x10;
+                case "12x12": return TextureImporterFormat.ASTC_12x12;
+            }
+            Debug.LogWarning($"[MobileConvertedModPolicy] {AstcVar}='{raw}' is not one of " +
+                $"4x4/5x5/6x6/8x8/10x10/12x12; keeping {fallback}");
+            return ParseAstcBlock(fallback, fallback == DefaultAstcBlock ? "6x6" : DefaultAstcBlock);
+        }
+
+        public static string[] ParseList(string raw, string[] fallback)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return fallback;
+            var parts = new List<string>();
+            foreach (string part in raw.Split(','))
+            {
+                string trimmed = part.Trim();
+                if (trimmed.Length > 0)
+                    parts.Add(trimmed);
+            }
+            return parts.Count > 0 ? parts.ToArray() : fallback;
+        }
+    }
+
     /// <summary>Import policy for CONVERTED mods, and the reason a 1.7GB texture pack can be
     /// opened on an 8GB iPad at all. These are the opposite trade-offs from the pilot content's:
     /// there the assets are small and wanted on the CPU, here every default that keeps a second
     /// copy of a texture around is a copy the device cannot afford.
     ///
-    /// Compressed rather than uncompressed (ASTC on iOS) is roughly a 4-8x saving on the largest
-    /// thing in the build; isReadable false drops the CPU-side mirror of every texture, which is
-    /// pure waste for content only the GPU ever samples and would otherwise double the cost;
-    /// mipmaps stay on because world textures are minified constantly and the sampling cost of
-    /// not having them outweighs their third; npotScale None keeps exact dimensions, since DFU's
-    /// XML/uv metadata is written against the authored size and rescaling silently misaligns it.
-    /// Normal maps are typed from the DFU *_Normal suffix so Unity compresses them as normal maps
-    /// and shaders unpack them correctly; the other two linear maps are marked non-sRGB for the
-    /// same reason the extractor writes them linear. Audio: songs stream, effects sit compressed
-    /// in memory - a streamed sound effect would stutter, an in-memory song is megabytes resident.
+    /// isReadable false drops the CPU-side mirror of every texture, which is pure waste for
+    /// content only the GPU ever samples and would otherwise double the cost. npotScale None
+    /// keeps exact dimensions, since DFU's XML/uv metadata is written against the authored size
+    /// and rescaling silently misaligns it. Normal maps are typed from the DFU *_Normal suffix so
+    /// Unity compresses them as normal maps and shaders unpack them correctly; the other two
+    /// linear maps are marked non-sRGB, matching DFU's own IsLinearTextureMap - note that this
+    /// deliberately NORMALISES a map whose author left the sRGB default on, which is a change of
+    /// behaviour relative to their desktop bundle and the reason the extraction side refuses to
+    /// make that decision from the filename. Audio: songs stream, effects sit compressed in
+    /// memory - a streamed sound effect would stutter, an in-memory song is megabytes resident.
+    ///
+    /// The three levers that actually move the memory number - size cap, mipmaps, ASTC block -
+    /// live in MobileConvertedModPolicy, where they can be changed without a recompile.
     ///
     /// Scoped to the extraction root, so nothing else in the project is touched.</summary>
     class MobileConvertedModImporter : AssetPostprocessor
     {
-        const string root = "Assets/Game/Mods/Converted/";
-
         // These settings are applied at import time and nowhere else, so a policy change only
         // reaches assets already on disk if this number moves. Note that it invalidates the
         // import cache for every texture and audio clip in the PROJECT, not only the converted
         // ones - the scope check below runs per import, long after the version is compared - so
         // bumping it costs a full re-import. Change it when the policy changes, not otherwise.
-        public override uint GetVersion() { return 1; }
+        // An environment lever moving does NOT move this: reconvert the mod instead.
+        public override uint GetVersion() { return 2; }
 
         static bool InScope(string assetPath)
         {
-            return assetPath.Replace('\\', '/').StartsWith(root, StringComparison.Ordinal);
+            return assetPath.Replace('\\', '/')
+                .StartsWith(MobileConvertedModPolicy.Root, StringComparison.Ordinal);
         }
 
         void OnPreprocessTexture()
@@ -519,14 +761,31 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             var importer = (TextureImporter)assetImporter;
             importer.npotScale = TextureImporterNPOTScale.None;   // exact sizes: DFU XML/uv metadata depends on them
             importer.isReadable = false;                          // no CPU copy - memory matters here
-            importer.mipmapEnabled = true;
             importer.textureCompression = TextureImporterCompression.Compressed;
+            importer.maxTextureSize = MobileConvertedModPolicy.MaxTextureSize();
+            importer.mipmapEnabled = MobileConvertedModPolicy.MipmapsAllowed()
+                && MobileConvertedModPolicy.ShouldMipmap(assetPath,
+                    MobileConvertedModPolicy.NoMipMarkers());
+            importer.streamingMipmaps = MobileConvertedModPolicy.StreamingMipmaps();
+
             // Same naming rule the extraction itself used, so what was written linear is read
             // back linear. NormalMap implies linear, hence the else.
             if (MobileModExtractor.IsNormalMapName(assetPath))
                 importer.textureType = TextureImporterType.NormalMap;
             else if (MobileModExtractor.IsLinearMapName(assetPath))
                 importer.sRGBTexture = false;                     // data, not colour
+
+            // The default platform settings above are what the editor and a desktop build use;
+            // the device is the point, and on iOS "Compressed" without an explicit format lets
+            // the platform pick the block size - the single number that decides how many bytes
+            // per pixel a 3.7GB pack costs. Name it.
+            var ios = importer.GetPlatformTextureSettings(MobileConvertedModPolicy.IosPlatform);
+            ios.overridden = true;
+            ios.maxTextureSize = MobileConvertedModPolicy.MaxTextureSize();
+            ios.textureCompression = TextureImporterCompression.Compressed;
+            ios.format = MobileConvertedModPolicy.IosFormat();
+            ios.compressionQuality = MobileConvertedModPolicy.CompressionQuality();
+            importer.SetPlatformTextureSettings(ios);
         }
 
         void OnPreprocessAudio()
