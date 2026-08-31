@@ -13,6 +13,11 @@
 //   follows roads even when they are not drawn, and Roads & tracks without travel is honest
 //   scenery for players who keep vanilla fast travel.
 //
+//   A THIRD entry, "Summer start", joined them on 2026-08-31. It is not a live switch at all:
+//   it is read once, when a new character is created, to move the start date out of winter
+//   (see MobileStartSeason). It sits here because the Mods window is the launcher-time page
+//   this port already uses for choices the player makes before pressing PLAY.
+//
 //   A PlayerPrefs mirror keeps each choice readable before ModManager exists (and in the
 //   editor self-test, which has no ModManager at all). When a mod entry is present it is the
 //   truth. The roads pref defaults to the travel pref so the old combined switch carries
@@ -27,11 +32,13 @@ namespace DaggerfallWorkshop.Game.Mobile
     {
         public const string RoadsTitle = "Roads & tracks";
         public const string TravelTitle = "Real travel";
+        public const string SummerStartTitle = "Summer start";
 
         // The travel pref name predates the (now reversed) combined switch; kept so saved
         // choices carry over. The roads pref is new with the split and inherits from it.
         const string travelPref = "DFMobile.journeymode";
         const string roadsPref = "DFMobile.mod.roads";
+        const string summerStartPref = "DFMobile.mod.summerstart";
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         static void Hook()
@@ -71,6 +78,22 @@ namespace DaggerfallWorkshop.Game.Mobile
                 "from Pause > Mobile Settings > Mods.";
             travel.Enabled = RealTravel;
             manager.RegisterBuiltInMod(travel);
+
+            Mod summer = new Mod();
+            summer.ModInfo.ModTitle = SummerStartTitle;
+            summer.ModInfo.ModVersion = "1.0";
+            summer.ModInfo.ModAuthor = "Codex64ai";
+            summer.ModInfo.ContactInfo = "github.com/Codex64ai/daggerfall-unity-ios";
+            summer.ModInfo.DFUnity_Version = VersionInfo.DaggerfallUnityVersion;
+            summer.ModInfo.GUID = "dfumobile-summer-start";
+            summer.ModInfo.ModDescription =
+                "A new character starts on the 4th of Midyear 3E405 instead of the 4th of " +
+                "Morning Star, so the first hours of the game are summer rather than two " +
+                "months of snow. Same day, same year, same 13:30 start time - only the month " +
+                "moves. Affects NEW characters only; a game in progress and any existing save " +
+                "keep their own date. Off by default: the winter date is the lore one.";
+            summer.Enabled = SummerStart;
+            manager.RegisterBuiltInMod(summer);
         }
 
         static Mod Entry(string title)
@@ -121,6 +144,16 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         /// <summary>
+        /// Start a new character in summer instead of the canonical winter date. Off by
+        /// default; read only when a new character is created. See MobileStartSeason.
+        /// </summary>
+        public static bool SummerStart
+        {
+            get { return GetFlag(SummerStartTitle, summerStartPref, 0); }
+            set { SetFlag(SummerStartTitle, summerStartPref, value); }
+        }
+
+        /// <summary>
         /// Push the effective choices (the Mods window's, if there is one) into the live flags
         /// and the pref mirrors. Called at game-scene startup; harmless to repeat.
         /// </summary>
@@ -133,6 +166,9 @@ namespace DaggerfallWorkshop.Game.Mobile
             bool roadsOn = Roads;
             if ((PlayerPrefs.GetInt(roadsPref, 0) == 1) != roadsOn)
                 PlayerPrefs.SetInt(roadsPref, roadsOn ? 1 : 0);
+            bool summerOn = SummerStart;
+            if ((PlayerPrefs.GetInt(summerStartPref, 0) == 1) != summerOn)
+                PlayerPrefs.SetInt(summerStartPref, summerOn ? 1 : 0);
             PlayerPrefs.Save();
         }
     }

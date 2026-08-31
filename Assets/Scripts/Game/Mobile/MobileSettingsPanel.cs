@@ -493,6 +493,20 @@ namespace DaggerfallWorkshop.Game.Mobile
                 "compression you control and can stop anywhere. Cautious journeys follow " +
                 "roads and tracks even when Roads & tracks is off and they are not drawn.");
 
+            // Listed here for parity with the launcher's Mods window, but unlike the other
+            // two it changes nothing about the session you are in: the start date is read
+            // once, when a character is created. The note says so rather than leaving the
+            // player to wonder why the sky did not change.
+            AddToggle(c, ref y, rowW, rowH, "Summer start",
+                () => MobileMods.SummerStart,
+                v => MobileMods.SummerStart = v,
+                null);
+
+            AddNote(c, ref y, rowW,
+                "A NEW character starts on the 4th of Midyear 3E405 instead of the 4th of " +
+                "Morning Star - summer instead of two months of snow. Same day, same year, " +
+                "same 13:30 start. This game and your saves keep the date they already have.");
+
             FinishSection(c, y);
         }
 

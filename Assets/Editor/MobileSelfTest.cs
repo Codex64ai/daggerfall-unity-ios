@@ -23,6 +23,7 @@ using System;
 using DaggerfallWorkshop.Game.Mobile;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
 using FullSerializer;
+using DaggerfallWorkshop.Utility;
 using DaggerfallWorkshop.Utility.AssetInjection;
 using System.Collections;
 using System.Collections.Generic;
@@ -84,6 +85,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestRoadData();
             TestRoadsInstallSurvivesSceneSwap();
             TestModsSwitchOwnsBothPrefs();
+            TestSummerStartDate();
             TestModBundleRoundTrip();
             TestModScriptSkipRule();
             TestNormalReconstructRule();
@@ -1228,6 +1230,85 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             {
                 MobileMods.Roads = savedRoads;
                 MobileMods.RealTravel = savedTravel;
+            }
+        }
+
+        /// <summary>
+        /// The date a new character starts on. The switch is off by default and the off case
+        /// must be byte-for-byte the classic 13:30 4th Morning Star 3E405 - purists get the
+        /// shipwreck date whatever else this port does. On, only the MONTH moves, to Midyear,
+        /// which is Summer; day, year and time of day are untouched.
+        /// </summary>
+        static void TestSummerStartDate()
+        {
+            // Default is off. Read through a fresh pref name so a developer who has turned
+            // the switch on for themselves does not turn this assertion into a lie.
+            const string pref = "DFMobile.mod.summerstart";
+            bool hadPref = PlayerPrefs.HasKey(pref);
+            int savedPref = PlayerPrefs.GetInt(pref, 0);
+            bool savedFlag = MobileMods.SummerStart;
+            try
+            {
+                PlayerPrefs.DeleteKey(pref);
+                Check(PlayerPrefs.GetInt(pref, 0) == 0,
+                      "summer start: the preference defaults to off (vanilla winter date)");
+
+                DaggerfallDateTime vanilla = new DaggerfallDateTime();
+                vanilla.SetClassicGameStartTime();
+
+                DaggerfallDateTime off = new DaggerfallDateTime();
+                MobileStartSeason.ApplyNewGameStartTime(off, false);
+                Check(off.Year == vanilla.Year && off.Month == vanilla.Month
+                      && off.Day == vanilla.Day && off.Hour == vanilla.Hour
+                      && off.Minute == vanilla.Minute,
+                      "summer start off: the classic start date is untouched",
+                      off.Year + "/" + off.Month + "/" + off.Day + " " + off.Hour + ":" + off.Minute);
+                Check(off.ToClassicDaggerfallTime() == vanilla.ToClassicDaggerfallTime(),
+                      "summer start off: classic minutes match, so LastGameMinutes is unchanged");
+                Check(off.SeasonValue == DaggerfallDateTime.Seasons.Winter
+                      && off.MonthValue == DaggerfallDateTime.Months.MorningStar,
+                      "summer start off: still the 4th of Morning Star, in winter");
+
+                DaggerfallDateTime on = new DaggerfallDateTime();
+                MobileStartSeason.ApplyNewGameStartTime(on, true);
+                Check(on.SeasonValue == DaggerfallDateTime.Seasons.Summer,
+                      "summer start on: the new character wakes up in summer",
+                      on.SeasonValue.ToString());
+                Check(on.MonthValue == DaggerfallDateTime.Months.Midyear
+                      && MobileStartSeason.SummerMonth == 5,
+                      "summer start on: the month is Midyear (5), the middle summer month",
+                      on.Month.ToString());
+                Check(on.Day == vanilla.Day && on.Year == vanilla.Year,
+                      "summer start on: same day of month and same year (3E405)",
+                      on.Day + "/" + on.Year);
+                Check(on.Hour == vanilla.Hour && on.Minute == vanilla.Minute
+                      && on.Hour == 13 && on.Minute == 30,
+                      "summer start on: still 13:30, so light and shop hours do not shift",
+                      on.Hour + ":" + on.Minute);
+
+                // Only the month may differ between the two.
+                Check(on.ToClassicDaggerfallTime() != vanilla.ToClassicDaggerfallTime(),
+                      "summer start on: the clock really did move");
+
+                // A null clock must not throw - the new-game path calls this before anything
+                // else touches WorldTime.
+                MobileStartSeason.ApplyNewGameStartTime(null, true);
+                Check(true, "summer start: a null date time is ignored rather than throwing");
+
+                // The pref round-trips through MobileMods, and MobileStartSeason reads it.
+                MobileMods.SummerStart = true;
+                Check(MobileStartSeason.Enabled, "summer start: MobileStartSeason reads the mod switch");
+                MobileMods.SummerStart = false;
+                Check(!MobileStartSeason.Enabled, "summer start: turning the switch off is honoured");
+            }
+            finally
+            {
+                MobileMods.SummerStart = savedFlag;
+                if (hadPref)
+                    PlayerPrefs.SetInt(pref, savedPref);
+                else
+                    PlayerPrefs.DeleteKey(pref);
+                PlayerPrefs.Save();
             }
         }
 

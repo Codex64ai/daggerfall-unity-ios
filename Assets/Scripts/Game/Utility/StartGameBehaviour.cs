@@ -359,7 +359,12 @@ namespace DaggerfallWorkshop.Game.Utility
             playerEntity.AssignCharacter(characterDocument);
 
             // Set game time
-            DaggerfallUnity.Instance.WorldTime.Now.SetClassicGameStartTime();
+            // MOBILE: routed through MobileStartSeason so the opt-in "Summer start" mod can
+            // move a NEW character's start month out of winter. With the switch off this is
+            // exactly SetClassicGameStartTime(). This is the only new-game path - the other
+            // call site (SaveLoadManager.Start) seeds the clock before a save is loaded and
+            // is deliberately left alone, so loading a save is unaffected either way.
+            Mobile.MobileStartSeason.ApplyNewGameStartTime(DaggerfallUnity.Instance.WorldTime.Now);
 
             // Set time tracked in playerEntity
             playerEntity.LastGameMinutes = DaggerfallUnity.Instance.WorldTime.DaggerfallDateTime.ToClassicDaggerfallTime();
