@@ -437,8 +437,24 @@ namespace DaggerfallWorkshop
                 material.mainTexture.filterMode = MainFilterMode;
 
                 // Setup normal map
-                bool importedNormals = TextureReplacement.TextureExistsAmongLooseFiles(settings.archive, settings.record, settings.frame, TextureMap.Normal);
-                if ((GenerateNormals || importedNormals) && results.normalMap != null)
+                // MOBILE: the gate here used to be (GenerateNormals || importedNormals), where
+                // importedNormals came from TextureExistsAmongLooseFiles - a LOOSE-FILES-ONLY probe.
+                // GetTexture2D above is called with TextureImport.AllLocations and so already imports
+                // a normal map from a mod's asset bundle, which this then threw away unless the user
+                // happened to have GenerateNormals switched on. A bundled mod therefore rendered worse
+                // than the identical assets shipped loose.
+                //
+                // The probe is not made mod-aware, it is REMOVED, because results.normalMap already
+                // holds the answer and re-asking would mean loading the texture out of the bundle a
+                // second time to learn something we know. Within this branch normalMap is non-null in
+                // exactly two cases: it was imported (loose files or mods, TextureReader.cs:278), or it
+                // was generated - and generation requires settings.createNormalMap, which is set only
+                // inside the `if (GenerateNormals)` block above and is false by default out of
+                // CreateTextureSettings. So `(GenerateNormals || wasImported)` is true whenever
+                // normalMap is non-null, and this condition is the same test with the redundant half
+                // dropped. Loose files and generated normals behave exactly as before; the only
+                // changed case is the bundled one, which is the bug.
+                if (results.normalMap != null)
                 {
                     results.normalMap.filterMode = MainFilterMode;
                     material.SetTexture(Uniforms.BumpMap, results.normalMap);

@@ -95,6 +95,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestConverterGuardRules();
             TestMaterialTextureNaming();
             TestMaterialMapLookupNaming();
+            TestNormalMapGatePremise();
             TestConversionRefusesEmptyResult();
             TestChunkedConversion();
             TestRoadDirectionReciprocity();
@@ -252,6 +253,36 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && TextureReplacement.IsLinearTextureMap(TextureMap.MetallicGloss)
                   && !TextureReplacement.IsLinearTextureMap(TextureMap.Albedo),
                   "the extra material maps are linear and albedo is not");
+        }
+
+        /// <summary>
+        /// The premise the normal-map gate in MaterialReader.GetMaterial() now rests on.
+        ///
+        /// That gate used to be (GenerateNormals || importedNormals) with importedNormals probing
+        /// loose files only, which discarded a normal map imported from a mod bundle. It is now
+        /// simply "did we end up with a normal map", which is EQUIVALENT only while a normal map
+        /// cannot be generated behind the caller's back: generation needs settings.createNormalMap,
+        /// and MaterialReader sets that solely inside its `if (GenerateNormals)` block.
+        ///
+        /// So the whole simplification hinges on CreateTextureSettings leaving createNormalMap
+        /// false. If someone ever defaults it true, generated normals would start being applied for
+        /// players who have GenerateNormals switched OFF - a silent visual change with nothing else
+        /// to catch it. This is that catch.
+        /// </summary>
+        static void TestNormalMapGatePremise()
+        {
+            GetTextureSettings settings = DaggerfallWorkshop.Utility.TextureReader.CreateTextureSettings(180, 0, 0);
+
+            Check(!settings.createNormalMap,
+                  "CreateTextureSettings leaves normal-map generation off, so a non-null normalMap means it was imported");
+
+            // The archive/record/frame must survive, since the gate reads them back off settings.
+            Check(settings.archive == 180 && settings.record == 0 && settings.frame == 0,
+                  "CreateTextureSettings carries the record identity through");
+
+            // Emission generation is gated the same way by its caller; pin it for the same reason.
+            Check(!settings.createEmissionMap,
+                  "CreateTextureSettings leaves emission generation off too");
         }
 
         /// <summary>
