@@ -206,8 +206,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 bool loggedAudioLoad = false;   // see EnsureAudioData: logged once, counted always
                 long sweepBudget = SweepBudgetBytes();
                 DateTime lastYield = DateTime.UtcNow;
-                // Which textures the AUTHOR marked Read/Write Enabled. See ReadableSidecarName.
-                var readableTextures = new List<string>();
+                // What the AUTHOR chose about each texture, for the import policy to honour.
+                // See ReadableSidecarName. Facts are recorded here; the policy decides which of
+                // them it acts on.
+                var textureFlags = new Dictionary<string, string>(StringComparer.Ordinal);
 
                 foreach (string assetName in ab.GetAllAssetNames())
                 {
@@ -275,8 +277,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                                 continue;
                             report.extracted.Add(outPath);
                             CommitNotes(report, notes);
-                            if (tex2d.isReadable)
-                                readableTextures.Add(outPath);
+                            // The author's own decisions, recorded verbatim: Read/Write Enabled,
+                            // and whether they left the texture UNCOMPRESSED. Both turned out to
+                            // be load-bearing contracts rather than preferences.
+                            string flags = (tex2d.isReadable ? "R" : string.Empty)
+                                + (IsCompressedFormat(tex2d.format) ? string.Empty : "U");
+                            if (flags.Length > 0)
+                                textureFlags[outPath] = flags;
                         }
                         else if (obj is TextAsset textAsset)
                         {
@@ -473,7 +480,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 // The author's readable flags, written where the import policy can find them.
                 // This has to happen BEFORE AssetDatabase.Refresh below, because that is what
                 // triggers the import that consults it.
-                WriteReadableSidecar(outputRoot, readableTextures, report);
+                WriteReadableSidecar(outputRoot, textureFlags, report);
 
                 // Manifest identity is preserved; only Files points at the extraction.
                 modInfo.Files = new List<string>(report.extracted);
@@ -1299,6 +1306,46 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             return string.Join(", ", parts.ToArray());
         }
 
+        /// <summary>True when the texture is stored in a BLOCK-COMPRESSED format.
+        ///
+        /// This matters because a mod author leaving a texture uncompressed is usually a
+        /// decision rather than an oversight: DFU slices classic UI art with GetPixels sub-rects,
+        /// and a block format constrains what rectangles are addressable at all - DFU says so
+        /// itself in SpellIconCollection, which refuses an atlas that is "compressed with a
+        /// block-based format but icons are not multiple of 4". DREAM's author left TALK02I0 and
+        /// TALK03I0 as RGBA32 while compressing almost everything else; compressing them anyway
+        /// broke the talk window.
+        ///
+        /// The list is of COMPRESSED families, so an unfamiliar format is treated as
+        /// uncompressed. That is the safe direction: the cost of being wrong is size, and the
+        /// cost of the other error is a broken window.</summary>
+        public static bool IsCompressedFormat(TextureFormat format)
+        {
+            switch (format)
+            {
+                case TextureFormat.DXT1: case TextureFormat.DXT1Crunched:
+                case TextureFormat.DXT5: case TextureFormat.DXT5Crunched:
+                case TextureFormat.BC4: case TextureFormat.BC5:
+                case TextureFormat.BC6H: case TextureFormat.BC7:
+                case TextureFormat.ETC_RGB4: case TextureFormat.ETC2_RGB:
+                case TextureFormat.ETC2_RGBA1: case TextureFormat.ETC2_RGBA8:
+                case TextureFormat.ETC_RGB4Crunched: case TextureFormat.ETC2_RGBA8Crunched:
+                case TextureFormat.EAC_R: case TextureFormat.EAC_R_SIGNED:
+                case TextureFormat.EAC_RG: case TextureFormat.EAC_RG_SIGNED:
+                case TextureFormat.PVRTC_RGB2: case TextureFormat.PVRTC_RGBA2:
+                case TextureFormat.PVRTC_RGB4: case TextureFormat.PVRTC_RGBA4:
+                case TextureFormat.ASTC_4x4: case TextureFormat.ASTC_5x5:
+                case TextureFormat.ASTC_6x6: case TextureFormat.ASTC_8x8:
+                case TextureFormat.ASTC_10x10: case TextureFormat.ASTC_12x12:
+                case TextureFormat.ASTC_HDR_4x4: case TextureFormat.ASTC_HDR_5x5:
+                case TextureFormat.ASTC_HDR_6x6: case TextureFormat.ASTC_HDR_8x8:
+                case TextureFormat.ASTC_HDR_10x10: case TextureFormat.ASTC_HDR_12x12:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         /// <summary>Name of the file that carries the author's Read/Write Enabled flags from the
         /// extraction to the import.
         ///
@@ -1329,15 +1376,15 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// be cheaper still and would not survive the reimport that a cache invalidation or a
         /// GetVersion bump causes, silently reverting the fix later. A file next to the assets
         /// survives both and is inspectable by hand.</summary>
-        static void WriteReadableSidecar(string outputRoot, List<string> readable,
+        static void WriteReadableSidecar(string outputRoot, Dictionary<string, string> flags,
             ExtractReport report)
         {
             var lines = new List<string>();
-            foreach (string path in readable)
+            foreach (var entry in flags)
             {
-                string rel = RelativeToRoot(path, outputRoot);
+                string rel = RelativeToRoot(entry.Key, outputRoot);
                 if (rel != null)
-                    lines.Add(rel);
+                    lines.Add(entry.Value + "\t" + rel);
             }
             lines.Sort(StringComparer.Ordinal);   // stable file across identical conversions
             TryWriteFile(Path.Combine(outputRoot, ReadableSidecarName),
@@ -1619,6 +1666,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// with DFU_MOD_MAXTEXSIZE=2048 when a specific pack proves it needs it.</summary>
         public const int DefaultMaxTextureSize = 1024;
 
+        /// <summary>The cap applied to classic UI art, which is to say none: 16384 is Unity's
+        /// maximum, so nothing is ever downscaled. This is not a memory oversight. UI art is
+        /// drawn at 1:1 and DFU computes GetPixels rects from its dimensions, so a clamp does not
+        /// cost quality, it changes arithmetic - see IsClassicUiArt.</summary>
+        public const int MaxUiTextureSize = 16384;
+
         /// <summary>ASTC 6x6 = 3.56 bits/pixel, and is Unity's own iOS default for Compressed;
         /// naming it explicitly is what makes it tunable rather than a platform accident. 8x8
         /// (2.0 bpp) is the next lever if 1024 is not enough; 4x4 (8.0 bpp) is where to go if
@@ -1650,8 +1703,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // re-conversion is picked up without an editor restart. Import runs per asset and there
         // are thousands of them; re-reading the file each time would be the expensive way to get
         // the same answer.
-        static readonly Dictionary<string, KeyValuePair<string, HashSet<string>>> readableCache =
-            new Dictionary<string, KeyValuePair<string, HashSet<string>>>(StringComparer.Ordinal);
+        static readonly Dictionary<string, KeyValuePair<string, Dictionary<string, string>>> readableCache =
+            new Dictionary<string, KeyValuePair<string, Dictionary<string, string>>>(StringComparer.Ordinal);
         static readonly HashSet<string> warnedMissingSidecar = new HashSet<string>(StringComparer.Ordinal);
 
         /// <summary>True when the mod author had Read/Write Enabled set on the texture this
@@ -1670,12 +1723,25 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// this bug in the first place.</summary>
         public static bool SourceWasReadable(string assetPath)
         {
+            return SourceFlags(assetPath).IndexOf('R') >= 0;
+        }
+
+        /// <summary>True when the author left the source texture UNCOMPRESSED.</summary>
+        public static bool SourceWasUncompressed(string assetPath)
+        {
+            return SourceFlags(assetPath).IndexOf('U') >= 0;
+        }
+
+        /// <summary>The author's recorded choices for one extracted texture, as flag letters
+        /// ("R" readable, "U" uncompressed), or empty when nothing is known.</summary>
+        static string SourceFlags(string assetPath)
+        {
             string path = (assetPath ?? string.Empty).Replace('\\', '/');
             if (!path.StartsWith(Root, StringComparison.Ordinal))
-                return false;
+                return string.Empty;
             int slash = path.IndexOf('/', Root.Length);
             if (slash < 0)
-                return false;
+                return string.Empty;
 
             string modRoot = path.Substring(0, slash);
             string relative = path.Substring(slash + 1);
@@ -1697,20 +1763,28 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                         "known; importing its textures non-readable, which is the memory-cheap " +
                         "answer and the one that can make DFU throw on UI art. Re-convert this " +
                         "mod to restore the flags.");
-                return false;
+                return string.Empty;
             }
 
-            KeyValuePair<string, HashSet<string>> cached;
+            KeyValuePair<string, Dictionary<string, string>> cached;
             if (!readableCache.TryGetValue(modRoot, out cached) || cached.Key != stamp)
             {
-                var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var set = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 try
                 {
                     foreach (string line in File.ReadAllLines(sidecar))
                     {
                         string entry = line.Trim();
-                        if (entry.Length > 0)
-                            set.Add(entry);
+                        if (entry.Length == 0)
+                            continue;
+                        // "<flags>\t<path>". A line with no tab is the ORIGINAL format, which
+                        // recorded readability alone - read it as "R" rather than discarding an
+                        // older extraction's flags outright.
+                        int tab = entry.IndexOf('\t');
+                        if (tab < 0)
+                            set[entry] = "R";
+                        else
+                            set[entry.Substring(tab + 1)] = entry.Substring(0, tab);
                     }
                 }
                 catch (Exception ex)
@@ -1718,11 +1792,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     Debug.LogWarning($"[MobileConvertedModPolicy] could not read '{sidecar}': " +
                         $"{ex.GetType().Name}. Importing this mod's textures non-readable.");
                 }
-                cached = new KeyValuePair<string, HashSet<string>>(stamp, set);
+                cached = new KeyValuePair<string, Dictionary<string, string>>(stamp, set);
                 readableCache[modRoot] = cached;
             }
 
-            return cached.Value.Contains(relative);
+            string found;
+            return cached.Value.TryGetValue(relative, out found) ? found : string.Empty;
         }
 
         public static int MaxTextureSize()
@@ -1796,6 +1871,32 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         static string Env(string name) { return Environment.GetEnvironmentVariable(name); }
 
         /// <summary>True when this asset is minified in use and should carry mipmaps.</summary>
+        /// <summary>ASTC block size for CLASSIC UI ART, as opposed to the tunable world-texture
+        /// one. 4x4 rather than 6x6, and not for quality: DFU addresses this art with GetPixels
+        /// SUB-RECTS whose coordinates it computes itself, and a block format constrains which
+        /// rectangles are addressable. DFU states the assumption in SpellIconCollection, which
+        /// refuses an atlas "compressed with a block-based format but icons are not multiple of
+        /// 4". 4x4 is the only block size that cannot introduce an alignment the classic 320x200
+        /// arithmetic does not already satisfy. It costs 8 bits/pixel against 6x6's 3.56, which
+        /// is the price of the UI working.</summary>
+        public const TextureImporterFormat UiFormat = TextureImporterFormat.ASTC_4x4;
+
+        /// <summary>True when this asset is classic UI art - the same set the no-mipmap rule
+        /// picks out, and for a related reason. That rule says this art is drawn at 1:1; this one
+        /// says DFU also does PIXEL-EXACT ARITHMETIC on it, so its dimensions and its format are
+        /// a contract rather than a preference.
+        ///
+        /// DaggerfallTalkWindow is the worked example: it slices its background with
+        /// GetPixels((int)(4 * (width / 320f)), ...) - classic 320x200 coordinates scaled by the
+        /// REPLACEMENT texture's own width. DREAM's TALK01I0 is 1920x1200, exactly 6x the classic
+        /// canvas, so every one of those rects lands on an integer. Clamped to 1024 it becomes
+        /// 3.2x, every rect origin and size truncates, and the window comes up with blank panels
+        /// and dead buttons.</summary>
+        public static bool IsClassicUiArt(string assetPath, string[] noMipMarkers)
+        {
+            return !ShouldMipmap(assetPath, noMipMarkers);
+        }
+
         public static bool ShouldMipmap(string assetPath, string[] noMipMarkers)
         {
             if (string.IsNullOrEmpty(assetPath) || noMipMarkers == null)
@@ -1894,6 +1995,20 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
     /// there the assets are small and wanted on the CPU, here every default that keeps a second
     /// copy of a texture around is a copy the device cannot afford.
     ///
+    /// THERE ARE TWO POLICIES HERE, and the split is the important part. Classic UI art
+    /// (.IMG/.CIF/.RCI names and DFU's Img/CifRci folders) has a PIXEL-EXACT CONTRACT with DFU's
+    /// own code: DaggerfallTalkWindow slices its background with GetPixels rects computed as
+    /// classic 320x200 coordinates scaled by the replacement texture's own width, and
+    /// SpellIconCollection refuses a block-compressed atlas whose icons are not a multiple of 4.
+    /// So for that art the author's dimensions and format are preserved - no size clamp, no
+    /// compression where the source had none, and ASTC 4x4 where a compressed source must be
+    /// re-encoded because iOS cannot decode BC7. World textures have no such contract and keep
+    /// the memory-optimised policy (1024 cap, ASTC 6x6) - as does everything else, EXCEPT a
+    /// texture the author left both uncompressed AND readable, which is them saying "code reads
+    /// pixels out of this" in two independent ways. That is where the memory actually is:
+    /// UI art is a few hundred images, world textures are gigabytes. DO NOT RE-OPTIMISE THE UI
+    /// PATH - twice now a saving that looked free has broken a window instead.
+    ///
     /// isReadable follows the MOD AUTHOR's Read/Write Enabled flag, and does not force anything.
     /// Dropping the CPU-side mirror looks like pure waste avoided - it is a second copy of every
     /// texture, so a readable one costs roughly double - but forcing it off froze the game on a
@@ -1923,7 +2038,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // ones - the scope check below runs per import, long after the version is compared - so
         // bumping it costs a full re-import. Change it when the policy changes, not otherwise.
         // An environment lever moving does NOT move this: reconvert the mod instead.
-        public override uint GetVersion() { return 3; }
+        public override uint GetVersion() { return 4; }
 
         static bool InScope(string assetPath)
         {
@@ -1943,11 +2058,36 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // inside the UI draw loop. The visible symptom is a frozen UI smeared with cursor
             // trails, which looks like a hang and is not one. See ReadableSidecar.
             importer.isReadable = MobileConvertedModPolicy.SourceWasReadable(assetPath);
-            importer.textureCompression = TextureImporterCompression.Compressed;
-            importer.maxTextureSize = MobileConvertedModPolicy.MaxTextureSize();
+
+            // THE SPLIT. Classic UI art has a pixel-exact contract with DFU's own code and world
+            // textures do not, so they get different policies - and the memory that matters is
+            // in the world textures anyway. See IsClassicUiArt.
+            string[] markers = MobileConvertedModPolicy.NoMipMarkers();
+            bool uiArt = MobileConvertedModPolicy.IsClassicUiArt(assetPath, markers);
+            bool uncompressedSource = MobileConvertedModPolicy.SourceWasUncompressed(assetPath);
+
+            // A texture the author left UNCOMPRESSED *and* marked READABLE is one they expected
+            // code to read pixels out of - two independent signals, and neither is the default.
+            // It gets the UI treatment even without a classic name, because the name rule is a
+            // heuristic and this is the author saying it outright. Found by measurement, not
+            // theory: DREAM's hud & menu has exactly two such textures outside the .IMG/.CIF/.RCI
+            // set - "cursor" and "renameSaveButtonBackgroundColor", the second of which says in
+            // its own name that something samples its pixels - and preserving both costs 0.06MB.
+            bool pixelContract = uiArt || (uncompressedSource
+                && MobileConvertedModPolicy.SourceWasReadable(assetPath));
+            bool keepUncompressed = pixelContract && uncompressedSource;
+
+            importer.textureCompression = keepUncompressed
+                ? TextureImporterCompression.Uncompressed
+                : TextureImporterCompression.Compressed;
+            // No size clamp on UI art: its dimensions ARE the contract. DREAM sizes its talk
+            // window art at exactly 6x the classic 320x200 canvas, and clamping it to 1024 turns
+            // that into 3.2x and truncates every rect DaggerfallTalkWindow computes.
+            importer.maxTextureSize = pixelContract
+                ? MobileConvertedModPolicy.MaxUiTextureSize
+                : MobileConvertedModPolicy.MaxTextureSize();
             importer.mipmapEnabled = MobileConvertedModPolicy.MipmapsAllowed()
-                && MobileConvertedModPolicy.ShouldMipmap(assetPath,
-                    MobileConvertedModPolicy.NoMipMarkers());
+                && MobileConvertedModPolicy.ShouldMipmap(assetPath, markers);
             importer.streamingMipmaps = MobileConvertedModPolicy.StreamingMipmaps();
 
             // Same naming rule the extraction itself used, so what was written linear is read
@@ -1963,10 +2103,24 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // per pixel a 3.7GB pack costs. Name it.
             var ios = importer.GetPlatformTextureSettings(MobileConvertedModPolicy.IosPlatform);
             ios.overridden = true;
-            ios.maxTextureSize = MobileConvertedModPolicy.MaxTextureSize();
-            ios.textureCompression = TextureImporterCompression.Compressed;
-            ios.format = MobileConvertedModPolicy.IosFormat();
+            ios.maxTextureSize = importer.maxTextureSize;
             ios.compressionQuality = MobileConvertedModPolicy.CompressionQuality();
+            if (keepUncompressed)
+            {
+                // The author left this uncompressed and DFU reads sub-rects out of it; naming
+                // RGBA32 explicitly is what stops the platform choosing a block format anyway.
+                ios.textureCompression = TextureImporterCompression.Uncompressed;
+                ios.format = TextureImporterFormat.RGBA32;
+            }
+            else
+            {
+                ios.textureCompression = TextureImporterCompression.Compressed;
+                // BC7/DXT cannot be decoded by iOS, so a compressed source still has to become
+                // ASTC - but UI art takes the 4x4 block, which cannot break the alignment maths.
+                ios.format = pixelContract
+                    ? MobileConvertedModPolicy.UiFormat
+                    : MobileConvertedModPolicy.IosFormat();
+            }
             importer.SetPlatformTextureSettings(ios);
         }
 

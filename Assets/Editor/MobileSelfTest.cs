@@ -1301,6 +1301,36 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && MobileConvertedModPolicy.ParseList("  ", markers) == markers,
                   "unset or blank keeps DFU's derived defaults");
 
+            // The same marker list now decides a second, heavier question: whether an asset has
+            // a PIXEL-EXACT contract with DFU's code. UI art is drawn 1:1 (no mipmaps) and is
+            // also sliced with GetPixels rects computed from its own dimensions, so neither its
+            // size nor its format may be optimised.
+            Check(MobileConvertedModPolicy.IsClassicUiArt("Assets/UI/TALK01I0.IMG.png", markers)
+                  && MobileConvertedModPolicy.IsClassicUiArt("Assets/Art/WEAPON01.CIF_3-2.png", markers)
+                  && MobileConvertedModPolicy.IsClassicUiArt("Assets/Art/TFAC00I0.RCI_0-0.png", markers),
+                  "classic UI art is recognised for the dimension/format contract");
+            Check(!MobileConvertedModPolicy.IsClassicUiArt("Assets/Textures/004_0-0.png", markers)
+                  && !MobileConvertedModPolicy.IsClassicUiArt("Assets/Textures/210_1-0_Normal.png", markers),
+                  "world textures are not, and keep the memory-optimised policy");
+            Check(MobileConvertedModPolicy.UiFormat == TextureImporterFormat.ASTC_4x4
+                  && MobileConvertedModPolicy.MaxUiTextureSize == 16384,
+                  "UI art takes the 4x4 block and no size cap",
+                  MobileConvertedModPolicy.UiFormat + " / " + MobileConvertedModPolicy.MaxUiTextureSize);
+
+            // Which source formats count as compressed. The list is of COMPRESSED families so an
+            // unfamiliar format reads as uncompressed - the safe direction, since being wrong
+            // that way costs size and the other way breaks a window.
+            Check(MobileModExtractor.IsCompressedFormat(TextureFormat.BC7)
+                  && MobileModExtractor.IsCompressedFormat(TextureFormat.DXT5)
+                  && MobileModExtractor.IsCompressedFormat(TextureFormat.DXT1Crunched)
+                  && MobileModExtractor.IsCompressedFormat(TextureFormat.ASTC_6x6),
+                  "block-compressed formats are recognised");
+            Check(!MobileModExtractor.IsCompressedFormat(TextureFormat.RGBA32)
+                  && !MobileModExtractor.IsCompressedFormat(TextureFormat.ARGB32)
+                  && !MobileModExtractor.IsCompressedFormat(TextureFormat.RGB24)
+                  && !MobileModExtractor.IsCompressedFormat(TextureFormat.Alpha8),
+                  "the uncompressed layouts an author leaves UI art in are not");
+
             // The audio half of the policy: songs stream, effects sit compressed in memory.
             // Both directions cost something real if they are got wrong - a resident song is
             // megabytes the device never gets back, a streamed effect misses the frame it was
@@ -1356,7 +1386,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // 2. Extract it back.
             var report = MobileModExtractor.Extract(built[0], extractRoot);
             Check(File.Exists(report.manifestPath), "extractor writes a manifest", report.manifestPath);
-            Check(report.extracted.Count == 7, "extractor writes five textures + textasset + audio clip",
+            Check(report.extracted.Count == 10, "extractor writes eight textures + textasset + audio clip",
                   "extracted=" + report.extracted.Count);
 
             // 3. Path tail and short names preserved.
@@ -1366,6 +1396,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             string hgt = report.extracted.Find(p => p.EndsWith("fixture_wall_Height.png"));
             string wav = report.extracted.Find(p => p.EndsWith("fixture_beep.wav"));
             string rdbl = report.extracted.Find(p => p.EndsWith("fixture_readable.png"));
+            string uiArt = report.extracted.Find(p => p.EndsWith("fixture_ui.IMG.png"));
+            string uiCmp = report.extracted.Find(p => p.EndsWith("fixture_uic.CIF.png"));
             // Mod.FindAssetNames accepts an asset whose directory ENDS WITH the requested one
             // and compares with a case-sensitive CompareOrdinal, while callers pass literal
             // capitalised paths ("Assets/Textures"). AssetBundle.GetAllAssetNames hands back
@@ -1623,6 +1655,96 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   File.Exists(sidecar) ? File.ReadAllText(sidecar).Replace("\n", " | ") : "missing");
             Check(!report.extracted.Exists(p => p.EndsWith(MobileModExtractor.ReadableSidecarName)),
                   "the sidecar is not an extracted asset and cannot reach the bundle");
+
+            // 3d-bis. CLASSIC UI ART KEEPS ITS DIMENSIONS AND ITS FORMAT. This is the second
+            // contract we broke by optimising: DaggerfallTalkWindow slices its background with
+            // GetPixels rects computed as classic 320x200 coordinates scaled by the REPLACEMENT
+            // texture's own width - so DREAM's 1920x1200 art (exactly 6x the classic canvas)
+            // gives integer rects, and our 1024 clamp turned that into 3.2x, truncating every
+            // one of them. The window came up with blank panels and dead buttons. Separately,
+            // the author left TALK02I0/TALK03I0 as RGBA32 because DFU reads sub-rects out of
+            // them, and we compressed them anyway.
+            //
+            // fixture_ui.IMG.png is 1200 pixels wide - deliberately past the 1024 world-texture
+            // cap - and uncompressed at source. fixture_uic.CIF.png is the same art with a UI
+            // name and a COMPRESSED source. Between them they pin both halves.
+            var uiImp = uiArt != null ? AssetImporter.GetAtPath(uiArt) as TextureImporter : null;
+            Check(uiImp != null && uiImp.maxTextureSize == MobileConvertedModPolicy.MaxUiTextureSize,
+                  "classic UI art is never downscaled: its dimensions are the contract",
+                  uiImp == null ? "no importer" : "max=" + uiImp.maxTextureSize);
+            Check(uiImp != null
+                  && uiImp.textureCompression == TextureImporterCompression.Uncompressed,
+                  "UI art whose author left it uncompressed stays uncompressed",
+                  uiImp == null ? "no importer" : uiImp.textureCompression.ToString());
+            var uiIos = uiImp != null
+                ? uiImp.GetPlatformTextureSettings(MobileConvertedModPolicy.IosPlatform) : null;
+            Check(uiIos != null && uiIos.format == TextureImporterFormat.RGBA32
+                  && uiIos.maxTextureSize == MobileConvertedModPolicy.MaxUiTextureSize,
+                  "and iOS names RGBA32 rather than letting the platform pick a block format",
+                  uiIos == null ? "no settings" : uiIos.format + " max=" + uiIos.maxTextureSize);
+            // The bytes on disk, not just the importer: the extracted PNG must still be 1200
+            // wide. A clamp that survived would show up here as 1024 - which is what this check
+            // first reported, from the FIXTURE's own nPOTScale: ToNearest rounding 1200 down
+            // before it ever reached the bundle. The fixture is nPOTScale None for that reason;
+            // the number below has to be measuring our policy, not Unity's rounding.
+            var uiDec = new Texture2D(2, 2);
+            bool uiLoaded = uiArt != null && uiDec.LoadImage(File.ReadAllBytes(uiArt));
+            Check(uiLoaded && uiDec.width == 1200 && uiDec.height == 8,
+                  "the extracted UI art really is still 1200x8",
+                  uiLoaded ? uiDec.width + "x" + uiDec.height : "did not decode");
+            UnityEngine.Object.DestroyImmediate(uiDec);
+
+            // A COMPRESSED UI source still has to be re-encoded - iOS cannot decode BC7/DXT -
+            // but it takes the 4x4 block, the only one that cannot introduce an alignment DFU's
+            // own arithmetic does not already satisfy (SpellIconCollection refuses an atlas
+            // "compressed with a block-based format but icons are not multiple of 4").
+            var uicImp = uiCmp != null ? AssetImporter.GetAtPath(uiCmp) as TextureImporter : null;
+            var uicIos = uicImp != null
+                ? uicImp.GetPlatformTextureSettings(MobileConvertedModPolicy.IosPlatform) : null;
+            Check(uicImp != null
+                  && uicImp.textureCompression == TextureImporterCompression.Compressed,
+                  "a compressed UI source stays compressed - iOS cannot decode BC7",
+                  uicImp == null ? "no importer" : uicImp.textureCompression.ToString());
+            Check(uicIos != null && uicIos.format == MobileConvertedModPolicy.UiFormat
+                  && uicIos.format == TextureImporterFormat.ASTC_4x4,
+                  "and it takes the 4x4 block, which cannot break the alignment maths",
+                  uicIos == null ? "no settings" : uicIos.format.ToString());
+            Check(uicImp != null && uicImp.maxTextureSize == MobileConvertedModPolicy.MaxUiTextureSize,
+                  "compressed UI art is not downscaled either",
+                  uicImp == null ? "no importer" : "max=" + uicImp.maxTextureSize);
+
+            // The second signal, found by measuring the real module rather than by theory: a
+            // texture the author left UNCOMPRESSED *and* marked READABLE is one they expect code
+            // to read pixels from, whatever it is called. fixture_readable.png is exactly that
+            // shape without a classic UI name, and DREAM's "renameSaveButtonBackgroundColor"
+            // says in its own name that something samples it.
+            string pixTex = report.extracted.Find(p => p.EndsWith("fixture_pixels.png"));
+            var pixImp = pixTex != null ? AssetImporter.GetAtPath(pixTex) as TextureImporter : null;
+            Check(pixImp != null
+                  && pixImp.textureCompression == TextureImporterCompression.Uncompressed
+                  && pixImp.maxTextureSize == MobileConvertedModPolicy.MaxUiTextureSize,
+                  "uncompressed+readable art keeps both, even without a classic UI name",
+                  pixImp == null ? "no importer"
+                    : pixImp.textureCompression + " max=" + pixImp.maxTextureSize);
+            // And the signal really needs BOTH halves: fixture_readable.png is readable but its
+            // source is COMPRESSED, so it stays on the memory-optimised policy.
+            Check(rdblImp != null
+                  && rdblImp.maxTextureSize == MobileConvertedModPolicy.MaxTextureSize(),
+                  "readable alone is not the signal - a compressed source stays capped",
+                  rdblImp == null ? "no importer" : "max=" + rdblImp.maxTextureSize);
+
+            // And the split holds: a WORLD texture keeps the memory-optimised policy, because
+            // that is where the gigabytes are and it has no pixel-exact contract.
+            Check(texImp != null && texImp.maxTextureSize == MobileConvertedModPolicy.MaxTextureSize()
+                  && texImp.maxTextureSize != MobileConvertedModPolicy.MaxUiTextureSize,
+                  "a world texture still takes the size cap - the split is real",
+                  texImp == null ? "no importer" : "max=" + texImp.maxTextureSize);
+            var worldIos = texImp != null
+                ? texImp.GetPlatformTextureSettings(MobileConvertedModPolicy.IosPlatform) : null;
+            Check(worldIos != null && worldIos.format == MobileConvertedModPolicy.IosFormat()
+                  && worldIos.format != MobileConvertedModPolicy.UiFormat,
+                  "and the tunable ASTC block, not the UI one",
+                  worldIos == null ? "no settings" : worldIos.format.ToString());
             Check(texImp != null && texImp.npotScale == TextureImporterNPOTScale.None,
                   "converted textures keep their exact dimensions (DFU uv metadata depends on it)",
                   texImp == null ? "no importer" : texImp.npotScale.ToString());
@@ -1787,7 +1909,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // itself - so deleting the release, or letting one branch escape the try/finally
             // that performs it, drives them apart. This fixture deliberately exercises the
             // awkward paths as well as the happy one: two clips refused on load type, one
-            // refused on residency, one texture losing a collision, seven assets written. If any
+            // refused on residency, one texture losing a collision, ten assets written. If any
             // of those paths stopped releasing, this is what would notice.
             Check(report.loaded > 0 && report.released == report.loaded,
                   "every bundle asset the loop loaded was released again, on every path",
@@ -2001,7 +2123,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(info != null && info.ModTitle == "Extractor Fixture"
                   && info.GUID == "0d2c4a68-9e1f-4b7a-8c35-6d0e2f4a6b8c",
                   "manifest identity preserved");
-            Check(info != null && info.Files.Count == 7
+            Check(info != null && info.Files.Count == 10
                   && info.Files.TrueForAll(f => File.Exists(f)),
                   "manifest Files rewritten to extracted paths");
 
