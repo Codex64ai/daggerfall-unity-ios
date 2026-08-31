@@ -1,0 +1,13 @@
+{
+    "ModTitle": "Extractor Clash Fixture",
+    "ModVersion": "1.0",
+    "ModAuthor": "Codex64ai",
+    "ModDescription": "Synthetic manifest for the extractor self-test. Contained but unwritable: it lists a TextAsset at 'clash' AND another asset under 'clash/', and lists one file under two spellings. Not a real mod.",
+    "GUID": "9c31a7d5-2e40-4f88-b6a1-7d0c5e2913ab",
+    "Files": [
+        "Assets/Editor/TestFixtures/ExtractorFixture/clash_ok.json",
+        "Assets/Editor/TestFixtures/ExtractorFixture/clash",
+        "Assets/Editor/TestFixtures/ExtractorFixture/clash/inner.json",
+        "Assets/Editor/TestFixtures/ExtractorFixture/sub/../clash_ok.json"
+    ]
+}

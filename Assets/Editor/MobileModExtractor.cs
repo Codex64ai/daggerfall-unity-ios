@@ -37,11 +37,19 @@ using UnityEngine;
 
 namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 {
+    /// <summary>The outcome of one extraction. The two counters answer different questions and
+    /// must never be summed together: skippedByType counts assets that did NOT reach the
+    /// extraction - an unsupported type, a colliding output path, a path that escaped the root,
+    /// a write that failed - so its total is a genuine loss report and is what a caller should
+    /// show as "N assets skipped". notesByType counts assets that WERE extracted but needed
+    /// something said about them: a texture re-encoded to .png under a new runtime lookup name,
+    /// or a path whose capitalisation the source manifest did not record.</summary>
     public class ExtractReport
     {
         public string manifestPath;
         public List<string> extracted = new List<string>();
         public Dictionary<string, int> skippedByType = new Dictionary<string, int>();
+        public Dictionary<string, int> notesByType = new Dictionary<string, int>();
     }
 
     public static class MobileModExtractor
@@ -71,7 +79,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     }
                 }
 
-                // One output path may be claimed by only one bundle asset; see Claim().
+                // One output FILE may be claimed by only one bundle asset; see Claim().
                 var claimed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
                 foreach (string assetName in ab.GetAllAssetNames())
@@ -87,7 +95,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                         // key with them (it is the short name WITH extension). Report it.
                         if (!outPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
                         {
-                            Count(report, "extension-rewritten");
+                            Noted(report, "extension-rewritten");
                             Debug.LogWarning($"[MobileModExtractor] {assetName} is re-encoded as .png, " +
                                 "so its runtime lookup name changes with it");
                             outPath = Path.ChangeExtension(outPath, ".png");
@@ -109,7 +117,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     else
                     {
                         string type = obj ? obj.GetType().Name : "null";
-                        Count(report, type);
+                        Skipped(report, type);
                         Debug.LogWarning($"[MobileModExtractor] skipped {assetName} ({type} not supported yet)");
                     }
                 }
@@ -172,7 +180,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             if (originalCase.TryGetValue(tail.ToLowerInvariant(), out original))
                 return Path.Combine(outputRoot, original);
 
-            Count(report, "unlisted-in-manifest");
+            Noted(report, "unlisted-in-manifest");
             Debug.LogWarning($"[MobileModExtractor] {bundleAssetName} is not listed in the source " +
                 "manifest, so its original capitalisation cannot be recovered; DFU's case-sensitive " +
                 "directory lookups may not find it");
@@ -189,23 +197,38 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         static bool Claim(Dictionary<string, string> claimed, string outPath, string assetName,
             ExtractReport report)
         {
+            // Key on the RESOLVED path: the manifest is attacker-controlled and "A/x.png",
+            // "A/./x.png" and "A/sub/../x.png" are three spellings of one file. Keyed on the raw
+            // string they would look like three separate assets, so the later writes would
+            // silently overwrite the earlier one and the rebuilt manifest would list the same
+            // file more than once - which Unity then refuses to pack at all.
+            string key;
+            try { key = Path.GetFullPath(outPath); }
+            catch (Exception) { key = outPath; }
+
             string owner;
-            if (!claimed.TryGetValue(outPath, out owner))
+            if (!claimed.TryGetValue(key, out owner))
             {
-                claimed[outPath] = assetName;
+                claimed[key] = assetName;
                 return true;
             }
 
-            Count(report, "collision");
+            Skipped(report, "collision");
             Debug.LogWarning($"[MobileModExtractor] {assetName} and {owner} both map to {outPath}; " +
                 $"keeping {owner} and skipping {assetName} rather than overwriting it");
             return false;
         }
 
-        static void Count(ExtractReport report, string key)
+        /// <summary>The asset did not make it into the extraction.</summary>
+        static void Skipped(ExtractReport report, string key) { Bump(report.skippedByType, key); }
+
+        /// <summary>The asset was extracted, but something about it is worth reporting.</summary>
+        static void Noted(ExtractReport report, string key) { Bump(report.notesByType, key); }
+
+        static void Bump(Dictionary<string, int> counts, string key)
         {
-            report.skippedByType.TryGetValue(key, out int n);
-            report.skippedByType[key] = n + 1;
+            counts.TryGetValue(key, out int n);
+            counts[key] = n + 1;
         }
 
         /// <summary>The single choke point for every byte this tool writes - no other code here
@@ -217,15 +240,31 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         {
             if (!IsInsideRoot(path, outputRoot))
             {
-                Count(report, "path-escape");
+                Skipped(report, "path-escape");
                 Debug.LogWarning($"[MobileModExtractor] refusing to write {sourceName}: '{path}' " +
                     $"resolves outside the extraction root '{outputRoot}'. A .dfmod is untrusted " +
                     "input, so this entry is skipped; the rest of the mod still converts.");
                 return false;
             }
 
-            Directory.CreateDirectory(Path.GetDirectoryName(path));
-            File.WriteAllBytes(path, bytes);
+            // Containment is not the only way a legal-looking path fails to be writable. A mod
+            // listing both "a" (a TextAsset) and "a/b.png" is entirely contained and entirely
+            // legal, but one of the two must lose: CreateDirectory raises IOException when "a" is
+            // already a file, WriteAllBytes raises UnauthorizedAccessException when "a" is already
+            // a directory. An over-long path component fails the same way, after passing
+            // GetFullPath. None of that may cost the operator the rest of a large mod.
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllBytes(path, bytes);
+            }
+            catch (Exception ex)
+            {
+                Skipped(report, "write-failed");
+                Debug.LogWarning($"[MobileModExtractor] could not write {sourceName} to '{path}': " +
+                    $"{ex.GetType().Name}: {ex.Message}. Skipping it; the rest of the mod still converts.");
+                return false;
+            }
             return true;
         }
 

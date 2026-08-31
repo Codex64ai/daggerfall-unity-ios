@@ -85,6 +85,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestModScriptSkipRule();
             TestModExtractorRoundTrip();
             TestModExtractorPathContainment();
+            TestModExtractorSurvivesBadPaths();
             TestRoadDirectionReciprocity();
             TestRoadRouting();
             TestWaypointOvershoot();
@@ -1124,7 +1125,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(tex != null && tex.Replace('\\', '/').Contains(
                       "/Assets/Editor/TestFixtures/ExtractorFixture/fixture_tex.png"),
                   "manifest path casing and Assets/ prefix preserved", tex);
-            Check(!report.skippedByType.ContainsKey("unlisted-in-manifest"),
+            Check(!report.notesByType.ContainsKey("unlisted-in-manifest"),
                   "every bundle asset matched a manifest entry (casing recoverable)");
             Check(txt != null && File.ReadAllText(txt).Contains("\"value\":42"),
                   "textasset bytes preserved");
@@ -1137,8 +1138,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             report.skippedByType.TryGetValue("collision", out collisions);
             Check(collisions == 1, "colliding output path reported, not overwritten",
                   "collision=" + collisions);
+            // A note, not a skip: the .tga's pixels DID reach the extraction, under a new name.
             int rewritten;
-            report.skippedByType.TryGetValue("extension-rewritten", out rewritten);
+            report.notesByType.TryGetValue("extension-rewritten", out rewritten);
             Check(rewritten == 1, "non-png texture extension rewrite is reported",
                   "extension-rewritten=" + rewritten);
 
@@ -1280,6 +1282,66 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "nothing was written outside the extraction root");
             Check(report.extracted.Count == 1 && report.extracted[0].EndsWith("hostile_payload.json"),
                   "the legitimate asset still extracts alongside the refused one",
+                  "extracted=" + report.extracted.Count);
+
+            Directory.Delete(bundleDir, true);
+            Directory.Delete(extractRoot, true);
+            File.Delete(extractRoot + ".meta");
+            AssetDatabase.Refresh();
+        }
+
+        /// <summary>
+        /// Containment is not the only way a manifest path fails to become a file. A mod listing
+        /// both "clash" (a TextAsset) and "clash/inner.json" is fully contained and fully legal,
+        /// but one of the two must lose - a name cannot be a file and a directory at once - and an
+        /// unguarded write would throw straight out of Extract, costing the operator every other
+        /// asset in the mod. The same manifest also spells one file two ways, which must count as
+        /// a collision rather than two assets: keyed on the raw string they look distinct, so the
+        /// second would quietly overwrite the first and the rebuilt manifest would list it twice,
+        /// which Unity then refuses to pack at all.
+        /// </summary>
+        static void TestModExtractorSurvivesBadPaths()
+        {
+            const string clashManifest = "Assets/Editor/TestFixtures/ExtractorFixture/clash-mod.dfmod.json";
+            const string okPayload = "Assets/Editor/TestFixtures/ExtractorFixture/fixture_data.json";
+            const string filePayload = "Assets/Editor/TestFixtures/ExtractorFixture/hostile_payload.json";
+            const string innerPayload = "Assets/Editor/TestFixtures/ExtractorFixture/hostile_escape_payload.json";
+            const string dupePayload = "Assets/Editor/TestFixtures/ExtractorFixture/clash_dupe_payload.json";
+            const string bundleDir = "Temp/MobileModExtractorClashTest";
+            const string extractRoot = "Assets/Game/Mods/Converted/__clash__";
+            if (Directory.Exists(bundleDir)) Directory.Delete(bundleDir, true);
+            if (Directory.Exists(extractRoot)) { Directory.Delete(extractRoot, true); File.Delete(extractRoot + ".meta"); AssetDatabase.Refresh(); }
+
+            const string dir = "assets/editor/testfixtures/extractorfixture/";
+            var build = new AssetBundleBuild[1];
+            build[0].assetBundleName = "clash-mod.dfmod";
+            build[0].assetNames = new[] { okPayload, filePayload, innerPayload, dupePayload, clashManifest };
+            build[0].addressableNames = new[] {
+                dir + "clash_ok.json",
+                dir + "clash",                      // a file...
+                dir + "clash/inner.json",           // ...and the same name as a directory
+                dir + "sub/../clash_ok.json",       // a second spelling of clash_ok.json
+                dir + "clash-mod.dfmod.json" };
+
+            Directory.CreateDirectory(bundleDir);
+            BuildPipeline.BuildAssetBundles(bundleDir, build,
+                BuildAssetBundleOptions.ChunkBasedCompression, BuildTarget.StandaloneOSX);
+
+            var report = MobileModExtractor.Extract(Path.Combine(bundleDir, "clash-mod.dfmod"), extractRoot);
+
+            // Whichever of the file/directory pair the bundle happens to enumerate first, exactly
+            // one of them is unwritable - so these hold without depending on that order.
+            int writeFailed;
+            report.skippedByType.TryGetValue("write-failed", out writeFailed);
+            Check(writeFailed == 1, "an unwritable path costs only its own asset",
+                  "write-failed=" + writeFailed);
+
+            int collisions;
+            report.skippedByType.TryGetValue("collision", out collisions);
+            Check(collisions == 1, "two spellings of one file are one collision, not two assets",
+                  "collision=" + collisions);
+
+            Check(report.extracted.Count == 2, "the rest of the mod still extracts",
                   "extracted=" + report.extracted.Count);
 
             Directory.Delete(bundleDir, true);
