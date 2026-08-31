@@ -1004,11 +1004,23 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
             {
                 // Seek from loose files
                 if (TryImportTextureFromDisk(Path.Combine(path, name), false, isLinear, readOnly, out tex))
+                {
+                    // MOBILE: diagnostics counter (see MobileAssetStats). Emission ONLY - the other
+                    // maps are counted where they are applied, but emission has an auto-generation
+                    // path (autoEmissionForWindows) that makes its origin unknowable by the time it
+                    // reaches the material, so it is counted here where the two branches are still
+                    // distinguishable. Import rather than application, and the overlay says so.
+                    CountEmission(textureMap, false);
                     return true;
+                }
 
                 // Seek from mods
                 if (TryImportTextureFromMods(name, readOnly, out tex))
+                {
+                    // MOBILE: see above.
+                    CountEmission(textureMap, true);
                     return true;
+                }
             }
 
             tex = null;
@@ -1045,6 +1057,16 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
         }
 
         /// <summary>
+        /// Counts an emission map import for the mobile diagnostics overlay, ignoring every other
+        /// map type so nothing is double counted against the sites that count at application.
+        /// </summary>
+        private static void CountEmission(TextureMap? textureMap, bool fromMod)
+        {
+            if (textureMap != null && textureMap.Value == TextureMap.Emission)
+                MobileAssetStats.CountApplied(TextureMap.Emission, fromMod);
+        }
+
+        /// <summary>
         /// Seek one of the extra material maps applied by <see cref="CustomizeMaterial"/> from loose files
         /// first and then from mods.
         /// </summary>
@@ -1063,10 +1085,22 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
         {
             // Loose files win, exactly as before.
             if (TryImportTextureFromLooseFiles(archive, record, frame, textureMap, true, out tex))
+            {
+                // MOBILE: diagnostics counter (see MobileAssetStats). CustomizeMaterial applies
+                // whatever this returns, so returning true here IS the application.
+                MobileAssetStats.CountApplied(textureMap, false);
                 return true;
+            }
 
             // Then mods, under the same name a converted bundle stores it by.
-            return TryImportTextureFromMods(GetName(archive, record, frame, textureMap), true, out tex);
+            if (TryImportTextureFromMods(GetName(archive, record, frame, textureMap), true, out tex))
+            {
+                // MOBILE: the count that proves the bundle fallthrough above is working.
+                MobileAssetStats.CountApplied(textureMap, true);
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>

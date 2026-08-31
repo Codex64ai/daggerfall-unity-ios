@@ -23,6 +23,7 @@ using DaggerfallConnect.Utility;
 using DaggerfallConnect.Arena2;
 using DaggerfallWorkshop.Utility;
 using DaggerfallWorkshop.Utility.AssetInjection;
+using DaggerfallWorkshop.Game.Mobile;
 
 namespace DaggerfallWorkshop
 {
@@ -459,6 +460,26 @@ namespace DaggerfallWorkshop
                     results.normalMap.filterMode = MainFilterMode;
                     material.SetTexture(Uniforms.BumpMap, results.normalMap);
                     material.EnableKeyword(KeyWords.NormalMap);
+
+                    // MOBILE: diagnostics counter (see MobileAssetStats). This is the site the fix
+                    // above was made at, so it is the site that proves it: a non-zero mod count means
+                    // bundle-sourced normals really are reaching materials.
+                    //
+                    // Whole block is behind Enabled because working out WHICH column to credit needs
+                    // a loose-file probe, and that is a file system hit. Off, this is one bool read.
+                    //
+                    // Attribution is exact rather than assumed. A loose file present means loose. With
+                    // no loose file, the map can only have been imported from a mod UNLESS generation
+                    // was available - settings.createNormalMap is the only way TextureReader can invent
+                    // one - so when that is set the normal goes uncounted rather than being credited to
+                    // a mod it may not have come from. Undercounts in that case; never overcounts.
+                    if (MobileAssetStats.Enabled)
+                    {
+                        if (TextureReplacement.TextureExistsAmongLooseFiles(settings.archive, settings.record, settings.frame, TextureMap.Normal))
+                            MobileAssetStats.CountApplied(TextureMap.Normal, false);
+                        else if (!settings.createNormalMap)
+                            MobileAssetStats.CountApplied(TextureMap.Normal, true);
+                    }
                 }
 
                 // Setup emission map

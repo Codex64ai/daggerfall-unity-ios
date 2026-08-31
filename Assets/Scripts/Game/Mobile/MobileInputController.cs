@@ -419,6 +419,11 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         void Update()
         {
+            // Asset-map counting is gated on the same toggle as this overlay, and the counting
+            // sites are engine code with no view of a MonoBehaviour, so mirror it into the static
+            // they can see. One assignment; the counters read it and do nothing when it is false.
+            MobileAssetStats.Enabled = showGestureDebug;
+
             // Runs even while paused: Time.timeScale = 0 stops time, not Update calls.
             // GameManager.WeaponManager may not exist yet at Start(), so keep retrying
             // until the threshold actually lands.
@@ -1069,7 +1074,12 @@ namespace DaggerfallWorkshop.Game.Mobile
                 MobilePointer.LockRequested, MobilePointer.IsLocked,
                 MobilePointer.Buttons, lastPointerDelta.ToString("0.0"), lastTouchTypes);
 
-            GUI.Label(new Rect(12f, 12f, 560f, 300f), text);
+            // Material maps applied from mod bundles vs loose files. The mod column is the only
+            // proof available in-game that bundled normal/height maps are being found and used -
+            // it cannot be told from a screenshot of the world itself.
+            text += "\n" + MobileAssetStats.Summary();
+
+            GUI.Label(new Rect(12f, 12f, 560f, 340f), text);
         }
 
         #endregion

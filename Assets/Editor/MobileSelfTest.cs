@@ -96,6 +96,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestMaterialTextureNaming();
             TestMaterialMapLookupNaming();
             TestNormalMapGatePremise();
+            TestAssetStatsCounters();
             TestConversionRefusesEmptyResult();
             TestChunkedConversion();
             TestRoadDirectionReciprocity();
@@ -283,6 +284,77 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // Emission generation is gated the same way by its caller; pin it for the same reason.
             Check(!settings.createEmissionMap,
                   "CreateTextureSettings leaves emission generation off too");
+        }
+
+        /// <summary>
+        /// The mod-vs-loose map counters behind the diagnostics overlay.
+        ///
+        /// These exist to answer a question a screenshot cannot - "are bundled normal and height
+        /// maps actually being applied?" - so a counter that miscounts is worse than none: it
+        /// would be read as proof either way. The split is what carries the meaning, since loose
+        /// files always worked and only the MOD column reflects the fix.
+        /// </summary>
+        static void TestAssetStatsCounters()
+        {
+            bool wasEnabled = MobileAssetStats.Enabled;
+            MobileAssetStats.Reset();
+
+            // Gated: with the overlay off nothing is recorded, which is what makes the counting
+            // free in a release session.
+            MobileAssetStats.Enabled = false;
+            MobileAssetStats.CountApplied(TextureMap.Normal, true);
+            MobileAssetStats.CountApplied(TextureMap.Height, false);
+            Check(MobileAssetStats.ModNormal == 0 && MobileAssetStats.LooseHeight == 0,
+                  "nothing is counted while the diagnostics overlay is off");
+
+            MobileAssetStats.Enabled = true;
+            MobileAssetStats.CountApplied(TextureMap.Normal, true);
+            MobileAssetStats.CountApplied(TextureMap.Normal, true);
+            MobileAssetStats.CountApplied(TextureMap.Normal, false);
+            MobileAssetStats.CountApplied(TextureMap.Height, true);
+            MobileAssetStats.CountApplied(TextureMap.MetallicGloss, false);
+            MobileAssetStats.CountApplied(TextureMap.Emission, true);
+
+            Check(MobileAssetStats.ModNormal == 2 && MobileAssetStats.LooseNormal == 1,
+                  "mod and loose normals land in separate columns",
+                  MobileAssetStats.ModNormal + "/" + MobileAssetStats.LooseNormal);
+            Check(MobileAssetStats.ModHeight == 1 && MobileAssetStats.LooseHeight == 0
+                  && MobileAssetStats.LooseMetallicGloss == 1 && MobileAssetStats.ModMetallicGloss == 0
+                  && MobileAssetStats.ModEmission == 1,
+                  "each map type has its own pair of counters");
+
+            // A map with no column must not be silently folded into another one.
+            MobileAssetStats.CountApplied(TextureMap.Albedo, true);
+            MobileAssetStats.CountApplied(TextureMap.Mask, true);
+            Check(MobileAssetStats.ModNormal == 2 && MobileAssetStats.ModHeight == 1
+                  && MobileAssetStats.ModMetallicGloss == 0 && MobileAssetStats.ModEmission == 1,
+                  "albedo and mask are ignored rather than miscounted");
+
+            // The headline signal: "did anything at all come out of a bundle".
+            Check(MobileAssetStats.AnyFromMods, "AnyFromMods is set by a mod-sourced application");
+
+            MobileAssetStats.Reset();
+            Check(!MobileAssetStats.AnyFromMods && MobileAssetStats.ModNormal == 0,
+                  "Reset clears every counter");
+
+            MobileAssetStats.Enabled = true;
+            MobileAssetStats.CountApplied(TextureMap.Height, false);
+            Check(!MobileAssetStats.AnyFromMods,
+                  "a LOOSE application does not read as proof the bundle path works");
+
+            // The overlay must actually show the numbers - a summary that silently dropped one
+            // would defeat the whole exercise.
+            MobileAssetStats.Reset();
+            MobileAssetStats.CountApplied(TextureMap.Normal, true);
+            MobileAssetStats.CountApplied(TextureMap.Height, true);
+            string summary = MobileAssetStats.Summary();
+            Check(summary.Contains("normal 1") && summary.Contains("height 1")
+                  && summary.Contains("metallic 0") && summary.Contains("emission 0")
+                  && summary.Contains("loose"),
+                  "the overlay line reports every column", summary.Replace("\n", " | "));
+
+            MobileAssetStats.Reset();
+            MobileAssetStats.Enabled = wasEnabled;
         }
 
         /// <summary>
