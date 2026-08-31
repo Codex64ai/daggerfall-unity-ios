@@ -507,8 +507,10 @@ there because running out mid-write does not look like a disk problem: Unity die
 which reads like a corrupt bundle. If you see that, you needed more slices.
 
 How many slices? Peak disk scales with the slice, not the module. `dream - mobs` (794MB)
-converts in 6 on a machine with ~15GB free. Start with roughly one slice per 150MB of module
-and add more if the floor check trips.
+converts in 6 on a machine with ~15GB free: **870s total, ~145s per slice, and free space
+never fell below 7GB**. Start with roughly one slice per 150MB of module and add more if the
+floor check trips. The six slices tile the module exactly - verified by comparing the union
+of their contents against the source: 5675 assets in, 5675 out, no overlap.
 
 Read the log. Every run ends with a summary line naming what was extracted, what was
 skipped and what was extracted-but-renamed; a skip means that asset is **absent from
@@ -572,6 +574,20 @@ from a silent game. Known limits, in the order they bite:
   before this fix, re-convert it** - the old bundle has every texture non-readable and will
   freeze the UI. A conversion whose extraction folder has no such file warns once and
   imports non-readable.
+- **World textures are rounded to a power of two, and that is what makes compression work
+  at all.** Unity cannot compress a non-power-of-two texture that has mipmaps: it silently
+  falls back to RGBA32 and says nothing. DREAM's `mobs` module asked for ASTC and got 737 of
+  963 textures uncompressed per slice - **1.71GB of texture RAM where 0.21GB was intended,
+  and a 461MB bundle instead of 91MB**. Letting Unity round world art to a power of two costs
+  nothing, because `maxTextureSize` already resizes it, and takes that slice to **100% ASTC**.
+  If a converted module looks far larger than its source, this is the first thing to check.
+
+  Rounding is applied **only** where nothing reads the dimensions. It is NOT applied to
+  classic UI art, to uncompressed+readable art, or to **terrain tile archives** (2/3/4,
+  102/103/104, 302/303/304, 402/403/404) - DFU assembles those into a `Texture2DArray` sized
+  from the first replacement record and *silently drops* any record whose width, height or
+  format differs, which would be a hole in the terrain rather than a visible error. Those
+  keep exact dimensions, and therefore keep the uncompressed fallback: fat, but correct.
 - **Classic UI art keeps its exact dimensions and its format; world textures do not.** DFU
   does pixel-exact arithmetic on `.IMG`/`.CIF`/`.RCI` art: `DaggerfallTalkWindow` slices its
   background with `GetPixels` rects computed as classic 320x200 coordinates scaled by the
