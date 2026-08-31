@@ -171,6 +171,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // missing from the list, so a player had to create it by hand before it could be used.
             Check(set.Contains("Movies"), "Documents/Movies is created for replacement videos");
 
+            // SpellIcons: loose icon packs are enumerated out of this folder.
+            Check(set.Contains("SpellIcons"), "Documents/SpellIcons is created for loose icon packs");
+
             // The folders the port already relied on must not be dropped by a careless edit.
             Check(set.Contains("Mods") && set.Contains("Textures") && set.Contains("Textures/Img")
                   && set.Contains("Textures/CifRci") && set.Contains("Sound") && set.Contains("Quests")

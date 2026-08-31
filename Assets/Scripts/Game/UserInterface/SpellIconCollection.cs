@@ -19,6 +19,7 @@ using DaggerfallWorkshop.Utility;
 using DaggerfallWorkshop.Game.MagicAndEffects;
 using DaggerfallWorkshop.Game.Serialization;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
+using DaggerfallWorkshop.Game.Mobile;
 
 namespace DaggerfallWorkshop.Game.UserInterface
 {
@@ -230,11 +231,37 @@ namespace DaggerfallWorkshop.Game.UserInterface
             // Start with all the atlases in the spell icons streaming assets path
             string sourcePath = Path.Combine(Application.streamingAssetsPath, sourceFolderName);
             string[] atlasPaths = Directory.GetFiles(sourcePath, "*.png");
+
+            // Packs the player dropped into Documents are ADDED to the shipped ones rather than
+            // replacing them - this enumerates a folder, so redirecting it wholesale would hide
+            // whatever ships. Listed first so a pack that reuses a shipped pack's name wins, which
+            // is how a user copy behaves everywhere else. Each atlas keeps its own absolute path,
+            // so its metadata is read from, and written beside, wherever it actually lives.
+            // No-op off iOS.
+            // MOBILE: user content from the app's Documents folder (see MobileContentPath).
+            string[] userAtlasPaths = MobileContentPath.UserFiles(sourceFolderName, "*.png");
+            if (userAtlasPaths.Length > 0)
+            {
+                var merged = new List<string>(userAtlasPaths);
+                if (atlasPaths != null)
+                    merged.AddRange(atlasPaths);
+                atlasPaths = merged.ToArray();
+            }
+
             if (atlasPaths != null && atlasPaths.Length != 0)
             {
                 // Read each atlas found and its metadata
                 foreach (string path in atlasPaths)
                 {
+                    string packKey = Path.GetFileNameWithoutExtension(path);
+
+                    // A pack already claimed this name; the first one listed keeps it, and user packs
+                    // are listed first. Without this a user pack sharing a shipped pack's name would
+                    // throw from Add() below. Checked before the atlas is read so the loser costs nothing.
+                    // MOBILE: user content from the app's Documents folder (see MobileContentPath).
+                    if (spellIconPacks.ContainsKey(packKey))
+                        continue;
+
                     // Get source atlas
                     Texture2D atlasTexture = LoadAtlasTextureFromPNG(path);
                     if (atlasTexture == null)
@@ -245,9 +272,12 @@ namespace DaggerfallWorkshop.Game.UserInterface
 
                     // Attempt to load metadata JSON file
                     SpellIconPack pack = null;
-                    string packKey = Path.GetFileNameWithoutExtension(path);
                     string metadataFilename = packKey + ".txt";
-                    string metadataPath = Path.Combine(sourcePath, metadataFilename);
+
+                    // Metadata sits beside its own atlas, not beside the shipped folder: identical for
+                    // shipped packs, and the only correct answer for one loaded from Documents.
+                    // MOBILE: user content from the app's Documents folder (see MobileContentPath).
+                    string metadataPath = Path.Combine(Path.GetDirectoryName(path), metadataFilename);
                     if (File.Exists(metadataPath))
                     {
                         // Try to load existing metadata and icons
