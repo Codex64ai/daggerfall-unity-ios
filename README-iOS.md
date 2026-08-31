@@ -517,6 +517,29 @@ skipped and what was extracted-but-renamed; a skip means that asset is **absent 
 the bundle you are about to install**, which is otherwise something you would find out
 from a silent game. Known limits, in the order they bite:
 
+- **A material-based mod converts as textures, not as materials.** DREAM's world retexture
+  (`dream - textures`) ships **1201 Materials and no addressable textures at all** - its 3443
+  textures are dependencies of those materials - so a converter that walks the bundle by
+  name sees nothing it can use. Each material's textures are now pulled out and written
+  under DFU's own replacement names (`TextureReplacement.GetName`: `006_0-0`,
+  `006_0-0_Normal`, `006_0-0_Height`, `_Emission`, `_MetallicGloss`), which turns it into an
+  ordinary texture mod the engine consumes natively - `MaterialReader` checks for loose
+  textures *before* it looks for a mod material, so these take precedence cleanly.
+  Measured: **3848 textures out of 1215 container assets, 100% ASTC, 0.69GB of texture
+  memory, 786MB across 10 slices**. The 7 terrain arrays are unrolled into their 56 records
+  each (392 textures, `002_0-0` … `403_55-0`), which is exactly what DFU rebuilds a
+  `Texture2DArray` from.
+
+  **What is lost:** the materials themselves - parallax setup and any non-standard shader -
+  and `_OcclusionMap`, which DFU has no `TextureMap` for. Also 7 materials whose names are
+  not DFU's `archive_record-frame` form (`095_day`, `095_night`, `144_3-0a`, `168_4-0a`,
+  `archguildsign`, `bardsign`, `redlantsign`): those are **skipped and counted, never
+  guessed**, because a wrongly-named texture does not fail - it silently replaces the wrong
+  art in game.
+- **A run that converts far less than the module contains now says so.** Separately from the
+  empty-bundle failure, the summary shouts when most of a module was skipped. That is there
+  because `dream - textures` converted 2 assets out of 1220 and exited 0 three runs running,
+  with every individual number looking reasonable.
 - **Music usually will not convert; sound effects do.** A bundle stores an `AudioClip` as
   decoded samples, and `AudioClip.GetData` only reads samples of a clip the author
   imported as `DecompressOnLoad`. That is Unity's default, so sound-effect packs convert
