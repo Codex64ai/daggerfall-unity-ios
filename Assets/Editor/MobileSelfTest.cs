@@ -1666,6 +1666,55 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && !report.notesByType.ContainsKey("AudioClip(compressed)"),
                   "a skip is a loss, so it is never filed as a note about a survivor");
 
+            // EVERY LOADED ASSET WAS HANDED BACK. The objects a bundle serves are not its
+            // compressed bytes: a DecompressOnLoad clip is decoded to PCM in native memory at
+            // load, and a texture decodes the same way, so a loop that loads a whole module
+            // before its first unload holds the whole module DECODED. On DREAM's music module
+            // that is the difference between converting and being killed part way through, and
+            // no other number in this report would show it.
+            //
+            // This is the cheap regression catch for that: the two counters are incremented in
+            // different places - loaded at the LoadAsset call site, released inside Release
+            // itself - so deleting the release, or letting one branch escape the try/finally
+            // that performs it, drives them apart. This fixture deliberately exercises the
+            // awkward paths as well as the happy one: two clips refused on load type, one
+            // texture losing a collision, five assets written. If any of those paths stopped
+            // releasing, this is what would notice.
+            Check(report.loaded > 0 && report.released == report.loaded,
+                  "every bundle asset the loop loaded was released again, on every path",
+                  "released=" + report.released + " loaded=" + report.loaded);
+
+            // ...and the release is not a no-op. The counter above proves Release was CALLED;
+            // it cannot prove it did anything, and "did anything" is the genuinely uncertain
+            // half - Resources.UnloadAsset is documented to do nothing for assets that came from
+            // the editor's AssetDatabase, and this check is what established that it does
+            // nothing for an editor-side BUNDLE asset either (it was written asserting the
+            // object would be destroyed, and it failed). So the audio path does not rest on it:
+            // UnloadAudioData is the call that carries the dominant term, and this is what says
+            // so out loud. Reload the source bundle, take a clip that really is decoded and
+            // resident - GetData succeeding is only true of loaded PCM - release it, and require
+            // the samples to be gone afterwards.
+            //
+            // Either outcome counts as freed: loadState back to Unloaded, or the whole object
+            // destroyed if a future Unity does make UnloadAsset bite here. A release that did
+            // nothing leaves loadState at Loaded and fails.
+            AssetBundle probe = AssetBundle.LoadFromFile(built[0]);
+            var probeClip = probe != null ? probe.LoadAsset<AudioClip>("fixture_beep") : null;
+            var probeSamples = probeClip != null
+                ? new float[probeClip.samples * probeClip.channels] : new float[0];
+            Check(probeClip != null && probeClip.GetData(probeSamples, 0) && probeSamples.Length > 0
+                  && probeClip.loadState == AudioDataLoadState.Loaded,
+                  "the probe clip really is decoded and resident before the release",
+                  probeClip == null ? "no clip"
+                    : probeSamples.Length + " samples, " + probeClip.loadState);
+            MobileModExtractor.Release(probeClip);
+            Check(probeClip == null || probeClip.loadState == AudioDataLoadState.Unloaded,
+                  "Release actually drops the decoded PCM; it is not a no-op",
+                  probeClip == null ? "object destroyed outright"
+                    : "loadState after release: " + probeClip.loadState);
+            if (probe != null)
+                probe.Unload(true);
+
             // 3f. The audio half of the import policy - MobileConvertedModImporter.OnPreprocessAudio -
             // which nothing in the suite could reach until audio was extracted, because the
             // postprocessor is scoped to the extraction root and nothing had ever landed an
@@ -1675,10 +1724,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             var clipImp = wav != null ? AssetImporter.GetAtPath(wav) as AudioImporter : null;
             var sampleSettings = clipImp != null ? clipImp.defaultSampleSettings
                                                  : default(AudioImporterSampleSettings);
-            // Two of the three are proof rather than pins: measured against the live control
-            // below, Unity 6 defaults a .wav to DecompressOnLoad at quality 1.0, so the load
-            // type and the quality here are both the postprocessor's doing. Vorbis happens to
-            // coincide with Unity's default and is a regression pin only. The Streaming branch
+            // Two of the three are proof rather than pins: measured against the control below,
+            // Unity 6 defaults a .wav to DecompressOnLoad at quality 1.0, so the load type and
+            // the quality here are both the postprocessor's doing. Vorbis happens to coincide
+            // with Unity's default and is a regression pin only. The Streaming branch
             // for songs cannot be reached by any fixture small enough to commit, so it is
             // pinned as a pure rule in TestConvertedModImportPolicy instead.
             Check(clipImp != null && sampleSettings.compressionFormat == AudioCompressionFormat.Vorbis,
@@ -1691,21 +1740,15 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "converted audio carries the policy's Vorbis quality",
                   clipImp == null ? "no importer" : sampleSettings.quality.ToString("F3"));
 
-            // Non-defaultness, PROVEN rather than claimed - the trap the texture block above
-            // documents in its own words ("those three would pass with the postprocessor
-            // deleted"). The source fixture is the same bytes as the extracted file but lives
-            // outside the extraction root, so the postprocessor never sees it, and its .meta is
-            // deliberately left at guid-only - which is exactly how Unity 6 records "every
-            // importer setting is at its default". Reading both importers and requiring them to
-            // differ is what turns the three checks above into evidence that the policy ran,
-            // without this test having to hard-code Unity's defaults and rot when they move.
-            // NON-DEFAULTNESS, PROVEN AGAINST A LIVE CONTROL rather than against a remembered
-            // value. fixture_beep.wav is the same bytes as the extracted file, sits outside the
-            // extraction root so the postprocessor never sees it, and carries the .meta UNITY
-            // ITSELF generated - so its importer is Unity's defaults, read at run time. Reading
-            // them instead of hard-coding them is what keeps this from rotting when Unity's
-            // defaults move, and it is what corrected this task's own first guess about what
-            // they were.
+            // NON-DEFAULTNESS, MEASURED AGAINST A CONTROL rather than against a remembered
+            // value. fixture_beep.wav is the same bytes as the extracted file and sits outside
+            // the extraction root, so the postprocessor never touches it; its .meta is the one
+            // Unity generated, committed as-is. That makes it a recorded snapshot of Unity's
+            // defaults, not a live reading of them - if Unity's defaults ever move, the meta
+            // will not follow, and the third check below is what would say so. What the
+            // comparison does buy is real: the assertions read both importers instead of
+            // hard-coding "0.7 differs from 1.0", so they state the property that matters
+            // (the policy changed something) rather than two literals that happen to differ.
             const string defaultFixture =
                 "Assets/Editor/TestFixtures/ExtractorFixture/fixture_beep.wav";
             var srcImp = AssetImporter.GetAtPath(defaultFixture) as AudioImporter;
@@ -1725,7 +1768,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "the converted clip's load type is not the importer default either",
                   audioSettings);
             // And the source really is readable, which is what makes it a control AND what
-            // makes the three skips above attributable to the load type and nothing else.
+            // makes the skips above attributable to the load type and nothing else. It is also
+            // the check that would notice if a future Unity stopped defaulting to
+            // DecompressOnLoad, which would make this fixture stop representing the default.
             Check(srcImp != null && srcSettings.loadType == AudioClipLoadType.DecompressOnLoad,
                   "Unity's default load type is DecompressOnLoad, so an unconfigured clip converts",
                   audioSettings);

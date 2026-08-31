@@ -88,6 +88,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
     {
         public string manifestPath;
         public List<string> extracted = new List<string>();
+        /// <summary>Bundle assets that were loaded into memory, and how many of those were
+        /// handed back with Release. They must match. A conversion that loads three thousand
+        /// assets and releases six is holding the whole mod resident, which is the difference
+        /// between a large module converting and the editor being killed part way through - and
+        /// it is invisible in every other number here, so it is reported on its own.</summary>
+        public int loaded;
+        public int released;
         public Dictionary<string, int> skippedByType = new Dictionary<string, int>();
         public Dictionary<string, int> notesByType = new Dictionary<string, int>();
     }
@@ -132,127 +139,157 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     var notes = new List<string>();
                     string outPath = OutputPathFor(assetName, outputRoot, originalCase, notes);
                     var obj = ab.LoadAsset<UnityEngine.Object>(assetName);
-                    if (obj is Texture2D tex2d)
-                    {
-                        // Textures are always re-encoded as .png, which moves the runtime lookup
-                        // key with them (it is the short name WITH extension). Report it.
-                        if (!outPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
-                        {
-                            notes.Add("extension-rewritten");
-                            Debug.LogWarning($"[MobileModExtractor] {assetName} is re-encoded as .png, " +
-                                "so its runtime lookup name changes with it");
-                            outPath = Path.ChangeExtension(outPath, ".png");
-                        }
-                        if (!Claim(claimed, outPath, assetName, report))
-                            continue;
-                        // Whether the blit degammas is decided by the SOURCE texture's graphics
-                        // format and by nothing else. Choosing it from the file NAME instead
-                        // looks equivalent and is not: a stranger's bundle can perfectly well
-                        // contain an sRGB-flagged "*_Height" (nothing forces a height map's
-                        // sRGBTexture off, and the importer default is on), and reading that
-                        // through a Linear RenderTexture degammas on sample with nothing
-                        // re-encoding on write - every mid-tone byte moved, silently. The name
-                        // rule still decides the DESTINATION policy, where it belongs, in
-                        // MobileConvertedModImporter. Here the source is the only authority.
-                        bool linear = !tex2d.isDataSRGB;
-                        Func<Color32, Color32> unswizzle = IsNormalMapName(assetName)
-                            ? NormalUnswizzlerFor(tex2d.format, tex2d.isDataSRGB, notes) : null;
-                        if (!TryWriteFile(outPath, TexturePng.Encode(tex2d, linear, unswizzle),
-                                outputRoot, assetName, report))
-                            continue;
-                        report.extracted.Add(outPath);
-                        CommitNotes(report, notes);
-                    }
-                    else if (obj is TextAsset textAsset)
-                    {
-                        if (!Claim(claimed, outPath, assetName, report))
-                            continue;
-                        if (!TryWriteFile(outPath, textAsset.bytes, outputRoot, assetName, report))
-                            continue;
-                        report.extracted.Add(outPath);
-                        CommitNotes(report, notes);
-                    }
-                    else if (obj is AudioClip clip)
-                    {
-                        // Same rule as textures, and for the same reason. A bundle keeps an
-                        // AudioClip as samples, not as the author's file, so the extraction has
-                        // to re-author a container - and the only one that can be written from
-                        // raw samples without an encoder is PCM WAV. A source .ogg therefore
-                        // comes back as .wav, which moves DFU's runtime lookup key (the short
-                        // name WITH its extension) with it. Counted, not left silent.
-                        if (!outPath.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
-                        {
-                            notes.Add("extension-rewritten");
-                            Debug.LogWarning($"[MobileModExtractor] {assetName} is re-encoded as .wav, " +
-                                "so its runtime lookup name changes with it");
-                            outPath = Path.ChangeExtension(outPath, ".wav");
-                        }
+                    if (obj != null)
+                        report.loaded++;
 
-                        // THE LIMIT OF THIS WHOLE APPROACH. AudioClip.GetData reads DECODED
-                        // PCM, and only a DecompressOnLoad clip has any: Unity's own message is
-                        // "Cannot get data on compressed samples for audio clip ... Changing the
-                        // load type to DecompressOnLoad on the audio clip will fix this". A
-                        // Streaming clip never had its samples in memory; a CompressedInMemory
-                        // one holds them still encoded, and there is no API that hands the
-                        // encoded bytes back either. Neither is recoverable here at all.
-                        //
-                        // Unity's own default for an audio import is DecompressOnLoad, so the
-                        // clip an author never thought about DOES convert. The one an author
-                        // thought about may not: CompressedInMemory and Streaming are exactly
-                        // what a large mod's music gets set to, and a music module is where a
-                        // whole-mod loss would land.
-                        //
-                        // They are refused up front rather than left to fail inside GetData for
-                        // two reasons: GetData logs a Unity error per clip, and a music mod with
-                        // a thousand of them would bury the report that matters under a thousand
-                        // stack traces; and the load type is the actual diagnosis, so it belongs
-                        // in the warning. Each is counted under its own key, because the two need
-                        // different things from the mod author.
-                        //
-                        // Both refusals come BEFORE Claim on purpose: a clip whose samples
-                        // cannot be read is not a writer, and letting it reserve the output path
-                        // would cost a sibling that could actually have been written there (a
-                        // streaming "song.ogg" beside a readable "song.wav" is one mod away).
-                        if (clip.loadType != AudioClipLoadType.DecompressOnLoad)
-                        {
-                            Skipped(report, clip.loadType == AudioClipLoadType.Streaming
-                                ? "AudioClip(streaming)" : "AudioClip(compressed)");
-                            Debug.LogWarning($"[MobileModExtractor] skipped {assetName}: its " +
-                                $"load type is {clip.loadType}, and AudioClip.GetData can only " +
-                                "read a clip imported as DecompressOnLoad. The samples are not " +
-                                "reachable through any API here, so this clip cannot be " +
-                                "converted from the bundle at all - it has to come from the " +
-                                "module's source audio, or from a rebuild of the desktop mod " +
-                                "with this clip set to DecompressOnLoad.");
-                            continue;
-                        }
-
-                        var samples = new float[clip.samples * clip.channels];
-                        if (!clip.GetData(samples, 0))
-                        {
-                            // Backstop: the load type said this should have worked. Something
-                            // else did not - a clip with no samples, or a Unity-version change
-                            // in what GetData accepts - and either way it is a loss, not a note.
-                            Skipped(report, "AudioClip(nodata)");
-                            Debug.LogWarning($"[MobileModExtractor] skipped {assetName}: GetData " +
-                                $"failed on a {clip.loadType} clip ({clip.samples} samples, " +
-                                $"{clip.channels} channels), which is not supposed to happen; " +
-                                "the clip is skipped rather than written as silence.");
-                            continue;
-                        }
-                        if (!Claim(claimed, outPath, assetName, report))
-                            continue;
-                        if (!TryWriteFile(outPath, EncodeWav(samples, clip.channels, clip.frequency),
-                                outputRoot, assetName, report))
-                            continue;
-                        report.extracted.Add(outPath);
-                        CommitNotes(report, notes);
-                    }
-                    else
+                    // Every branch below is wrapped so the asset's native memory goes back the
+                    // moment this tool is done with it - including the ones that refuse it. See
+                    // Release: without this the loop holds every decoded clip and every decoded
+                    // texture in the mod at once, which is what a multi-gigabyte module cannot
+                    // afford. `continue` inside a try still runs the finally, which is what makes
+                    // the skip and containment-failure paths release too.
+                    try
                     {
-                        string type = obj ? obj.GetType().Name : "null";
-                        Skipped(report, type);
-                        Debug.LogWarning($"[MobileModExtractor] skipped {assetName} ({type} not supported yet)");
+                        if (obj is Texture2D tex2d)
+                        {
+                            // Textures are always re-encoded as .png, which moves the runtime lookup
+                            // key with them (it is the short name WITH extension). Report it.
+                            if (!outPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
+                            {
+                                notes.Add("extension-rewritten");
+                                Debug.LogWarning($"[MobileModExtractor] {assetName} is re-encoded as .png, " +
+                                    "so its runtime lookup name changes with it");
+                                outPath = Path.ChangeExtension(outPath, ".png");
+                            }
+                            if (!Claim(claimed, outPath, assetName, report))
+                                continue;
+                            // Whether the blit degammas is decided by the SOURCE texture's graphics
+                            // format and by nothing else. Choosing it from the file NAME instead
+                            // looks equivalent and is not: a stranger's bundle can perfectly well
+                            // contain an sRGB-flagged "*_Height" (nothing forces a height map's
+                            // sRGBTexture off, and the importer default is on), and reading that
+                            // through a Linear RenderTexture degammas on sample with nothing
+                            // re-encoding on write - every mid-tone byte moved, silently. The name
+                            // rule still decides the DESTINATION policy, where it belongs, in
+                            // MobileConvertedModImporter. Here the source is the only authority.
+                            bool linear = !tex2d.isDataSRGB;
+                            Func<Color32, Color32> unswizzle = IsNormalMapName(assetName)
+                                ? NormalUnswizzlerFor(tex2d.format, tex2d.isDataSRGB, notes) : null;
+                            if (!TryWriteFile(outPath, TexturePng.Encode(tex2d, linear, unswizzle),
+                                    outputRoot, assetName, report))
+                                continue;
+                            report.extracted.Add(outPath);
+                            CommitNotes(report, notes);
+                        }
+                        else if (obj is TextAsset textAsset)
+                        {
+                            if (!Claim(claimed, outPath, assetName, report))
+                                continue;
+                            if (!TryWriteFile(outPath, textAsset.bytes, outputRoot, assetName, report))
+                                continue;
+                            report.extracted.Add(outPath);
+                            CommitNotes(report, notes);
+                        }
+                        else if (obj is AudioClip clip)
+                        {
+                            // A bundle keeps an AudioClip as samples, not as the author's file,
+                            // so the extraction has to re-author a container - and the only one
+                            // that can be written from raw samples with no encoder is PCM WAV.
+                            //
+                            // THE LIMIT OF THIS WHOLE APPROACH. AudioClip.GetData reads DECODED
+                            // PCM, and only a DecompressOnLoad clip has any: Unity's own message is
+                            // "Cannot get data on compressed samples for audio clip ... Changing the
+                            // load type to DecompressOnLoad on the audio clip will fix this". A
+                            // Streaming clip never had its samples in memory; a CompressedInMemory
+                            // one holds them still encoded, and there is no API that hands the
+                            // encoded bytes back either. Neither is recoverable here at all.
+                            //
+                            // Unity's own default for an audio import is DecompressOnLoad, so the
+                            // clip an author never thought about DOES convert. The one an author
+                            // thought about may not: CompressedInMemory and Streaming are exactly
+                            // what a large mod's music gets set to, and a music module is where a
+                            // whole-mod loss would land.
+                            //
+                            // They are refused up front rather than left to fail inside GetData for
+                            // two reasons: GetData logs a Unity error per clip, and a music mod with
+                            // a thousand of them would bury the report that matters under a thousand
+                            // stack traces; and the load type is the actual diagnosis, so it belongs
+                            // in the warning. Each is counted under its own key, because the two need
+                            // different things from the mod author.
+                            //
+                            // Both refusals come BEFORE the rewrite and before Claim on purpose:
+                            // a clip whose samples cannot be read is not a writer, and letting it
+                            // reserve the output path would cost a sibling that could actually
+                            // have been written there (a streaming "song.ogg" beside a readable
+                            // "song.wav" is one mod away).
+                            if (clip.loadType != AudioClipLoadType.DecompressOnLoad)
+                            {
+                                Skipped(report, clip.loadType == AudioClipLoadType.Streaming
+                                    ? "AudioClip(streaming)" : "AudioClip(compressed)");
+                                Debug.LogWarning($"[MobileModExtractor] skipped {assetName}: its " +
+                                    $"load type is {clip.loadType}, and AudioClip.GetData can only " +
+                                    "read a clip imported as DecompressOnLoad. The samples are not " +
+                                    "reachable through any API here, so this clip cannot be " +
+                                    "converted from the bundle at all - it has to come from the " +
+                                    "module's source audio, or from a rebuild of the desktop mod " +
+                                    "with this clip set to DecompressOnLoad.");
+                                continue;
+                            }
+
+                            // Only now the container rewrite, and ONLY for a clip that is
+                            // actually going to be written. Announcing "re-encoded as .wav" and
+                            // then announcing a skip is two warnings per clip, one of them
+                            // false, on exactly the module whose log we most need to read.
+                            //
+                            // And unlike the texture case this is a note, not a hazard. DFU
+                            // looks mod audio up by EXTENSIONLESS name - TryImportSound and
+                            // TryImportSong pass sound.ToString()/song.ToString() straight into
+                            // ModManager.TryGetAsset, which asks AssetBundle.Contains - so a
+                            // source .ogg arriving as .wav still answers to the same key. What
+                            // does move is Mod.FindAssetNames(dir, ".ogg"), which filters a
+                            // directory listing by extension; that is the residual risk, and it
+                            // is why this is still counted rather than passed over in silence.
+                            if (!outPath.EndsWith(".wav", StringComparison.OrdinalIgnoreCase))
+                            {
+                                notes.Add("extension-rewritten");
+                                Debug.LogWarning($"[MobileModExtractor] {assetName} is re-encoded " +
+                                    "as .wav. DFU's own audio lookups are extensionless, so this " +
+                                    "does not change how the clip is found; a mod that enumerates " +
+                                    "its own directory by \".ogg\" would no longer see it.");
+                                outPath = Path.ChangeExtension(outPath, ".wav");
+                            }
+
+                            var samples = new float[clip.samples * clip.channels];
+                            if (!clip.GetData(samples, 0))
+                            {
+                                // Backstop: the load type said this should have worked. Something
+                                // else did not - a clip with no samples, or a Unity-version change
+                                // in what GetData accepts - and either way it is a loss, not a note.
+                                Skipped(report, "AudioClip(nodata)");
+                                Debug.LogWarning($"[MobileModExtractor] skipped {assetName}: GetData " +
+                                    $"failed on a {clip.loadType} clip ({clip.samples} samples, " +
+                                    $"{clip.channels} channels), which is not supposed to happen; " +
+                                    "the clip is skipped rather than written as silence.");
+                                continue;
+                            }
+                            if (!Claim(claimed, outPath, assetName, report))
+                                continue;
+                            if (!TryWriteFile(outPath, EncodeWav(samples, clip.channels, clip.frequency),
+                                    outputRoot, assetName, report))
+                                continue;
+                            report.extracted.Add(outPath);
+                            CommitNotes(report, notes);
+                        }
+                        else
+                        {
+                            string type = obj ? obj.GetType().Name : "null";
+                            Skipped(report, type);
+                            Debug.LogWarning($"[MobileModExtractor] skipped {assetName} ({type} not supported yet)");
+                        }
+                    }
+                    finally
+                    {
+                        Release(obj, report);
                     }
                 }
 
@@ -277,6 +314,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             AssetDatabase.Refresh();
             foreach (string p in report.extracted)
                 AssetDatabase.ImportAsset(p, ImportAssetOptions.ForceUpdate);
+            LogSummary(report, dfmodPath, outputRoot);
             return report;
         }
 
@@ -495,8 +533,109 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     w.Write((short)Mathf.RoundToInt(s * short.MaxValue));
                 }
                 w.Flush();
-                return stream.ToArray();
+                // GetBuffer, not ToArray: the stream was created with exactly this capacity and
+                // filled exactly full, so its internal array already IS the answer and ToArray
+                // would copy every byte of it a second time - ~115MB of pure copy for one long
+                // song. The equality check is what makes that safe rather than assumed; if the
+                // two ever diverge the copy is still there to fall back on.
+                byte[] buffer = stream.GetBuffer();
+                return buffer.Length == stream.Length ? buffer : stream.ToArray();
             }
+        }
+
+        /// <summary>Hands one bundle asset's native memory back the moment this tool is done
+        /// with it, instead of letting the whole mod accumulate until AssetBundle.Unload at the
+        /// end of the run.
+        ///
+        /// This is not a tidiness measure. The objects a bundle hands out are NOT the compressed
+        /// bytes on disk: a DecompressOnLoad AudioClip is decoded to PCM in native memory at load
+        /// time, so a music module that is 273MB of Vorbis on disk is some multiple of that
+        /// resident once every clip in it has been loaded. Holding all of them at once - which is
+        /// what the loop did while its only unload was the one after the loop - is the single
+        /// most likely reason a first conversion of a real module dies rather than finishing.
+        ///
+        /// UnloadAudioData is the call that carries this, and that is a MEASURED statement, not
+        /// the obvious ordering. Resources.UnloadAsset looks like it should subsume the audio
+        /// case - it is the documented counterpart of AssetBundle.LoadAsset and destroys the
+        /// native object - but it is documented to do nothing for an asset that came from the
+        /// editor's AssetDatabase, and the self-test established that it does nothing for an
+        /// editor-side BUNDLE asset either: the check was first written asserting the object
+        /// would be destroyed, and it failed with the clip still alive. UnloadAudioData does
+        /// bite, which is fortunate, because decoded PCM is the term that dominates on a music
+        /// module. The test now pins the effect (samples gone) rather than the mechanism.
+        ///
+        /// Resources.UnloadAsset is still called, for everything that is not a GameObject or a
+        /// Component (the two types for which it is undefined, hence the guard). It costs
+        /// nothing, it is correct where it works, and it is the right call to have in place if
+        /// this ever runs outside an editor process. But NOTHING here should be read as a claim
+        /// that it frees an editor-side bundle TEXTURE - it is not known to, there is no
+        /// per-texture equivalent of UnloadAudioData, and the honest position is that the
+        /// texture half of a large module still relies on the Unload(true) after the loop.
+        ///
+        /// Neither call is a correctness problem here because nothing holds a reference past
+        /// this point: the report keeps output PATHS, the notes keep strings, and the bytes have
+        /// already been written.
+        ///
+        /// There is deliberately no periodic Resources.UnloadUnusedAssets sweep. That call walks
+        /// the whole loaded object graph, so its cost grows with everything the editor has open
+        /// rather than with this mod, and picking an interval for it would mean picking a number
+        /// with no measurement behind it. Releasing each asset by name at the point it stops
+        /// being needed leaves nothing for a sweep to find.
+        /// </summary>
+        public static void Release(UnityEngine.Object obj, ExtractReport report = null)
+        {
+            if (obj == null)
+                return;
+
+            var clip = obj as AudioClip;
+            if (clip != null)
+                clip.UnloadAudioData();
+
+            if (!(obj is GameObject) && !(obj is Component))
+                Resources.UnloadAsset(obj);
+
+            if (report != null)
+                report.released++;
+        }
+
+        /// <summary>The one line worth reading when a real conversion has just produced a
+        /// thousand warnings. An entirely unconvertible module - every clip streamed, say -
+        /// otherwise looks like a wall of individually reasonable warnings and an empty output
+        /// directory, which is obvious only to someone who reads the whole log. This states the
+        /// verdict, and raises its own voice to a warning when anything was lost, so it survives
+        /// a log filtered to warnings and errors.</summary>
+        static void LogSummary(ExtractReport report, string dfmodPath, string outputRoot)
+        {
+            int skipped = Total(report.skippedByType);
+            string line = $"[MobileModExtractor] {Path.GetFileName(dfmodPath)}: extracted " +
+                $"{report.extracted.Count}, skipped {skipped} [{Describe(report.skippedByType)}], " +
+                $"noted {Total(report.notesByType)} [{Describe(report.notesByType)}], " +
+                $"released {report.released}/{report.loaded} loaded -> {outputRoot}";
+            if (skipped > 0)
+                Debug.LogWarning(line);
+            else
+                Debug.Log(line);
+        }
+
+        static int Total(Dictionary<string, int> counts)
+        {
+            int total = 0;
+            foreach (var kv in counts)
+                total += kv.Value;
+            return total;
+        }
+
+        /// <summary>Renders a counter dictionary as "key=n, key=n", sorted so two runs of the
+        /// same conversion produce comparable lines.</summary>
+        static string Describe(Dictionary<string, int> counts)
+        {
+            if (counts.Count == 0)
+                return "none";
+            var parts = new List<string>();
+            foreach (var kv in counts)
+                parts.Add(kv.Key + "=" + kv.Value);
+            parts.Sort(StringComparer.Ordinal);
+            return string.Join(", ", parts.ToArray());
         }
 
         /// <summary>The asset did not make it into the extraction.</summary>
