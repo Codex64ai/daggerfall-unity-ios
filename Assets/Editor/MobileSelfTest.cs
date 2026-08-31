@@ -1313,6 +1313,18 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(!MobileConvertedModPolicy.IsClassicUiArt("Assets/Textures/004_0-0.png", markers)
                   && !MobileConvertedModPolicy.IsClassicUiArt("Assets/Textures/210_1-0_Normal.png", markers),
                   "world textures are not, and keep the memory-optimised policy");
+            // Terrain tiles are the class the POT rounding must NOT touch: DFU builds a
+            // Texture2DArray sized from the first replacement record and silently drops any
+            // record whose width/height/format differs, which is a hole in the terrain rather
+            // than a visible error.
+            Check(MobileConvertedModPolicy.IsTerrainTileTexture("Assets/Textures/302_5-0.png")
+                  && MobileConvertedModPolicy.IsTerrainTileTexture("Assets/Textures/002_0-0.png")
+                  && MobileConvertedModPolicy.IsTerrainTileTexture("Assets/Textures/404_55-0_Normal.png"),
+                  "terrain tile archives are recognised (ground sets + winter/rain variants)");
+            Check(!MobileConvertedModPolicy.IsTerrainTileTexture("Assets/Textures/210_1-0.png")
+                  && !MobileConvertedModPolicy.IsTerrainTileTexture("Assets/Textures/TALK01I0.IMG.png")
+                  && !MobileConvertedModPolicy.IsTerrainTileTexture("Assets/Textures/nonsense.png"),
+                  "a billboard archive, UI art and an unnumbered name are not terrain tiles");
             Check(MobileConvertedModPolicy.UiFormat == TextureImporterFormat.ASTC_4x4
                   && MobileConvertedModPolicy.MaxUiTextureSize == 16384,
                   "UI art takes the 4x4 block and no size cap",
@@ -1670,6 +1682,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // cap - and uncompressed at source. fixture_uic.CIF.png is the same art with a UI
             // name and a COMPRESSED source. Between them they pin both halves.
             var uiImp = uiArt != null ? AssetImporter.GetAtPath(uiArt) as TextureImporter : null;
+            // ...but the UI path is UNTOUCHED by that: its dimensions are read by DFU's own
+            // arithmetic, so it keeps None and keeps its exact size.
+            Check(uiImp != null && uiImp.npotScale == TextureImporterNPOTScale.None,
+                  "classic UI art still keeps exact dimensions - no rounding",
+                  uiImp == null ? "no importer" : uiImp.npotScale.ToString());
             Check(uiImp != null && uiImp.maxTextureSize == MobileConvertedModPolicy.MaxUiTextureSize,
                   "classic UI art is never downscaled: its dimensions are the contract",
                   uiImp == null ? "no importer" : "max=" + uiImp.maxTextureSize);
@@ -1746,8 +1763,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && worldIos.format != MobileConvertedModPolicy.UiFormat,
                   "and the tunable ASTC block, not the UI one",
                   worldIos == null ? "no settings" : worldIos.format.ToString());
-            Check(texImp != null && texImp.npotScale == TextureImporterNPOTScale.None,
-                  "converted textures keep their exact dimensions (DFU uv metadata depends on it)",
+            // World art is now allowed to round to a power of two, because Unity CANNOT compress
+            // a non-power-of-two texture that has mipmaps - it silently returns RGBA32, which is
+            // how DREAM's mobs module ended up costing nine times the texture RAM it should.
+            // Rounding costs world art nothing: maxTextureSize already resizes it.
+            Check(texImp != null && texImp.npotScale == TextureImporterNPOTScale.ToNearest,
+                  "world textures may round to a power of two, so ASTC can actually apply",
                   texImp == null ? "no importer" : texImp.npotScale.ToString());
             // Against the policy's value, not a literal: this must keep passing when an operator
             // is tuning the cap against a device, which is the whole reason it is an env var.

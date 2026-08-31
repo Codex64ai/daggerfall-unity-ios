@@ -2190,6 +2190,42 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// canvas, so every one of those rects lands on an integer. Clamped to 1024 it becomes
         /// 3.2x, every rect origin and size truncates, and the window comes up with blank panels
         /// and dead buttons.</summary>
+        /// <summary>The classic archives whose records DFU assembles into a Texture2DArray:
+        /// the four climate ground sets, each with a winter (+1) and rain (+2) variant
+        /// (ClimateSwaps.GetGroundArchive).</summary>
+        public static readonly int[] TerrainTileArchives =
+            { 2, 3, 4, 102, 103, 104, 302, 303, 304, 402, 403, 404 };
+
+        /// <summary>True when this asset is a terrain TILE, whose dimensions are a contract with
+        /// DFU every bit as strict as classic UI art's - just for a different reason.
+        ///
+        /// TextureReader.GetTerrainTextureArray builds a Texture2DArray sized from the FIRST
+        /// replacement record ("must be the same for all replacement textures for
+        /// Texture2DArray", says its own comment) and TryMakeTextureArrayCopyTexture then
+        /// requires every other record to match it in width, height AND format - a record that
+        /// does not is logged and SILENTLY DROPPED, which is a hole in the terrain rather than an
+        /// error anyone would see. Its Color32 fallback is stricter still: it calls GetPixels32
+        /// on each replacement (so they must be readable) and SetPixels32 into a fixed-size
+        /// array (so they must be exactly the right size).
+        ///
+        /// So these are excluded from the power-of-two rescale below. They keep their exact
+        /// dimensions, which on a non-power-of-two source means they also keep the uncompressed
+        /// fallback - fat, but a working terrain beats a cheap broken one.</summary>
+        public static bool IsTerrainTileTexture(string assetPath)
+        {
+            string name = Path.GetFileNameWithoutExtension(assetPath ?? string.Empty);
+            int underscore = name.IndexOf('_');
+            if (underscore <= 0)
+                return false;
+            int archive;
+            if (!int.TryParse(name.Substring(0, underscore), out archive))
+                return false;
+            foreach (int terrainArchive in TerrainTileArchives)
+                if (terrainArchive == archive)
+                    return true;
+            return false;
+        }
+
         public static bool IsClassicUiArt(string assetPath, string[] noMipMarkers)
         {
             return !ShouldMipmap(assetPath, noMipMarkers);
@@ -2314,9 +2350,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
     /// ImageReader's GetPixels32 then throws every frame inside the UI draw loop. DFU's own
     /// remark says whose call it is ("It is up to mod authors to ensure that textures from asset
     /// bundles have `Read/Write Enabled` flag set when required"), so the memory it costs is the
-    /// author's decision and not this converter's. See MobileModExtractor.ReadableSidecarName. npotScale None
-    /// keeps exact dimensions, since DFU's XML/uv metadata is written against the authored size
-    /// and rescaling silently misaligns it. Normal maps are typed from the DFU *_Normal suffix so
+    /// author's decision and not this converter's. See MobileModExtractor.ReadableSidecarName.
+    ///
+    /// npotScale keeps exact dimensions ONLY where something reads them: classic UI art,
+    /// uncompressed+readable art, and terrain tiles. Everywhere else Unity is allowed to round to
+    /// a power of two, because it must be - Unity cannot compress a non-power-of-two texture that
+    /// has mipmaps and silently returns RGBA32 instead, which cost DREAM's mobs module nine times
+    /// the texture RAM it should have used. Rounding costs those textures nothing, since
+    /// maxTextureSize already resizes them. Normal maps are typed from the DFU *_Normal suffix so
     /// Unity compresses them as normal maps and shaders unpack them correctly; the other two
     /// linear maps are marked non-sRGB, matching DFU's own IsLinearTextureMap - note that this
     /// deliberately NORMALISES a map whose author left the sRGB default on, which is a change of
@@ -2348,7 +2389,6 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         {
             if (!InScope(assetPath)) return;
             var importer = (TextureImporter)assetImporter;
-            importer.npotScale = TextureImporterNPOTScale.None;   // exact sizes: DFU XML/uv metadata depends on them
             // THE AUTHOR'S FLAG, NOT OURS. This used to be a flat isReadable=false to save the
             // CPU-side copy, and that broke DFU on a device: a non-readable texture handed to a
             // caller that needs pixels only produces a LOG from TryImportTexture, which returns
@@ -2374,6 +2414,29 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             bool pixelContract = uiArt || (uncompressedSource
                 && MobileConvertedModPolicy.SourceWasReadable(assetPath));
             bool keepUncompressed = pixelContract && uncompressedSource;
+
+            // NON-POWER-OF-TWO IS WHY THE COMPRESSION SILENTLY DID NOT HAPPEN. Unity cannot
+            // compress an NPOT texture that has mipmaps, and falls back to RGBA32 without
+            // saying so: DREAM's mobs module asked for ASTC_6x6 and got 2.28GB of uncompressed
+            // texture per slice, nine times the RAM it should cost. Measured by format
+            // histogram - every ASTC output was power-of-two, every RGBA32 one was not.
+            //
+            // The cure is to let Unity round to a power of two, and it costs nothing for world
+            // art BECAUSE WE ALREADY RESIZE IT: maxTextureSize clamps it to 1024 anyway, so
+            // "None" was preserving nothing here - the comment this replaces claimed exact sizes
+            // were needed, and for clamped world textures that premise was already false.
+            //
+            // It is NOT applied where dimensions really are a contract, and those are audited
+            // rather than assumed: classic UI art and uncompressed+readable art (pixelContract,
+            // whose sizes DaggerfallTalkWindow and PaperDollRenderer compute against), and
+            // terrain tiles (see IsTerrainTileTexture). Billboards are cleared: MaterialReader
+            // takes recordSizes from results.textureFile.GetSize(record) - the CLASSIC record -
+            // and only falls back to the albedo map's dimensions when there is no classic file.
+            bool exactDimensions = pixelContract
+                || MobileConvertedModPolicy.IsTerrainTileTexture(assetPath);
+            importer.npotScale = exactDimensions
+                ? TextureImporterNPOTScale.None
+                : TextureImporterNPOTScale.ToNearest;
 
             importer.textureCompression = keepUncompressed
                 ? TextureImporterCompression.Uncompressed
