@@ -506,6 +506,24 @@ from a silent game. Known limits, in the order they bite:
   module and the largest pack is ~19x this one - but that is an extrapolation, not a
   result. Read the "holding NNNMB of asset memory" figure in the summary to judge whether
   it could matter for a given module.
+- **Read/Write Enabled is the mod author's call, and the converter now preserves it.** An
+  earlier version forced every converted texture non-readable to save the CPU-side copy.
+  That froze the game on device: DFU hands a non-readable texture to callers that need
+  pixels with only a log line, and `ImageReader.GetPixels32` then throws *every frame*
+  inside the UI draw loop - which looks like a hang, complete with cursor trails smeared
+  across a static frame. DFU's own remark settles whose decision it is: "It is up to mod
+  authors to ensure that textures from asset bundles have `Read/Write Enabled` flag set
+  when required." So the source flag is carried through conversion verbatim - 202 of the
+  330 textures in DREAM's `hud & menu` have it set, and the converted bundle now has
+  exactly the same 202. **A readable texture costs roughly double on the device**, because
+  it keeps a CPU copy as well as the GPU one; that is the price of the author's choice, and
+  not something this tool should overrule.
+
+  The flags travel in a `.readable-textures.txt` file inside the extraction folder (dotted,
+  so Unity never imports it and it can never reach a bundle). **If you converted a mod
+  before this fix, re-convert it** - the old bundle has every texture non-readable and will
+  freeze the UI. A conversion whose extraction folder has no such file warns once and
+  imports non-readable.
 - **Textures and audio change file extension.** Textures are re-encoded as `.png` and
   clips as `.wav`, which moves a texture's runtime lookup name with it (DFU keys on the
   short name *with* extension for textures, extensionless for audio). The summary counts
