@@ -1913,17 +1913,30 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             if (Directory.Exists(watchdogRoot)) { Directory.Delete(watchdogRoot, true); File.Delete(watchdogRoot + ".meta"); }
             var watchdogReport = new ExtractReport();
             var watchdogStarted = DateTime.UtcNow;
-            IEnumerator watchdogSteps = MobileModExtractor.ExtractSteps(
-                built[0], watchdogRoot, watchdogReport, true);
             int pumped = 0;
-            while (watchdogSteps.MoveNext())
+            double watchdogSeconds;
+            // try/finally, because leaking a one-second audio cap into the rest of the suite
+            // would make every later check quietly wrong in a way nothing here would explain.
+            try
             {
-                pumped++;
-                if ((DateTime.UtcNow - watchdogStarted).TotalSeconds > 60)
-                    break;      // the test's own backstop; reaching it IS the failure
+                IEnumerator watchdogSteps = MobileModExtractor.ExtractSteps(
+                    built[0], watchdogRoot, watchdogReport, true);
+                while (watchdogSteps.MoveNext())
+                {
+                    pumped++;
+                    if ((DateTime.UtcNow - watchdogStarted).TotalSeconds > 60)
+                        break;      // the test's own backstop; reaching it IS the failure
+                }
             }
-            double watchdogSeconds = (DateTime.UtcNow - watchdogStarted).TotalSeconds;
-            Environment.SetEnvironmentVariable(MobileModExtractor.AudioTimeoutVar, previousCap);
+            finally
+            {
+                watchdogSeconds = (DateTime.UtcNow - watchdogStarted).TotalSeconds;
+                Environment.SetEnvironmentVariable(
+                    MobileModExtractor.AudioTimeoutVar, previousCap);
+            }
+            Check(Environment.GetEnvironmentVariable(MobileModExtractor.AudioTimeoutVar)
+                      == previousCap,
+                  "the watchdog test restores the audio cap it borrowed");
 
             int watchdogAsync;
             watchdogReport.skippedByType.TryGetValue("AudioClip(async)", out watchdogAsync);
@@ -1937,6 +1950,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(watchdogReport.extracted.Count == report.extracted.Count,
                   "everything that does not depend on the stalled clip still converts",
                   "extracted=" + watchdogReport.extracted.Count);
+            // And it yielded MORE than once. The driver can only check its run cap between
+            // steps, so an extraction that yields only where it waits for audio leaves a
+            // texture module - which waits for nothing - running inside a single step with the
+            // watchdog unreachable. Now that -quit is gone there would be nothing left to end
+            // such a stall, so the heartbeat is load-bearing, not cosmetic.
+            Check(pumped > 1, "the extraction yields periodically, so the run cap is reachable",
+                  "yields=" + pumped);
             if (Directory.Exists(watchdogRoot))
             {
                 Directory.Delete(watchdogRoot, true);
@@ -2139,6 +2159,32 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && !MobileModExtractor.IsProjectCodeFile("x/data.json")
                   && !MobileModExtractor.IsProjectCodeFile(null),
                   "ordinary content, and a null path, are not code");
+            // Native plugin sources: Unity gives these to PluginImporter and compiles them into
+            // the player. Verified in this project on Assets/Plugins/iOS/DFMobilePointer.mm,
+            // whose .meta is a PluginImporter. The rule is folder-independent on purpose, so it
+            // does not matter whether Unity 6 still restricts that to a Plugins/ folder.
+            Check(MobileModExtractor.IsProjectCodeFile("x/native.m")
+                  && MobileModExtractor.IsProjectCodeFile("x/native.mm")
+                  && MobileModExtractor.IsProjectCodeFile("x/native.c")
+                  && MobileModExtractor.IsProjectCodeFile("x/native.cpp")
+                  && MobileModExtractor.IsProjectCodeFile("x/native.h")
+                  && MobileModExtractor.IsProjectCodeFile("x/native.swift"),
+                  "native plugin sources are refused: Unity compiles them into the player");
+            Check(MobileModExtractor.IsProjectCodeFile("x/lib.jar")
+                  && MobileModExtractor.IsProjectCodeFile("x/lib.aar"),
+                  "Android plugin archives are refused too");
+            // A .meta is not content: it is the file that tells Unity how to import its
+            // NEIGHBOUR. A hostile one rewrites a sibling's importer settings, or claims a GUID
+            // that already belongs to a project asset - corrupting the project without ever
+            // writing an asset.
+            Check(MobileModExtractor.IsProjectCodeFile("x/tex.png.meta"),
+                  "a .meta is refused: it rewrites how the file beside it is imported");
+
+            // The sweep budget: bytes, not asset counts, because a mod's assets are wildly
+            // uneven and it is the bytes that exhaust the machine.
+            Check(MobileModExtractor.DefaultSweepBudgetBytes == 256L * 1024 * 1024,
+                  "the default sweep budget is the argued-for 256MB",
+                  MobileModExtractor.DefaultSweepBudgetBytes / (1024 * 1024) + "MB");
 
             // The watchdog clock. 10s is not a guess: a 790,320-sample clip from DREAM's sound
             // module completes in two editor ticks and 0.14s once the main loop is being handed

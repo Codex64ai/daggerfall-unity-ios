@@ -130,6 +130,17 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// it is invisible in every other number here, so it is reported on its own.</summary>
         public int loaded;
         public int released;
+        /// <summary>Bytes of asset memory released since the last sweep (it resets), the total
+        /// across the whole conversion (it does not), and how many sweeps happened.
+        ///
+        /// The TOTAL is the number worth reading. It says how much decoded asset memory a module
+        /// asks the machine to hold if none of it is reclaimed, which is the one quantity that
+        /// predicts whether a very large pack converts at all - and it is measured per module
+        /// rather than guessed from file size, because the ratio between the two is not
+        /// constant.</summary>
+        public long releasedBytes;
+        public long releasedBytesTotal;
+        public int sweeps;
         public Dictionary<string, int> skippedByType = new Dictionary<string, int>();
         public Dictionary<string, int> notesByType = new Dictionary<string, int>();
     }
@@ -170,6 +181,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             if (!File.Exists(dfmodPath))
                 throw new FileNotFoundException("Desktop .dfmod not found", dfmodPath);
 
+            DateTime lastImportYield = DateTime.UtcNow;
             AssetBundle ab = AssetBundle.LoadFromFile(dfmodPath);
             if (ab == null)
                 throw new InvalidDataException("Could not load AssetBundle (wrong platform or corrupt): " + dfmodPath);
@@ -191,7 +203,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
                 // One output FILE may be claimed by only one bundle asset; see Claim().
                 var claimed = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                bool loggedAudioLoad = false;   // see TryEnsureAudioData: logged once, counted always
+                bool loggedAudioLoad = false;   // see EnsureAudioData: logged once, counted always
+                long sweepBudget = SweepBudgetBytes();
+                DateTime lastYield = DateTime.UtcNow;
 
                 foreach (string assetName in ab.GetAllAssetNames())
                 {
@@ -415,6 +429,41 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     {
                         Release(obj, report);
                     }
+
+                    // THE SWEEP. Release drops this tool's reference to the asset, but dropping a
+                    // reference is not reclaiming memory: an earlier round measured that
+                    // Resources.UnloadAsset does not free an editor-side bundle texture at all,
+                    // so without this the decoded copy of every texture in the mod accumulates
+                    // until the bundle is unloaded at the very end. Measured on DREAM's hud &
+                    // menu module that was ~600MB above an idle editor for 92MB of input, which
+                    // projects badly onto a 1.72GB pack.
+                    //
+                    // UnloadUnusedAssets is a DIFFERENT mechanism from UnloadAsset: it collects
+                    // assets nothing references any more, which is exactly what Release has just
+                    // made these. The editor-only Immediate form is used because the runtime one
+                    // returns an AsyncOperation, and an AsyncOperation cannot complete inside a
+                    // step that is holding the main thread - the same trap the audio load walked
+                    // into.
+                    if (sweepBudget > 0 && report.releasedBytes >= sweepBudget)
+                    {
+                        report.releasedBytes = 0;
+                        report.sweeps++;
+                        EditorUtility.UnloadUnusedAssetsImmediate();
+                        if (canYield)
+                            yield return null;
+                    }
+
+                    // And a heartbeat, so the run cap is REACHABLE. Everything above happens
+                    // inside one MoveNext for a module with no audio to wait on, and the driver
+                    // can only check its watchdog between steps - so without this a GPU or
+                    // import stall on a texture module would hang forever now that -quit is
+                    // gone. Time-based rather than every-Nth-asset: it costs one frame per
+                    // quarter second regardless of how big or small the assets are.
+                    if (canYield && (DateTime.UtcNow - lastYield).TotalSeconds > HeartbeatSeconds)
+                    {
+                        lastYield = DateTime.UtcNow;
+                        yield return null;
+                    }
                 }
 
                 // Manifest identity is preserved; only Files points at the extraction.
@@ -437,7 +486,18 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
             AssetDatabase.Refresh();
             foreach (string p in report.extracted)
+            {
                 AssetDatabase.ImportAsset(p, ImportAssetOptions.ForceUpdate);
+                // The import loop is per-asset and can be the long pole on a texture module -
+                // every one of these is a compress-to-ASTC - so it gets the same heartbeat.
+                // (AssetDatabase.Refresh and BuildMod are single calls that cannot be broken up;
+                // the run cap cannot interrupt those, which is stated rather than pretended.)
+                if (canYield && (DateTime.UtcNow - lastImportYield).TotalSeconds > HeartbeatSeconds)
+                {
+                    lastImportYield = DateTime.UtcNow;
+                    yield return null;
+                }
+            }
             LogSummary(report, dfmodPath, outputRoot);
         }
 
@@ -537,6 +597,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         static IEnumerator driverSteps;
         static List<string> driverBuilt;
         static DateTime driverStarted;
+        // Resolved ONCE when the driver is armed, not re-read every frame. Re-parsing per tick
+        // meant a mistyped DFU_MOD_TIMEOUT logged its "keeping the default" warning on every
+        // editor frame for the length of the run - thousands of identical lines through the one
+        // log an operator has to read.
+        static double driverRunTimeout;
 
         /// <summary>The command-line entry point. RUN THIS WITHOUT -quit.
         ///
@@ -596,9 +661,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 driverBuilt = new List<string>();
                 driverSteps = ConvertSteps(input, extractRoot, outRoot, targets, true, driverBuilt);
                 driverStarted = DateTime.UtcNow;
+                driverRunTimeout = RunTimeoutSeconds();
                 Debug.Log($"[MobileModExtractor] converting {Path.GetFileName(input)} " +
                     $"(per-clip audio cap {AudioLoadTimeoutSeconds():F0}s, run cap " +
-                    $"{RunTimeoutSeconds() / 60:F0} min); this process exits by itself.");
+                    $"{driverRunTimeout / 60:F0} min, sweep budget " +
+                    $"{SweepBudgetBytes() / (1024 * 1024)}MB); this process exits by itself.");
                 EditorApplication.update += DriverTick;
             }
             catch (Exception ex)
@@ -620,10 +687,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             try
             {
                 double elapsed = (DateTime.UtcNow - driverStarted).TotalSeconds;
-                if (elapsed > RunTimeoutSeconds())
+                if (elapsed > driverRunTimeout)
                 {
                     Debug.LogError($"[MobileModExtractor] giving up after {elapsed / 60:F1} " +
-                        $"minutes (DFU_MOD_TIMEOUT={RunTimeoutSeconds() / 60:F0} min). The " +
+                        $"minutes (DFU_MOD_TIMEOUT={driverRunTimeout / 60:F0} min). The " +
                         "conversion is incomplete and no bundle should be trusted from this run.");
                     FinishDriver(2);
                     return;
@@ -928,6 +995,52 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             return fallback;
         }
 
+        /// <summary>How often the extraction hands a frame back purely so the driver can check
+        /// its watchdog. A quarter second is far below any timeout worth setting and costs one
+        /// frame per four assets-worth of work at worst, which is nothing against a conversion
+        /// measured in tens of seconds.</summary>
+        const double HeartbeatSeconds = 0.25;
+
+        public const string SweepVar = "DFU_MOD_SWEEP_MB";
+
+        /// <summary>How much released asset memory may pile up before the converter asks Unity
+        /// to actually reclaim it. 0 disables the sweep entirely.
+        ///
+        /// The point of a BYTE budget rather than an every-N-assets cadence: it is the bytes that
+        /// exhaust the machine, and a mod's assets are wildly uneven - DREAM's hud &amp; menu
+        /// module mixes 1920x1200 screens with 64x64 icons, so "every 50 assets" means something
+        /// different in every folder of the same mod. A budget makes the peak a function of the
+        /// BUDGET rather than of the module, which is the property that decides whether a
+        /// 1.72GB pack converts on a given machine at all.
+        ///
+        /// 256MB by default - and BE HONEST ABOUT WHAT THAT DEFAULT IS WORTH. Measured on the
+        /// hud &amp; menu module (92MB of bundle, 330 textures, ~416MB of asset memory) the sweep
+        /// does NOT reduce peak RSS: off runs peaked at 1438 and 1769MB, a 256MB budget (1 sweep)
+        /// at 1746MB, and a 32MB budget (13 sweeps) at 1789MB, all inside the same run-to-run
+        /// band, with wall clock identical at 32s throughout. So it is neither a win nor a cost
+        /// at that size, and the peak there is an early transient rather than accumulation.
+        ///
+        /// It is on by default anyway, for one reason: accumulation is the only term here that
+        /// GROWS WITH THE MODULE, and the pack this tool exists for is nineteen times larger
+        /// than the one that could be measured. That is an extrapolation, not a result. Turn it
+        /// off with DFU_MOD_SWEEP_MB=0, and read the "holding NNNMB of asset memory" figure in
+        /// the summary line to see whether it could ever have mattered for a given module.
+        /// Modules smaller than the budget never sweep at all and pay nothing.</summary>
+        public const long DefaultSweepBudgetBytes = 256L * 1024 * 1024;
+
+        public static long SweepBudgetBytes()
+        {
+            string raw = Environment.GetEnvironmentVariable(SweepVar);
+            if (string.IsNullOrWhiteSpace(raw))
+                return DefaultSweepBudgetBytes;
+            long mb;
+            if (long.TryParse(raw.Trim(), out mb) && mb >= 0)
+                return mb * 1024 * 1024;
+            Debug.LogWarning($"[MobileModExtractor] {SweepVar}='{raw}' is not a whole number of " +
+                $"megabytes (0 disables); keeping {DefaultSweepBudgetBytes / (1024 * 1024)}MB");
+            return DefaultSweepBudgetBytes;
+        }
+
         /// <summary>True when writing this path into the project would hand a stranger's mod to
         /// a COMPILER or a LOADER rather than to an importer.
         ///
@@ -952,6 +1065,20 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 case ".asmdef": case ".asmref":               // restructures compilation
                 case ".rsp":                                  // rewrites compiler flags
                 case ".jslib": case ".jspre":                 // linked into a WebGL build
+                // Native plugin sources. Unity hands these to PluginImporter and compiles them
+                // into the player for whatever platforms the importer enables - verified in this
+                // project, where Assets/Plugins/iOS/DFMobilePointer.mm carries a PluginImporter.
+                // Whether Unity 6 still restricts that to a Plugins/ folder could NOT be
+                // confirmed here (the project has no native source outside Plugins/), and it
+                // does not matter: this rule is folder-independent, so a mod cannot smuggle one
+                // in by choosing a path, whichever way Unity behaves.
+                case ".m": case ".mm": case ".c": case ".cpp": case ".h": case ".swift":
+                case ".jar": case ".aar":                     // Android plugins
+                // And a .meta is not content at all - it is the file that tells Unity how to
+                // import the file BESIDE it. A hostile one can rewrite a sibling asset's
+                // importer settings or claim a GUID that already belongs to a project asset,
+                // which is a way to corrupt the project without writing a single asset.
+                case ".meta":
                     return true;
                 default:
                     return false;
@@ -1097,6 +1224,19 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             if (obj == null)
                 return;
 
+            // Measure BEFORE unloading anything, while the asset still holds its memory. This is
+            // what drives the sweep: not how many assets have gone by, but how many bytes.
+            if (report != null)
+            {
+                try
+                {
+                    long size = UnityEngine.Profiling.Profiler.GetRuntimeMemorySizeLong(obj);
+                    report.releasedBytes += size;
+                    report.releasedBytesTotal += size;
+                }
+                catch (Exception) { /* a size we cannot read is not worth failing a conversion for */ }
+            }
+
             var clip = obj as AudioClip;
             if (clip != null)
                 clip.UnloadAudioData();
@@ -1120,7 +1260,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             string line = $"[MobileModExtractor] {Path.GetFileName(dfmodPath)}: extracted " +
                 $"{report.extracted.Count}, skipped {skipped} [{Describe(report.skippedByType)}], " +
                 $"noted {Total(report.notesByType)} [{Describe(report.notesByType)}], " +
-                $"released {report.released}/{report.loaded} loaded -> {outputRoot}";
+                $"released {report.released}/{report.loaded} loaded holding " +
+                $"{report.releasedBytesTotal / (1024 * 1024)}MB of asset memory, {report.sweeps} " +
+                $"memory sweeps -> {outputRoot}";
             if (skipped > 0)
                 Debug.LogWarning(line);
             else
