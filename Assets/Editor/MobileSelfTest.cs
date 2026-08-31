@@ -6,6 +6,9 @@
 //   Menu: Tools > Daggerfall Mobile > Run Self Test
 //   CLI:  -executeMethod DaggerfallWorkshop.Game.Mobile.EditorTools.MobileSelfTest.RunAll
 //
+// Run with "-batchmode -quit" but NOT with -nographics: the mod extractor tests decode
+// compressed bundle textures through a GPU blit, which needs a real graphics device.
+//
 // Deliberately not NUnit: this project has no asmdefs, so everything lands in the
 // predefined assemblies and test discovery there is unreliable. A plain -executeMethod
 // entry point always works and exits non-zero on failure, which is what CI needs.
@@ -20,6 +23,7 @@ using DaggerfallWorkshop.Game.Mobile;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
 using FullSerializer;
 using DaggerfallWorkshop.Utility.AssetInjection;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using UnityEngine;
@@ -1085,6 +1089,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// only as desktop AssetBundles, so iOS support means unpacking one back into loose
         /// project assets and repacking it. This packs a synthetic desktop .dfmod, extracts
         /// it, and rebuilds - what survives the full circle is what a converted mod gets.
+        ///
+        /// NEEDS A REAL GRAPHICS DEVICE: the bundle texture is compressed and non-readable, so
+        /// extracting it goes through a GPU blit. Do not run this suite with -nographics.
         /// </summary>
         static void TestModExtractorRoundTrip()
         {
@@ -1111,6 +1118,46 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "bundle-internal path tail preserved", tex);
             Check(txt != null && File.ReadAllText(txt).Contains("\"value\":42"),
                   "textasset bytes preserved");
+
+            // 3b. THE CHECK THAT MATTERS for textures. Everything above passes on a blank
+            // image: the name, the path, the size and the manifest are all still right when
+            // the pixels are gone. The bundle texture is DXT1 and non-readable, so extraction
+            // must go through the GPU blit, and a blit with no graphics device is a silent
+            // no-op that yields a uniform grey. Compare against the fixture's generator
+            // pattern - pixel (x,y) = (4x, 4y, (x^y)*4) - which only real decoded data matches.
+            var decoded = new Texture2D(2, 2);
+            bool loaded = tex != null && decoded.LoadImage(File.ReadAllBytes(tex));
+            Check(loaded && decoded.width == 64 && decoded.height == 64,
+                  "extracted png decodes at 64x64",
+                  loaded ? decoded.width + "x" + decoded.height : "did not decode");
+
+            Color32[] px = loaded ? decoded.GetPixels32() : new Color32[0];
+            var seen = new HashSet<int>();
+            foreach (Color32 c in px)
+                seen.Add((c.r << 16) | (c.g << 8) | c.b);
+            Check(seen.Count > 100, "extracted texture is not a solid fill",
+                  "distinct colours=" + seen.Count + " (1 means the blit produced a flat fill)");
+
+            // DXT1 is lossy, so allow a margin - but one far tighter than a grey wash.
+            const int dxtTolerance = 16;
+            int[,] samples = { { 0, 0 }, { 17, 42 }, { 32, 32 }, { 63, 63 }, { 20, 40 }, { 5, 58 } };
+            int worst = 0;
+            string worstAt = "none";
+            for (int i = 0; loaded && i < samples.GetLength(0); i++)
+            {
+                int x = samples[i, 0], y = samples[i, 1];
+                // GetPixels32 runs bottom-up; the fixture pattern is written top-down.
+                Color32 got = px[(63 - y) * 64 + x];
+                int dr = Mathf.Abs(got.r - 4 * x % 256);
+                int dg = Mathf.Abs(got.g - 4 * y % 256);
+                int db = Mathf.Abs(got.b - (x ^ y) * 4 % 256);
+                int d = Mathf.Max(dr, Mathf.Max(dg, db));
+                if (d > worst) { worst = d; worstAt = string.Format("({0},{1}) got {2},{3},{4} want {5},{6},{7}",
+                    x, y, got.r, got.g, got.b, 4 * x % 256, 4 * y % 256, (x ^ y) * 4 % 256); }
+            }
+            Check(loaded && worst <= dxtTolerance, "extracted pixels match the fixture pattern",
+                  "worst channel delta=" + worst + " at " + worstAt);
+            UnityEngine.Object.DestroyImmediate(decoded);
 
             // 4. Rewritten manifest points at extracted files, keeps identity.
             ModInfo info = null;

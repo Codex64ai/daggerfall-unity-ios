@@ -10,6 +10,9 @@
 // skipped and counted in the report. Extraction output goes under Assets/Game/Mods/Converted/,
 // which is gitignored - converted third-party content must never be committed.
 //
+// Bundle textures are normally compressed and non-readable, so decoding them means a GPU
+// blit: run the editor WITHOUT -nographics or extraction refuses (see TexturePng.Encode).
+//
 // Place in Assets/Editor/
 
 using System;
@@ -127,6 +130,17 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 try { return src.EncodeToPNG(); }
                 catch (Exception) { /* fall through to GPU path */ }
             }
+            // Graphics.Blit against the null device is a silent no-op: ReadPixels then returns
+            // a uniform grey and the extraction looks entirely successful - right name, right
+            // path, right size, no pixels. Corrupting a mod quietly is worse than not
+            // converting it, so refuse instead of guessing.
+            if (SystemInfo.graphicsDeviceType == UnityEngine.Rendering.GraphicsDeviceType.Null)
+                throw new InvalidOperationException(
+                    "Cannot decode texture '" + src.name + "' (format " + src.format +
+                    ", not readable): decoding a compressed or non-readable bundle texture needs a " +
+                    "real graphics device, and this Unity process has none. Re-run the extraction " +
+                    "WITHOUT the -nographics flag ('-batchmode -quit' on its own is fine).");
+
             var rt = RenderTexture.GetTemporary(src.width, src.height, 0,
                 RenderTextureFormat.ARGB32,
                 linear ? RenderTextureReadWrite.Linear : RenderTextureReadWrite.sRGB);
