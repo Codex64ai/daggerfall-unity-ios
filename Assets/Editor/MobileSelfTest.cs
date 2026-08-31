@@ -93,6 +93,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestModExtractorSurvivesBadPaths();
             TestConverterGuardRules();
             TestConversionRefusesEmptyResult();
+            TestChunkedConversion();
             TestRoadDirectionReciprocity();
             TestRoadRouting();
             TestWaypointOvershoot();
@@ -2347,14 +2348,23 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "the measured per-clip cap and the whole-run backstop are the argued-for ones",
                   MobileModExtractor.DefaultAudioLoadTimeoutSeconds + "s / "
                       + MobileModExtractor.DefaultRunTimeoutSeconds / 3600 + "h");
-            Check(MobileModExtractor.ParseSeconds("2.5", 10, "T") == 2.5
-                  && MobileModExtractor.ParseSeconds(" 30 ", 10, "T") == 30,
+            // The disk floor shares this parser, so the same "never becomes no-limit" rule
+            // covers it: a mistyped DFU_MOD_MIN_FREE_GB must not disable the guard.
+            Check(MobileModExtractor.DefaultMinFreeGb == 4
+                  && MobileModExtractor.ParsePositiveNumber("nope", 4, "G") == 4
+                  && MobileModExtractor.ParsePositiveNumber("0", 4, "G") == 4,
+                  "the disk floor is 4GB and a typo cannot switch it off");
+            Check(MobileModExtractor.FreeBytesFor(".") != 0,
+                  "free space on this volume is readable (or reported unknown, never zero)",
+                  "free=" + MobileModExtractor.FreeBytesFor("."));
+            Check(MobileModExtractor.ParsePositiveNumber("2.5", 10, "T") == 2.5
+                  && MobileModExtractor.ParsePositiveNumber(" 30 ", 10, "T") == 30,
                   "a positive number of seconds is honoured, whitespace and all");
-            Check(MobileModExtractor.ParseSeconds(null, 10, "T") == 10
-                  && MobileModExtractor.ParseSeconds("", 10, "T") == 10
-                  && MobileModExtractor.ParseSeconds("soon", 10, "T") == 10
-                  && MobileModExtractor.ParseSeconds("0", 10, "T") == 10
-                  && MobileModExtractor.ParseSeconds("-5", 10, "T") == 10,
+            Check(MobileModExtractor.ParsePositiveNumber(null, 10, "T") == 10
+                  && MobileModExtractor.ParsePositiveNumber("", 10, "T") == 10
+                  && MobileModExtractor.ParsePositiveNumber("soon", 10, "T") == 10
+                  && MobileModExtractor.ParsePositiveNumber("0", 10, "T") == 10
+                  && MobileModExtractor.ParsePositiveNumber("-5", 10, "T") == 10,
                   "unset, garbage, zero and negative all keep the default - never 'no timeout'");
         }
 
@@ -2410,6 +2420,131 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 Directory.Delete(extractRoot, true);
                 File.Delete(extractRoot + ".meta");
             }
+            AssetDatabase.Refresh();
+        }
+
+        /// <summary>
+        /// Converting a module in SLICES has to produce what one pass would have produced.
+        ///
+        /// Three DREAM modules have never converted, and not for want of RAM: Unity's import
+        /// cache fills the disk (25GB on an 800MB module, on a machine with 22GB free). The
+        /// cache can only be cleared with Unity stopped, so a slice is a whole process and the
+        /// shell drives one per slice. That only helps if the slices actually tile the module -
+        /// an asset lost at a boundary would be a silent hole in a converted mod, which is
+        /// exactly the class of bug this whole suite exists to catch.
+        ///
+        /// So: extract the same bundle once whole and once in three slices, and require the
+        /// union to be identical AND the slices to be disjoint. Set equality alone would pass
+        /// if an asset appeared in two slices; disjointness alone would pass if one went
+        /// missing. Both, or neither is worth much.
+        /// </summary>
+        static void TestChunkedConversion()
+        {
+            const string fixtureManifest = "Assets/Editor/TestFixtures/ExtractorFixture/fixture-mod.dfmod.json";
+            const string bundleDir = "Temp/MobileModExtractorChunkTest";
+            const string wholeRoot = "Assets/Game/Mods/Converted/__chunk_whole__";
+            if (Directory.Exists(bundleDir)) Directory.Delete(bundleDir, true);
+            foreach (string stale in Directory.GetDirectories("Assets/Game/Mods/Converted",
+                         "__chunk*", SearchOption.TopDirectoryOnly))
+            {
+                Directory.Delete(stale, true);
+                File.Delete(stale + ".meta");
+            }
+            AssetDatabase.Refresh();
+
+            string[] built = MobileModBuilder.BuildMod(fixtureManifest, bundleDir,
+                new[] { BuildTarget.StandaloneOSX });
+
+            // One pass, for the reference set.
+            var whole = MobileModExtractor.Extract(built[0], wholeRoot);
+            var wholeSet = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string p in whole.extracted)
+                wholeSet.Add(MobileModExtractor.RelativeToRoot(p, wholeRoot));
+
+            // Three slices, each an independent extraction into its own folder - which is what
+            // the real thing does, so that the previous slice's assets are not left on disk.
+            var unionSet = new HashSet<string>(StringComparer.Ordinal);
+            var guids = new HashSet<string>(StringComparer.Ordinal);
+            var titles = new HashSet<string>(StringComparer.Ordinal);
+            int overlap = 0, sliceTotal = 0;
+            var sliceRoots = new List<string>();
+            for (int i = 0; i < 3; i++)
+            {
+                string root = "Assets/Game/Mods/Converted/__chunk" + i + "__";
+                sliceRoots.Add(root);
+                var report = new ExtractReport();
+                IEnumerator steps = MobileModExtractor.ExtractSteps(built[0], root, report, false, i, 3);
+                while (steps.MoveNext()) { }
+                sliceTotal += report.extracted.Count;
+                foreach (string p in report.extracted)
+                    if (!unionSet.Add(MobileModExtractor.RelativeToRoot(p, root)))
+                        overlap++;
+
+                ModInfo info = null;
+                ModManager._serializer.TryDeserialize(
+                    fsJsonParser.Parse(File.ReadAllText(report.manifestPath)), ref info);
+                if (info != null) { guids.Add(info.GUID); titles.Add(info.ModTitle); }
+                // The slice's own manifest must be named for the slice, or three slices would
+                // overwrite one another's bundle.
+                Check(report.manifestPath.Replace('\\', '/').EndsWith(
+                          "fixture-mod (" + (i + 1) + " of 3).dfmod.json"),
+                      "slice " + (i + 1) + " writes its own manifest", report.manifestPath);
+            }
+
+            Check(wholeSet.Count > 0 && unionSet.SetEquals(wholeSet),
+                  "three slices extract exactly what one pass extracts",
+                  "whole=" + wholeSet.Count + " union=" + unionSet.Count);
+            Check(overlap == 0 && sliceTotal == wholeSet.Count,
+                  "and no asset appears in two slices",
+                  "overlap=" + overlap + " sliceTotal=" + sliceTotal);
+            Check(guids.Count == 3, "each slice gets its own GUID - a shared one is a real clash",
+                  "distinct GUIDs=" + guids.Count);
+            Check(titles.Count == 3, "and its own title, so DFU's mod list is legible",
+                  "distinct titles=" + titles.Count);
+            // Derived, not random: converting the same module twice must produce the same
+            // identities, or every re-conversion installs duplicates instead of replacing.
+            Check(MobileModExtractor.DerivedGuid("abc", 1, 3) == MobileModExtractor.DerivedGuid("abc", 1, 3)
+                  && MobileModExtractor.DerivedGuid("abc", 1, 3) != MobileModExtractor.DerivedGuid("abc", 2, 3)
+                  && MobileModExtractor.DerivedGuid("abc", 1, 3) != MobileModExtractor.DerivedGuid("xyz", 1, 3),
+                  "slice GUIDs are derived: stable across runs, distinct across slices");
+            // A single slice must be indistinguishable from no slicing at all.
+            // Colliding assets MUST share a slice, or both survive and the module ships two
+            // mods claiming the same short name. This is the check that caught the first,
+            // position-based slicing.
+            Check(MobileModExtractor.SliceKeyOf("root/A/foo.tga")
+                      == MobileModExtractor.SliceKeyOf("root/A/foo.png")
+                  && MobileModExtractor.SliceKeyOf("root/A/FOO.PNG")
+                      == MobileModExtractor.SliceKeyOf("root/a/foo.png"),
+                  "assets that can collide onto one file share a slice key");
+            Check(MobileModExtractor.SliceKeyOf("root/A/foo.png")
+                      != MobileModExtractor.SliceKeyOf("root/B/foo.png"),
+                  "but the same name in different folders does not");
+            Check(MobileModExtractor.SliceOf("x", 4) == MobileModExtractor.SliceOf("x", 4)
+                  && MobileModExtractor.SliceOf("x", 4) >= 0
+                  && MobileModExtractor.SliceOf("x", 4) < 4,
+                  "slice assignment is stable and in range");
+            Check(MobileModExtractor.SliceName("x/dream - mobs.dfmod", 0, 1) == "dream - mobs"
+                  && MobileModExtractor.SliceName("x/dream - mobs.dfmod", 1, 4) == "dream - mobs (2 of 4)",
+                  "one slice is just the module; several are numbered",
+                  MobileModExtractor.SliceName("x/dream - mobs.dfmod", 1, 4));
+
+            // The per-asset contracts have to survive slicing: each slice writes the readable
+            // sidecar for ITS OWN assets, or a sliced module loses the flags a whole one keeps.
+            int sidecars = 0;
+            foreach (string root in sliceRoots)
+                if (File.Exists(Path.Combine(root, MobileModExtractor.ReadableSidecarName)))
+                    sidecars++;
+            Check(sidecars == 3, "every slice carries its own readable-texture sidecar",
+                  "sidecars=" + sidecars);
+
+            Directory.Delete(bundleDir, true);
+            foreach (string root in sliceRoots)
+            {
+                Directory.Delete(root, true);
+                File.Delete(root + ".meta");
+            }
+            Directory.Delete(wholeRoot, true);
+            File.Delete(wholeRoot + ".meta");
             AssetDatabase.Refresh();
         }
 

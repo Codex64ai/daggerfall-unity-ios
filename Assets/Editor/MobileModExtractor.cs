@@ -17,6 +17,19 @@
 //   DFU_MOD_TARGETS       comma-separated Unity BuildTarget names  default iOS
 //   DFU_MOD_AUDIO_TIMEOUT seconds allowed for one clip's load      default 10
 //   DFU_MOD_TIMEOUT       seconds allowed for the whole run        default 14400
+//   DFU_MOD_SWEEP_MB      released bytes before a memory sweep     default 256 (0 = off)
+//   DFU_MOD_CHUNK_COUNT   convert the module in this many slices   default 1
+//   DFU_MOD_CHUNK_INDEX   which slice this run converts, 1-based   default 1
+//   DFU_MOD_MIN_FREE_GB   refuse to start below this much disk     default 4
+//   DFU_MOD_KEEP_EXTRACTION  keep the loose files after a build    default off
+//
+// SLICING, for the modules that do not fit. The three biggest DREAM modules have never
+// converted, and RAM was never the problem: Unity's import cache fills the DISK - 25GB while
+// converting an 800MB module. That cache can only be cleared with Unity stopped, so a slice is
+// a whole PROCESS: run one invocation per slice, clear the cache in between, and peak disk
+// follows the slice instead of the module. Each slice is an independent, valid mod
+// ("dream - mobs (2 of 4).dfmod"), with its own title and its own derived GUID, and DFU loads
+// them all. See README-iOS.md for the loop to run.
 //
 // NO -quit AND NO -nographics, and neither is an oversight. -nographics: see the GPU-blit note
 // below. -quit: the conversion has to hand control back to Unity between steps (see the audio
@@ -178,6 +191,37 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         public static IEnumerator ExtractSteps(string dfmodPath, string outputRoot,
             ExtractReport report, bool canYield)
         {
+            return ExtractSteps(dfmodPath, outputRoot, report, canYield, 0, 1);
+        }
+
+        /// <summary>The extraction, optionally as ONE SLICE of a larger module.
+        ///
+        /// Three modules in the DREAM pack have never converted, and not for want of RAM: the
+        /// import cache fills the disk. Library/Artifacts reached 25GB converting an 800MB
+        /// module on a machine with 22GB free, and even a 246MB module once died inside a Unity
+        /// write with "Failed to write compressed chunk ... Error: 14". The cache can only be
+        /// cleared with Unity stopped, so the unit of work has to be a whole PROCESS: the shell
+        /// runs one invocation per slice and deletes the cache between them, and peak disk
+        /// becomes a function of the slice rather than of the module.
+        ///
+        /// Slicing is by a stable hash of each asset's OUTPUT PATH minus its extension, which
+        /// spreads assets evenly without clustering a module's large art into one slice, and -
+        /// the part that matters - keeps assets that would COLLIDE together. See SliceKeyOf: the
+        /// first version of this sliced by position, and the self-test caught it letting a
+        /// foo.tga and a foo.png both survive in different slices when one pass would have kept
+        /// only one. Every asset belongs to exactly one slice, so the slices are disjoint and
+        /// their union is the whole module - pinned by converting a fixture in one slice and in
+        /// three and requiring identical output.</summary>
+        public static IEnumerator ExtractSteps(string dfmodPath, string outputRoot,
+            ExtractReport report, bool canYield, int chunkIndex, int chunkCount)
+        {
+            if (chunkCount < 1)
+                throw new ArgumentOutOfRangeException("chunkCount", chunkCount,
+                    "A conversion has at least one slice.");
+            if (chunkIndex < 0 || chunkIndex >= chunkCount)
+                throw new ArgumentOutOfRangeException("chunkIndex", chunkIndex,
+                    "Slice index must be in [0, " + chunkCount + ").");
+
             if (!File.Exists(dfmodPath))
                 throw new FileNotFoundException("Desktop .dfmod not found", dfmodPath);
 
@@ -211,7 +255,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 // them it acts on.
                 var textureFlags = new Dictionary<string, string>(StringComparer.Ordinal);
 
-                foreach (string assetName in ab.GetAllAssetNames())
+                // Sorted so the order - and therefore which asset wins a collision - cannot
+                // depend on however Unity happened to enumerate the bundle.
+                var allAssets = new List<string>(ab.GetAllAssetNames());
+                allAssets.Sort(StringComparer.Ordinal);
+
+                foreach (string assetName in allAssets)
                 {
                     if (assetName.EndsWith(ModManager.MODINFOEXTENSION, StringComparison.Ordinal))
                         continue; // rewritten below, not copied verbatim
@@ -220,6 +269,18 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     // actually happened and thrown away if it has not; see CommitNotes.
                     var notes = new List<string>();
                     string outPath = OutputPathFor(assetName, outputRoot, originalCase, notes);
+
+                    // Is this asset in the slice being converted? The key is taken RELATIVE to
+                    // the extraction root, because each slice extracts into its own folder and a
+                    // key containing that folder would hash differently in every slice - which
+                    // it did, until the union check reported both missing and duplicated assets.
+                    // See SliceKeyOf for why it is the path minus its extension.
+                    if (chunkCount > 1)
+                    {
+                        string sliceKey = RelativeToRoot(outPath, outputRoot) ?? outPath;
+                        if (SliceOf(SliceKeyOf(sliceKey), chunkCount) != chunkIndex)
+                            continue;
+                    }
 
                     // Before the asset is even loaded: a path that Unity would COMPILE or LOAD
                     // rather than import is refused outright. Leaving this to MobileModBuilder's
@@ -482,11 +543,27 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 // triggers the import that consults it.
                 WriteReadableSidecar(outputRoot, textureFlags, report);
 
-                // Manifest identity is preserved; only Files points at the extraction.
+                // Manifest identity is preserved; only Files points at the extraction - except
+                // for a SLICE, which has to become a mod in its own right. DFU loads several
+                // mods happily, so a chunked module ships as several .dfmod files, but each one
+                // needs its own name in the mod list and its own GUID: two mods sharing a GUID
+                // is not a cosmetic clash, it is the identity DFU keys on.
+                //
+                // The GUID is DERIVED rather than random, so converting the same module twice
+                // produces the same identities and re-installing a slice replaces it instead of
+                // adding a duplicate. MD5 of the original GUID plus the slice number is enough:
+                // this needs determinism and distinctness, not unpredictability.
+                string sliceName = SliceName(dfmodPath, chunkIndex, chunkCount);
+                if (chunkCount > 1)
+                {
+                    modInfo.ModTitle = modInfo.ModTitle + " (" + (chunkIndex + 1) + " of " +
+                        chunkCount + ")";
+                    modInfo.GUID = DerivedGuid(modInfo.GUID, chunkIndex, chunkCount);
+                }
                 modInfo.Files = new List<string>(report.extracted);
                 ModManager._serializer.TrySerialize(modInfo, out fsData data);
                 string manifestOut = Path.Combine(outputRoot,
-                    Path.GetFileNameWithoutExtension(dfmodPath) + ModManager.MODINFOEXTENSION);
+                    sliceName + ModManager.MODINFOEXTENSION);
                 // Same containment check; but a conversion with no manifest is not a mod, so
                 // unlike a single bad asset this one cannot be skipped past.
                 if (!TryWriteFile(manifestOut, System.Text.Encoding.UTF8.GetBytes(fsJsonPrinter.PrettyJson(data)),
@@ -528,9 +605,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         public static string[] Convert(string dfmodPath, string extractRoot, string bundleOutRoot,
             BuildTarget[] targets)
         {
+            return Convert(dfmodPath, extractRoot, bundleOutRoot, targets, 0, 1);
+        }
+
+        /// <summary>Converts ONE SLICE of a module; see ExtractSteps for why slices exist.</summary>
+        public static string[] Convert(string dfmodPath, string extractRoot, string bundleOutRoot,
+            BuildTarget[] targets, int chunkIndex, int chunkCount)
+        {
             var built = new List<string>();
             IEnumerator steps = ConvertSteps(dfmodPath, extractRoot, bundleOutRoot, targets,
-                false, built);
+                false, built, chunkIndex, chunkCount);
             while (steps.MoveNext()) { }
             return built.ToArray();
         }
@@ -540,10 +624,28 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         public static IEnumerator ConvertSteps(string dfmodPath, string extractRoot,
             string bundleOutRoot, BuildTarget[] targets, bool canYield, List<string> builtInto)
         {
+            return ConvertSteps(dfmodPath, extractRoot, bundleOutRoot, targets, canYield,
+                builtInto, 0, 1);
+        }
+
+        public static IEnumerator ConvertSteps(string dfmodPath, string extractRoot,
+            string bundleOutRoot, BuildTarget[] targets, bool canYield, List<string> builtInto,
+            int chunkIndex, int chunkCount)
+        {
+            // Disk before anything else. A conversion that runs out of space dies INSIDE a Unity
+            // write - "Failed to write compressed chunk to the archive ... Error: 14" - which
+            // reads like a corrupt bundle rather than a full disk, and cost a real afternoon.
+            RequireFreeSpace(extractRoot, "starting");
+
             var report = new ExtractReport();
-            IEnumerator steps = ExtractSteps(dfmodPath, extractRoot, report, canYield);
+            IEnumerator steps = ExtractSteps(dfmodPath, extractRoot, report, canYield,
+                chunkIndex, chunkCount);
             while (steps.MoveNext())
                 yield return null;
+
+            // And again before the build, which is the write that actually failed last time.
+            RequireFreeSpace(extractRoot, "about to build the bundle for " +
+                SliceName(dfmodPath, chunkIndex, chunkCount));
 
             // A conversion that saved nothing is a FAILURE, not a quiet success. Without this
             // the rewritten manifest lists no files, BuildMod packs the manifest alone, and the
@@ -553,7 +655,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // whole point of a per-mod exit code is that a shell loop over a mods folder stops.
             if (report.extracted.Count == 0)
                 throw new InvalidDataException(
-                    "Converted nothing from " + Path.GetFileName(dfmodPath) + ": all " +
+                    "Converted nothing from " +
+                    SliceName(dfmodPath, chunkIndex, chunkCount) + ": all " +
                     Total(report.skippedByType) + " assets were skipped [" +
                     Describe(report.skippedByType) + "]. Refusing to write a bundle that would " +
                     "install, load and contain no content. The extraction under '" + extractRoot +
@@ -582,7 +685,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             int skipped = Total(report.skippedByType);
             int noted = Total(report.notesByType);
             var line = new System.Text.StringBuilder();
-            line.Append("[MobileModExtractor] converted ").Append(Path.GetFileName(dfmodPath))
+            line.Append("[MobileModExtractor] converted ")
+                .Append(SliceName(dfmodPath, chunkIndex, chunkCount))
                 .Append(": ").Append(report.extracted.Count).Append(" assets rebuilt into ")
                 .Append(string.Join(", ", builtPaths));
             if (skipped > 0)
@@ -610,8 +714,28 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// flexibility.</summary>
         // The tick-driven conversion. Fields rather than locals because the work now spans
         // editor frames: ConvertFromEnv arms the driver and returns, and DriverTick carries it.
+        public const string ChunkIndexVar = "DFU_MOD_CHUNK_INDEX";
+        public const string ChunkCountVar = "DFU_MOD_CHUNK_COUNT";
+        public const string KeepExtractionVar = "DFU_MOD_KEEP_EXTRACTION";
+
+        /// <summary>A positive whole number, or the default. Used for the slice index and count,
+        /// where a typo silently becoming 1 would quietly convert a fraction of a module and
+        /// report success.</summary>
+        public static int ParseCount(string raw, int fallback)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return fallback;
+            int value;
+            if (int.TryParse(raw.Trim(), out value) && value >= 1)
+                return value;
+            throw new InvalidOperationException(
+                "'" + raw + "' is not a positive whole number; refusing to guess, because " +
+                "guessing here converts part of a module and calls it a success.");
+        }
+
         static IEnumerator driverSteps;
         static List<string> driverBuilt;
+        static string driverExtractRoot;
         static DateTime driverStarted;
         // Resolved ONCE when the driver is armed, not re-read every frame. Re-parsing per tick
         // meant a mistyped DFU_MOD_TIMEOUT logged its "keeping the default" warning on every
@@ -671,16 +795,32 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 BuildTarget[] targets = Array.ConvertAll(targetsVar.Split(','),
                     t => (BuildTarget)Enum.Parse(typeof(BuildTarget), t.Trim(), true));
 
-                string extractRoot = "Assets/Game/Mods/Converted/" +
-                    Path.GetFileNameWithoutExtension(input);
+                int chunkCount = ParseCount(Environment.GetEnvironmentVariable(ChunkCountVar), 1);
+                int chunkIndex = ParseCount(Environment.GetEnvironmentVariable(ChunkIndexVar), 1) - 1;
+                if (chunkIndex < 0 || chunkIndex >= chunkCount)
+                    throw new InvalidOperationException(
+                        ChunkIndexVar + " is 1-based and must be between 1 and " +
+                        ChunkCountVar + " (" + chunkCount + "); got " +
+                        (Environment.GetEnvironmentVariable(ChunkIndexVar) ?? "unset"));
 
+                // Each slice gets its OWN extraction folder. Sharing one would leave the
+                // previous slice's assets on disk to be re-imported - which is the cost this
+                // whole mechanism exists to bound - and would overwrite its readable sidecar.
+                string extractRoot = "Assets/Game/Mods/Converted/" +
+                    SliceName(input, chunkIndex, chunkCount);
+
+                driverExtractRoot = extractRoot;
                 driverBuilt = new List<string>();
-                driverSteps = ConvertSteps(input, extractRoot, outRoot, targets, true, driverBuilt);
+                driverSteps = ConvertSteps(input, extractRoot, outRoot, targets, true,
+                    driverBuilt, chunkIndex, chunkCount);
                 driverStarted = DateTime.UtcNow;
                 driverRunTimeout = RunTimeoutSeconds();
-                Debug.Log($"[MobileModExtractor] converting {Path.GetFileName(input)} " +
-                    $"(per-clip audio cap {AudioLoadTimeoutSeconds():F0}s, run cap " +
-                    $"{driverRunTimeout / 60:F0} min, sweep budget " +
+                Debug.Log($"[MobileModExtractor] converting " +
+                    $"{SliceName(input, chunkIndex, chunkCount)}" +
+                    (chunkCount > 1 ? $" [slice {chunkIndex + 1}/{chunkCount}]" : string.Empty) +
+                    $" ({FreeBytesFor(extractRoot) / (1024.0 * 1024 * 1024):F1}GB disk free, " +
+                    $"floor {MinFreeGb():F1}GB; per-clip audio cap {AudioLoadTimeoutSeconds():F0}s, " +
+                    $"run cap {driverRunTimeout / 60:F0} min, sweep budget " +
                     $"{SweepBudgetBytes() / (1024 * 1024)}MB); this process exits by itself.");
                 EditorApplication.update += DriverTick;
             }
@@ -717,6 +857,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
                 foreach (string built in driverBuilt)
                     Debug.Log("[MobileModExtractor] built " + built);
+                ReleaseExtraction(driverExtractRoot);
                 // Re-read the clock: `elapsed` above was sampled BEFORE the step that just ran,
                 // and a module with no audio to wait on does all of its work inside the very
                 // first one - which reported a 30-second conversion as "done in 0.0s".
@@ -729,6 +870,45 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 Debug.LogError("[MobileModExtractor] " + ex);
                 FinishDriver(1);
             }
+        }
+
+        /// <summary>Deletes an extraction once its bundle exists, because the extraction is an
+        /// intermediate and the bundle is the product.
+        ///
+        /// This is half of what bounds peak disk. A converted module's loose PNGs are larger
+        /// than the module itself - 155MB of PNG from a 92MB bundle - and on a multi-gigabyte
+        /// pack that is the difference between finishing and filling the disk. It happens only
+        /// after a SUCCESSFUL build: a failed conversion leaves everything in place, because
+        /// then the extraction is the evidence. DFU_MOD_KEEP_EXTRACTION=1 keeps it regardless.
+        ///
+        /// It does not touch Library/Artifacts, which is the other half and cannot be deleted
+        /// while Unity is running - that is why slices are separate processes.</summary>
+        static void ReleaseExtraction(string extractRoot)
+        {
+            if (string.IsNullOrEmpty(extractRoot)
+                || ParseBoolLoose(Environment.GetEnvironmentVariable(KeepExtractionVar)))
+                return;
+            try
+            {
+                if (Directory.Exists(extractRoot))
+                {
+                    Directory.Delete(extractRoot, true);
+                    File.Delete(extractRoot + ".meta");
+                    Debug.Log($"[MobileModExtractor] removed the extraction at '{extractRoot}' " +
+                        $"({FreeBytesFor(".") / (1024.0 * 1024 * 1024):F1}GB free now). " +
+                        $"Set {KeepExtractionVar}=1 to keep it.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[MobileModExtractor] could not remove '{extractRoot}': " +
+                    $"{ex.GetType().Name}. The bundle is built; delete it by hand to reclaim disk.");
+            }
+        }
+
+        static bool ParseBoolLoose(string raw)
+        {
+            return MobileConvertedModPolicy.ParseBool(raw, false);
         }
 
         static void FinishDriver(int exitCode)
@@ -985,19 +1165,20 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
         public static double AudioLoadTimeoutSeconds()
         {
-            return ParseSeconds(Environment.GetEnvironmentVariable(AudioTimeoutVar),
+            return ParsePositiveNumber(Environment.GetEnvironmentVariable(AudioTimeoutVar),
                 DefaultAudioLoadTimeoutSeconds, AudioTimeoutVar);
         }
 
         public static double RunTimeoutSeconds()
         {
-            return ParseSeconds(Environment.GetEnvironmentVariable(RunTimeoutVar),
+            return ParsePositiveNumber(Environment.GetEnvironmentVariable(RunTimeoutVar),
                 DefaultRunTimeoutSeconds, RunTimeoutVar);
         }
 
-        /// <summary>A positive number of seconds, or the default. A typo must not silently become
-        /// "no timeout", which is the one value a watchdog must never take.</summary>
-        public static double ParseSeconds(string raw, double fallback, string name)
+        /// <summary>A positive number, or the default. Used for the timeouts and for the disk
+        /// floor: a typo must not silently become "no limit", which is the one value a guard
+        /// must never take.</summary>
+        public static double ParsePositiveNumber(string raw, double fallback, string name)
         {
             if (string.IsNullOrWhiteSpace(raw))
                 return fallback;
@@ -1006,8 +1187,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     System.Globalization.CultureInfo.InvariantCulture, out value)
                 && value > 0 && !double.IsInfinity(value))
                 return value;
-            Debug.LogWarning($"[MobileModExtractor] {name}='{raw}' is not a positive number of " +
-                $"seconds; keeping {fallback}");
+            Debug.LogWarning($"[MobileModExtractor] {name}='{raw}' is not a positive number; " +
+                $"keeping {fallback}");
             return fallback;
         }
 
@@ -1411,6 +1592,123 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 || !full.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase))
                 return null;
             return full.Substring(fullRoot.Length);
+        }
+
+        /// <summary>The key an asset is sliced on: its output path WITHOUT the extension,
+        /// lowercased.
+        ///
+        /// Not its position in the list, and the difference is a bug the self-test caught. Two
+        /// bundle assets can resolve to ONE output file - a foo.tga and a foo.png collapse once
+        /// the texture extension is rewritten - and a whole conversion resolves that by letting
+        /// the first one win and counting the other as a collision. Sliced by position, those two
+        /// can land in different slices, where each has its own claim table and BOTH survive: the
+        /// module then ships two mods that provide the same short name, and load order decides
+        /// which the game sees. The union stopped matching a single pass, which is the one
+        /// property slicing must not lose.
+        ///
+        /// Keying on the extensionless output path puts every asset that could possibly collide
+        /// in the same slice - a rewrite only ever changes the extension - so the existing
+        /// first-one-wins rule resolves them exactly as it would have in one pass.</summary>
+        public static string SliceKeyOf(string outPath)
+        {
+            string path = (outPath ?? string.Empty).Replace('\\', '/');
+            int dot = path.LastIndexOf('.');
+            int slash = path.LastIndexOf('/');
+            if (dot > slash)
+                path = path.Substring(0, dot);
+            return path.ToLowerInvariant();
+        }
+
+        /// <summary>Which slice a key belongs to. MD5 rather than string.GetHashCode, because
+        /// .NET randomises string hashes per process - slices computed in different Unity
+        /// invocations would disagree about which assets they own, and the module would come out
+        /// with holes and duplicates. This has to be stable across processes and machines.</summary>
+        public static int SliceOf(string key, int chunkCount)
+        {
+            if (chunkCount <= 1)
+                return 0;
+            using (var md5 = System.Security.Cryptography.MD5.Create())
+            {
+                byte[] hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(key ?? string.Empty));
+                uint value = (uint)(hash[0] | (hash[1] << 8) | (hash[2] << 16) | (hash[3] << 24));
+                return (int)(value % (uint)chunkCount);
+            }
+        }
+
+        public const string MinFreeVar = "DFU_MOD_MIN_FREE_GB";
+
+        /// <summary>Free space, in GB, below which a conversion refuses to continue.
+        ///
+        /// 4GB is not a guess about what a slice needs - it is a guess about what a FAILURE
+        /// costs. Running out mid-write does not produce a clean error: Unity dies with "Failed
+        /// to write compressed chunk to the archive 'Temp/unitystream.unity3d'! Error: 14",
+        /// which reads like a corrupt bundle, and it can leave a half-written .dfmod that looks
+        /// installable. Stopping early with the word "disk" in the message is worth several GB
+        /// of caution. Raise or lower it with DFU_MOD_MIN_FREE_GB.</summary>
+        public const double DefaultMinFreeGb = 4;
+
+        public static double MinFreeGb()
+        {
+            return ParsePositiveNumber(Environment.GetEnvironmentVariable(MinFreeVar),
+                DefaultMinFreeGb, MinFreeVar);
+        }
+
+        /// <summary>Free bytes on the volume holding a path, or -1 when it cannot be
+        /// determined - in which case the check declines to block rather than guessing.</summary>
+        public static long FreeBytesFor(string path)
+        {
+            try
+            {
+                string full = Path.GetFullPath(string.IsNullOrEmpty(path) ? "." : path);
+                string root = Path.GetPathRoot(full);
+                if (string.IsNullOrEmpty(root))
+                    return -1;
+                return new DriveInfo(root).AvailableFreeSpace;
+            }
+            catch (Exception) { return -1; }
+        }
+
+        /// <summary>Stops the conversion while the message can still say "disk".</summary>
+        static void RequireFreeSpace(string path, string what)
+        {
+            long free = FreeBytesFor(path);
+            if (free < 0)
+                return;   // unknown: not a reason to refuse to work
+
+            double freeGb = free / (1024.0 * 1024 * 1024);
+            double floor = MinFreeGb();
+            if (freeGb >= floor)
+                return;
+
+            throw new IOException(string.Format(
+                "Only {0:F1}GB free where the extraction goes, below the {1:F1}GB floor " +
+                "({2}), {3}. THIS IS A DISK PROBLEM, not a bad mod: converting a large module " +
+                "fills Unity's import cache (Library/Artifacts reached 25GB on an 800MB " +
+                "module). Free space, or convert this module in slices with " +
+                "DFU_MOD_CHUNK_COUNT - see README-iOS.md. Stopping now rather than failing " +
+                "inside a Unity write, which reports a corrupt archive instead of a full disk.",
+                freeGb, floor, MinFreeVar, what));
+        }
+
+        /// <summary>The file-stem a slice's manifest and bundle take: "dream - mobs (2 of 4)".
+        /// The whole-module name when there is only one slice, so an unchunked conversion is
+        /// byte-for-byte what it always was.</summary>
+        public static string SliceName(string dfmodPath, int chunkIndex, int chunkCount)
+        {
+            string baseName = Path.GetFileNameWithoutExtension(dfmodPath);
+            return chunkCount > 1
+                ? baseName + " (" + (chunkIndex + 1) + " of " + chunkCount + ")"
+                : baseName;
+        }
+
+        /// <summary>A GUID for one slice, derived from the module's own so it is stable across
+        /// conversions and distinct between slices. Formatted as a GUID because that is what
+        /// ModInfo.GUID is compared as.</summary>
+        public static string DerivedGuid(string sourceGuid, int chunkIndex, int chunkCount)
+        {
+            string seed = (sourceGuid ?? string.Empty) + "#" + chunkIndex + "/" + chunkCount;
+            using (var md5 = System.Security.Cryptography.MD5.Create())
+                return new Guid(md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(seed))).ToString();
         }
 
         /// <summary>The asset did not make it into the extraction.</summary>
