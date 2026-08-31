@@ -896,7 +896,15 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 // first one - which reported a 30-second conversion as "done in 0.0s".
                 Debug.Log("[MobileModExtractor] done in " +
                     (DateTime.UtcNow - driverStarted).TotalSeconds.ToString("F1") + "s.");
-                FinishDriver(driverBuilt.Count > 0 ? 0 : 1);
+                // Exit 0 on any completion that did not throw, INCLUDING one that built no
+                // bundle. This used to be "0 if a bundle was built, else 1", which was a safety
+                // net when finishing empty was always a bug - and it silently outlived that:
+                // once an empty SLICE became legitimate, ConvertSteps logged the friendly
+                // explanation and the driver still exited 1, so dream - textures still stopped
+                // on slice 1. ConvertSteps now throws in every case that really is a failure -
+                // an unsliced module that converted nothing, and a sliced one whose last slice
+                // finds no sibling bundle - so reaching here at all means success.
+                FinishDriver(0);
             }
             catch (Exception ex)
             {
