@@ -254,6 +254,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 // See ReadableSidecarName. Facts are recorded here; the policy decides which of
                 // them it acts on.
                 var textureFlags = new Dictionary<string, string>(StringComparer.Ordinal);
+                // Textures reached through a material or a terrain array, keyed by the DFU name
+                // they were written under; see WriteDerivedTexture.
+                var derivedNames = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
                 // Sorted so the order - and therefore which asset wins a collision - cannot
                 // depend on however Unity happened to enumerate the bundle.
@@ -489,6 +492,121 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                                 continue;
                             report.extracted.Add(outPath);
                             CommitNotes(report, notes);
+                        }
+                        else if (obj is Material material)
+                        {
+                            // A MATERIAL MOD. DREAM's world retexture ships 1201 Materials and
+                            // exposes NO textures as addressable assets - its 3443 textures are
+                            // dependencies of those materials - so an extractor that only walks
+                            // the container by name sees nothing it can convert. DFU consumes
+                            // such a mod through MaterialReader.GetMaterial -> TryImportMaterial,
+                            // taking the material whole, shader and all.
+                            //
+                            // We cannot carry a desktop material to iOS (its shaders are compiled
+                            // for another platform), but we can carry what is IN it. Pulling each
+                            // texture out under DFU's own replacement name turns a material mod
+                            // into an ordinary texture mod, which the engine consumes through the
+                            // standard path - and MaterialReader checks
+                            // TextureExistsAmongLooseFiles BEFORE TryImportMaterial, so extracted
+                            // textures take precedence cleanly. What is lost is the material
+                            // itself: parallax setup and any non-standard shader.
+                            int archive, record, frame;
+                            string shortName = Path.GetFileNameWithoutExtension(assetName);
+                            if (!TryParseDfuTextureName(shortName, out archive, out record, out frame))
+                            {
+                                // Never guess. A wrongly-named texture silently replaces the
+                                // wrong art, which is worse than not converting it.
+                                Skipped(report, "Material(unparsable name)");
+                                Debug.LogWarning($"[MobileModExtractor] skipped material " +
+                                    $"'{shortName}': its name is not DFU's " +
+                                    "archive_record-frame form, so the textures inside it cannot " +
+                                    "be given names the engine would look up. Guessing would " +
+                                    "replace the wrong texture in game.");
+                                continue;
+                            }
+
+                            foreach (string property in MaterialTextureProperties)
+                            {
+                                if (!material.HasProperty(property))
+                                    continue;
+                                var tex = material.GetTexture(property) as Texture2D;
+                                if (tex == null)
+                                    continue;
+                                string map = TextureMapForProperty(property);
+                                WriteDerivedTexture(tex,
+                                    DfuTextureName(archive, record, frame, map),
+                                    outputRoot, shortName, report, derivedNames, textureFlags,
+                                    notes);
+                                Release(tex, null);   // not a counted load; still worth freeing
+                            }
+                            CommitNotes(report, notes);
+
+                            // Whatever else the material carries, DFU has no name for. Counted so
+                            // a pack that leans on one shows up as a number rather than silence.
+                            foreach (string property in new[] { "_OcclusionMap", "_DetailAlbedoMap",
+                                "_DetailNormalMap", "_DetailMask" })
+                                if (material.HasProperty(property) && material.GetTexture(property))
+                                    Bump(report.notesByType, "material-property-unmapped" );
+                        }
+                        else if (obj is Texture2DArray texArray)
+                        {
+                            // TERRAIN. DFU looks for a prebuilt Texture2DArray by name and, not
+                            // finding one, rebuilds it from the individual records
+                            // (TryMakeTextureArrayCopyTexture) - a fallback that is intact but
+                            // starved, because this module exposes no per-record textures either.
+                            // Writing the slices out as "002_0-0" ... "002_55-0" feeds exactly
+                            // that fallback.
+                            //
+                            // The array is compressed and non-readable, so each slice is copied
+                            // GPU-side into a Texture2D of the same format and then goes through
+                            // the ordinary blit-and-encode path. If the copy is unsupported the
+                            // whole array is counted and skipped rather than half-written.
+                            string arrayName = Path.GetFileNameWithoutExtension(assetName);
+                            int tArchive;
+                            int dash = arrayName.IndexOf('-');
+                            if (dash <= 0 || !int.TryParse(arrayName.Substring(0, dash), out tArchive))
+                            {
+                                Skipped(report, "Texture2DArray(unparsable name)");
+                                Debug.LogWarning($"[MobileModExtractor] skipped texture array " +
+                                    $"'{arrayName}': not DFU's '{{archive:000}}-TexArray' form.");
+                                continue;
+                            }
+
+                            int written = 0;
+                            for (int slice = 0; slice < texArray.depth; slice++)
+                            {
+                                Texture2D flat = null;
+                                try
+                                {
+                                    flat = new Texture2D(texArray.width, texArray.height,
+                                        texArray.format, false);
+                                    Graphics.CopyTexture(texArray, slice, 0, flat, 0, 0);
+                                    WriteDerivedTexture(flat,
+                                        DfuTextureName(tArchive, slice, 0, string.Empty),
+                                        outputRoot, arrayName, report, derivedNames, textureFlags,
+                                        notes);
+                                    written++;
+                                }
+                                catch (Exception ex)
+                                {
+                                    Skipped(report, "Texture2DArray(slice unreadable)");
+                                    Debug.LogWarning($"[MobileModExtractor] could not take slice " +
+                                        $"{slice} out of '{arrayName}': {ex.GetType().Name}: " +
+                                        $"{ex.Message}. Terrain for archive {tArchive} will fall " +
+                                        "back to classic art.");
+                                    break;
+                                }
+                                finally
+                                {
+                                    if (flat != null)
+                                        UnityEngine.Object.DestroyImmediate(flat);
+                                }
+                            }
+                            if (written > 0)
+                            {
+                                Bump(report.notesByType, "terrain-array-unrolled");
+                                CommitNotes(report, notes);
+                            }
                         }
                         else
                         {
@@ -1505,7 +1623,30 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 Debug.LogWarning(line);
             else
                 Debug.Log(line);
+
+            // AND A SEPARATE, LOUDER LINE when most of what the module contains did not convert.
+            // dream - textures converted 2 assets out of 1220 and exited 0 with two bundles of
+            // essentially nothing, three runs in a row, because every individual number looked
+            // reasonable: no errors, no failed writes, a valid bundle. The ratio is the thing
+            // that was obviously wrong and nothing was watching it. This is deliberately not the
+            // empty-bundle failure - that one is fatal and this one is a warning, because a mod
+            // legitimately full of types we do not handle is a real thing and the operator, not
+            // the converter, has to decide whether the remainder is worth installing.
+            if (report.loaded >= UnderConversionMinAssets
+                && skipped * 2 > report.loaded)
+                Debug.LogWarning(string.Format(
+                    "[MobileModExtractor] MOST OF THIS MODULE DID NOT CONVERT: {0} of its {1} " +
+                    "assets were skipped ({2:P0}), leaving {3} extracted. Check the breakdown " +
+                    "above before installing this - a bundle can be valid, load cleanly and " +
+                    "still contain almost nothing. [{4}]",
+                    skipped, report.loaded, skipped / (double)report.loaded,
+                    report.extracted.Count, Describe(report.skippedByType)));
         }
+
+        /// <summary>Below this many assets a module is too small for the skipped-ratio warning to
+        /// mean anything - a two-asset mod with one unsupported type is not a failed
+        /// conversion.</summary>
+        const int UnderConversionMinAssets = 20;
 
         static int Total(Dictionary<string, int> counts)
         {
@@ -1527,6 +1668,133 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             parts.Sort(StringComparer.Ordinal);
             return string.Join(", ", parts.ToArray());
         }
+
+        /// <summary>Writes one texture that was reached THROUGH another asset - a material's
+        /// property or a slice of a terrain array - under the name DFU will look it up by.
+        ///
+        /// Everything the ordinary texture path guarantees still applies here, because it goes
+        /// through the same machinery: TexturePng.Encode with the linear/normal-map rules keyed
+        /// off the DFU suffix, the author's readable and compressed flags recorded for the
+        /// import policy, and TryWriteFile as the single containment-checked write.
+        ///
+        /// Dedupe is by NAME plus identity, not by path, and that distinction matters. Hundreds
+        /// of materials share one albedo, and treating the repeats as path collisions would
+        /// report a successful conversion as thousands of losses. Two DIFFERENT textures landing
+        /// on one name is a real clash and is still counted as one.</summary>
+        static void WriteDerivedTexture(Texture2D tex, string textureName, string outputRoot,
+            string sourceLabel, ExtractReport report, Dictionary<string, int> claimedNames,
+            Dictionary<string, string> textureFlags, List<string> notes)
+        {
+            if (tex == null)
+                return;
+
+            int existing;
+            if (claimedNames.TryGetValue(textureName, out existing))
+            {
+                if (existing == tex.GetInstanceID())
+                {
+                    Bump(report.notesByType, "texture-shared-between-materials");
+                    return;                      // the same texture again: already written
+                }
+                Skipped(report, "collision");
+                Debug.LogWarning($"[MobileModExtractor] two different textures both want the " +
+                    $"name '{textureName}' (this one from {sourceLabel}); keeping the first, " +
+                    "because the second would replace the wrong thing in game.");
+                return;
+            }
+
+            string outPath = Path.Combine(Path.Combine(outputRoot, "Textures"), textureName + ".png");
+            bool linear = !tex.isDataSRGB;
+            Func<Color32, Color32> unswizzle = IsNormalMapName(textureName)
+                ? NormalUnswizzlerFor(tex.format, tex.isDataSRGB, notes) : null;
+
+            byte[] png;
+            try { png = TexturePng.Encode(tex, linear, unswizzle); }
+            catch (Exception ex)
+            {
+                Skipped(report, "texture-encode-failed");
+                Debug.LogWarning($"[MobileModExtractor] could not decode '{textureName}' from " +
+                    $"{sourceLabel}: {ex.GetType().Name}: {ex.Message}");
+                return;
+            }
+
+            if (!TryWriteFile(outPath, png, outputRoot, textureName, report))
+                return;
+
+            claimedNames[textureName] = tex.GetInstanceID();
+            report.extracted.Add(outPath);
+            string flags = (tex.isReadable ? "R" : string.Empty)
+                + (IsCompressedFormat(tex.format) ? string.Empty : "U");
+            if (flags.Length > 0)
+                textureFlags[outPath] = flags;
+        }
+
+        /// <summary>DFU's own name for a replacement texture, rebuilt from the archive/record/
+        /// frame rather than copied from whatever the source asset was called.
+        ///
+        /// This is TextureReplacement.GetName reimplemented against its source, and it is
+        /// deliberately not "reuse the material's name": a wrongly-named texture does not fail,
+        /// it silently replaces the WRONG THING in game, which is the worst failure available
+        /// here. Parsing the name and regenerating it canonically means a material called
+        /// "6_0-0" produces "006_0-0" - the name the engine will actually look up - and a
+        /// material whose name does not parse produces nothing at all.
+        ///
+        /// Format: "{archive:000}_{record}-{frame}", plus "_{TextureMap}" for everything except
+        /// Albedo, which carries no suffix.</summary>
+        public static string DfuTextureName(int archive, int record, int frame, string textureMap)
+        {
+            string name = string.Format("{0:000}_{1}-{2}", archive, record, frame);
+            return string.IsNullOrEmpty(textureMap) ? name : name + "_" + textureMap;
+        }
+
+        /// <summary>Reads DFU's "{archive}_{record}-{frame}" out of an asset name, or fails.
+        /// Strict on purpose: anything that is not exactly that shape is refused rather than
+        /// coerced, because a coerced name is a texture that replaces something else.</summary>
+        public static bool TryParseDfuTextureName(string shortName, out int archive, out int record,
+            out int frame)
+        {
+            archive = record = frame = 0;
+            if (string.IsNullOrEmpty(shortName))
+                return false;
+            int underscore = shortName.IndexOf('_');
+            int dash = shortName.IndexOf('-', underscore + 1);
+            if (underscore <= 0 || dash <= underscore + 1 || dash == shortName.Length - 1)
+                return false;
+            // Nothing after the frame: "006_0-0_Normal" is already a MAP name, not a base name,
+            // and treating it as one would append a second suffix.
+            if (shortName.IndexOf('_', dash) >= 0)
+                return false;
+            return int.TryParse(shortName.Substring(0, underscore), out archive)
+                && int.TryParse(shortName.Substring(underscore + 1, dash - underscore - 1), out record)
+                && int.TryParse(shortName.Substring(dash + 1), out frame);
+        }
+
+        /// <summary>Which of DFU's TextureMap suffixes a Unity material property corresponds to,
+        /// or null when DFU has no name for it.
+        ///
+        /// Taken from MaterialReader.Uniforms.Textures, which is the set DFU itself reads
+        /// (MainTex, EmissionMap, BumpMap, HeightMap=_ParallaxMap, MetallicGlossMap), mapped onto
+        /// the TextureMap enum. TextureMap.Mask has no material property and so appears nowhere
+        /// here - inventing one would produce a file the engine never looks for at best, and a
+        /// mis-replacement at worst. Anything else (DREAM's materials also set _OcclusionMap) is
+        /// counted as unhandled rather than guessed at.</summary>
+        public static string TextureMapForProperty(string property)
+        {
+            switch (property)
+            {
+                case "_MainTex": return string.Empty;          // Albedo carries no suffix
+                case "_BumpMap": return "Normal";
+                case "_ParallaxMap": return "Height";
+                case "_EmissionMap": return "Emission";
+                case "_MetallicGlossMap": return "MetallicGloss";
+                default: return null;
+            }
+        }
+
+        /// <summary>The material texture properties this converter extracts, in DFU's own
+        /// order (MaterialReader.Uniforms.Textures).</summary>
+        public static readonly string[] MaterialTextureProperties =
+            { "_MainTex", "_EmissionMap", "_BumpMap", "_ParallaxMap", "_MetallicGlossMap" };
 
         /// <summary>True when the texture is stored in a BLOCK-COMPRESSED format.
         ///

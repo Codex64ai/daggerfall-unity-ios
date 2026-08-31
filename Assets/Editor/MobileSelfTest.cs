@@ -92,6 +92,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestModExtractorPathContainment();
             TestModExtractorSurvivesBadPaths();
             TestConverterGuardRules();
+            TestMaterialTextureNaming();
             TestConversionRefusesEmptyResult();
             TestChunkedConversion();
             TestRoadDirectionReciprocity();
@@ -2308,6 +2309,85 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// process, so a timeout that a typo could turn into "no timeout" would be worse than no
         /// watchdog at all - it would look like one.
         /// </summary>
+        /// <summary>
+        /// The naming used when a texture is reached through a MATERIAL, which is the one thing
+        /// in this converter that fails silently and destructively if it is wrong.
+        ///
+        /// DREAM's world retexture ships 1201 Materials and no addressable textures, so the only
+        /// way to convert it is to pull the textures out and name them ourselves. A texture
+        /// written under the wrong name does not error - DFU finds it and replaces the WRONG
+        /// art, and nobody discovers that until they walk past the wrong wall. So the rule is:
+        /// parse the material's name into archive/record/frame, regenerate the name from those
+        /// numbers, and refuse outright when it does not parse.
+        ///
+        /// The authority is TextureReplacement.GetName: "{archive:000}_{record}-{frame}", plus
+        /// "_{TextureMap}" for everything except Albedo.
+        /// </summary>
+        static void TestMaterialTextureNaming()
+        {
+            // Canonical form, including the zero padding a material called "6_0-0" would lack.
+            Check(MobileModExtractor.DfuTextureName(6, 0, 0, string.Empty) == "006_0-0"
+                  && MobileModExtractor.DfuTextureName(6, 0, 0, "Normal") == "006_0-0_Normal"
+                  && MobileModExtractor.DfuTextureName(302, 55, 0, string.Empty) == "302_55-0",
+                  "names are rebuilt in DFU's form, zero-padded, suffix only when not albedo",
+                  MobileModExtractor.DfuTextureName(6, 0, 0, "Normal"));
+            Check(MobileModExtractor.DfuTextureName(1234, 7, 2, "MetallicGloss") == "1234_7-2_MetallicGloss",
+                  "an archive wider than three digits is not truncated",
+                  MobileModExtractor.DfuTextureName(1234, 7, 2, "MetallicGloss"));
+
+            int a, r, f;
+            Check(MobileModExtractor.TryParseDfuTextureName("006_0-0", out a, out r, out f)
+                  && a == 6 && r == 0 && f == 0, "the canonical name parses back to its numbers");
+            Check(MobileModExtractor.TryParseDfuTextureName("302_55-3", out a, out r, out f)
+                  && a == 302 && r == 55 && f == 3, "multi-digit record and frame parse");
+            // Round trip: whatever parses must regenerate to a name the engine looks up.
+            Check(MobileModExtractor.TryParseDfuTextureName("6_0-0", out a, out r, out f)
+                  && MobileModExtractor.DfuTextureName(a, r, f, string.Empty) == "006_0-0",
+                  "an unpadded source name is regenerated padded, not copied through");
+
+            // REFUSALS. Each of these would, if coerced into a name, replace the wrong art.
+            Check(!MobileModExtractor.TryParseDfuTextureName("brick_wall", out a, out r, out f)
+                  && !MobileModExtractor.TryParseDfuTextureName("006", out a, out r, out f)
+                  && !MobileModExtractor.TryParseDfuTextureName("006_0", out a, out r, out f)
+                  && !MobileModExtractor.TryParseDfuTextureName("006_0-", out a, out r, out f)
+                  && !MobileModExtractor.TryParseDfuTextureName("", out a, out r, out f)
+                  && !MobileModExtractor.TryParseDfuTextureName(null, out a, out r, out f),
+                  "anything that is not exactly archive_record-frame is refused, not guessed");
+            // A name that ALREADY carries a map suffix is a map name, not a base name: parsing it
+            // would append a second suffix and produce "006_0-0_Normal_Normal".
+            Check(!MobileModExtractor.TryParseDfuTextureName("006_0-0_Normal", out a, out r, out f),
+                  "a name that already has a TextureMap suffix is not a base name");
+
+            // Property -> suffix, from MaterialReader.Uniforms.Textures.
+            Check(MobileModExtractor.TextureMapForProperty("_MainTex") == string.Empty,
+                  "albedo carries no suffix, as GetName does it");
+            Check(MobileModExtractor.TextureMapForProperty("_BumpMap") == "Normal"
+                  && MobileModExtractor.TextureMapForProperty("_ParallaxMap") == "Height"
+                  && MobileModExtractor.TextureMapForProperty("_EmissionMap") == "Emission"
+                  && MobileModExtractor.TextureMapForProperty("_MetallicGlossMap") == "MetallicGloss",
+                  "each of DFU's four non-albedo maps gets its own TextureMap suffix");
+            // _OcclusionMap is real and DREAM sets it; DFU's TextureMap has no name for it, and
+            // TextureMap.Mask has no material property. Neither may be invented.
+            Check(MobileModExtractor.TextureMapForProperty("_OcclusionMap") == null
+                  && MobileModExtractor.TextureMapForProperty("_DetailAlbedoMap") == null
+                  && MobileModExtractor.TextureMapForProperty("_Anything") == null,
+                  "a property DFU has no TextureMap for is refused, never guessed");
+
+            // The written suffixes must be the ones the rest of this converter already keys its
+            // colour-space and normal-map rules off, or a material-sourced normal map would be
+            // imported as ordinary colour.
+            Check(MobileModExtractor.IsNormalMapName(
+                      MobileModExtractor.DfuTextureName(6, 0, 0, "Normal") + ".png")
+                  && MobileModExtractor.IsLinearMapName(
+                      MobileModExtractor.DfuTextureName(6, 0, 0, "Height") + ".png")
+                  && MobileModExtractor.IsLinearMapName(
+                      MobileModExtractor.DfuTextureName(6, 0, 0, "MetallicGloss") + ".png"),
+                  "material-sourced maps are recognised by the existing suffix rules");
+            Check(!MobileModExtractor.IsLinearMapName(
+                      MobileModExtractor.DfuTextureName(6, 0, 0, string.Empty) + ".png"),
+                  "and a material-sourced albedo is still colour");
+        }
+
         static void TestConverterGuardRules()
         {
             Check(MobileModExtractor.IsProjectCodeFile("Assets/Game/Mods/Converted/x/Foo.cs"),
