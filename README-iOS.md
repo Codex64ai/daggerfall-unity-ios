@@ -388,9 +388,11 @@ Realism: Items all use a C# entry point.
 
 **What cannot work as distributed: `.dfmod` packages from Nexus.** Asset bundles are built
 per platform, and upstream's Mod Builder targets Windows, macOS and Linux; this fork adds
-an iOS target. A macOS-built bundle is refused by iOS, so a Nexus mod must be rebuilt
-against an iOS target, which needs the mod's original source assets - re-targeting an
-existing `.dfmod` is not possible.
+an iOS target. A macOS-built bundle is refused by iOS, so a Nexus mod has to be rebuilt
+against an iOS target - either from the mod's original source assets, or by unpacking the
+desktop bundle and repacking it, which this fork's converter does in one command. The
+converter recovers textures, sounds and text assets and nothing else, and its limits are
+worth reading before you rely on it: see [Converting a desktop `.dfmod`](#converting-a-desktop-dfmod).
 
 **Music replacement is deliberately delayed by one play.** A replacement `.ogg` is decoded
 in the background while the original track plays, and takes over the next time that song
@@ -418,10 +420,57 @@ Two iOS-specific rules:
   and will not load. Mods have to be rebuilt from their source assets with the Daggerfall
   Unity Mod Builder with the iOS target ticked (this fork's Mod Builder has it), or with
   the headless builder: `-executeMethod DaggerfallWorkshop.Game.Mobile.EditorTools.MobileModBuilder.BuildFromEnv`.
+  If all you have is the desktop bundle - which is all most Nexus mods ship - the
+  converter below unpacks one and rebuilds it in a single step.
 - **Asset mods only.** Mods that ship C# scripts need a JIT compiler, which iOS forbids;
   their scripts are skipped (assets still load). Texture and sound packs work; model
   replacements are not covered by the headless builder, which does not run the GUI Mod
   Builder's prefab serialization pass.
+
+### Converting a desktop `.dfmod`
+
+One mod per run, from a checkout of this fork with the Unity editor installed:
+
+```sh
+env DFU_MOD_IN="$HOME/Downloads/dream - sound.dfmod" DFU_MOD_OUT="$HOME/dev/dfu-mods" \
+/Applications/Unity/Hub/Editor/6000.3.23f1/Unity.app/Contents/MacOS/Unity \
+  -batchmode -quit -projectPath ~/dev/daggerfall-unity \
+  -executeMethod DaggerfallWorkshop.Game.Mobile.EditorTools.MobileModExtractor.ConvertFromEnv \
+  -logFile /tmp/convert.log
+```
+
+`DFU_MOD_IN` is required; `DFU_MOD_OUT` defaults to `~/dev/dfu-mods` and
+`DFU_MOD_TARGETS` to `iOS`. The rebuilt bundle lands in `$DFU_MOD_OUT/iOS/`, ready to
+copy to the device. **No `-nographics`**: bundle textures are compressed and
+non-readable, so decoding them needs a real graphics device, and the converter refuses
+rather than writing grey squares. Extracted assets go to `Assets/Game/Mods/Converted/`,
+which is gitignored - never commit somebody else's mod.
+
+Read the log. Every run ends with a summary line naming what was extracted, what was
+skipped and what was extracted-but-renamed; a skip means that asset is **absent from
+the bundle you are about to install**, which is otherwise something you would find out
+from a silent game. Known limits, in the order they bite:
+
+- **Music usually will not convert.** A bundle stores an `AudioClip` as decoded samples,
+  and `AudioClip.GetData` only reads samples of a clip the author imported as
+  `DecompressOnLoad`. That is Unity's default, so sound-effect packs convert fine (DREAM
+  2026's sound module: 340 of 340 clips). Music is the part an author *does* configure,
+  and `CompressedInMemory` or `Streaming` clips are unreachable through this route -
+  DREAM's music module is 81 clips and this converter gets none of them. Those have to
+  come from the module's source audio, from a desktop rebuild with the clips set to
+  `DecompressOnLoad`, or from a bundle reader outside Unity; loose `.ogg` files dropped
+  in `Documents/Sound` are picked up regardless of how they were produced.
+- **Large texture packs need a machine with plenty of RAM.** Measured: in the editor,
+  releasing a bundle texture does not actually free it, so the decoded copy of every
+  texture accumulates until the whole bundle is unloaded at the end. A ~1.7GB texture
+  module is a real risk on a 16GB machine. Convert the big ones on the largest machine
+  you have, and one module at a time.
+- **Textures and audio change file extension.** Textures are re-encoded as `.png` and
+  clips as `.wav`, which moves a texture's runtime lookup name with it (DFU keys on the
+  short name *with* extension for textures, extensionless for audio). The summary counts
+  every rewrite.
+- **Not supported at all:** video (`VideoClip`), prefabs and model replacements, and mod
+  script code. They are counted in the summary and left out of the rebuilt bundle.
 
 ## Diagnostics
 
