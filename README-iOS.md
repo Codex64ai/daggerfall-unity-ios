@@ -434,32 +434,57 @@ One mod per run, from a checkout of this fork with the Unity editor installed:
 ```sh
 env DFU_MOD_IN="$HOME/Downloads/dream - sound.dfmod" DFU_MOD_OUT="$HOME/dev/dfu-mods" \
 /Applications/Unity/Hub/Editor/6000.3.23f1/Unity.app/Contents/MacOS/Unity \
-  -batchmode -quit -projectPath ~/dev/daggerfall-unity \
+  -batchmode -projectPath ~/dev/daggerfall-unity \
   -executeMethod DaggerfallWorkshop.Game.Mobile.EditorTools.MobileModExtractor.ConvertFromEnv \
   -logFile /tmp/convert.log
 ```
 
 `DFU_MOD_IN` is required; `DFU_MOD_OUT` defaults to `~/dev/dfu-mods` and
-`DFU_MOD_TARGETS` to `iOS`. The rebuilt bundle lands in `$DFU_MOD_OUT/iOS/`, ready to
-copy to the device. **No `-nographics`**: bundle textures are compressed and
-non-readable, so decoding them needs a real graphics device, and the converter refuses
-rather than writing grey squares. Extracted assets go to `Assets/Game/Mods/Converted/`,
-which is gitignored - never commit somebody else's mod.
+`DFU_MOD_TARGETS` to `iOS`. `DFU_MOD_AUDIO_TIMEOUT` (default 10) and `DFU_MOD_TIMEOUT`
+(default 14400) are the watchdog's seconds-per-clip and seconds-per-run caps. The rebuilt
+bundle lands in `$DFU_MOD_OUT/iOS/`, ready to copy to the device.
+
+**No `-quit` and no `-nographics`**, and neither is an oversight.
+
+- **`-nographics`**: bundle textures are compressed and non-readable, so decoding them
+  needs a real graphics device, and the converter refuses rather than writing grey squares.
+- **`-quit`**: some audio clips only become readable once Unity's main loop has run, so
+  the converter hands control back between steps - and `-quit` kills the process before
+  the first frame of that happens. It would convert **nothing** and still exit 0, so the
+  converter refuses `-quit` outright rather than letting that happen. It ends the process
+  itself when the work is done.
+
+Exit codes, so a loop over a mods folder stops on failure: **0** a bundle was written,
+**1** a failure - including a conversion that saved nothing, which never gets a bundle -
+and **2** the watchdog gave up.
+
+Extracted assets go to `Assets/Game/Mods/Converted/`, which is gitignored - never commit
+somebody else's mod.
 
 Read the log. Every run ends with a summary line naming what was extracted, what was
 skipped and what was extracted-but-renamed; a skip means that asset is **absent from
 the bundle you are about to install**, which is otherwise something you would find out
 from a silent game. Known limits, in the order they bite:
 
-- **Music usually will not convert.** A bundle stores an `AudioClip` as decoded samples,
-  and `AudioClip.GetData` only reads samples of a clip the author imported as
-  `DecompressOnLoad`. That is Unity's default, so sound-effect packs convert fine (DREAM
-  2026's sound module: 340 of 340 clips). Music is the part an author *does* configure,
+- **Music usually will not convert; sound effects do.** A bundle stores an `AudioClip` as
+  decoded samples, and `AudioClip.GetData` only reads samples of a clip the author
+  imported as `DecompressOnLoad`. That is Unity's default, so sound-effect packs convert
+  fine - DREAM 2026's sound module is **340 of 340 clips, 0 skipped, in 33 seconds**
+  (10.1MB out, from 1100 seconds of audio). Music is the part an author *does* configure,
   and `CompressedInMemory` or `Streaming` clips are unreachable through this route -
-  DREAM's music module is 81 clips and this converter gets none of them. Those have to
-  come from the module's source audio, from a desktop rebuild with the clips set to
-  `DecompressOnLoad`, or from a bundle reader outside Unity; loose `.ogg` files dropped
-  in `Documents/Sound` are picked up regardless of how they were produced.
+  DREAM's music module is 81 clips and this converter gets none of them, so it **fails
+  with exit 1 and writes no bundle** rather than handing you a `.dfmod` that installs and
+  plays nothing. Those have to come from the module's source audio, from a desktop rebuild
+  with the clips set to `DecompressOnLoad`, or from a bundle reader outside Unity; loose
+  `.ogg` files dropped in `Documents/Sound` are picked up regardless of how they were
+  produced.
+- **A slow-looking conversion is usually audio waiting, and it is bounded.** Clips with
+  *Preload Audio Data* off arrive with no samples, and if they also have *Load In
+  Background* the load only finishes when Unity's main loop runs - which is the whole
+  reason there is no `-quit`. 35 of DREAM's 340 clips needed that, 34 of them with a wait.
+  A clip that never loads is abandoned after `DFU_MOD_AUDIO_TIMEOUT` and counted as
+  `AudioClip(async)`; if you see that key in a summary, the converter was not given the
+  main loop back.
 - **Large texture packs need a machine with plenty of RAM.** Measured: in the editor,
   releasing a bundle texture does not actually free it, so the decoded copy of every
   texture accumulates until the whole bundle is unloaded at the end. A ~1.7GB texture
@@ -469,8 +494,16 @@ from a silent game. Known limits, in the order they bite:
   clips as `.wav`, which moves a texture's runtime lookup name with it (DFU keys on the
   short name *with* extension for textures, extensionless for audio). The summary counts
   every rewrite.
-- **Not supported at all:** video (`VideoClip`), prefabs and model replacements, and mod
-  script code. They are counted in the summary and left out of the rebuilt bundle.
+- **Not supported at all:** video (`VideoClip`), prefabs and model replacements. Those are
+  counted in the summary and left out of the rebuilt bundle, and the rest of the mod
+  converts around them.
+- **A mod carrying C# code does not convert at all** - it is not a partial conversion with
+  the scripts dropped. The rebuild refuses a manifest listing `.cs` or `.dll.bytes`
+  outright, so you get no bundle and a non-zero exit rather than an asset-only bundle.
+  (Separately, a bundle asset actually *named* `.cs` is refused at extraction time and
+  counted as `code-file-refused`: the extraction root lives inside `Assets/`, so writing
+  one would hand a stranger's source to Unity's compiler mid-run.) Such mods need their
+  assets repackaged by hand, without the script entries in the manifest.
 
 ## Diagnostics
 
