@@ -654,13 +654,46 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // possibly work must not be written, and the exit code has to say so, because the
             // whole point of a per-mod exit code is that a shell loop over a mods folder stops.
             if (report.extracted.Count == 0)
-                throw new InvalidDataException(
-                    "Converted nothing from " +
-                    SliceName(dfmodPath, chunkIndex, chunkCount) + ": all " +
-                    Total(report.skippedByType) + " assets were skipped [" +
-                    Describe(report.skippedByType) + "]. Refusing to write a bundle that would " +
-                    "install, load and contain no content. The extraction under '" + extractRoot +
-                    "' is left in place so the skips can be inspected.");
+            {
+                string emptyDetail = "all " + Total(report.skippedByType) + " assets were " +
+                    "skipped [" + Describe(report.skippedByType) + "]";
+
+                // A WHOLE run that saved nothing is a failure - that is the dream - music case,
+                // where every clip is unreadable and the alternative is a bundle that installs,
+                // loads and contains nothing while exiting 0.
+                //
+                // ONE SLICE of a run is different, and treating it the same stopped
+                // dream - textures dead on slice 1 of 10. A module is not all one kind of asset:
+                // that one is 3443 textures alongside 1201 Materials, GameObjects and Transforms,
+                // and a slice can quite legitimately draw only types this converter does not
+                // handle. That is a fact about the slice, not a failure of the conversion, so it
+                // says so and gets out of the way.
+                if (chunkCount == 1)
+                    throw new InvalidDataException(
+                        "Converted nothing from " + SliceName(dfmodPath, chunkIndex, chunkCount) +
+                        ": " + emptyDetail + ". Refusing to write a bundle that would install, " +
+                        "load and contain no content. The extraction under '" + extractRoot +
+                        "' is left in place so the skips can be inspected.");
+
+                Debug.LogWarning("[MobileModExtractor] " +
+                    SliceName(dfmodPath, chunkIndex, chunkCount) + " contains nothing this " +
+                    "converter handles: " + emptyDetail + ". No bundle is written for this " +
+                    "slice and the run continues. The bundles that ARE written keep their " +
+                    "original slice numbers, so expect a gap - \"2 of 10\" with no \"1 of 10\". " +
+                    "That is cosmetic; renumbering would make a slice's contents depend on which " +
+                    "other slices happened to be empty, and stop the same command reproducing " +
+                    "the same files.");
+
+                // ...but if the LAST slice finds that no slice produced a bundle, the module as a
+                // whole converted nothing, which is the failure the single-slice case catches.
+                if (chunkIndex == chunkCount - 1
+                    && !AnySliceBundleExists(dfmodPath, bundleOutRoot, targets, chunkCount))
+                    throw new InvalidDataException(
+                        "Converted nothing from " + Path.GetFileName(dfmodPath) + " in any of " +
+                        chunkCount + " slices (this one: " + emptyDetail + "). No bundle was " +
+                        "written by any slice, so there is nothing to install.");
+                yield break;
+            }
 
             string[] builtPaths = MobileModBuilder.BuildMod(report.manifestPath, bundleOutRoot,
                 targets);
@@ -1688,6 +1721,26 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "DFU_MOD_CHUNK_COUNT - see README-iOS.md. Stopping now rather than failing " +
                 "inside a Unity write, which reports a corrupt archive instead of a full disk.",
                 freeGb, floor, MinFreeVar, what));
+        }
+
+        /// <summary>True when any slice of this module has already produced a bundle. Used by the
+        /// last slice to tell "this slice had nothing in it" from "the whole module converted
+        /// nothing", which a single slice cannot otherwise know - the slices are separate
+        /// processes and share no state but the output directory.</summary>
+        static bool AnySliceBundleExists(string dfmodPath, string bundleOutRoot,
+            BuildTarget[] targets, int chunkCount)
+        {
+            foreach (BuildTarget target in targets)
+            {
+                for (int i = 0; i < chunkCount; i++)
+                {
+                    string candidate = Path.Combine(Path.Combine(bundleOutRoot, target.ToString()),
+                        SliceName(dfmodPath, i, chunkCount) + ModManager.MODEXTENSION);
+                    if (File.Exists(candidate))
+                        return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>The file-stem a slice's manifest and bundle take: "dream - mobs (2 of 4)".

@@ -2434,6 +2434,49 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   || Directory.GetFiles(outDir, "*.dfmod", SearchOption.AllDirectories).Length == 0,
                   "no bundle is written for a conversion that would contain nothing");
 
+            // ...but ONE SLICE of a run is a different question, and conflating the two stopped
+            // dream - textures dead on its first slice. That module is 3443 textures alongside
+            // 1201 Materials, GameObjects and Transforms, so a slice can legitimately draw only
+            // types this converter does not handle. That is a fact about the slice, not a failed
+            // conversion, and the other nine slices had real work in them.
+            const string sliceRootA = "Assets/Game/Mods/Converted/__empty_s1__";
+            const string sliceRootB = "Assets/Game/Mods/Converted/__empty_s2__";
+            foreach (string r in new[] { sliceRootA, sliceRootB })
+                if (Directory.Exists(r)) { Directory.Delete(r, true); File.Delete(r + ".meta"); }
+            AssetDatabase.Refresh();
+
+            bool sliceThrew = false;
+            string sliceMessage = "no exception";
+            try
+            {
+                MobileModExtractor.Convert(built[0], sliceRootA, outDir,
+                    new[] { BuildTarget.StandaloneOSX }, 0, 2);
+            }
+            catch (Exception ex) { sliceThrew = true; sliceMessage = ex.Message; }
+            Check(!sliceThrew, "a slice containing only unsupported types is NOT a failure",
+                  sliceMessage);
+            Check(!Directory.Exists(outDir)
+                  || Directory.GetFiles(outDir, "*.dfmod", SearchOption.AllDirectories).Length == 0,
+                  "and it still writes no bundle for itself");
+
+            // The LAST slice is the one that can tell "this slice was empty" from "the whole
+            // module converted nothing", because by then it can see whether any sibling slice
+            // produced a bundle. Nothing did here, so this must still fail.
+            bool lastThrew = false;
+            string lastMessage = "no exception";
+            try
+            {
+                MobileModExtractor.Convert(built[0], sliceRootB, outDir,
+                    new[] { BuildTarget.StandaloneOSX }, 1, 2);
+            }
+            catch (Exception ex) { lastThrew = true; lastMessage = ex.Message; }
+            Check(lastThrew && lastMessage.Contains("in any of 2 slices"),
+                  "but a run where EVERY slice was empty still fails, on the last one",
+                  lastMessage);
+
+            foreach (string r in new[] { sliceRootA, sliceRootB })
+                if (Directory.Exists(r)) { Directory.Delete(r, true); File.Delete(r + ".meta"); }
+
             Directory.Delete(bundleDir, true);
             if (Directory.Exists(outDir)) Directory.Delete(outDir, true);
             if (Directory.Exists(extractRoot))
