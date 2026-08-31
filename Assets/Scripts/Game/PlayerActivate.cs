@@ -5,7 +5,7 @@
 // Source Code:     https://github.com/Interkarma/daggerfall-unity
 // Original Author: Gavin Clayton (interkarma@dfworkshop.net)
 // Contributors:    Allofich, Numidium, TheLacus
-// 
+//
 // Notes:
 //
 
@@ -26,6 +26,7 @@ using DaggerfallWorkshop.Utility.AssetInjection;
 using DaggerfallWorkshop.Game.Utility;
 using DaggerfallWorkshop.Game.Formulas;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
+using DaggerfallWorkshop.Localization;
 
 namespace DaggerfallWorkshop.Game
 {
@@ -87,8 +88,8 @@ namespace DaggerfallWorkshop.Game
         public const float MobileNPCActivationDistance = 256 * MeshReader.GlobalScale;
 
         // Opening and closing hours by building type
-        public static byte[] openHours  = {  7,  8,  9,  8,  0,  9, 10, 10,  9,  6,  9, 11,  9,  9,  0,  0, 10, 0 };
-        public static byte[] closeHours = { 22, 16, 19, 15, 25, 21, 19, 20, 18, 23, 23, 23, 20, 20, 25, 25, 16, 0 };
+        public static byte[] openHours  = {  7,  8,  9,  8,  0,  9, 10, 10,  9,  6,  9, 11,  9,  9,  0,  0, 10, 0, 6, 6, 6, 6, 6, 6, 0 };
+        public static byte[] closeHours = { 22, 16, 19, 15, 25, 21, 19, 20, 18, 23, 23, 23, 20, 20, 25, 25, 16, 0, 18, 18 ,18, 18, 18, 18, 25 };
 
         const int PrivatePropertyId = 37;
 
@@ -468,7 +469,7 @@ namespace DaggerfallWorkshop.Game
                 if (GameManager.Instance.PlayerGPS.GetDiscoveredBuilding(building.buildingKey, out db))
                 {
                     // Check against quest system for an overriding quest-assigned display name for this building
-                    DaggerfallUI.AddHUDText(db.displayName);
+                    DaggerfallUI.AddHUDText(GrammarManager.grammarProcessor.ProcessGrammar(db.displayName));
 
                     if (!buildingUnlocked && buildingType < DFLocation.BuildingTypes.Temple
                         && buildingType != DFLocation.BuildingTypes.HouseForSale)
@@ -490,7 +491,8 @@ namespace DaggerfallWorkshop.Game
             DFLocation.BuildingTypes buildingType,
             bool buildingUnlocked,
             int buildingLockValue,
-            Transform doorOwner)
+            Transform doorOwner,
+            bool isBash = false)
         {
             StaticDoor door;
             if (CustomDoor.HasHit(hit, out door) || (doors && doors.HasHit(hit.point, out door)))
@@ -502,17 +504,23 @@ namespace DaggerfallWorkshop.Game
                     return;
                 }
 
+                // Play sound when bashing.
+                if (isBash && door.doorType != DoorTypes.DungeonExit)
+                    if (TryGetComponent<DaggerfallAudioSource>(out var dfAudioSource))
+                        dfAudioSource.PlayOneShot(SoundClips.PlayerDoorBash);
+
                 if (door.doorType == DoorTypes.Building && !playerEnterExit.IsPlayerInside)
                 {
                     // Discover building
                     GameManager.Instance.PlayerGPS.DiscoverBuilding(building.buildingKey);
 
                     // Handle clicking exterior door with Open spell active
-                    if (HandleOpenEffectOnExteriorDoor(buildingLockValue))
-                        buildingUnlocked = true;
+                    var isBrokenIn = isBash; // Breaking in can be done via unlocking or bashing.
+                    if (!buildingUnlocked && !isBash && HandleOpenEffectOnExteriorDoor(buildingLockValue))
+                        buildingUnlocked = isBrokenIn = true;
 
                     // Handle locked buildings
-                    if (!buildingUnlocked)
+                    if (!buildingUnlocked && !isBash)
                     {
                         if (currentMode != PlayerActivateModes.Steal)
                         {
@@ -546,6 +554,7 @@ namespace DaggerfallWorkshop.Game
                                 DaggerfallAudioSource dfAudioSource = GetComponent<DaggerfallAudioSource>();
                                 if (dfAudioSource != null)
                                     dfAudioSource.PlayOneShot(SoundClips.ActivateLockUnlock);
+                                isBrokenIn = true;
                             }
                             else
                             {
@@ -559,13 +568,27 @@ namespace DaggerfallWorkshop.Game
                         }
                     }
 
+                    // Attempt to bash the door. Classic makes a roll whether it is locked or not.
+                    if (isBash && !buildingUnlocked && Dice100.FailedRoll(25 - buildingLockValue))
+                    {
+                        // 10% chance that you are noticed.
+                        if (Dice100.SuccessRoll(10))
+                        {
+                            PlayerEntity player = GameManager.Instance.PlayerEntity;
+                            player.CrimeCommitted = PlayerEntity.Crimes.Attempted_Breaking_And_Entering;
+                            player.SpawnCityGuards(true);
+                        }
+
+                        return;
+                    }
+
                     // If entering a shop let player know the quality level
                     // If entering an open home, show greeting
                     if (hitBuilding && buildingGreetingsEnabled)
                     {
                         const int houseGreetingsTextId = 256;
 
-                        DaggerfallMessageBox mb;
+                        DaggerfallMessageBox mb = null;
 
                         PlayerGPS.DiscoveredBuilding buildingData;
                         GameManager.Instance.PlayerGPS.GetDiscoveredBuilding(building.buildingKey, out buildingData);
@@ -577,8 +600,11 @@ namespace DaggerfallWorkshop.Game
                             buildingData.factionID != (int)FactionFile.FactionIDs.The_Dark_Brotherhood &&
                             !DaggerfallBankManager.IsHouseOwned(building.buildingKey))
                         {
-                            string greetingText = DaggerfallUnity.Instance.TextProvider.GetRandomText(houseGreetingsTextId);
-                            mb = DaggerfallUI.MessageBox(greetingText);
+                            if (!isBrokenIn)
+                            {
+                                string greetingText = DaggerfallUnity.Instance.TextProvider.GetRandomText(houseGreetingsTextId);
+                                mb = DaggerfallUI.MessageBox(greetingText);
+                            }
                         }
                         else
                             mb = PresentShopQuality(building);
@@ -590,6 +616,14 @@ namespace DaggerfallWorkshop.Game
                             deferredInteriorDoor = door;
                             mb.OnClose += BuildingGreetingPopup_OnClose;
                             return;
+                        }
+
+                        // Bashing open an unlocked door potentially alerts the guards.
+                        if (isBash && Dice100.SuccessRoll(10))
+                        {
+                            PlayerEntity player = GameManager.Instance.PlayerEntity;
+                            player.CrimeCommitted = PlayerEntity.Crimes.Breaking_And_Entering;
+                            player.SpawnCityGuards(true);
                         }
                     }
 
@@ -614,6 +648,8 @@ namespace DaggerfallWorkshop.Game
                 }
                 else if (door.doorType == DoorTypes.DungeonExit && playerEnterExit.IsPlayerInside)
                 {
+                    if (isBash)
+                        return;
                     // Hit dungeon exit while inside, ask if access wagon or transition outside
                     if (GameManager.Instance.PlayerEntity.Items.Contains(ItemGroups.Transportation, (int)Transportation.Small_cart) && DaggerfallUnity.Settings.DungeonExitWagonPrompt)
                     {
@@ -922,7 +958,7 @@ namespace DaggerfallWorkshop.Game
             }
             // Open inventory window with activated loot container as remote target (if we fall through to here)
             DaggerfallUI.Instance.InventoryWindow.LootTarget = loot;
-            DaggerfallUI.PostMessage(DaggerfallUIMessages.dfuiOpenInventoryWindow);
+            uiManager.PushWindow(DaggerfallUI.Instance.InventoryWindow);
         }
 
         void DisableEmptyCorpseContainer(GameObject go)
@@ -1004,7 +1040,7 @@ namespace DaggerfallWorkshop.Game
             if (openEffect == null)
                 return false;
 
-            return openEffect.TriggerExteriorOpenEffect(buildingLockValue); 
+            return openEffect.TriggerExteriorOpenEffect(buildingLockValue);
         }
 
         /// <summary>
@@ -1019,50 +1055,31 @@ namespace DaggerfallWorkshop.Game
 
         public bool AttemptExteriorDoorBash(RaycastHit hit)
         {
-            Transform doorOwner;
-            DaggerfallStaticDoors doors = GetDoors(hit.transform, out doorOwner);
-            StaticDoor door;
-            if (CustomDoor.HasHit(hit, out door) || (doors && doors.HasHit(hit.point, out door)))
+            var doors = GetDoors(hit.transform, out Transform doorOwner);
+            if (!doors || !doors.HasHit(hit.point, out var door) || !playerEnterExit)
+                return false;
+            var hitBuilding = false;
+            var buildingType = DFLocation.BuildingTypes.AllValid;
+            var buildingUnlocked = false;
+            var buildingLockValue = 0;
+            var building = new StaticBuilding();
+            DaggerfallStaticBuildings buildings = GetBuildings(hit.transform, out Transform buildingOwner);
+            if (buildings && buildings.HasHit(hit.point, out building))
             {
-                // Discover building - this is needed to check lock level and transition to interior
-                GameManager.Instance.PlayerGPS.DiscoverBuilding(door.buildingKey);
+                var buildingDirectory = GameManager.Instance.StreamingWorld.GetCurrentBuildingDirectory();
+                if (!buildingDirectory)
+                    return false;
+                if (!buildingDirectory.GetBuildingSummary(building.buildingKey, out BuildingSummary buildingSummary))
+                    return false;
 
-                // Play bashing sound
-                DaggerfallAudioSource dfAudioSource = GetComponent<DaggerfallAudioSource>();
-                if (dfAudioSource != null)
-                    dfAudioSource.PlayOneShot(SoundClips.PlayerDoorBash);
-
-                // Get lock value from discovered building
-                int lockValue = 0;
-                PlayerGPS.DiscoveredBuilding discoveredBuilding;
-                if (GameManager.Instance.PlayerGPS.GetDiscoveredBuilding(door.buildingKey, out discoveredBuilding))
-                    lockValue = GetBuildingLockValue(discoveredBuilding.quality);
-
-                // Roll for chance to open - Lower lock values have a higher chance
-                PlayerEntity playerEntity = GameManager.Instance.PlayerEntity;
-                Random.InitState(Time.frameCount);
-                int chance = 25 - lockValue;
-                if (Dice100.SuccessRoll(chance))
-                {
-                    // Success - player has forced their way into building
-                    if (Dice100.SuccessRoll(10)) // 10% chance someone saw you breaking in, as with Attempted
-                        playerEntity.CrimeCommitted = PlayerEntity.Crimes.Breaking_And_Entering;
-                    playerEntity.TallyCrimeGuildRequirements(true, 1);
-                    TransitionInterior(doorOwner, door, true);
-                    return true;
-                }
-                else
-                {
-                    // Bashing doors in cities is a crime - 10% chance of summoning guards on each failed bash attempt
-                    if (Dice100.SuccessRoll(10))
-                    {
-                        Debug.Log("Breaking and entering detected - spawning city guards.");
-                        playerEntity.CrimeCommitted = PlayerEntity.Crimes.Attempted_Breaking_And_Entering;
-                        playerEntity.SpawnCityGuards(true);
-                    }
-                }
+                buildingUnlocked = BuildingIsUnlocked(buildingSummary);
+                buildingLockValue = GetBuildingLockValue(buildingSummary);
+                buildingType = buildingSummary.BuildingType;
+                hitBuilding = true;
             }
-            return false;
+
+            ActivateStaticDoor(doors, hit, hitBuilding, building, buildingType, buildingUnlocked, buildingLockValue, doorOwner, true);
+            return door.doorType != DoorTypes.DungeonExit; // Dungeon exits should not respond to bashes.
         }
 
         public void PrivateProperty_OnButtonClick(DaggerfallMessageBox sender, DaggerfallMessageBox.MessageBoxButtons messageBoxButton)
@@ -1071,7 +1088,8 @@ namespace DaggerfallWorkshop.Game
             if (messageBoxButton == DaggerfallMessageBox.MessageBoxButtons.Yes)
             {
                 // Open inventory window with activated private container as remote target (pre-set)
-                DaggerfallUI.PostMessage(DaggerfallUIMessages.dfuiOpenInventoryWindow);
+                UserInterfaceManager uiManager = DaggerfallUI.Instance.UserInterfaceManager;
+                uiManager.PushWindow(DaggerfallUI.Instance.InventoryWindow);
             }
             else
                 DaggerfallUI.Instance.InventoryWindow.LootTarget = null;
@@ -1268,10 +1286,9 @@ namespace DaggerfallWorkshop.Game
             // Handle House1 through House4
             // TODO: Figure out the rest of house door calculations.
             // TODO: Need to lock doors if quest target for stealing, and unlock for other quests.
-            else if (type >= DFLocation.BuildingTypes.House1 && type <= DFLocation.BuildingTypes.House4
-                && DaggerfallUnity.Instance.WorldTime.Now.IsDay)
+            else if (type >= DFLocation.BuildingTypes.House1 && type <= DFLocation.BuildingTypes.House4)
             {
-                unlocked = true;
+                unlocked = IsBuildingOpen(type);
             }
             // Handle stores
             else if (RMBLayout.IsShop(type))

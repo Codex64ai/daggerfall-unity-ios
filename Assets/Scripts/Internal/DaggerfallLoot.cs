@@ -59,6 +59,12 @@ namespace DaggerfallWorkshop
             get { return items; }
         }
 
+        public void Awake()
+        {
+            // Register as Loot object
+            ActiveGameObjectDatabase.RegisterLoot(gameObject);
+        }
+
         public static int CreateStockedDate(DaggerfallDateTime date)
         {
             return (date.Year * 1000) + date.DayOfYear;
@@ -247,6 +253,10 @@ namespace DaggerfallWorkshop
                         }
                         // Add any modded items registered in applicable groups
                         int[] customItemTemplates = itemHelper.GetCustomItemsForGroup(itemGroup);
+                        // Ensure there's a (21-rarity)% chance for a custom transportation item to be generated
+                        if (chanceMod == 0 && itemGroup == ItemGroups.Transportation)
+                            chanceMod = 20;
+
                         for (int j = 0; j < customItemTemplates.Length; j++)
                         {
                             ItemTemplate itemTemplate = itemHelper.GetItemTemplate(itemGroup, customItemTemplates[j]);
@@ -290,7 +300,7 @@ namespace DaggerfallWorkshop
             DaggerfallUnityItem item = null;
             Game.Entity.PlayerEntity playerEntity = GameManager.Instance.PlayerEntity;
 
-            if (buildingType < DFLocation.BuildingTypes.House5)
+            if (buildingType <= DFLocation.BuildingTypes.Town23)
             {
                 if (modelIndex >= 2)
                 {

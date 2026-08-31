@@ -9,13 +9,12 @@
 // Notes:
 //
 
-//#define SEPARATE_DEV_PERSISTENT_PATH
-
 using UnityEngine;
 using System;
 using System.Globalization;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using DaggerfallWorkshop.Game;
 using IniParser;
 using IniParser.Model;
@@ -31,6 +30,43 @@ namespace DaggerfallWorkshop
     /// </summary>
     public class SettingsManager
     {
+        private static string GetFullPath(string basePath, string path)
+        {
+            if(string.IsNullOrEmpty(path) || Path.IsPathRooted(path))
+            {
+                return path;
+            }
+
+            return Path.GetFullPath(Path.Combine(basePath, path));
+        }
+
+        // Returns a relative path if embedded within the base path,
+        // returns the full path as is if outside the base path
+        private static string GetPortablePath(string basePath, string path)
+        {
+            if(string.IsNullOrEmpty(path))
+            {
+                return path;
+            }
+
+            char lastChar = basePath.Last();
+            if (lastChar != Path.DirectorySeparatorChar && lastChar != Path.AltDirectorySeparatorChar)
+            {
+                basePath += Path.DirectorySeparatorChar;
+            }
+
+            Uri baseUri = new Uri(basePath);
+            Uri relUri = baseUri.MakeRelativeUri(new Uri(path));
+
+            string relativePath = Uri.UnescapeDataString(relUri.ToString()).Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+            if (relativePath.StartsWith(".." + Path.DirectorySeparatorChar))
+            {
+                return path;
+            }
+
+            return relativePath;
+        }
+
         const string defaultsIniName = "defaults.ini";
         const string settingsIniName = "settings.ini";
         const string settingsBakExt = ".bak";
@@ -43,6 +79,7 @@ namespace DaggerfallWorkshop
         const string sectionChildGuard = "ChildGuard";
         const string sectionGUI = "GUI";
         const string sectionSpells = "Spells";
+        const string sectionMeleeAttacks = "MeleeAttacks";
         const string sectionControls = "Controls";
         const string sectionMap = "Map";
         const string sectionStartup = "Startup";
@@ -53,23 +90,14 @@ namespace DaggerfallWorkshop
         IniData defaultIniData = null;
         IniData userIniData = null;
 
-        string persistentPath = null;
         string distributionSuffix = null;
 
+        // Legacy way to get the persistent path. Better to just go through DaggerfallUnityApplication now
         public string PersistentDataPath
         {
             get
             {
-                if (string.IsNullOrEmpty(persistentPath))
-                {
-#if UNITY_EDITOR && SEPARATE_DEV_PERSISTENT_PATH
-                    persistentPath = String.Concat(Application.persistentDataPath, ".devenv");
-                    Directory.CreateDirectory(persistentPath);
-#else
-                    persistentPath = Application.persistentDataPath;
-#endif
-                }
-                return persistentPath;
+                return DaggerfallUnityApplication.PersistentDataPath;
             }
         }
 
@@ -246,6 +274,10 @@ namespace DaggerfallWorkshop
         public bool EnableSpellLighting { get; set; }
         public bool EnableSpellShadows { get; set; }
 
+        // [MeleeAttacks]
+        public int MeleeAttackDetection { get; set; }
+        public bool MeleeAttackFriendlyProtection { get; set; }
+
         // [Controls]
         public bool InvertMouseVertical { get; set; }
         public float MouseLookSmoothingFactor { get; set; }
@@ -352,6 +384,24 @@ namespace DaggerfallWorkshop
             MyDaggerfallPath = GetString(sectionDaggerfall, "MyDaggerfallPath");
             MyDaggerfallUnitySavePath = GetString(sectionDaggerfall, "MyDaggerfallUnitySavePath");
             MyDaggerfallUnityScreenshotsPath = GetString(sectionDaggerfall, "MyDaggerfallUnityScreenshotsPath");
+
+            // In Portable Install mode, we save those paths as relative to the current directory
+            // This allows users to move the directory around without breaking the settings
+            if(DaggerfallUnityApplication.IsPortableInstall)
+            {
+                if(!string.IsNullOrEmpty(MyDaggerfallPath))
+                {
+                    MyDaggerfallPath = GetFullPath(AppDomain.CurrentDomain.BaseDirectory, MyDaggerfallPath);
+                }
+                if(!string.IsNullOrEmpty(MyDaggerfallUnitySavePath))
+                {
+                    MyDaggerfallUnitySavePath = GetFullPath(AppDomain.CurrentDomain.BaseDirectory, MyDaggerfallUnitySavePath);
+                }
+                if(!string.IsNullOrEmpty(MyDaggerfallUnityScreenshotsPath))
+                {
+                    MyDaggerfallUnityScreenshotsPath = GetFullPath(AppDomain.CurrentDomain.BaseDirectory, MyDaggerfallUnityScreenshotsPath);
+                }
+            }
 
             ResolutionWidth = GetInt(sectionVideo, "ResolutionWidth");
             ResolutionHeight = GetInt(sectionVideo, "ResolutionHeight");
@@ -463,6 +513,9 @@ namespace DaggerfallWorkshop
             DisableEnemyDeathAlert = GetBool(sectionGUI, "DisableEnemyDeathAlert");
             HideLoginName = GetBool(sectionGUI, "HideLoginName");
 
+            MeleeAttackDetection = GetInt(sectionMeleeAttacks, "MeleeAttackDetection", 0, 1);
+            MeleeAttackFriendlyProtection = GetBool(sectionMeleeAttacks, "MeleeAttackFriendlyProtection");
+
             EnableSpellLighting = GetBool(sectionSpells, "EnableSpellLighting");
             EnableSpellShadows = GetBool(sectionSpells, "EnableSpellShadows");
 
@@ -536,9 +589,19 @@ namespace DaggerfallWorkshop
         public void SaveSettings()
         {
             // Write property cache to ini data
-            SetString(sectionDaggerfall, "MyDaggerfallPath", MyDaggerfallPath);
-            SetString(sectionDaggerfall, "MyDaggerfallUnitySavePath", MyDaggerfallUnitySavePath);
-            SetString(sectionDaggerfall, "MyDaggerfallUnityScreenshotsPath", MyDaggerfallUnityScreenshotsPath);
+            if (DaggerfallUnityApplication.IsPortableInstall)
+            {
+                // Save relative paths
+                SetString(sectionDaggerfall, "MyDaggerfallPath", GetPortablePath(AppDomain.CurrentDomain.BaseDirectory, MyDaggerfallPath));
+                SetString(sectionDaggerfall, "MyDaggerfallUnitySavePath", GetPortablePath(AppDomain.CurrentDomain.BaseDirectory, MyDaggerfallUnitySavePath));
+                SetString(sectionDaggerfall, "MyDaggerfallUnityScreenshotsPath", GetPortablePath(AppDomain.CurrentDomain.BaseDirectory,MyDaggerfallUnityScreenshotsPath));
+            }
+            else
+            {
+                SetString(sectionDaggerfall, "MyDaggerfallPath", MyDaggerfallPath);
+                SetString(sectionDaggerfall, "MyDaggerfallUnitySavePath", MyDaggerfallUnitySavePath);
+                SetString(sectionDaggerfall, "MyDaggerfallUnityScreenshotsPath", MyDaggerfallUnityScreenshotsPath);
+            }
 
             SetInt(sectionVideo, "ResolutionWidth", ResolutionWidth);
             SetInt(sectionVideo, "ResolutionHeight", ResolutionHeight);
@@ -649,6 +712,9 @@ namespace DaggerfallWorkshop
             SetInt(sectionGUI, "QuestRumorWeight", QuestRumorWeight);
             SetBool(sectionGUI, "DisableEnemyDeathAlert", DisableEnemyDeathAlert);
             SetBool(sectionGUI, "HideLoginName", HideLoginName);
+
+            SetInt(sectionMeleeAttacks, "MeleeAttackDetection", MeleeAttackDetection);
+            SetBool(sectionMeleeAttacks, "MeleeAttackFriendlyProtection", MeleeAttackFriendlyProtection);
 
             SetBool(sectionSpells, "EnableSpellLighting", EnableSpellLighting);
             SetBool(sectionSpells, "EnableSpellShadows", EnableSpellShadows);

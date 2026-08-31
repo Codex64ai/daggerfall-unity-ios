@@ -1525,6 +1525,15 @@ PrefabInstance:
       propertyPath: m_BeforeStackBundles.Array.data[0].assemblyQualifiedName
       value: ColorBoost, Assembly-CSharp, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null
       objectReference: {fileID: 0}
+    - target: {fileID: 4609117991535154, guid: 53a45b46ca97a974f8e677f68c2a85e6, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 20
+      objectReference: {fileID: 0}
+    - target: {fileID: 198237622866876544, guid: 53a45b46ca97a974f8e677f68c2a85e6,
+        type: 3}
+      propertyPath: ShapeModule.m_Scale.y
+      value: 40
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -6508,6 +6517,10 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 11400006, guid: 312abd0527754e047a6bfbc424f09ace, type: 3}
       propertyPath: m_Value
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 11400012, guid: 312abd0527754e047a6bfbc424f09ace, type: 3}
+      propertyPath: closeOnEscape
       value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 11400024, guid: 312abd0527754e047a6bfbc424f09ace, type: 3}

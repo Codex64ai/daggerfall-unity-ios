@@ -257,15 +257,15 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
                 new Color32(colors.GetRed(243), colors.GetGreen(243), colors.GetBlue(243), 255),  //dungruin (R171, G51, B15)
                 new Color32(colors.GetRed(246), colors.GetGreen(246), colors.GetBlue(246), 255),  //graveyards (R147, G15, B7)
                 new Color32(colors.GetRed(0), colors.GetGreen(0), colors.GetBlue(0), 255),        //coven (R15, G15, B15)
-                new Color32(colors.GetRed(53), colors.GetGreen(53), colors.GetBlue(53), 255),     //farms (R165, G100, B70)
-                new Color32(colors.GetRed(51), colors.GetGreen(51), colors.GetBlue(51), 255),     //wealthy (R193, G133, B100)
-                new Color32(colors.GetRed(55), colors.GetGreen(55), colors.GetBlue(55), 255),     //poor (R140, G86, B55)
+                new Color32(colors.GetRed(53), colors.GetGreen(53), colors.GetBlue(53), 255),     //farms (R155, G105, B106)
+                new Color32(colors.GetRed(51), colors.GetGreen(51), colors.GetBlue(51), 255),     //wealthy (R188, G138, B138)
+                new Color32(colors.GetRed(55), colors.GetGreen(55), colors.GetBlue(55), 255),     //poor (R126, G81, B89)
                 new Color32(colors.GetRed(96), colors.GetGreen(96), colors.GetBlue(96), 255),     //temple (R176, G205, B255)
                 new Color32(colors.GetRed(101), colors.GetGreen(101), colors.GetBlue(101), 255),  //cult (R68, G124, B192)
-                new Color32(colors.GetRed(39), colors.GetGreen(39), colors.GetBlue(39), 255),     //tavern (R126, G81, B89)
-                new Color32(colors.GetRed(33), colors.GetGreen(33), colors.GetBlue(33), 255),     //city (R220, G177, B177)
-                new Color32(colors.GetRed(35), colors.GetGreen(35), colors.GetBlue(35), 255),     //hamlet (R188, G138, B138)
-                new Color32(colors.GetRed(37), colors.GetGreen(37), colors.GetBlue(37), 255),     //village (R155, G105, B106)
+                new Color32(colors.GetRed(39), colors.GetGreen(39), colors.GetBlue(39), 255),     //tavern (R140, G86, B55)
+                new Color32(colors.GetRed(33), colors.GetGreen(33), colors.GetBlue(33), 255),     //city (R227, G180, B144)
+                new Color32(colors.GetRed(35), colors.GetGreen(35), colors.GetBlue(35), 255),     //hamlet (R193, G133, B100)
+                new Color32(colors.GetRed(37), colors.GetGreen(37), colors.GetBlue(37), 255),     //village (R165, G100, B70)
             };
 
             identifyFlashColor = new Color32(colors.GetRed(244), colors.GetGreen(244), colors.GetBlue(244), 255); // (R163, G39, B15)
@@ -1554,14 +1554,31 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
             }
         }
 
+        // Subclass DaggerfallListPickerWindow to delay calls to listBox.AddItem() after its setup
+        // Otherwise, added items do not inherit the restricted area from the ListBox
+        protected class DaggerfallLocationsListPickerWindow : DaggerfallListPickerWindow
+        {
+            private List<string> locations;
+
+            public DaggerfallLocationsListPickerWindow(IUserInterfaceManager uiManager, IUserInterfaceWindow previous, List<string> locations) : base(uiManager, previous)
+            {
+                this.locations = locations;
+            }
+
+            protected override void Setup()
+            {
+                base.Setup();
+                listBox.RectRestrictedRenderArea = new Rect(listBox.Position, listBox.Size);
+                listBox.RestrictedRenderAreaCoordinateType = BaseScreenComponent.RestrictedRenderArea_CoordinateType.ParentCoordinates;
+                listBox.AddItems(locations);
+            }
+        }
+
         // Creates a ListPickerWindow with a list of locations from current region
         // Locations displayed will be filtered out depending on the dungeon / town / temple / home button settings
         private void ShowLocationPicker(string[] locations, bool applyFilters)
         {
-            DaggerfallListPickerWindow locationPicker = new DaggerfallListPickerWindow(uiManager, this);
-            locationPicker.OnItemPicked += HandleLocationPickEvent;
-            locationPicker.ListBox.MaxCharacters = 29;
-
+            List<string> filteredLocations = new List<string>();
             for (int i = 0; i < locations.Length; i++)
             {
                 if (applyFilters)
@@ -1571,9 +1588,11 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
                     if (GetPixelColorIndex(currentDFRegion.MapTable[index].LocationType) == -1)
                         continue;
                 }
-                locationPicker.ListBox.AddItem(locations[i]);
+                filteredLocations.Add(locations[i]);
             }
 
+            DaggerfallListPickerWindow locationPicker = new DaggerfallLocationsListPickerWindow(uiManager, this, filteredLocations);
+            locationPicker.OnItemPicked += HandleLocationPickEvent;
             uiManager.PushWindow(locationPicker);
         }
 

@@ -1488,13 +1488,13 @@ namespace Wenzil.Console
                     return error;
                 else
                 {
-                    DaggerfallActionDoor[] doors = GameObject.FindObjectsOfType<DaggerfallActionDoor>();
                     int count = 0;
-                    for (int i = 0; i < doors.Length; i++)
+                    IEnumerable<DaggerfallActionDoor> doors = ActiveGameObjectDatabase.GetActiveActionDoors();
+                    foreach (DaggerfallActionDoor door in doors)
                     {
-                        if (!doors[i].IsOpen)
+                        if (!door.IsOpen)
                         {
-                            doors[i].SetOpen(true, false, true);
+                            door.SetOpen(true, false, true);
                             count++;
                         }
                     }
@@ -1574,11 +1574,9 @@ namespace Wenzil.Console
 
             public static string Execute(params string[] args)
             {
-                DaggerfallEntityBehaviour[] entityBehaviours = FindObjectsOfType<DaggerfallEntityBehaviour>();
                 int count = 0;
-                for (int i = 0; i < entityBehaviours.Length; i++)
+                foreach(DaggerfallEntityBehaviour entityBehaviour in ActiveGameObjectDatabase.GetActiveEnemyBehaviours())
                 {
-                    DaggerfallEntityBehaviour entityBehaviour = entityBehaviours[i];
                     if (entityBehaviour.EntityType == EntityTypes.EnemyMonster || entityBehaviour.EntityType == EntityTypes.EnemyClass)
                     {
                         entityBehaviour.Entity.SetHealth(0);
@@ -2279,7 +2277,7 @@ namespace Wenzil.Console
                 }
                 else
                 {
-                    return "Quest ID '" + args[0] + "' could not be found";
+                    return "Quest ID '" + args[0] + "': not found, or parsing error (see quest_log.txt)";
                 }
             }
         }
@@ -2682,7 +2680,7 @@ namespace Wenzil.Console
         {
             public static readonly string name = "summondaedra";
             public static readonly string description = "Summons a daedra prince to test quest delivery.";
-            public static readonly string usage = "summondaedra [filename] (note: matches the .VID filename for daedea in /arena2 folder.)";
+            public static readonly string usage = "summondaedra [filename] (note: matches the .VID filename for daedra in /arena2 folder.)";
 
             public static string Execute(params string[] args)
             {

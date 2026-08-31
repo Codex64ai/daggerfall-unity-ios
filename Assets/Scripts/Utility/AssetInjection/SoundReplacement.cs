@@ -5,7 +5,7 @@
 // Source Code:     https://github.com/Interkarma/daggerfall-unity
 // Original Author: TheLacus
 // Contributors:
-// 
+//
 // Notes:
 //
 
@@ -15,6 +15,7 @@ using System.IO;
 using UnityEngine;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
 using DaggerfallWorkshop.Game.Mobile;
+using UnityEngine.Networking;
 
 namespace DaggerfallWorkshop.Utility.AssetInjection
 {
@@ -129,13 +130,7 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
                     // milliseconds, and the timeout means a truncated file fails with a log
                     // line rather than hanging the game.
                     string url = "file://" + path;
-                    AudioType audioType = AudioType.UNKNOWN;
-                    if (string.Equals(extension, ".ogg", StringComparison.OrdinalIgnoreCase))
-                        audioType = AudioType.OGGVORBIS;
-                    else if (string.Equals(extension, ".wav", StringComparison.OrdinalIgnoreCase))
-                        audioType = AudioType.WAV;
-                    else if (string.Equals(extension, ".mp3", StringComparison.OrdinalIgnoreCase))
-                        audioType = AudioType.MPEG;
+                    AudioType audioType = GetAudioTypeFromExtension(extension);
 
                     using (var request = UnityEngine.Networking.UnityWebRequestMultimedia.GetAudioClip(url, audioType))
                     {
@@ -170,7 +165,7 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
                 }
 
                 // Seek from mods
-                if (ModManager.Instance != null && ModManager.Instance.TryGetAsset(name, false, out audioClip))
+                if (ModManager.Instance && ModManager.Instance.TryGetAsset(name, false, out audioClip))
                 {
                     if (audioClip.preloadAudioData || audioClip.LoadAudioData())
                         return true;
@@ -182,6 +177,7 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
             audioClip = null;
             return false;
         }
+
 
         /// <summary>
         /// Import midi data from modding locations as a byte array.
@@ -390,6 +386,24 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
                 Debug.LogError("[SoundReplacement] WAV decode failed for " + path + ": " + ex.Message);
                 audioClip = null;
                 return false;
+            }
+        }
+
+        private static AudioType GetAudioTypeFromExtension(string extension)
+        {
+            switch (extension.ToLowerInvariant())
+            {
+                case ".wav":
+                    return AudioType.WAV;
+                case ".mp3":
+                    return AudioType.MPEG;
+                case ".ogg":
+                    return AudioType.OGGVORBIS;
+                case ".aif":
+                case ".aiff":
+                    return AudioType.AIFF;
+                default:
+                    return AudioType.UNKNOWN;
             }
         }
 
