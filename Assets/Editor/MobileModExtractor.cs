@@ -6,6 +6,18 @@
 // bundles, so conversion means: load bundle -> write assets to disk (short names preserved
 // verbatim - every DFU runtime lookup is by short name) -> rewrite the manifest -> rebuild.
 //
+// One mod at a time, from the command line (Convert is the same chain as a method call):
+//
+//   env DFU_MOD_IN="$HOME/Downloads/dream - sound.dfmod" DFU_MOD_OUT=$HOME/dev/dfu-mods \
+//   Unity -batchmode -quit -projectPath <proj> \
+//     -executeMethod DaggerfallWorkshop.Game.Mobile.EditorTools.MobileModExtractor.ConvertFromEnv
+//
+//   DFU_MOD_IN       the desktop .dfmod to convert              required
+//   DFU_MOD_OUT      where the rebuilt bundles are written      default ~/dev/dfu-mods
+//   DFU_MOD_TARGETS  comma-separated Unity BuildTarget names    default iOS
+//
+// No -nographics in that line, and it is not an oversight: see the GPU-blit note below.
+//
 // v1 handles Texture2D, AudioClip and TextAsset (added per task); everything else is
 // skipped and counted in the report. Extraction output goes under Assets/Game/Mods/Converted/,
 // which is gitignored - converted third-party content must never be committed.
@@ -317,6 +329,100 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 AssetDatabase.ImportAsset(p, ImportAssetOptions.ForceUpdate);
             LogSummary(report, dfmodPath, outputRoot);
             return report;
+        }
+
+        /// <summary>Desktop .dfmod in, iOS .dfmod out, in one call: extract the bundle to loose
+        /// assets under extractRoot, then repack the rewritten manifest for each target under
+        /// bundleOutRoot. Returns the built bundle paths (one per target).
+        ///
+        /// Deliberately takes all four values as arguments and reads no environment: this is the
+        /// call the self-test drives, and a function that reached for DFU_MOD_OUT on its own
+        /// would be testable only by mutating the process environment. ConvertFromEnv below is
+        /// where the environment is read, and it is the only place.</summary>
+        public static string[] Convert(string dfmodPath, string extractRoot, string bundleOutRoot,
+            BuildTarget[] targets)
+        {
+            ExtractReport report = Extract(dfmodPath, extractRoot);
+            string[] builtPaths = MobileModBuilder.BuildMod(report.manifestPath, bundleOutRoot, targets);
+
+            // Extract has ALREADY logged the extraction summary - counts, the per-key breakdown
+            // of both dictionaries, the loaded/released pair - and already escalated it to a
+            // warning if anything was lost. Repeating that here would print every number twice
+            // and teach an operator to skim the one report they need to read. So this line adds
+            // only the half Extract cannot know: that a rebuild happened, where the bundle
+            // landed, and - the reason it is worth saying at all - that whatever the extraction
+            // skipped is therefore ABSENT FROM THAT BUNDLE. That is the sentence an operator
+            // needs when a converted mod is missing content, and it is the one nobody else here
+            // is in a position to write.
+            //
+            // The two dictionaries are reported separately and never summed. skippedByType is a
+            // loss (an unsupported type, a collision, a path that escaped the root, a failed
+            // write, a clip whose samples GetData cannot reach); notesByType describes assets
+            // that DID make it into the bundle and merely changed name or lost their recorded
+            // capitalisation on the way. Adding them would inflate the loss with survivors and
+            // turn a clean conversion into an alarming one.
+            int skipped = Total(report.skippedByType);
+            int noted = Total(report.notesByType);
+            var line = new System.Text.StringBuilder();
+            line.Append("[MobileModExtractor] converted ").Append(Path.GetFileName(dfmodPath))
+                .Append(": ").Append(report.extracted.Count).Append(" assets rebuilt into ")
+                .Append(string.Join(", ", builtPaths));
+            if (skipped > 0)
+                line.Append("; ").Append(skipped).Append(" NOT converted and therefore absent ")
+                    .Append("from the rebuilt bundle [").Append(Describe(report.skippedByType)).Append(']');
+            if (noted > 0)
+                line.Append("; ").Append(noted).Append(" converted with a note [")
+                    .Append(Describe(report.notesByType)).Append(']');
+            if (skipped > 0)
+                Debug.LogWarning(line.ToString());
+            else
+                Debug.Log(line.ToString());
+
+            return builtPaths;
+        }
+
+        /// <summary>Command-line entry point; see the CLI block at the top of this file. Mirrors
+        /// MobileModBuilder.BuildFromEnv's shape - read the environment, do the work, and turn any
+        /// exception into a non-zero exit so a shell loop over a mod folder stops on the failure
+        /// instead of reporting success over a stack trace nobody read.
+        ///
+        /// The extraction root is NOT an environment variable. It is pinned under
+        /// Assets/Game/Mods/Converted/, which is gitignored and which MobileConvertedModImporter
+        /// scopes its whole import policy to by path prefix: an extraction landing anywhere else
+        /// would silently import with Unity's defaults (uncompressed, 2048 cap, normal maps typed
+        /// as colour) and could be committed by accident. Both of those are worth more than the
+        /// flexibility.</summary>
+        public static void ConvertFromEnv()
+        {
+            try
+            {
+                string input = Environment.GetEnvironmentVariable("DFU_MOD_IN");
+                if (string.IsNullOrEmpty(input) || !File.Exists(input))
+                    throw new InvalidOperationException(
+                        "DFU_MOD_IN must point at a desktop .dfmod file (got: " +
+                        (string.IsNullOrEmpty(input) ? "unset" : input) + ")");
+
+                string outRoot = Environment.GetEnvironmentVariable("DFU_MOD_OUT");
+                if (string.IsNullOrEmpty(outRoot))
+                    outRoot = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.Personal), "dev/dfu-mods");
+
+                string targetsVar = Environment.GetEnvironmentVariable("DFU_MOD_TARGETS");
+                if (string.IsNullOrEmpty(targetsVar))
+                    targetsVar = "iOS";
+                BuildTarget[] targets = Array.ConvertAll(targetsVar.Split(','),
+                    t => (BuildTarget)Enum.Parse(typeof(BuildTarget), t.Trim(), true));
+
+                string extractRoot = "Assets/Game/Mods/Converted/" +
+                    Path.GetFileNameWithoutExtension(input);
+                foreach (string built in Convert(input, extractRoot, outRoot, targets))
+                    Debug.Log("[MobileModExtractor] built " + built);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError("[MobileModExtractor] " + ex);
+                EditorApplication.Exit(1);
+            }
         }
 
         static ModInfo ReadManifest(AssetBundle ab, string dfmodPath)

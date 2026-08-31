@@ -1830,9 +1830,23 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && info.Files.TrueForAll(f => File.Exists(f)),
                   "manifest Files rewritten to extracted paths");
 
-            // 5. Full circle: rebuild from the extraction, short-name lookup still answers.
-            string[] rebuilt = MobileModBuilder.BuildMod(report.manifestPath, bundleDir,
+            // 5. Full circle, and THROUGH THE SHIPPED ENTRY POINT rather than around it.
+            // Convert is the one call an operator makes - ConvertFromEnv is a thin env wrapper
+            // over it - so hand-assembling extract-then-BuildMod here would leave the chain
+            // itself the only part of the pipeline nothing exercises: a Convert that passed
+            // the wrong root to BuildMod, or dropped the rebuild entirely, would still let
+            // every check above pass. It also re-extracts on top of the extraction this test
+            // has already made, which is the only place anything proves a second conversion
+            // onto a populated root does not trip over its own output.
+            string[] rebuilt = MobileModExtractor.Convert(built[0], extractRoot, bundleDir,
                 new[] { BuildTarget.StandaloneOSX });
+            Check(rebuilt.Length == 1, "Convert returns one built bundle per requested target",
+                  "built=" + rebuilt.Length);
+            Check(rebuilt.Length == 1 && File.Exists(rebuilt[0])
+                  && rebuilt[0].Replace('\\', '/').EndsWith(
+                      bundleDir + "/" + BuildTarget.StandaloneOSX + "/fixture-mod.dfmod"),
+                  "Convert built into the bundle root it was given, under the target's folder",
+                  rebuilt.Length == 1 ? rebuilt[0] : "no path");
             AssetBundle ab = AssetBundle.LoadFromFile(rebuilt[0]);
             Check(ab != null && ab.Contains("fixture_tex"), "rebuilt bundle answers to short name");
             if (ab != null)
