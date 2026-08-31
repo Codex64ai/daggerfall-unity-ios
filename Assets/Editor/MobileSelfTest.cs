@@ -1678,7 +1678,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // itself - so deleting the release, or letting one branch escape the try/finally
             // that performs it, drives them apart. This fixture deliberately exercises the
             // awkward paths as well as the happy one: two clips refused on load type, one
-            // texture losing a collision, five assets written. If any of those paths stopped
+            // texture losing a collision, six assets written. If any of those paths stopped
             // releasing, this is what would notice.
             Check(report.loaded > 0 && report.released == report.loaded,
                   "every bundle asset the loop loaded was released again, on every path",
@@ -1714,6 +1714,39 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     : "loadState after release: " + probeClip.loadState);
             if (probe != null)
                 probe.Unload(true);
+
+            // THE TEXTURE PROBE, and the reason it is a separate one. The clip check above is
+            // mildly confounded: Release calls UnloadAudioData first, so by the time
+            // Resources.UnloadAsset sees the clip its samples are already gone, and "the object
+            // survived" might have been a fact about that state rather than about UnloadAsset.
+            // A Texture2D goes through no such preparatory call, so this is the clean question -
+            // and it is the question that decides whether converting a 1.72GB texture module
+            // accumulates every decoded texture until the Unload after the loop, or does not.
+            //
+            // The assertion below encodes the MEASURED answer, so it is a statement of fact
+            // about this Unity, not a wish: if a future Unity starts honouring UnloadAsset for
+            // an editor-side bundle asset, this fails and the residual it documents is gone.
+            // Either way the fact is logged, because it is what a conversion has to be
+            // scheduled around.
+            AssetBundle texProbe = AssetBundle.LoadFromFile(built[0]);
+            // A name with no .tga twin: fixture_tex exists twice in this bundle and which one a
+            // short-name load returns is not something this check should depend on.
+            var probeTex = texProbe != null
+                ? texProbe.LoadAsset<Texture2D>("fixture_wall_Height") : null;
+            Check(probeTex != null && probeTex.width == 64,
+                  "the probe texture loaded from the bundle before the release",
+                  probeTex == null ? "no texture" : probeTex.width + "x" + probeTex.height);
+            MobileModExtractor.Release(probeTex);
+            bool textureFreed = probeTex == null;
+            Debug.Log("[MobileSelfTest] MEASURED: Resources.UnloadAsset on an editor-side bundle "
+                + "Texture2D " + (textureFreed ? "DOES destroy it - Release covers the texture path"
+                    : "does NOT destroy it - a texture module accumulates until AssetBundle.Unload"));
+            Check(!textureFreed,
+                  "measured: Release does NOT free a bundle texture in the editor "
+                  + "(so a large texture module still accumulates until Unload)",
+                  "texture after release: " + (textureFreed ? "destroyed" : "still alive"));
+            if (texProbe != null)
+                texProbe.Unload(true);
 
             // 3f. The audio half of the import policy - MobileConvertedModImporter.OnPreprocessAudio -
             // which nothing in the suite could reach until audio was extracted, because the

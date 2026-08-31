@@ -218,10 +218,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                             // different things from the mod author.
                             //
                             // Both refusals come BEFORE the rewrite and before Claim on purpose:
-                            // a clip whose samples cannot be read is not a writer, and letting it
-                            // reserve the output path would cost a sibling that could actually
-                            // have been written there (a streaming "song.ogg" beside a readable
-                            // "song.wav" is one mod away).
+                            // a clip whose samples cannot be read is not a writer, so it must
+                            // neither announce a rewrite it will not perform nor reserve an
+                            // output path a sibling could have used (a streaming "song.ogg"
+                            // beside a readable "song.wav" is one mod away).
                             if (clip.loadType != AudioClipLoadType.DecompressOnLoad)
                             {
                                 Skipped(report, clip.loadType == AudioClipLoadType.Streaming
@@ -236,10 +236,25 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                                 continue;
                             }
 
-                            // Only now the container rewrite, and ONLY for a clip that is
+                            var samples = new float[clip.samples * clip.channels];
+                            if (!clip.GetData(samples, 0))
+                            {
+                                // Backstop: the load type said this should have worked. Something
+                                // else did not - a clip with no samples, or a Unity-version change
+                                // in what GetData accepts - and either way it is a loss, not a note.
+                                Skipped(report, "AudioClip(nodata)");
+                                Debug.LogWarning($"[MobileModExtractor] skipped {assetName}: GetData " +
+                                    $"failed on a {clip.loadType} clip ({clip.samples} samples, " +
+                                    $"{clip.channels} channels), which is not supposed to happen; " +
+                                    "the clip is skipped rather than written as silence.");
+                                continue;
+                            }
+
+                            // Only now the container rewrite, and only for a clip that is
                             // actually going to be written. Announcing "re-encoded as .wav" and
                             // then announcing a skip is two warnings per clip, one of them
-                            // false, on exactly the module whose log we most need to read.
+                            // false, on exactly the module whose log we most need to read - so
+                            // it sits below BOTH refusals, not just the load-type one.
                             //
                             // And unlike the texture case this is a note, not a hazard. DFU
                             // looks mod audio up by EXTENSIONLESS name - TryImportSound and
@@ -257,20 +272,6 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                                     "does not change how the clip is found; a mod that enumerates " +
                                     "its own directory by \".ogg\" would no longer see it.");
                                 outPath = Path.ChangeExtension(outPath, ".wav");
-                            }
-
-                            var samples = new float[clip.samples * clip.channels];
-                            if (!clip.GetData(samples, 0))
-                            {
-                                // Backstop: the load type said this should have worked. Something
-                                // else did not - a clip with no samples, or a Unity-version change
-                                // in what GetData accepts - and either way it is a loss, not a note.
-                                Skipped(report, "AudioClip(nodata)");
-                                Debug.LogWarning($"[MobileModExtractor] skipped {assetName}: GetData " +
-                                    $"failed on a {clip.loadType} clip ({clip.samples} samples, " +
-                                    $"{clip.channels} channels), which is not supposed to happen; " +
-                                    "the clip is skipped rather than written as silence.");
-                                continue;
                             }
                             if (!Claim(claimed, outPath, assetName, report))
                                 continue;
@@ -567,10 +568,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// Resources.UnloadAsset is still called, for everything that is not a GameObject or a
         /// Component (the two types for which it is undefined, hence the guard). It costs
         /// nothing, it is correct where it works, and it is the right call to have in place if
-        /// this ever runs outside an editor process. But NOTHING here should be read as a claim
-        /// that it frees an editor-side bundle TEXTURE - it is not known to, there is no
-        /// per-texture equivalent of UnloadAudioData, and the honest position is that the
-        /// texture half of a large module still relies on the Unload(true) after the loop.
+        /// this ever runs outside an editor process. But it does NOT free an editor-side bundle
+        /// TEXTURE, and that is measured rather than suspected: the self-test loads a Texture2D
+        /// straight from a bundle - no preparatory unload of any kind, so nothing confounds it -
+        /// releases it, and finds the object still alive. There is no per-texture equivalent of
+        /// UnloadAudioData, so THE TEXTURE HALF OF A LARGE MODULE STILL ACCUMULATES until the
+        /// Unload(true) after the loop. A 1.72GB texture pack should be scheduled on that
+        /// understanding. The audio half, which was the acute one, is genuinely fixed.
         ///
         /// Neither call is a correctness problem here because nothing holds a reference past
         /// this point: the report keeps output PATHS, the notes keep strings, and the bytes have
