@@ -35,7 +35,20 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             "Mods", "Textures", "Textures/Img", "Textures/CifRci",
             "Sound", "Quests", "QuestPacks", "Books", "WorldData",
+            "Movies",
         };
+
+        /// <summary>
+        /// The folders <see cref="EnsureUserFolders"/> creates, for tests and diagnostics.
+        ///
+        /// A loader that resolves through <see cref="Override"/> or <see cref="UserFiles"/> is useless
+        /// if the player has nowhere obvious to put the files, so every redirected content type must
+        /// appear here. Copied on the way out so a caller cannot rewrite the list.
+        /// </summary>
+        public static string[] UserFolderNames
+        {
+            get { return (string[])userFolders.Clone(); }
+        }
 
         const string readmeName = "PUT-MODS-AND-LOOSE-FILES-HERE.txt";
 
@@ -189,6 +202,7 @@ namespace DaggerfallWorkshop.Game.Mobile
                 sb.AppendLine("  QuestPacks/    quest packs (a folder each, with a QuestList-*.txt)");
                 sb.AppendLine("  Books/         loose book text");
                 sb.AppendLine("  WorldData/     loose location and block .json");
+                sb.AppendLine("  Movies/        replacement videos as .mp4, named like ANIM0000.VID.mp4");
                 sb.AppendLine("  Mods/          .dfmod packages BUILT FOR iOS");
                 sb.AppendLine();
                 sb.AppendLine("Two things will not work, and cannot be made to:");

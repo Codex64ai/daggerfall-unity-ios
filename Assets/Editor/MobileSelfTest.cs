@@ -72,6 +72,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestDeviceIndependence();
             TestRelinquish();
             TestContentPathRemap();
+            TestUserContentFolders();
             TestWavDecoder();
             TestJourneyBearing();
             TestJourneyArrivalRect();
@@ -151,6 +152,47 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobileContentPath.Remap(shipped + "/Sound/a.wav", shipped, user,
                       p => p == "/docs/Sound/a.wav") == "/docs/Sound/a.wav",
                   "remap strips the leading separator");
+        }
+
+        /// <summary>
+        /// The folders EnsureUserFolders() creates in Documents.
+        ///
+        /// Redirecting a loader through MobileContentPath is only half the job: if the folder is
+        /// never created the player has no visible place to put the files and the feature looks
+        /// broken. Every content type that resolves through Override()/UserFiles() must be listed,
+        /// so this test is the thing that fails when a redirect is added and the folder is not.
+        /// </summary>
+        static void TestUserContentFolders()
+        {
+            string[] folders = MobileContentPath.UserFolderNames;
+            var set = new HashSet<string>(folders);
+
+            // Movies: VideoReplacement resolves "Movies" through Override(), but the folder was
+            // missing from the list, so a player had to create it by hand before it could be used.
+            Check(set.Contains("Movies"), "Documents/Movies is created for replacement videos");
+
+            // The folders the port already relied on must not be dropped by a careless edit.
+            Check(set.Contains("Mods") && set.Contains("Textures") && set.Contains("Textures/Img")
+                  && set.Contains("Textures/CifRci") && set.Contains("Sound") && set.Contains("Quests")
+                  && set.Contains("QuestPacks") && set.Contains("Books") && set.Contains("WorldData"),
+                  "every previously supported content folder is still listed");
+
+            Check(set.Count == folders.Length, "no folder is listed twice");
+
+            // Relative, forward-slashed and non-empty: these are combined onto UserRoot.
+            bool wellFormed = true;
+            foreach (string f in folders)
+            {
+                if (string.IsNullOrEmpty(f) || f.Contains("\\") || Path.IsPathRooted(f))
+                    wellFormed = false;
+            }
+            Check(wellFormed, "folder names are relative and forward-slashed");
+
+            // The accessor must not hand out the live array.
+            string[] copy = MobileContentPath.UserFolderNames;
+            copy[0] = "clobbered";
+            Check(MobileContentPath.UserFolderNames[0] != "clobbered",
+                  "UserFolderNames returns a copy, not the backing array");
         }
 
         /// <summary>
