@@ -84,6 +84,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestModBundleRoundTrip();
             TestModScriptSkipRule();
             TestModExtractorRoundTrip();
+            TestModExtractorPathContainment();
             TestRoadDirectionReciprocity();
             TestRoadRouting();
             TestWaypointOvershoot();
@@ -1206,6 +1207,81 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             }
 
             // Cleanup.
+            Directory.Delete(bundleDir, true);
+            Directory.Delete(extractRoot, true);
+            File.Delete(extractRoot + ".meta");
+            AssetDatabase.Refresh();
+        }
+
+        /// <summary>
+        /// A .dfmod is untrusted input - a file a stranger hands us - and the converter is meant
+        /// to be exposed publicly. The manifest inside the bundle is the part an attacker fully
+        /// controls, so an unconstrained Files entry ("../../.ssh/authorized_keys", or an absolute
+        /// path, which Path.Combine would let win outright) is an arbitrary file write, not a
+        /// theoretical one. Every output path must therefore be proven inside the extraction root
+        /// before any byte is written.
+        /// </summary>
+        static void TestModExtractorPathContainment()
+        {
+            // The decision itself, as a pure function. Normalisation, not string matching.
+            const string root = "Assets/Game/Mods/Converted/probe";
+            Check(MobileModExtractor.IsInsideRoot(Path.Combine(root, "tex.png"), root),
+                  "containment: a plain path inside the root is allowed");
+            Check(MobileModExtractor.IsInsideRoot(Path.Combine(root, "Assets/Textures/water.png"), root),
+                  "containment: a nested path inside the root is allowed");
+            Check(!MobileModExtractor.IsInsideRoot(Path.Combine(root, "../escape.png"), root),
+                  "containment: .. climbing out of the root is refused");
+            Check(!MobileModExtractor.IsInsideRoot("/tmp/dfu-extractor-evil.png", root),
+                  "containment: an absolute path is refused");
+            // Path.Combine would happily build this, and a naive StartsWith would accept it.
+            Check(!MobileModExtractor.IsInsideRoot(root + "-evil/x.png", root),
+                  "containment: a sibling sharing a name prefix is refused");
+            // .. that resolves back inside is legitimate; refusing it would be a false positive.
+            Check(MobileModExtractor.IsInsideRoot(Path.Combine(root, "sub/../ok.png"), root),
+                  "containment: .. that resolves back inside is allowed");
+
+            // End to end, through Extract, with a genuinely hostile bundle. MobileModBuilder
+            // cannot produce one - it validates every manifest entry - so pack it the way an
+            // attacker would, giving one asset an addressable name that climbs out of the root.
+            const string hostileManifest = "Assets/Editor/TestFixtures/ExtractorFixture/hostile-mod.dfmod.json";
+            const string payload = "Assets/Editor/TestFixtures/ExtractorFixture/hostile_payload.json";
+            // A distinct asset: Unity refuses to pack the same one into a bundle twice.
+            const string escapePayload = "Assets/Editor/TestFixtures/ExtractorFixture/hostile_escape_payload.json";
+            const string escapeName = "../dfu-extractor-escape.json";
+            const string bundleDir = "Temp/MobileModExtractorEscapeTest";
+            const string extractRoot = "Assets/Game/Mods/Converted/__escape__";
+            const string escapeTarget = "Assets/Game/Mods/Converted/dfu-extractor-escape.json";
+            if (Directory.Exists(bundleDir)) Directory.Delete(bundleDir, true);
+            if (Directory.Exists(extractRoot)) { Directory.Delete(extractRoot, true); File.Delete(extractRoot + ".meta"); AssetDatabase.Refresh(); }
+            File.Delete(escapeTarget);
+
+            // hostile-mod.dfmod.json's Files lists the escaping name, and one bundle asset is
+            // addressed by it, so the extractor resolves that entry exactly as it would a real
+            // attacker's - through the manifest lookup, straight into an output path.
+            var build = new AssetBundleBuild[1];
+            build[0].assetBundleName = "hostile-mod.dfmod";
+            build[0].assetNames = new[] { payload, escapePayload, hostileManifest };
+            build[0].addressableNames = new[] {
+                "assets/editor/testfixtures/extractorfixture/hostile_payload.json",
+                escapeName,
+                "assets/editor/testfixtures/extractorfixture/hostile-mod.dfmod.json" };
+
+            Directory.CreateDirectory(bundleDir);
+            BuildPipeline.BuildAssetBundles(bundleDir, build,
+                BuildAssetBundleOptions.ChunkBasedCompression, BuildTarget.StandaloneOSX);
+            string hostileBundle = Path.Combine(bundleDir, "hostile-mod.dfmod");
+
+            var report = MobileModExtractor.Extract(hostileBundle, extractRoot);
+
+            int escapes;
+            report.skippedByType.TryGetValue("path-escape", out escapes);
+            Check(escapes == 1, "hostile manifest entry is refused", "path-escape=" + escapes);
+            Check(!File.Exists(escapeTarget) && !File.Exists("Assets/Game/Mods/Converted/" + Path.GetFileName(escapeName)),
+                  "nothing was written outside the extraction root");
+            Check(report.extracted.Count == 1 && report.extracted[0].EndsWith("hostile_payload.json"),
+                  "the legitimate asset still extracts alongside the refused one",
+                  "extracted=" + report.extracted.Count);
+
             Directory.Delete(bundleDir, true);
             Directory.Delete(extractRoot, true);
             File.Delete(extractRoot + ".meta");

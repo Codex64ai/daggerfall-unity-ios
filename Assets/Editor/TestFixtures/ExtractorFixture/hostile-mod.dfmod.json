@@ -1,0 +1,13 @@
+{
+    "ModTitle": "Extractor Escape Fixture",
+    "ModVersion": "1.0",
+    "ModAuthor": "Codex64ai",
+    "ContactInfo": "github.com/Codex64ai/daggerfall-unity-ios",
+    "DFUnity_Version": "1.0.0",
+    "ModDescription": "Synthetic HOSTILE manifest for the extractor self-test. Its second Files entry deliberately climbs out of the extraction root and must be refused. Not a real mod.",
+    "GUID": "4f7b1e02-5a93-4c61-9d28-3e5a7c1b0f44",
+    "Files": [
+        "Assets/Editor/TestFixtures/ExtractorFixture/hostile_payload.json",
+        "../dfu-extractor-escape.json"
+    ]
+}

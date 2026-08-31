@@ -21,6 +21,10 @@
 // because AssetBundle.GetAllAssetNames lowercases them while Mod.FindAssetNames matches
 // case-sensitively - an asset the manifest does not list cannot have its casing recovered.
 //
+// A .dfmod is untrusted input: it is a file a stranger hands us, and the manifest inside it is
+// the part of a mod an attacker fully controls. Every output path is therefore checked for
+// containment under outputRoot before a single byte is written (see IsInsideRoot).
+//
 // Place in Assets/Editor/
 
 using System;
@@ -90,14 +94,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                         }
                         if (!Claim(claimed, outPath, assetName, report))
                             continue;
-                        WriteFile(outPath, TexturePng.Encode(tex2d, false));
+                        if (!TryWriteFile(outPath, TexturePng.Encode(tex2d, false), outputRoot, assetName, report))
+                            continue;
                         report.extracted.Add(outPath);
                     }
                     else if (obj is TextAsset textAsset)
                     {
                         if (!Claim(claimed, outPath, assetName, report))
                             continue;
-                        WriteFile(outPath, textAsset.bytes);
+                        if (!TryWriteFile(outPath, textAsset.bytes, outputRoot, assetName, report))
+                            continue;
                         report.extracted.Add(outPath);
                     }
                     else
@@ -113,7 +119,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 ModManager._serializer.TrySerialize(modInfo, out fsData data);
                 string manifestOut = Path.Combine(outputRoot,
                     Path.GetFileNameWithoutExtension(dfmodPath) + ModManager.MODINFOEXTENSION);
-                WriteFile(manifestOut, System.Text.Encoding.UTF8.GetBytes(fsJsonPrinter.PrettyJson(data)));
+                // Same containment check; but a conversion with no manifest is not a mod, so
+                // unlike a single bad asset this one cannot be skipped past.
+                if (!TryWriteFile(manifestOut, System.Text.Encoding.UTF8.GetBytes(fsJsonPrinter.PrettyJson(data)),
+                        outputRoot, "the rewritten manifest", report))
+                    throw new InvalidDataException(
+                        "Refusing to write the rewritten manifest outside the extraction root: " + manifestOut);
                 report.manifestPath = manifestOut;
             }
             finally
@@ -197,10 +208,61 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             report.skippedByType[key] = n + 1;
         }
 
-        static void WriteFile(string path, byte[] bytes)
+        /// <summary>The single choke point for every byte this tool writes - no other code here
+        /// touches the filesystem - so containment enforced here cannot be bypassed by a later
+        /// code path. A rejected entry is skipped and counted rather than fatal: one hostile or
+        /// malformed path in a large mod must not cost the operator the other 99% of it.</summary>
+        static bool TryWriteFile(string path, byte[] bytes, string outputRoot, string sourceName,
+            ExtractReport report)
         {
+            if (!IsInsideRoot(path, outputRoot))
+            {
+                Count(report, "path-escape");
+                Debug.LogWarning($"[MobileModExtractor] refusing to write {sourceName}: '{path}' " +
+                    $"resolves outside the extraction root '{outputRoot}'. A .dfmod is untrusted " +
+                    "input, so this entry is skipped; the rest of the mod still converts.");
+                return false;
+            }
+
             Directory.CreateDirectory(Path.GetDirectoryName(path));
             File.WriteAllBytes(path, bytes);
+            return true;
+        }
+
+        /// <summary>True when candidate resolves to a location strictly inside root.
+        ///
+        /// The manifest and the bundle's own asset names are attacker-controlled, so a Files entry
+        /// of "../../../.ssh/authorized_keys" - or an absolute path, which Path.Combine would let
+        /// win outright and discard the root - would otherwise be an arbitrary file write.
+        ///
+        /// Both sides are resolved with GetFullPath first, so this is normalisation rather than
+        /// naive string matching: "sub/../ok.png" stays inside and is accepted, while ".." that
+        /// genuinely climbs out is not. The root is compared with a trailing separator so a
+        /// sibling that merely shares a name prefix ("&lt;root&gt;-evil") cannot pass. The
+        /// comparison is ordinal but case-insensitive, because APFS and HFS+ are case-insensitive
+        /// by default and a case-flipped prefix would otherwise slip past on macOS.</summary>
+        public static bool IsInsideRoot(string candidate, string root)
+        {
+            if (string.IsNullOrEmpty(candidate) || string.IsNullOrEmpty(root))
+                return false;
+
+            string fullCandidate, fullRoot;
+            try
+            {
+                fullCandidate = Path.GetFullPath(candidate);
+                fullRoot = Path.GetFullPath(root);
+            }
+            catch (Exception)
+            {
+                return false;   // malformed, too long, or illegal characters: never write there
+            }
+
+            if (fullRoot[fullRoot.Length - 1] != Path.DirectorySeparatorChar)
+                fullRoot += Path.DirectorySeparatorChar;
+
+            // Strictly inside: the root directory itself is not a valid destination for a file.
+            return fullCandidate.Length > fullRoot.Length
+                && fullCandidate.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase);
         }
     }
 
