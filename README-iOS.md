@@ -442,7 +442,11 @@ env DFU_MOD_IN="$HOME/Downloads/dream - sound.dfmod" DFU_MOD_OUT="$HOME/dev/dfu-
 `DFU_MOD_IN` is required; `DFU_MOD_OUT` defaults to `~/dev/dfu-mods` and
 `DFU_MOD_TARGETS` to `iOS`. `DFU_MOD_AUDIO_TIMEOUT` (default 10) and `DFU_MOD_TIMEOUT`
 (default 14400) are the watchdog's seconds-per-clip and seconds-per-run caps, and
-`DFU_MOD_SWEEP_MB` (default 256, `0` disables) is the memory-sweep budget described below. The rebuilt
+`DFU_MOD_SWEEP_MB` (default 256, `0` disables) is the memory-sweep budget described below.
+`DFU_MOD_CHUNK_COUNT` / `DFU_MOD_CHUNK_INDEX` (default 1 / 1, index is 1-based) convert a
+module in slices, `DFU_MOD_MIN_FREE_GB` (default 4) is the disk floor, and
+`DFU_MOD_KEEP_EXTRACTION=1` keeps the loose extracted files after a successful build - all
+covered under "Converting a module too big for the disk". The rebuilt
 bundle lands in `$DFU_MOD_OUT/iOS/`, ready to copy to the device.
 
 **No `-quit` and no `-nographics`**, and neither is an oversight.
@@ -461,6 +465,50 @@ and **2** the watchdog gave up.
 
 Extracted assets go to `Assets/Game/Mods/Converted/`, which is gitignored - never commit
 somebody else's mod.
+
+### Converting a module too big for the disk
+
+Three DREAM modules never converted on a 16GB/8GB-free machine, and RAM was never the
+problem: **Unity's import cache fills the disk** - `Library/Artifacts` reached 25GB while
+converting an 800MB module. The cache can only be deleted with Unity stopped, so a big
+module is converted in **slices, one Unity process each**, clearing the cache between.
+Each slice is a complete, valid mod of its own (`dream - mobs (2 of 6).dfmod`) with its own
+title and GUID; DFU loads them all, so a six-slice module is just six mods in the list.
+
+Copy this loop, set `MOD` and `N`, and run it from the project directory:
+
+```sh
+MOD="$HOME/Downloads/dream - mobs.dfmod"   # the module to convert
+N=6                                        # slices; more = less peak disk, more time
+PROJ=~/dev/daggerfall-unity
+UNITY=/Applications/Unity/Hub/Editor/6000.3.23f1/Unity.app/Contents/MacOS/Unity
+
+for i in $(seq 1 $N); do
+  echo "=== slice $i/$N ==="
+  rm -rf "$PROJ/Library/Artifacts" "$PROJ/Library/ArtifactDB"   # Unity must not be running
+  env DFU_MOD_IN="$MOD" DFU_MOD_OUT="$HOME/dev/dfu-mods" \
+      DFU_MOD_CHUNK_COUNT=$N DFU_MOD_CHUNK_INDEX=$i \
+    "$UNITY" -batchmode -projectPath "$PROJ" \
+    -executeMethod DaggerfallWorkshop.Game.Mobile.EditorTools.MobileModExtractor.ConvertFromEnv \
+    -logFile /tmp/convert-$i.log || { echo "slice $i failed"; break; }
+done
+```
+
+`DFU_MOD_CHUNK_INDEX` is **1-based**. Every slice must use the same `DFU_MOD_CHUNK_COUNT`, or
+the slices will not tile the module. Each slice deletes its own extraction folder once its
+bundle is built (`DFU_MOD_KEEP_EXTRACTION=1` keeps it), so loose files do not accumulate
+either; the `rm -rf` above is for the import cache, which the converter cannot touch while
+Unity is running.
+
+Before starting and again before each build, the converter checks free space and **stops with
+the word "disk" in the message** if it is under `DFU_MOD_MIN_FREE_GB` (default 4). That is
+there because running out mid-write does not look like a disk problem: Unity dies with
+`Failed to write compressed chunk to the archive 'Temp/unitystream.unity3d'! Error: 14`,
+which reads like a corrupt bundle. If you see that, you needed more slices.
+
+How many slices? Peak disk scales with the slice, not the module. `dream - mobs` (794MB)
+converts in 6 on a machine with ~15GB free. Start with roughly one slice per 150MB of module
+and add more if the floor check trips.
 
 Read the log. Every run ends with a summary line naming what was extracted, what was
 skipped and what was extracted-but-renamed; a skip means that asset is **absent from
