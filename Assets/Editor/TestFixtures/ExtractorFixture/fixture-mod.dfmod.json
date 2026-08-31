@@ -8,6 +8,7 @@
     "GUID": "0d2c4a68-9e1f-4b7a-8c35-6d0e2f4a6b8c",
     "Files": [
         "Assets/Editor/TestFixtures/ExtractorFixture/fixture_tex.png",
-        "Assets/Editor/TestFixtures/ExtractorFixture/fixture_data.json"
+        "Assets/Editor/TestFixtures/ExtractorFixture/fixture_data.json",
+        "Assets/Editor/TestFixtures/ExtractorFixture/fixture_tex.tga"
     ]
 }

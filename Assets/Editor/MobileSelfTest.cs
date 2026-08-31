@@ -1114,10 +1114,32 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // 3. Path tail and short names preserved.
             string tex = report.extracted.Find(p => p.EndsWith("fixture_tex.png"));
             string txt = report.extracted.Find(p => p.EndsWith("fixture_data.json"));
-            Check(tex != null && tex.Replace('\\', '/').Contains("/extractorfixture/"),
-                  "bundle-internal path tail preserved", tex);
+            // Mod.FindAssetNames accepts an asset whose directory ENDS WITH the requested one
+            // and compares with a case-sensitive CompareOrdinal, while callers pass literal
+            // capitalised paths ("Assets/Textures"). AssetBundle.GetAllAssetNames hands back
+            // everything lowercased, so the extraction has to recover the manifest's own casing
+            // - and keep the leading "Assets/" - or a converted mod silently loses loose-file
+            // injection while every other check here still passes.
+            Check(tex != null && tex.Replace('\\', '/').Contains(
+                      "/Assets/Editor/TestFixtures/ExtractorFixture/fixture_tex.png"),
+                  "manifest path casing and Assets/ prefix preserved", tex);
+            Check(!report.skippedByType.ContainsKey("unlisted-in-manifest"),
+                  "every bundle asset matched a manifest entry (casing recoverable)");
             Check(txt != null && File.ReadAllText(txt).Contains("\"value\":42"),
                   "textasset bytes preserved");
+
+            // fixture_tex.tga and fixture_tex.png collapse onto one output path once the texture
+            // extension is rewritten. Overwriting would lose an asset and list the survivor twice
+            // in the rebuilt manifest, so the clash must be reported instead. Both fixtures carry
+            // the same pixels, so which one wins does not change anything else in this test.
+            int collisions;
+            report.skippedByType.TryGetValue("collision", out collisions);
+            Check(collisions == 1, "colliding output path reported, not overwritten",
+                  "collision=" + collisions);
+            int rewritten;
+            report.skippedByType.TryGetValue("extension-rewritten", out rewritten);
+            Check(rewritten == 1, "non-png texture extension rewrite is reported",
+                  "extension-rewritten=" + rewritten);
 
             // 3b. THE CHECK THAT MATTERS for textures. Everything above passes on a blank
             // image: the name, the path, the size and the manifest are all still right when
