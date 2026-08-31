@@ -83,6 +83,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestModsSwitchOwnsBothPrefs();
             TestModBundleRoundTrip();
             TestModScriptSkipRule();
+            TestNormalReconstructRule();
             TestModExtractorRoundTrip();
             TestModExtractorPathContainment();
             TestModExtractorSurvivesBadPaths();
@@ -1087,6 +1088,63 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         }
 
         /// <summary>
+        /// Normal maps do not survive a naive extraction. A compressed normal map does not
+        /// store its blue channel at all: DXT5nm keeps x in alpha and y in green (RGB are
+        /// thrown away), BC5 keeps x and y in red and green. Writing those bytes straight
+        /// out yields a PNG that looks like a normal map to no one - the same family of
+        /// silent corruption as a blank texture, but harder to see. z has to be rebuilt from
+        /// x and y, which is possible because a tangent-space normal is a unit vector.
+        /// </summary>
+        static void TestNormalReconstructRule()
+        {
+            // Flat up-normal (0,0,1): x=y=0 -> encoded 128,128,255.
+            var flat = MobileModExtractor.ReconstructNormalPixel(new Color32(255, 128, 0, 128), true);
+            Check(flat.r == 128 && flat.g == 128 && flat.b >= 254, "DXTnm flat normal reconstructs (x from alpha)");
+            var flatBc5 = MobileModExtractor.ReconstructNormalPixel(new Color32(128, 128, 0, 255), false);
+            Check(flatBc5.r == 128 && flatBc5.g == 128 && flatBc5.b >= 254, "BC5 flat normal reconstructs (x from red)");
+            // Fully tilted +x: x=1, y=0 -> z=0. Zero is the MIDDLE of the encoding, not the
+            // bottom of it: every channel of a tangent-space normal map is stored as
+            // (n * 0.5 + 0.5), which is what Unity's UnpackNormal undoes, so a collapsed z
+            // encodes to 128 and not to 0.
+            var tilt = MobileModExtractor.ReconstructNormalPixel(new Color32(0, 128, 0, 255), true);
+            Check(tilt.r == 255 && tilt.b == 128, "tilted normal keeps x, z collapses to encoded zero",
+                  "r=" + tilt.r + " b=" + tilt.b);
+            // A vector that is not unit length must not produce NaN or wrap around: x=y=1
+            // gives 1-x*x-y*y = -1, and Mathf.Sqrt of a negative is NaN, which casts to a
+            // garbage byte. The max(0,..) clamp is what stops a corrupt source pixel from
+            // becoming a corrupt output pixel.
+            var over = MobileModExtractor.ReconstructNormalPixel(new Color32(255, 255, 0, 255), false);
+            Check(over.r == 255 && over.g == 255 && over.b == 128 && over.a == 255,
+                  "over-unit x,y clamps to z=0 instead of NaN", "b=" + over.b);
+            // Alpha is always opaque: the extracted png is a data texture, and a 0 alpha
+            // would let a later importer treat it as transparent.
+            Check(flat.a == 255 && flatBc5.a == 255 && tilt.a == 255, "reconstructed normal is opaque");
+
+            // Which textures get this treatment is decided by name alone - a bundle texture
+            // records nothing about the importer settings it was built with - so the naming
+            // rule is the whole of the classification and both the extractor and the converted
+            // -mod import policy read it from here. DFU appends "_" + the TextureMap enum name
+            // (TextureReplacement.GetName), and its own IsLinearTextureMap calls exactly
+            // Normal, Height and MetallicGloss linear: Emission and Mask are colour, and
+            // forcing those linear would regrade them as badly as leaving a normal in sRGB.
+            const string dfuName = "Assets/Textures/004_0-0";
+            Check(MobileModExtractor.IsNormalMapName(dfuName + "_Normal.png"), "DFU _Normal suffix is a normal map");
+            Check(MobileModExtractor.IsNormalMapName(dfuName + "_normal.PNG"), "suffix match ignores case");
+            Check(!MobileModExtractor.IsNormalMapName(dfuName + ".png"), "an albedo is not a normal map");
+            Check(!MobileModExtractor.IsNormalMapName("Assets/Textures/wallNormal.png"),
+                  "the underscore is required: 'wallNormal' is not a map suffix");
+            Check(!MobileModExtractor.IsNormalMapName(dfuName + "_Height.png"), "a height map is not a normal map");
+            Check(MobileModExtractor.IsLinearMapName(dfuName + "_Normal.png")
+                  && MobileModExtractor.IsLinearMapName(dfuName + "_Height.png")
+                  && MobileModExtractor.IsLinearMapName(dfuName + "_MetallicGloss.png"),
+                  "normal, height and metallic/gloss are linear (as in DFU's IsLinearTextureMap)");
+            Check(!MobileModExtractor.IsLinearMapName(dfuName + ".png")
+                  && !MobileModExtractor.IsLinearMapName(dfuName + "_Emission.png")
+                  && !MobileModExtractor.IsLinearMapName(dfuName + "_Mask.png"),
+                  "albedo, emission and mask stay sRGB colour");
+        }
+
+        /// <summary>
         /// The reverse direction of the mod pipeline. Third-party mods (DREAM-class) ship
         /// only as desktop AssetBundles, so iOS support means unpacking one back into loose
         /// project assets and repacking it. This packs a synthetic desktop .dfmod, extracts
@@ -1110,12 +1168,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // 2. Extract it back.
             var report = MobileModExtractor.Extract(built[0], extractRoot);
             Check(File.Exists(report.manifestPath), "extractor writes a manifest", report.manifestPath);
-            Check(report.extracted.Count == 2, "extractor writes texture + textasset",
+            Check(report.extracted.Count == 3, "extractor writes both textures + textasset",
                   "extracted=" + report.extracted.Count);
 
             // 3. Path tail and short names preserved.
             string tex = report.extracted.Find(p => p.EndsWith("fixture_tex.png"));
             string txt = report.extracted.Find(p => p.EndsWith("fixture_data.json"));
+            string nrm = report.extracted.Find(p => p.EndsWith("fixture_wall_Normal.png"));
             // Mod.FindAssetNames accepts an asset whose directory ENDS WITH the requested one
             // and compares with a case-sensitive CompareOrdinal, while callers pass literal
             // capitalised paths ("Assets/Textures"). AssetBundle.GetAllAssetNames hands back
@@ -1184,6 +1243,85 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "worst channel delta=" + worst + " at " + worstAt);
             UnityEngine.Object.DestroyImmediate(decoded);
 
+            // 3c. THE SAME CHECK FOR NORMAL MAPS, where "the bytes came out" is even further
+            // from "the asset survived". Unity does not store a normal map as an image of one:
+            // it throws the blue channel away and swizzles what is left into the two channels
+            // its block format codes best, so a byte-for-byte extraction produces a white image
+            // (DXT5nm) or a blue-less one (BC5) that re-imports as an ordinary colour texture
+            // and lights nothing. The fixture is generated from real unit normals, so a correct
+            // extraction reproduces all three channels of the source pattern; a wrong one misses
+            // blue by ~100. Which swizzle Unity actually used is recorded rather than assumed.
+            int unswizzled = 0;
+            string layout = "none";
+            foreach (var kv in report.notesByType)
+                if (kv.Key.StartsWith("normal-")) { layout = kv.Key; unswizzled += kv.Value; }
+            // The layout is named in the check itself rather than asserted: which of the two
+            // swizzles Unity picks is a build-target and Unity-version decision, and pinning it
+            // would make this a test of Unity. What must hold is that exactly one normal map was
+            // recognised and classified - the pixel comparison below is what proves the branch
+            // chosen was the right one, since the wrong one misses blue by about 100.
+            Check(unswizzled == 1, "normal map recognised, layout recorded: " + layout,
+                  "notes=" + string.Join(",", new List<string>(report.notesByType.Keys).ToArray()));
+
+            var dn = new Texture2D(2, 2);
+            bool nLoaded = nrm != null && dn.LoadImage(File.ReadAllBytes(nrm));
+            Check(nLoaded && dn.width == 64 && dn.height == 64, "extracted normal png decodes at 64x64",
+                  nLoaded ? dn.width + "x" + dn.height : "did not decode");
+            Color32[] npx = nLoaded ? dn.GetPixels32() : new Color32[0];
+            int nWorst = 0;
+            string nWorstAt = "none";
+            for (int i = 0; nLoaded && i < samples.GetLength(0); i++)
+            {
+                int x = samples[i, 0], y = samples[i, 1];
+                Color32 got = npx[(63 - y) * 64 + x];       // GetPixels32 is bottom-up
+                // The fixture's generator: a unit normal fanning out across the square.
+                float fx = ((x / 63f) * 2f - 1f) * 0.5f;
+                float fy = ((y / 63f) * 2f - 1f) * 0.5f;
+                float fz = Mathf.Sqrt(Mathf.Max(0f, 1f - fx * fx - fy * fy));
+                int wr = Mathf.RoundToInt((fx * 0.5f + 0.5f) * 255f);
+                int wg = Mathf.RoundToInt((fy * 0.5f + 0.5f) * 255f);
+                int wb = Mathf.RoundToInt((fz * 0.5f + 0.5f) * 255f);
+                int d = Mathf.Max(Mathf.Abs(got.r - wr),
+                        Mathf.Max(Mathf.Abs(got.g - wg), Mathf.Abs(got.b - wb)));
+                if (d > nWorst) { nWorst = d; nWorstAt = string.Format("({0},{1}) got {2},{3},{4} want {5},{6},{7}",
+                    x, y, got.r, got.g, got.b, wr, wg, wb); }
+            }
+            Check(nLoaded && nWorst <= 16, "extracted normal map reconstructs x, y AND z",
+                  "worst channel delta=" + nWorst + " at " + nWorstAt);
+            UnityEngine.Object.DestroyImmediate(dn);
+
+            // 3d. The import policy that makes a multi-gigabyte pack fit on the device. The
+            // extraction lands under Assets/Game/Mods/Converted/, which MobileConvertedModImporter
+            // owns, so the settings below are the postprocessor's doing and not Unity's defaults.
+            // A normal map imported as a colour texture is silently wrong in exactly the way this
+            // whole test exists to catch, and npotScale is the one asserted setting Unity does NOT
+            // default to - it pins that the postprocessor actually ran on the colour texture too.
+            var nrmImp = AssetImporter.GetAtPath(nrm) as TextureImporter;
+            Check(nrmImp != null && nrmImp.textureType == TextureImporterType.NormalMap,
+                  "extracted *_Normal re-imports as a normal map",
+                  nrmImp == null ? "no importer" : nrmImp.textureType.ToString());
+            var texImp = AssetImporter.GetAtPath(tex) as TextureImporter;
+            Check(texImp != null && texImp.textureType == TextureImporterType.Default,
+                  "extracted colour texture stays a colour texture",
+                  texImp == null ? "no importer" : texImp.textureType.ToString());
+            Check(texImp != null && !texImp.isReadable,
+                  "converted textures keep no CPU-side copy (isReadable false)");
+            Check(texImp != null && texImp.textureCompression == TextureImporterCompression.Compressed
+                  && texImp.mipmapEnabled,
+                  "converted textures are compressed and mipped");
+            Check(texImp != null && texImp.npotScale == TextureImporterNPOTScale.None,
+                  "converted textures keep their exact dimensions (DFU uv metadata depends on it)",
+                  texImp == null ? "no importer" : texImp.npotScale.ToString());
+            // The extraction root is deleted at the end of this test, so its .meta files never
+            // survive to be inspected by hand. Record what the policy actually produced.
+            if (texImp != null && nrmImp != null)
+                Debug.Log(string.Format("[MobileSelfTest] converted-mod import policy produced: " +
+                    "colour type={0} readable={1} compression={2} mips={3} npot={4} sRGB={5}; " +
+                    "normal type={6} sRGB={7}",
+                    texImp.textureType, texImp.isReadable, texImp.textureCompression,
+                    texImp.mipmapEnabled, texImp.npotScale, texImp.sRGBTexture,
+                    nrmImp.textureType, nrmImp.sRGBTexture));
+
             // 4. Rewritten manifest points at extracted files, keeps identity.
             ModInfo info = null;
             ModManager._serializer.TryDeserialize(
@@ -1191,7 +1329,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(info != null && info.ModTitle == "Extractor Fixture"
                   && info.GUID == "0d2c4a68-9e1f-4b7a-8c35-6d0e2f4a6b8c",
                   "manifest identity preserved");
-            Check(info != null && info.Files.Count == 2
+            Check(info != null && info.Files.Count == 3
                   && info.Files.TrueForAll(f => File.Exists(f)),
                   "manifest Files rewritten to extracted paths");
 

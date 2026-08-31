@@ -9,6 +9,7 @@
     "Files": [
         "Assets/Editor/TestFixtures/ExtractorFixture/fixture_tex.png",
         "Assets/Editor/TestFixtures/ExtractorFixture/fixture_data.json",
-        "Assets/Editor/TestFixtures/ExtractorFixture/fixture_tex.tga"
+        "Assets/Editor/TestFixtures/ExtractorFixture/fixture_tex.tga",
+        "Assets/Editor/TestFixtures/ExtractorFixture/fixture_wall_Normal.png"
     ]
 }

@@ -21,6 +21,16 @@
 // because AssetBundle.GetAllAssetNames lowercases them while Mod.FindAssetNames matches
 // case-sensitively - an asset the manifest does not list cannot have its casing recovered.
 //
+// Textures are not all colour. A compressed normal map has had its blue channel thrown away
+// and the remaining two swizzled into whichever channels its block format codes best, so
+// extracting one byte-for-byte produces an image that is not a normal map at all; DFU's
+// *_Normal / *_Height / *_MetallicGloss suffixes are what tells them apart, and the extractor
+// rebuilds z and keeps them out of sRGB (see NormalUnswizzlerFor).
+//
+// MobileConvertedModImporter at the bottom of this file decides how the extraction is then
+// imported. That policy - compressed, not readable, mipped, normal maps typed - is what makes
+// a multi-gigabyte texture pack fit in an iPad's memory, so it is not cosmetic.
+//
 // A .dfmod is untrusted input: it is a file a stranger hands us, and the manifest inside it is
 // the part of a mod an attacker fully controls. Every output path is therefore checked for
 // containment under outputRoot before a single byte is written (see IsInsideRoot).
@@ -102,7 +112,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                         }
                         if (!Claim(claimed, outPath, assetName, report))
                             continue;
-                        if (!TryWriteFile(outPath, TexturePng.Encode(tex2d, false), outputRoot, assetName, report))
+                        // Colour maps are sRGB; normal, height and metallic/gloss maps carry
+                        // numbers rather than colours and must round-trip untouched by gamma
+                        // (DFU makes the same split in TextureReplacement.IsLinearTextureMap).
+                        // A compressed normal map additionally arrives swizzled with no blue
+                        // channel at all, so it needs rebuilding pixel by pixel.
+                        Func<Color32, Color32> unswizzle = IsNormalMapName(assetName)
+                            ? NormalUnswizzlerFor(tex2d.format, report) : null;
+                        if (!TryWriteFile(outPath,
+                                TexturePng.Encode(tex2d, IsLinearMapName(assetName), unswizzle),
+                                outputRoot, assetName, report))
                             continue;
                         report.extracted.Add(outPath);
                     }
@@ -219,6 +238,84 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             return false;
         }
 
+        /// <summary>True when the name carries DFU's normal-map suffix. The name is all there is
+        /// to go on: TextureReplacement.GetName writes "_" + the TextureMap enum name onto every
+        /// non-albedo map ("004_0-0_Normal.png"), while a texture inside a bundle carries no
+        /// record of the importer settings it was built with.</summary>
+        public static bool IsNormalMapName(string assetName)
+        {
+            return HasMapSuffix(assetName, "Normal");
+        }
+
+        /// <summary>True when the name says the texture holds numbers rather than colours - the
+        /// same three maps DFU itself treats as linear in TextureReplacement.IsLinearTextureMap.
+        /// Emission and Mask are deliberately absent: those are colour, and forcing them linear
+        /// would regrade them exactly as badly as leaving a normal map in sRGB does.</summary>
+        public static bool IsLinearMapName(string assetName)
+        {
+            return HasMapSuffix(assetName, "Normal")
+                || HasMapSuffix(assetName, "Height")
+                || HasMapSuffix(assetName, "MetallicGloss");
+        }
+
+        static bool HasMapSuffix(string assetName, string map)
+        {
+            return Path.GetFileNameWithoutExtension(assetName)
+                .EndsWith("_" + map, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Picks the per-pixel fixup a normal map needs to become an ordinary RGB
+        /// normal map again, or null when it already is one.
+        ///
+        /// A compressed normal map is not an image of a normal map. Unity drops z at import
+        /// time - it is recoverable, so spending bits on it is waste - and stores what is left
+        /// in whichever two channels its block format codes best: DXT5nm puts y in green and x
+        /// in ALPHA (rgb are left as 1s), BC5 is a two-channel format holding x and y in red
+        /// and green with nothing in blue or alpha. Written straight to a .png either one is
+        /// garbage: DXT5nm reads as a white image, BC5 as a flat blue-less one, and both
+        /// re-import as ordinary colour textures that light nothing correctly. Rebuilding z
+        /// with ReconstructNormalPixel restores the standard encoding every shader expects.
+        ///
+        /// The decision is made on the format because that is where the swizzle actually lives;
+        /// an uncompressed or BC7 normal map already holds x,y,z in r,g,b and is passed through
+        /// unchanged. All three outcomes are counted so a real conversion can be checked rather
+        /// than trusted.</summary>
+        static Func<Color32, Color32> NormalUnswizzlerFor(TextureFormat format, ExtractReport report)
+        {
+            switch (format)
+            {
+                case TextureFormat.DXT5:
+                case TextureFormat.DXT5Crunched:
+                    Noted(report, "normal-unswizzled-dxt5nm");
+                    return c => ReconstructNormalPixel(c, true);
+                case TextureFormat.BC5:
+                    Noted(report, "normal-unswizzled-bc5");
+                    return c => ReconstructNormalPixel(c, false);
+                default:
+                    Noted(report, "normal-rgb-kept-as-is");
+                    return null;
+            }
+        }
+
+        /// <summary>Rebuilds one standard tangent-space normal pixel from a swizzled one.
+        /// x comes from alpha for DXT5nm and from red for BC5; y is always green. Both are
+        /// decoded from [0,255] to [-1,1], z is recovered as sqrt(1 - x^2 - y^2) - which is
+        /// what makes dropping it lossless-in-principle, since a tangent-space normal is a
+        /// unit vector with z >= 0 - and all three are re-encoded as n * 0.5 + 0.5, the
+        /// mapping Unity's UnpackNormal undoes. So a collapsed z encodes to 128, not to 0.
+        /// The max(0, ...) matters: block compression error alone can push x^2 + y^2 just past
+        /// 1, and Mathf.Sqrt of a negative is NaN, which casts to an arbitrary byte.</summary>
+        public static Color32 ReconstructNormalPixel(Color32 swizzled, bool xInAlpha)
+        {
+            float x = ((xInAlpha ? swizzled.a : swizzled.r) / 255f) * 2f - 1f;
+            float y = (swizzled.g / 255f) * 2f - 1f;
+            float z = Mathf.Sqrt(Mathf.Max(0f, 1f - x * x - y * y));
+            return new Color32(
+                (byte)Mathf.RoundToInt((x * 0.5f + 0.5f) * 255f),
+                (byte)Mathf.RoundToInt((y * 0.5f + 0.5f) * 255f),
+                (byte)Mathf.RoundToInt((z * 0.5f + 0.5f) * 255f), 255);
+        }
+
         /// <summary>The asset did not make it into the extraction.</summary>
         static void Skipped(ExtractReport report, string key) { Bump(report.skippedByType, key); }
 
@@ -310,11 +407,22 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
     /// format (DXT included), then ReadPixels brings it back to the CPU.</summary>
     static class TexturePng
     {
-        public static byte[] Encode(Texture2D src, bool linear)
+        /// <param name="linear">The texture holds numbers, not colours (normal, height,
+        /// metallic/gloss). The project renders in linear space, so an sRGB round trip would
+        /// silently regrade every byte of a data map.</param>
+        /// <param name="perPixel">Optional fixup applied to the decoded RGBA32 pixels before
+        /// they are encoded - how a swizzled normal map gets its blue channel back.</param>
+        public static byte[] Encode(Texture2D src, bool linear, Func<Color32, Color32> perPixel = null)
         {
             if (src.isReadable)
             {
-                try { return src.EncodeToPNG(); }
+                try
+                {
+                    if (perPixel == null)
+                        return src.EncodeToPNG();
+                    return EncodePixels(Transform(src.GetPixels32(), perPixel),
+                                        src.width, src.height, linear);
+                }
                 catch (Exception) { /* fall through to GPU path */ }
             }
             // Graphics.Blit against the null device is a silent no-op: ReadPixels then returns
@@ -338,6 +446,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 RenderTexture.active = rt;
                 var tmp = new Texture2D(src.width, src.height, TextureFormat.RGBA32, false, linear);
                 tmp.ReadPixels(new Rect(0, 0, src.width, src.height), 0, 0);
+                if (perPixel != null)
+                    tmp.SetPixels32(Transform(tmp.GetPixels32(), perPixel));
                 tmp.Apply();
                 byte[] png = tmp.EncodeToPNG();
                 UnityEngine.Object.DestroyImmediate(tmp);
@@ -348,6 +458,89 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 RenderTexture.active = prev;
                 RenderTexture.ReleaseTemporary(rt);
             }
+        }
+
+        static Color32[] Transform(Color32[] pixels, Func<Color32, Color32> perPixel)
+        {
+            for (int i = 0; i < pixels.Length; i++)
+                pixels[i] = perPixel(pixels[i]);
+            return pixels;
+        }
+
+        static byte[] EncodePixels(Color32[] pixels, int width, int height, bool linear)
+        {
+            var tmp = new Texture2D(width, height, TextureFormat.RGBA32, false, linear);
+            try
+            {
+                tmp.SetPixels32(pixels);
+                tmp.Apply();
+                return tmp.EncodeToPNG();
+            }
+            finally { UnityEngine.Object.DestroyImmediate(tmp); }
+        }
+    }
+
+    /// <summary>Import policy for CONVERTED mods, and the reason a 1.7GB texture pack can be
+    /// opened on an 8GB iPad at all. These are the opposite trade-offs from the pilot content's:
+    /// there the assets are small and wanted on the CPU, here every default that keeps a second
+    /// copy of a texture around is a copy the device cannot afford.
+    ///
+    /// Compressed rather than uncompressed (ASTC on iOS) is roughly a 4-8x saving on the largest
+    /// thing in the build; isReadable false drops the CPU-side mirror of every texture, which is
+    /// pure waste for content only the GPU ever samples and would otherwise double the cost;
+    /// mipmaps stay on because world textures are minified constantly and the sampling cost of
+    /// not having them outweighs their third; npotScale None keeps exact dimensions, since DFU's
+    /// XML/uv metadata is written against the authored size and rescaling silently misaligns it.
+    /// Normal maps are typed from the DFU *_Normal suffix so Unity compresses them as normal maps
+    /// and shaders unpack them correctly; the other two linear maps are marked non-sRGB for the
+    /// same reason the extractor writes them linear. Audio: songs stream, effects sit compressed
+    /// in memory - a streamed sound effect would stutter, an in-memory song is megabytes resident.
+    ///
+    /// Scoped to the extraction root, so nothing else in the project is touched.</summary>
+    class MobileConvertedModImporter : AssetPostprocessor
+    {
+        const string root = "Assets/Game/Mods/Converted/";
+
+        // These settings are applied at import time and nowhere else, so a policy change only
+        // reaches assets already on disk if this number moves. Note that it invalidates the
+        // import cache for every texture and audio clip in the PROJECT, not only the converted
+        // ones - the scope check below runs per import, long after the version is compared - so
+        // bumping it costs a full re-import. Change it when the policy changes, not otherwise.
+        public override uint GetVersion() { return 1; }
+
+        static bool InScope(string assetPath)
+        {
+            return assetPath.Replace('\\', '/').StartsWith(root, StringComparison.Ordinal);
+        }
+
+        void OnPreprocessTexture()
+        {
+            if (!InScope(assetPath)) return;
+            var importer = (TextureImporter)assetImporter;
+            importer.npotScale = TextureImporterNPOTScale.None;   // exact sizes: DFU XML/uv metadata depends on them
+            importer.isReadable = false;                          // no CPU copy - memory matters here
+            importer.mipmapEnabled = true;
+            importer.textureCompression = TextureImporterCompression.Compressed;
+            // Same naming rule the extraction itself used, so what was written linear is read
+            // back linear. NormalMap implies linear, hence the else.
+            if (MobileModExtractor.IsNormalMapName(assetPath))
+                importer.textureType = TextureImporterType.NormalMap;
+            else if (MobileModExtractor.IsLinearMapName(assetPath))
+                importer.sRGBTexture = false;                     // data, not colour
+        }
+
+        void OnPreprocessAudio()
+        {
+            if (!InScope(assetPath)) return;
+            var importer = (AudioImporter)assetImporter;
+            var settings = importer.defaultSampleSettings;
+            settings.compressionFormat = AudioCompressionFormat.Vorbis;
+            settings.quality = 0.7f;
+            long size = new FileInfo(assetPath).Length;
+            settings.loadType = size > 2 * 1024 * 1024
+                ? AudioClipLoadType.Streaming            // songs
+                : AudioClipLoadType.CompressedInMemory;  // sound effects
+            importer.defaultSampleSettings = settings;
         }
     }
 }
