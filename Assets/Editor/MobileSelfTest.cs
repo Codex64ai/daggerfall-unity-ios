@@ -57,6 +57,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestKeyboardForcesCursorOff();
             TestInputModeResolution();
             TestSwingModeDecision();
+            TestClassicDrawerRules();
             TestPointerKeepsCursorOverKeyboard();
             TestPointerDeltaScale();
             TestPointerLockDecision();
@@ -537,6 +538,41 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "tap-to-attack on: touch runs click mode");
             Check(MobileInput.ResolveSwingMode(0, true, true, true, true) == 0,
                   "window open -> launcher value regardless of switches");
+        }
+
+        /// <summary>
+        /// Classic docked mode hides the MENU toggle and puts the travel map in its slot.
+        /// TWO rules have to agree for that to work, and either one alone breaks the very
+        /// button the change exists to expose: the drawer must hold its panel open in
+        /// classic mode (MAP lives inside that panel, and a button in a deactivated
+        /// container is dead however visible the layout thinks it is), and MenuToggle's
+        /// never-hide exemption must lift there (it exists so the drawer is always
+        /// reachable - pointless once the drawer never closes).
+        /// </summary>
+        static void TestClassicDrawerRules()
+        {
+            Check(!MobileButtonDrawer.PanelShown(false, false, false),
+                  "fullscreen: a closed drawer stays closed");
+            Check(MobileButtonDrawer.PanelShown(true, false, false),
+                  "fullscreen: MENU opens the drawer");
+            Check(MobileButtonDrawer.PanelShown(false, true, false),
+                  "the layout editor forces the drawer open so its icons can be dragged");
+            // The closed case is the one that matters: closeOnSelection and the auto-close
+            // timer both drive open back to false, and in classic mode neither may take
+            // the travel map off the screen.
+            Check(MobileButtonDrawer.PanelShown(false, false, true),
+                  "classic: a closed drawer still shows, so MAP survives a selection and the auto-close timer");
+            Check(MobileButtonDrawer.PanelShown(true, false, true)
+                  && MobileButtonDrawer.PanelShown(false, true, true),
+                  "classic: open or forced open, the panel shows either way");
+
+            Check(MobileHudLayout.ExemptFromHiding("MenuToggle", false),
+                  "fullscreen: MENU can never hide - it is the only way into the drawer");
+            Check(!MobileHudLayout.ExemptFromHiding("MenuToggle", true),
+                  "classic: MENU may hide, the drawer it opens is already open");
+            Check(!MobileHudLayout.ExemptFromHiding("Map", false)
+                  && !MobileHudLayout.ExemptFromHiding("Map", true),
+                  "no element but MENU is ever exempt from hiding");
         }
 
         /// <summary>A queued click must produce exactly one Down frame and one Up frame.</summary>

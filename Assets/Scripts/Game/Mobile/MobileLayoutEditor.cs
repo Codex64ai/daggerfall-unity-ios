@@ -11,8 +11,9 @@
 //   MobileHudLayout's override store), so a layout arranged on an iPad still lands
 //   sensibly on an iPhone.
 //
-//   MENU and TUNE are deliberately not hideable: hiding them would lock the player out
-//   of the editor itself with no way back.
+//   MENU is deliberately not hideable in fullscreen mode: hiding it would lock the
+//   player out of the drawer with no way back. In classic docked mode the drawer stands
+//   permanently open, so that exemption lifts (MobileHudLayout.ExemptFromHiding).
 //
 
 using System.Collections.Generic;
@@ -29,9 +30,10 @@ namespace DaggerfallWorkshop.Game.Mobile
         public Canvas canvas;
         public GameObject gameplayLayer;
 
-        // MenuToggle is the way back into the drawer; hiding it would strand the player.
+        // What may never be hidden lives in MobileHudLayout.ExemptFromHiding - one rule,
+        // so the editor and the layout cannot disagree. In fullscreen mode that is
+        // MenuToggle, the way back into the drawer; in classic mode nothing is exempt.
         // (Settings used to have a gear here too; it now lives in the pause menu.)
-        static readonly HashSet<string> neverHide = new HashSet<string> { "MenuToggle" };
 
         RectTransform overlay;
         RectTransform highlight;
@@ -312,7 +314,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         void ToggleHidden()
         {
             string name = SelectedName();
-            if (name == null || neverHide.Contains(name))
+            if (name == null || MobileHudLayout.ExemptFromHiding(name, MobileClassicHud.DockedBarVisible))
                 return;
 
             // Flip the EFFECTIVE state, not the raw pref: classic-bar duplicates default

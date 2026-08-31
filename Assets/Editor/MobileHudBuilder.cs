@@ -357,8 +357,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                      classicMarginIn: new Vector2(2.64f, 0.62f), classicWidthIn: 0.50f),
                 Elem("Combat",    combatRect,   0.55f, 0f, new Vector2(5.95f, 0.10f),
                      classicHidden: true),
+                // Classic mode HIDES the drawer toggle and gives its slot to MAP (below).
+                // Everything else in the drawer is a classic-bar duplicate and already
+                // hidden there, so MENU opened a one-icon drawer: a tap of ceremony in
+                // front of the only tap the player wanted. The drawer holds itself open in
+                // classic mode (MobileButtonDrawer.PanelShown), so nothing is stranded -
+                // and a player who un-hides MENU gets MAP's old top-right slot rather than
+                // a button stacked on top of the map.
                 Elem("MenuToggle", menuToggleRect, 0.50f, 0f, new Vector2(2.60f, 0.10f),
-                     classicMarginIn: new Vector2(3.27f, 0.00f), classicWidthIn: 0.40f),
+                     classicMarginIn: new Vector2(0.26f, 3.61f), classicWidthIn: 0.40f,
+                     classicHidden: true),
                 // One element per icon so each is draggable, hideable and scalable on its
                 // own. Defaults reproduce the former grid rows exactly: the bottom-centre
                 // action row steps 0.57in (0.50 cell + 0.07 gap) leftward from WEAPON, the
@@ -385,8 +393,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                      classicHidden: true),
                 Elem("Status",    secondaryRects["STATUS"],    0.48f, 0f, new Vector2(0.20f, 3.34f),
                      classicHidden: true),
+                // In classic mode this takes MENU's old slot by the right thumb - same
+                // anchor, pivot and 0.40in size, so it lands exactly where MENU stood. It
+                // is the one drawer button the bar does not duplicate, which is why the
+                // travel map is the thing MENU was being tapped for.
                 Elem("Map",       secondaryRects["MAP"],       0.48f, 0f, new Vector2(0.20f, 3.87f),
-                     classicMarginIn: new Vector2(0.26f, 3.61f), classicWidthIn: 0.40f),
+                     classicMarginIn: new Vector2(3.27f, 0.00f), classicWidthIn: 0.40f),
                 // Sits directly above the travel map: two map buttons together is the
                 // discoverable arrangement. Hidden in classic mode, where the bar's own
                 // map icon already opens the automap indoors.

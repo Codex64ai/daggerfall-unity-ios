@@ -12,6 +12,13 @@
 //   The drawer closes itself after a selection, because every button inside it opens a
 //   classic window anyway, which hides the whole gameplay HUD.
 //
+//   In CLASSIC DOCKED mode the drawer instead stands permanently open, and MENU hides.
+//   The bar already carries every button in here except the travel map, so MENU opened a
+//   drawer with exactly one live icon in it - one tap of ceremony before the only tap the
+//   player wanted. MAP now sits in MENU's old slot; holding the panel open is what keeps
+//   that icon alive, since a button inside a deactivated container is a dead button no
+//   matter what the layout says about it.
+//
 
 using UnityEngine;
 using UnityEngine.UI;
@@ -60,9 +67,23 @@ namespace DaggerfallWorkshop.Game.Mobile
             Apply();
         }
 
+        /// <summary>
+        /// Should the panel be showing? Pure static so the self test can pin it: two
+        /// separate rules have to agree for the classic-mode MAP button to work, and this
+        /// is one of them (MobileHudLayout.ExemptFromHiding is the other).
+        /// </summary>
+        public static bool PanelShown(bool open, bool forceOpen, bool classicDocked)
+        {
+            return open || forceOpen || classicDocked;
+        }
+
         void Update()
         {
-            if (forceOpen && panel != null && !panel.activeSelf)
+            // Re-apply whenever something outside Toggle() changed the answer: the layout
+            // editor forcing the drawer open, or the classic bar being switched on or off
+            // in DFU's settings mid-session.
+            if (panel != null &&
+                panel.activeSelf != PanelShown(open, forceOpen, MobileClassicHud.DockedBarVisible))
                 Apply();
 
             if (!open || forceOpen || autoCloseSeconds <= 0f)
@@ -103,7 +124,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         void Apply()
         {
-            bool shown = open || forceOpen;
+            bool shown = PanelShown(open, forceOpen, MobileClassicHud.DockedBarVisible);
 
             if (panel != null && panel.activeSelf != shown)
                 panel.SetActive(shown);

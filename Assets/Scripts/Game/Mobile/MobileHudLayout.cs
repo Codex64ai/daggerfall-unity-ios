@@ -168,6 +168,19 @@ namespace DaggerfallWorkshop.Game.Mobile
             return MobileClassicHud.DockedBarVisible && e.classicHidden;
         }
 
+        /// <summary>
+        /// Elements that may never be hidden. MenuToggle is the only way into the drawer,
+        /// so hiding it in fullscreen mode would strand every button inside it. Classic
+        /// docked mode is the exception: there the drawer stands permanently open
+        /// (MobileButtonDrawer.PanelShown) and the bar duplicates all of its buttons but
+        /// the travel map, which takes MENU's slot - so MENU opens nothing and may hide
+        /// like any other duplicate. Pure static so the self test can pin it.
+        /// </summary>
+        public static bool ExemptFromHiding(string name, bool classicDocked)
+        {
+            return name == "MenuToggle" && !classicDocked;
+        }
+
         /// <summary>Name-based lookup for the layout editor.</summary>
         public bool EffectiveHiddenByName(string name)
         {
@@ -273,11 +286,12 @@ namespace DaggerfallWorkshop.Game.Mobile
 
                 if (!suppressHiding)
                 {
-                    // MenuToggle is exempt from hiding - it is the way back into the
-                    // drawer. Everything else follows IsEffectivelyHidden: hidden by
+                    // MenuToggle is exempt from hiding in fullscreen mode - it is the way
+                    // back into the drawer - but not in classic mode, where the drawer is
+                    // already open. Everything else follows EffectiveHidden: hidden by
                     // default when the classic bar duplicates it, but the player's own
                     // choice in this profile always wins.
-                    bool hidden = EffectiveHidden(e) && e.name != "MenuToggle";
+                    bool hidden = EffectiveHidden(e) && !ExemptFromHiding(e.name, classic);
                     e.target.gameObject.SetActive(!hidden);
                 }
 
