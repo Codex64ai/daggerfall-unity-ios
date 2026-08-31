@@ -18,6 +18,7 @@
 
 using DaggerfallWorkshop.Game.Mobile;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
+using FullSerializer;
 using DaggerfallWorkshop.Utility.AssetInjection;
 using System.IO;
 using System.Text;
@@ -78,6 +79,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestModsSwitchOwnsBothPrefs();
             TestModBundleRoundTrip();
             TestModScriptSkipRule();
+            TestModExtractorRoundTrip();
             TestRoadDirectionReciprocity();
             TestRoadRouting();
             TestWaypointOvershoot();
@@ -1076,6 +1078,69 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(!Mod.ShouldSkipScriptCompilation(2, true), "script mod, JIT: compiles");
             Check(Mod.ShouldSkipScriptCompilation(2, false), "script mod, no JIT: skips");
             Check(Mod.RuntimeScriptsSupported, "editor/desktop supports mod scripts");
+        }
+
+        /// <summary>
+        /// The reverse direction of the mod pipeline. Third-party mods (DREAM-class) ship
+        /// only as desktop AssetBundles, so iOS support means unpacking one back into loose
+        /// project assets and repacking it. This packs a synthetic desktop .dfmod, extracts
+        /// it, and rebuilds - what survives the full circle is what a converted mod gets.
+        /// </summary>
+        static void TestModExtractorRoundTrip()
+        {
+            const string fixtureManifest = "Assets/Editor/TestFixtures/ExtractorFixture/fixture-mod.dfmod.json";
+            const string bundleDir = "Temp/MobileModExtractorTest";
+            const string extractRoot = "Assets/Game/Mods/Converted/__test__";
+            if (Directory.Exists(bundleDir)) Directory.Delete(bundleDir, true);
+            if (Directory.Exists(extractRoot)) { Directory.Delete(extractRoot, true); File.Delete(extractRoot + ".meta"); AssetDatabase.Refresh(); }
+
+            // 1. Make a "desktop mod" the way the outside world does: build for StandaloneOSX.
+            string[] built = MobileModBuilder.BuildMod(fixtureManifest, bundleDir,
+                new[] { BuildTarget.StandaloneOSX });
+
+            // 2. Extract it back.
+            var report = MobileModExtractor.Extract(built[0], extractRoot);
+            Check(File.Exists(report.manifestPath), "extractor writes a manifest", report.manifestPath);
+            Check(report.extracted.Count == 2, "extractor writes texture + textasset",
+                  "extracted=" + report.extracted.Count);
+
+            // 3. Path tail and short names preserved.
+            string tex = report.extracted.Find(p => p.EndsWith("fixture_tex.png"));
+            string txt = report.extracted.Find(p => p.EndsWith("fixture_data.json"));
+            Check(tex != null && tex.Replace('\\', '/').Contains("/extractorfixture/"),
+                  "bundle-internal path tail preserved", tex);
+            Check(txt != null && File.ReadAllText(txt).Contains("\"value\":42"),
+                  "textasset bytes preserved");
+
+            // 4. Rewritten manifest points at extracted files, keeps identity.
+            ModInfo info = null;
+            ModManager._serializer.TryDeserialize(
+                fsJsonParser.Parse(File.ReadAllText(report.manifestPath)), ref info);
+            Check(info != null && info.ModTitle == "Extractor Fixture"
+                  && info.GUID == "0d2c4a68-9e1f-4b7a-8c35-6d0e2f4a6b8c",
+                  "manifest identity preserved");
+            Check(info != null && info.Files.Count == 2
+                  && info.Files.TrueForAll(f => File.Exists(f)),
+                  "manifest Files rewritten to extracted paths");
+
+            // 5. Full circle: rebuild from the extraction, short-name lookup still answers.
+            string[] rebuilt = MobileModBuilder.BuildMod(report.manifestPath, bundleDir,
+                new[] { BuildTarget.StandaloneOSX });
+            AssetBundle ab = AssetBundle.LoadFromFile(rebuilt[0]);
+            Check(ab != null && ab.Contains("fixture_tex"), "rebuilt bundle answers to short name");
+            if (ab != null)
+            {
+                var t = ab.LoadAsset<Texture2D>("fixture_tex");
+                Check(t != null && t.width == 64 && t.height == 64, "rebuilt texture is 64x64",
+                      t ? t.width + "x" + t.height : "null");
+                ab.Unload(true);
+            }
+
+            // Cleanup.
+            Directory.Delete(bundleDir, true);
+            Directory.Delete(extractRoot, true);
+            File.Delete(extractRoot + ".meta");
+            AssetDatabase.Refresh();
         }
 
         /// <summary>
