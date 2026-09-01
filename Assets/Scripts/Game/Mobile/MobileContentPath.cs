@@ -213,7 +213,11 @@ namespace DaggerfallWorkshop.Game.Mobile
                 sb.AppendLine("  * .dfmod packages built for Windows, macOS or Linux. Asset bundles are");
                 sb.AppendLine("    platform specific and iOS refuses them. They must be rebuilt for iOS.");
                 sb.AppendLine();
-                sb.AppendLine("Music replacement (.ogg) is not supported yet.");
+                sb.AppendLine("Music replacement (.ogg in Sound/) works, with one quirk: the first time");
+                sb.AppendLine("a track is asked for it plays the original MIDI while the replacement");
+                sb.AppendLine("loads in the background, and swaps in the next time that track starts.");
+                sb.AppendLine("Returning a still-loading track would risk permanent silence, so the");
+                sb.AppendLine("authentic MIDI plays instead of nothing.");
                 File.WriteAllText(readme, sb.ToString());
             }
             catch (Exception ex)
