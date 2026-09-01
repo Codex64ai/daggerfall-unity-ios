@@ -58,6 +58,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestInputModeResolution();
             TestSwingModeDecision();
             TestClassicDrawerRules();
+            TestBottomRowSpacing();
+            TestLayoutOverrideStaleness();
             TestPointerKeepsCursorOverKeyboard();
             TestPointerDeltaScale();
             TestPointerLockDecision();
@@ -573,6 +575,134 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(!MobileHudLayout.ExemptFromHiding("Map", false)
                   && !MobileHudLayout.ExemptFromHiding("Map", true),
                   "no element but MENU is ever exempt from hiding");
+        }
+
+        /// <summary>
+        /// No two cells of the bottom HUD band may intersect.
+        ///
+        /// This is the test the row needed and did not have. COMBAT was authored at 6.52
+        /// against a row that ended at 5.95; MODE was added at 6.20 later, nobody re-checked
+        /// the neighbour, and the two buttons overlapped by 0.18in for months - a tap in the
+        /// shared strip hit whichever happened to be on top. The numbers now live in one
+        /// table (MobileHudBuilder.BottomRow) precisely so they can be checked as a set, and
+        /// this runs that check for whoever adds the next button.
+        ///
+        /// Geometry: every cell anchors bottom-right with a bottom-right pivot, so marginX is
+        /// the distance from the right screen edge to its RIGHT edge and it extends widthIn
+        /// further left. The table is ordered right to left, so each cell must start at or
+        /// beyond the previous one's left extent.
+        /// </summary>
+        static void TestBottomRowSpacing()
+        {
+            var row = MobileHudBuilder.BottomRow;
+
+            Check(row.Length >= 8, "the bottom row table still describes the whole band",
+                  "length=" + row.Length);
+
+            bool ordered = true, clear = true;
+            string worst = "";
+            float worstOverlap = 0f;
+
+            for (int i = 1; i < row.Length; i++)
+            {
+                var left = row[i];
+                var right = row[i - 1];
+
+                if (left.marginX <= right.marginX)
+                    ordered = false;
+
+                float overlap = right.LeftExtent - left.marginX;
+                if (overlap > 0.0005f)
+                {
+                    clear = false;
+                    if (overlap > worstOverlap)
+                    {
+                        worstOverlap = overlap;
+                        worst = right.name + "/" + left.name;
+                    }
+                }
+            }
+
+            Check(ordered, "the bottom row table runs right to left with no repeated slot");
+            Check(clear, "no two bottom-row buttons overlap",
+                  worst + " overlap " + worstOverlap.ToString("0.###") + "in");
+
+            // The contiguous action cells - WEAPON through MODE - keep the documented pitch.
+            // MENU sits further out with its own gap, and COMBAT is placed by its left edge
+            // because it is wider than a cell, so both are checked by clearance alone above.
+            bool stepped = true;
+            for (int i = 1; i < row.Length; i++)
+            {
+                if (row[i - 1].name == "MenuToggle" || row[i].name == "Combat")
+                    continue;
+                if (Mathf.Abs((row[i].marginX - row[i - 1].marginX)
+                              - MobileHudBuilder.BottomRowStepIn) > 0.0005f)
+                    stepped = false;
+            }
+            Check(stepped, "the action cells step the documented 0.57in");
+
+            // The regression itself: COMBAT clears MODE by the row's own gap, no more and no
+            // less. Placed here rather than left implicit so a future re-space of the row has
+            // to state its intent about this pair.
+            var mode = System.Array.Find(row, c => c.name == "Mode");
+            var combat = System.Array.Find(row, c => c.name == "Combat");
+            Near(combat.marginX - mode.LeftExtent, MobileHudBuilder.BottomRowGapIn, 0.0005f,
+                 "COMBAT clears MODE by the row gap");
+
+            // And the band as a whole still fits the screen it is authored for. At hudScale 1
+            // the leftmost extent is measured from the right edge, so this is the minimum
+            // screen width the defaults need: an iPad Pro 11in is 9.05in wide in landscape and
+            // the narrowest 264ppi iPad is 8.18in, so 8in is the budget to defend. Anything
+            // narrower is a phone, where the player scales the whole HUD down and the band
+            // scales with it.
+            float leftmost = 0f;
+            for (int i = 0; i < row.Length; i++)
+                leftmost = Mathf.Max(leftmost, row[i].LeftExtent);
+
+            Check(leftmost <= 8.0f, "the bottom row still fits the narrowest supported iPad",
+                  "leftmost extent " + leftmost.ToString("0.##") + "in from the right edge");
+        }
+
+        /// <summary>
+        /// A saved position must not shadow a default that has since moved.
+        ///
+        /// The failure this pins is not hypothetical: the COMBAT/MODE overlap above could be
+        /// fixed in the builder and still be on the player's screen afterwards, because a
+        /// PlayerPrefs position override wins over the built-in default unconditionally and
+        /// forever. Stamping the default a drag was made against turns that into a decision
+        /// the code can make per element.
+        /// </summary>
+        static void TestLayoutOverrideStaleness()
+        {
+            Vector2 authored = new Vector2(6.77f, 0.10f);
+
+            Check(MobileHudLayout.OverrideSurvives(true, authored, authored),
+                  "an override made against the current default is kept");
+
+            // The case the whole mechanism exists for: COMBAT's default moved 6.52 -> 6.77.
+            Check(!MobileHudLayout.OverrideSurvives(true, new Vector2(6.52f, 0.10f), authored),
+                  "an override made against a default that has since moved is discarded");
+
+            Check(!MobileHudLayout.OverrideSurvives(true, new Vector2(6.77f, 0.35f), authored),
+                  "a moved default is caught on the y axis too");
+
+            // Only the elements whose defaults actually moved are invalidated - a blunt
+            // schema bump would throw away the drags the player made on everything else.
+            Vector2 untouched = new Vector2(0.20f, 3.87f);
+            Check(MobileHudLayout.OverrideSurvives(true, untouched, untouched),
+                  "an unrelated element's override survives a change elsewhere in the layout");
+
+            // Migration: overrides saved before the stamp existed carry no default to compare
+            // against, and the release that adds the stamp is itself a layout change, so they
+            // go. Positions only - scale and hidden are never stamped or pruned.
+            Check(!MobileHudLayout.OverrideSurvives(false, Vector2.zero, authored),
+                  "a pre-stamp override is discarded, because its default is unknowable");
+            Check(!MobileHudLayout.OverrideSurvives(false, authored, authored),
+                  "no stamp means discard even if the payload happens to match");
+
+            // Floats make the round trip through PlayerPrefs; that must not read as a move.
+            Check(MobileHudLayout.OverrideSurvives(true, new Vector2(6.7700005f, 0.1000001f), authored),
+                  "float noise in a stamp is not a moved default");
         }
 
         /// <summary>A queued click must produce exactly one Down frame and one Up frame.</summary>

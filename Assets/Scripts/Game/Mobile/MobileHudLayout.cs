@@ -16,6 +16,7 @@
 //   Apple's minimum touch target is 44pt (~0.29in); these defaults sit well above it.
 //
 
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -127,10 +128,126 @@ namespace DaggerfallWorkshop.Game.Mobile
             return prefPrefix + name + ProfileSuffix + field;
         }
 
-        public static void SetMarginOverride(string name, Vector2 marginInches)
+        /// <summary>
+        /// Save a dragged position, STAMPED with the authored default it was made against.
+        ///
+        /// Without the stamp a saved position shadowed its built-in default forever, so a
+        /// shipped layout fix never reached anyone who had ever dragged that button - they
+        /// kept the broken placement with no way to know which button was wrong, and the only
+        /// remedy was a full reset that also threw away every customisation they meant to
+        /// keep. The stamp lets PruneStaleOverrides() tell a customisation that is still
+        /// meaningful (its default has not moved) from one made against a layout that no
+        /// longer exists.
+        /// </summary>
+        public static void SetMarginOverride(string name, Vector2 marginInches,
+                                             Vector2 authoredDefaultInches)
         {
             PlayerPrefs.SetFloat(Key(name, ".mx"), marginInches.x);
             PlayerPrefs.SetFloat(Key(name, ".my"), marginInches.y);
+            PlayerPrefs.SetFloat(Key(name, ".dmx"), authoredDefaultInches.x);
+            PlayerPrefs.SetFloat(Key(name, ".dmy"), authoredDefaultInches.y);
+        }
+
+        /// <summary>
+        /// The authored default margin for this element in the CURRENT profile - the value
+        /// Apply() would use if the player had never touched it, and so the value a saved
+        /// position is stamped with and later compared against.
+        /// </summary>
+        public static Vector2 AuthoredMargin(Element e)
+        {
+            return MobileClassicHud.DockedBarVisible ? e.classicMarginInches : e.marginInches;
+        }
+
+        /// <summary>Stamps are floats through PlayerPrefs; compare with a little slack.</summary>
+        public const float MarginEpsilonInches = 0.0005f;
+
+        /// <summary>
+        /// Whether a saved position outlives the authored default it was made against.
+        ///
+        ///   stamp matches the current default -> the player customised the layout we still
+        ///     ship, their choice is still what they meant, keep it
+        ///   stamp differs                     -> it was made against a layout that no longer
+        ///     exists, so it is not a preference any more, just a stale absolute position
+        ///   no stamp at all                   -> a pre-2026-08-31 install: DISCARD
+        ///
+        /// Discarding the unstamped ones is the deliberate migration choice. There is no way
+        /// to know which defaults they were made against, and the release that introduces the
+        /// stamp is itself a layout change (COMBAT moves out of MODE, and USEMAGIC had already
+        /// shifted JUMP/CROUCH/MODE along a cell) - so grandfathering them would preserve
+        /// exactly the overlapping row this is meant to fix. It costs saved POSITIONS only,
+        /// once: scale and hidden overrides are not stamped and are never pruned, so a
+        /// player's hidden-button arrangement and sizes survive the migration intact.
+        ///
+        /// Pure - no PlayerPrefs, no scene - so the self test can pin it.
+        /// </summary>
+        public static bool OverrideSurvives(bool hasStamp, Vector2 stampedDefault,
+                                            Vector2 authoredDefault)
+        {
+            if (!hasStamp)
+                return false;
+
+            return Mathf.Abs(stampedDefault.x - authoredDefault.x) <= MarginEpsilonInches
+                && Mathf.Abs(stampedDefault.y - authoredDefault.y) <= MarginEpsilonInches;
+        }
+
+        /// <summary>
+        /// Drop saved positions whose authored default has moved since they were saved, so a
+        /// shipped layout fix reaches the player automatically instead of waiting for a manual
+        /// reset nobody knows they need.
+        ///
+        /// Scoped to the CURRENT profile, like every other override key: the two profiles are
+        /// separate layouts and a fullscreen change must not reset a classic customisation.
+        /// Positions only - a scale override is a multiplier that stays meaningful against any
+        /// new default, and a hide/show is a plain statement of intent rather than a value
+        /// derived from the default, so neither is stamped or pruned.
+        ///
+        /// Called from Apply(). It deletes the keys it rejects, so the next call finds nothing
+        /// and the log line appears once per profile per install, not once per frame. Returns
+        /// the number discarded for the self test.
+        /// </summary>
+        public int PruneStaleOverrides()
+        {
+            var discarded = new List<string>();
+
+            for (int i = 0; i < elements.Length; i++)
+            {
+                Element e = elements[i];
+                if (e == null || string.IsNullOrEmpty(e.name))
+                    continue;
+
+                string kx = Key(e.name, ".mx");
+                if (!PlayerPrefs.HasKey(kx))
+                    continue;
+
+                string kdx = Key(e.name, ".dmx");
+                bool hasStamp = PlayerPrefs.HasKey(kdx);
+                Vector2 stamped = hasStamp
+                    ? new Vector2(PlayerPrefs.GetFloat(kdx), PlayerPrefs.GetFloat(Key(e.name, ".dmy")))
+                    : Vector2.zero;
+
+                if (OverrideSurvives(hasStamp, stamped, AuthoredMargin(e)))
+                    continue;
+
+                PlayerPrefs.DeleteKey(kx);
+                PlayerPrefs.DeleteKey(Key(e.name, ".my"));
+                PlayerPrefs.DeleteKey(kdx);
+                PlayerPrefs.DeleteKey(Key(e.name, ".dmy"));
+                discarded.Add(e.name);
+            }
+
+            if (discarded.Count > 0)
+            {
+                PlayerPrefs.Save();
+
+                // One line, not one per element: a device report needs to be able to say this
+                // happened and to which buttons, without a log flooded every frame.
+                Debug.Log("[MobileHudLayout] discarded " + discarded.Count +
+                          " saved position(s) made against older defaults (" +
+                          (MobileClassicHud.DockedBarVisible ? "classic" : "fullscreen") +
+                          " profile): " + string.Join(", ", discarded.ToArray()));
+            }
+
+            return discarded.Count;
         }
 
         public static void SetScaleOverride(string name, float scale)
@@ -192,7 +309,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// layout must not touch the fullscreen one, and vice versa.</summary>
         public static void ClearOverrides(string name)
         {
-            foreach (string k in new[] { ".mx", ".my", ".scale", ".hidden" })
+            foreach (string k in new[] { ".mx", ".my", ".dmx", ".dmy", ".scale", ".hidden" })
                 PlayerPrefs.DeleteKey(Key(name, k));
         }
 
@@ -259,6 +376,13 @@ namespace DaggerfallWorkshop.Game.Mobile
             // control clear of it. Deliberately NOT multiplied by hudScale: the bar's height
             // is a fact about the screen, not a control size preference.
             lastBottomInset = MobileClassicHud.BottomInsetInches;
+
+            // Before anything is read back: throw away saved positions that were made against
+            // defaults we no longer ship, so a layout fix lands on its own. Idempotent - it
+            // deletes what it rejects - and cheap, so running it on every Apply() (which is
+            // also every profile switch, and the only place both profiles are ever seen) is
+            // the simplest way to cover fullscreen and classic alike.
+            PruneStaleOverrides();
 
             float upi = UnitsPerInch * hudScale;
             if (upi <= 0.0001f)

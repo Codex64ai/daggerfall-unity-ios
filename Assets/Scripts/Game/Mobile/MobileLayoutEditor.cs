@@ -292,8 +292,11 @@ namespace DaggerfallWorkshop.Game.Mobile
             // The inverse lives in MobileHudLayout because it must mirror Apply() exactly,
             // including the classic-bar inset - inverting the raw position here is what
             // corrupted saves whenever the classic bar was visible.
+            // Stamped with the authored default it was dragged away from, so a later change
+            // to that default invalidates this save instead of being shadowed by it forever.
             MobileHudLayout.SetMarginOverride(selectedElement.name,
-                layout.MarginInchesFromCurrentPosition(selectedElement));
+                layout.MarginInchesFromCurrentPosition(selectedElement),
+                MobileHudLayout.AuthoredMargin(selectedElement));
         }
 
         #endregion

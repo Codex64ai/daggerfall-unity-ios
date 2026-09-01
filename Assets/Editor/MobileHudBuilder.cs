@@ -29,6 +29,80 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // Reference resolution the layout numbers below are authored against.
         static readonly Vector2 referenceResolution = new Vector2(1920f, 1080f);
 
+        #region Bottom row geometry
+
+        /// <summary>One cell of the bottom band, in authored inches.</summary>
+        public struct RowCell
+        {
+            public string name;
+            public float marginX;
+            public float widthIn;
+
+            /// <summary>Distance from the right screen edge to this cell's LEFT edge.</summary>
+            public float LeftExtent { get { return marginX + widthIn; } }
+        }
+
+        /// <summary>Shared y margin of every cell in the band.</summary>
+        public const float BottomRowY = 0.10f;
+
+        /// <summary>Cell pitch: 0.50in cell + 0.07in gap.</summary>
+        public const float BottomRowStepIn = 0.57f;
+
+        /// <summary>Gap the row keeps between neighbouring cells.</summary>
+        public const float BottomRowGapIn = 0.07f;
+
+        /// <summary>
+        /// The bottom band of the fullscreen HUD, RIGHT to LEFT across the screen: the drawer
+        /// toggle, the action row proper, and the combat toggle just off its left end.
+        ///
+        /// Every one of these anchors bottom-right with a bottom-right pivot, so marginX is
+        /// the distance from the right screen edge to the cell's RIGHT edge and the cell
+        /// extends widthIn further LEFT. Cell n+1 therefore clears cell n only while
+        /// marginX(n+1) >= marginX(n) + widthIn(n) - which is easy to get wrong from seven
+        /// loose literals scattered down the element list, and duly was: COMBAT was placed at
+        /// 6.52 against a row that ended at 5.95, MODE was added at 6.20 later without
+        /// re-checking, and the two sat 0.18in inside each other until 2026-08-31. One table
+        /// so the whole band can be read at once, and so MobileSelfTest.TestBottomRowSpacing
+        /// can pin that no two cells intersect before the next button joins the row.
+        /// </summary>
+        public static readonly RowCell[] BottomRow =
+        {
+            new RowCell { name = "MenuToggle", marginX = 2.60f, widthIn = 0.50f },
+            new RowCell { name = "Weapon",     marginX = 3.35f, widthIn = 0.50f },
+            new RowCell { name = "Spell",      marginX = 3.92f, widthIn = 0.50f },
+            new RowCell { name = "UseMagic",   marginX = 4.49f, widthIn = 0.50f },
+            new RowCell { name = "Jump",       marginX = 5.06f, widthIn = 0.50f },
+            new RowCell { name = "Crouch",     marginX = 5.63f, widthIn = 0.50f },
+            new RowCell { name = "Mode",       marginX = 6.20f, widthIn = 0.50f },
+            // Wider than a cell (it is a state toggle, not an action) and so it is placed by
+            // its own left edge: MODE's left edge is at 6.70, plus the row's 0.07 gap.
+            new RowCell { name = "Combat",     marginX = 6.77f, widthIn = 0.55f },
+        };
+
+        static RowCell Cell(string name)
+        {
+            for (int i = 0; i < BottomRow.Length; i++)
+                if (BottomRow[i].name == name)
+                    return BottomRow[i];
+
+            Debug.LogError("[MobileHudBuilder] no bottom-row cell named " + name);
+            return new RowCell { name = name, marginX = 0f, widthIn = 0.50f };
+        }
+
+        /// <summary>Authored default margin of a bottom-row cell.</summary>
+        static Vector2 RowMargin(string name)
+        {
+            return new Vector2(Cell(name).marginX, BottomRowY);
+        }
+
+        /// <summary>Authored default width of a bottom-row cell.</summary>
+        static float RowWidth(string name)
+        {
+            return Cell(name).widthIn;
+        }
+
+        #endregion
+
         [MenuItem("Tools/Daggerfall Mobile/Build Touch HUD")]
         public static void Build()
         {
@@ -363,7 +437,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                      classicMarginIn: new Vector2(2.64f, 0.62f), classicWidthIn: 0.50f),
                 // Sits just off the left end of the action row, and moves with it: this
                 // stepped along one 0.57in cell when USEMAGIC joined the row (below).
-                Elem("Combat",    combatRect,   0.55f, 0f, new Vector2(6.52f, 0.10f),
+                // Position comes from the BottomRow table, which is what finally caught it
+                // sitting 0.18in inside MODE.
+                Elem("Combat",    combatRect,   RowWidth("Combat"), 0f, RowMargin("Combat"),
                      classicHidden: true),
                 // Classic mode HIDES the drawer toggle and gives its slot to MAP (below).
                 // Everything else in the drawer is a classic-bar duplicate and already
@@ -372,31 +448,33 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 // classic mode (MobileButtonDrawer.PanelShown), so nothing is stranded -
                 // and a player who un-hides MENU gets MAP's old top-right slot rather than
                 // a button stacked on top of the map.
-                Elem("MenuToggle", menuToggleRect, 0.50f, 0f, new Vector2(2.60f, 0.10f),
+                Elem("MenuToggle", menuToggleRect, RowWidth("MenuToggle"), 0f, RowMargin("MenuToggle"),
                      classicMarginIn: new Vector2(0.26f, 3.61f), classicWidthIn: 0.40f,
                      classicHidden: true),
                 // One element per icon so each is draggable, hideable and scalable on its
                 // own. Defaults reproduce the former grid rows exactly: the bottom-centre
                 // action row steps 0.57in (0.50 cell + 0.07 gap) leftward from WEAPON, the
-                // drawer column steps 0.53in (0.48 + 0.05) upward from PAUSE.
-                Elem("Weapon",    primaryRects["WEAPON"],   0.50f, 0f, new Vector2(3.35f, 0.10f),
+                // drawer column steps 0.53in (0.48 + 0.05) upward from PAUSE. The row's own
+                // numbers live in the BottomRow table above, where they can be checked as a
+                // set instead of one literal at a time.
+                Elem("Weapon",    primaryRects["WEAPON"],   RowWidth("Weapon"), 0f, RowMargin("Weapon"),
                      classicHidden: true),
-                Elem("Spell",     primaryRects["SPELL"],    0.50f, 0f, new Vector2(3.92f, 0.10f),
+                Elem("Spell",     primaryRects["SPELL"],    RowWidth("Spell"), 0f, RowMargin("Spell"),
                      classicHidden: true),
                 // Next along the row from SPELL, the two magic actions together. Hidden in
                 // classic mode - the bar's own use-magic-item panel is right there. Adding it
                 // steps everything to ITS left along by one 0.57in cell (JUMP, CROUCH, MODE
                 // below, and COMBAT with them so the row keeps the clearance it had).
-                Elem("UseMagic",  primaryRects["USEMAGIC"], 0.50f, 0f, new Vector2(4.49f, 0.10f),
+                Elem("UseMagic",  primaryRects["USEMAGIC"], RowWidth("UseMagic"), 0f, RowMargin("UseMagic"),
                      classicHidden: true),
-                Elem("Jump",      primaryRects["JUMP"],     0.50f, 0f, new Vector2(5.06f, 0.10f),
+                Elem("Jump",      primaryRects["JUMP"],     RowWidth("Jump"), 0f, RowMargin("Jump"),
                      classicMarginIn: new Vector2(2.07f, 0.05f), classicWidthIn: 0.45f),
-                Elem("Crouch",    primaryRects["CROUCH"],   0.50f, 0f, new Vector2(5.63f, 0.10f),
+                Elem("Crouch",    primaryRects["CROUCH"],   RowWidth("Crouch"), 0f, RowMargin("Crouch"),
                      classicMarginIn: new Vector2(2.68f, 0.00f), classicWidthIn: 0.45f),
                 // Interaction mode sits with the action row. Hidden by default in classic
                 // mode - the bar carries its own mode switcher.
-                Elem("Mode",      (RectTransform)modeGo.transform, 0.50f, 0f,
-                     new Vector2(6.20f, 0.10f), classicHidden: true),
+                Elem("Mode",      (RectTransform)modeGo.transform, RowWidth("Mode"), 0f,
+                     RowMargin("Mode"), classicHidden: true),
                 Elem("Pause",     secondaryRects["PAUSE"],     0.48f, 0f, new Vector2(0.20f, 1.75f),
                      classicHidden: true),
                 Elem("Inventory", secondaryRects["INVENTORY"], 0.48f, 0f, new Vector2(0.20f, 2.28f),
