@@ -28,6 +28,7 @@ using DaggerfallWorkshop.Utility.AssetInjection;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using UnityEngine;
 using DaggerfallConnect.Utility;
@@ -108,6 +109,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestRoadRouting();
             TestWaypointOvershoot();
             TestImmediateModeDrawGuards();
+            TestSpellCastAnimNeverStrands();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -3393,6 +3395,123 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(unguarded.Count == 0,
                   "every OnGUI drawing through DaggerfallUI.DrawTexture guards on EventType.Repaint",
                   string.Join(", ", unguarded.ToArray()));
+        }
+
+        /// <summary>
+        /// The first-person spell cast animation must always terminate.
+        ///
+        /// FPSSpellCasting clears currentFrame back to -1 in exactly one place - inside the
+        /// animation coroutine's loop body - and raises the release-frame event from inside that
+        /// same body. That event synchronously runs arbitrary game logic: EntityEffectManager
+        /// releases the spell there, assigning the bundle, starting effects and refreshing HUD
+        /// icons and text. Unity terminates a coroutine for good once MoveNext() throws, so an
+        /// exception escaping any listener used to leave currentFrame stranded at the release
+        /// frame - the casting hands frozen on screen, and IsPlayingAnim blocking every later
+        /// cast for the rest of the session. Self-targeted buffs (Chameleon, Slowfall) run far
+        /// more listener code inside that coroutine than missile spells do, which is why those
+        /// were the spells seen to strand on device.
+        ///
+        /// Drives the real coroutine by pumping MoveNext() the way Unity's scheduler does,
+        /// including its stop-on-throw behaviour, so this reproduces the stuck pose rather than
+        /// merely restating the fix.
+        /// </summary>
+        static void TestSpellCastAnimNeverStrands()
+        {
+            Type type = typeof(FPSSpellCasting);
+            const BindingFlags priv = BindingFlags.NonPublic | BindingFlags.Instance;
+
+            FieldInfo currentFrameField = type.GetField("currentFrame", priv);
+            FieldInfo currentAnimsField = type.GetField("currentAnims", priv);
+            FieldInfo frameIndicesField = type.GetField("frameIndices", priv);
+            MethodInfo animMethod = type.GetMethod("AnimateSpellCast", priv);
+            Type recordType = type.GetNestedType("AnimationRecord", BindingFlags.NonPublic);
+
+            // Guards the premise: if these stop resolving, every assertion below would pass
+            // vacuously while testing nothing.
+            bool wired = currentFrameField != null && currentAnimsField != null &&
+                         frameIndicesField != null && animMethod != null && recordType != null;
+            Check(wired, "spell cast: the animation state machine is still reachable to test");
+            if (!wired)
+                return;
+
+            GameObject go = new GameObject("SelfTest_FPSSpellCasting");
+            bool logging = Debug.unityLogger.logEnabled;
+            try
+            {
+                FPSSpellCasting casting = go.AddComponent<FPSSpellCasting>();
+                int frameCount = ((int[])frameIndicesField.GetValue(casting)).Length;
+
+                // Stands in for whatever throws on device. The point is not which listener fails
+                // but that the animation must survive any of them.
+                int raised = 0;
+                FPSSpellCasting.OnReleaseFrameEventHandler thrower = delegate
+                {
+                    raised++;
+                    throw new InvalidOperationException("self test: listener failed at release frame");
+                };
+                casting.OnReleaseFrame += thrower;
+
+                // Non-empty anims, so the loop body runs and reaches the release frame.
+                currentAnimsField.SetValue(casting, Array.CreateInstance(recordType, frameCount));
+                currentFrameField.SetValue(casting, 0);
+
+                // The listener's exception is expected here and is logged by the fix; keep it out
+                // of the build log so a genuine failure stays easy to spot.
+                Debug.unityLogger.logEnabled = false;
+                bool survived = PumpAnim(animMethod, casting, frameCount * 4);
+                Debug.unityLogger.logEnabled = logging;
+
+                Check(raised > 0, "spell cast: the release frame is actually reached",
+                      "raised=" + raised);
+                Check(survived,
+                      "spell cast: a throwing release-frame listener does not kill the animation coroutine");
+                Check((int)currentFrameField.GetValue(casting) < 0,
+                      "spell cast: a throwing release-frame listener leaves no stuck casting pose",
+                      "currentFrame=" + currentFrameField.GetValue(casting));
+
+                casting.OnReleaseFrame -= thrower;
+
+                // The other shape of the same trap: a cast started with nothing to animate. The
+                // loop body is skipped entirely for an empty animation, so this must self-clear.
+                currentAnimsField.SetValue(casting, Array.CreateInstance(recordType, 0));
+                currentFrameField.SetValue(casting, 0);
+                PumpAnim(animMethod, casting, 8);
+
+                Check((int)currentFrameField.GetValue(casting) < 0,
+                      "spell cast: an empty animation leaves no stuck casting pose",
+                      "currentFrame=" + currentFrameField.GetValue(casting));
+                Check(!casting.IsPlayingAnim,
+                      "spell cast: IsPlayingAnim always clears, so later casts stay possible");
+            }
+            finally
+            {
+                Debug.unityLogger.logEnabled = logging;
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+        }
+
+        /// <summary>
+        /// Steps the animation coroutine the way Unity's scheduler would, reproducing the part
+        /// that matters here: Unity never resumes a coroutine whose MoveNext() threw.
+        /// </summary>
+        /// <returns>False if the coroutine died on an exception.</returns>
+        static bool PumpAnim(MethodInfo animMethod, FPSSpellCasting casting, int steps)
+        {
+            IEnumerator anim = (IEnumerator)animMethod.Invoke(casting, null);
+            for (int i = 0; i < steps; i++)
+            {
+                try
+                {
+                    if (!anim.MoveNext())
+                        return true;
+                }
+                catch (Exception)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         #endregion

@@ -139,6 +139,14 @@ namespace DaggerfallWorkshop.Game
 
             // Start playing anim
             SetCurrentAnims(elementType);
+
+            // Never enter the casting state with nothing to animate.
+            // The animation loop below is the only thing that can clear currentFrame back to -1,
+            // and it will not run for an empty animation - so starting at frame 0 here would
+            // leave IsPlayingAnim true forever and block every future cast.
+            if (currentAnims == null || currentAnims.Length == 0 || frameIndices == null || frameIndices.Length == 0)
+                return;
+
             currentFrame = 0;
         }
 
@@ -280,12 +288,34 @@ namespace DaggerfallWorkshop.Game
                     currentFrame++;
 
                     // Trigger cast frame
+                    // Listeners run arbitrary game logic from inside this coroutine - the spell is
+                    // released here, which starts effects and refreshes the HUD. Unity terminates a
+                    // coroutine permanently once MoveNext() throws, so an exception escaping a
+                    // listener would strand currentFrame short of the end of the animation: the
+                    // casting hands would stay frozen on screen and IsPlayingAnim would block every
+                    // later cast for the rest of the session. Report it and keep the loop running so
+                    // the animation still terminates.
                     if (currentFrame == releaseFrame)
-                        RaiseOnReleaseFrameEvent();
+                    {
+                        try
+                        {
+                            RaiseOnReleaseFrameEvent();
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.LogError(string.Format("FPSSpellCasting: OnReleaseFrame listener threw, spell release may be incomplete. {0}", ex));
+                        }
+                    }
 
                     // Handle end of frames
                     if (currentFrame >= frameIndices.Length)
                         currentFrame = -1;
+                }
+                else if (currentFrame >= 0)
+                {
+                    // A cast was started with nothing to animate. Nothing else can clear this,
+                    // so end it here rather than leaving IsPlayingAnim true forever.
+                    currentFrame = -1;
                 }
 
                 yield return new WaitForSeconds(animSpeed);
