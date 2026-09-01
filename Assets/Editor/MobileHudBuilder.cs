@@ -167,6 +167,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             {
                 ("WEAPON", InputManager.Actions.ReadyWeapon, MobileActionButton.PressMode.Tap),
                 ("SPELL",  InputManager.Actions.CastSpell,   MobileActionButton.PressMode.Tap),
+                // Enchanted rings, staves and amulets. Keyboard has U and the pad has LT+B,
+                // and the classic bar carries its own use-magic-item panel - fullscreen touch
+                // had nothing, so a magic item could be owned but never used. An action, not a
+                // menu trip, so it lives in the row beside SPELL rather than in the drawer.
+                // Icon: btn_usemagic.png via MobileIconImporter.
+                ("USEMAGIC", InputManager.Actions.UseMagicItem, MobileActionButton.PressMode.Tap),
                 ("JUMP",   InputManager.Actions.Jump,        MobileActionButton.PressMode.Tap),
                 ("CROUCH", InputManager.Actions.Crouch,      MobileActionButton.PressMode.Toggle),
             };
@@ -355,7 +361,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                      classicWidthIn: 0.33f),
                 Elem("Activate",  (RectTransform)activateGo.transform, 0.80f, 0f, new Vector2(2.40f, 0.65f),
                      classicMarginIn: new Vector2(2.64f, 0.62f), classicWidthIn: 0.50f),
-                Elem("Combat",    combatRect,   0.55f, 0f, new Vector2(5.95f, 0.10f),
+                // Sits just off the left end of the action row, and moves with it: this
+                // stepped along one 0.57in cell when USEMAGIC joined the row (below).
+                Elem("Combat",    combatRect,   0.55f, 0f, new Vector2(6.52f, 0.10f),
                      classicHidden: true),
                 // Classic mode HIDES the drawer toggle and gives its slot to MAP (below).
                 // Everything else in the drawer is a classic-bar duplicate and already
@@ -375,14 +383,20 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                      classicHidden: true),
                 Elem("Spell",     primaryRects["SPELL"],    0.50f, 0f, new Vector2(3.92f, 0.10f),
                      classicHidden: true),
-                Elem("Jump",      primaryRects["JUMP"],     0.50f, 0f, new Vector2(4.49f, 0.10f),
+                // Next along the row from SPELL, the two magic actions together. Hidden in
+                // classic mode - the bar's own use-magic-item panel is right there. Adding it
+                // steps everything to ITS left along by one 0.57in cell (JUMP, CROUCH, MODE
+                // below, and COMBAT with them so the row keeps the clearance it had).
+                Elem("UseMagic",  primaryRects["USEMAGIC"], 0.50f, 0f, new Vector2(4.49f, 0.10f),
+                     classicHidden: true),
+                Elem("Jump",      primaryRects["JUMP"],     0.50f, 0f, new Vector2(5.06f, 0.10f),
                      classicMarginIn: new Vector2(2.07f, 0.05f), classicWidthIn: 0.45f),
-                Elem("Crouch",    primaryRects["CROUCH"],   0.50f, 0f, new Vector2(5.06f, 0.10f),
+                Elem("Crouch",    primaryRects["CROUCH"],   0.50f, 0f, new Vector2(5.63f, 0.10f),
                      classicMarginIn: new Vector2(2.68f, 0.00f), classicWidthIn: 0.45f),
                 // Interaction mode sits with the action row. Hidden by default in classic
                 // mode - the bar carries its own mode switcher.
                 Elem("Mode",      (RectTransform)modeGo.transform, 0.50f, 0f,
-                     new Vector2(5.63f, 0.10f), classicHidden: true),
+                     new Vector2(6.20f, 0.10f), classicHidden: true),
                 Elem("Pause",     secondaryRects["PAUSE"],     0.48f, 0f, new Vector2(0.20f, 1.75f),
                      classicHidden: true),
                 Elem("Inventory", secondaryRects["INVENTORY"], 0.48f, 0f, new Vector2(0.20f, 2.28f),

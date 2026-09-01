@@ -55,6 +55,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             new KeyValuePair<string, string>("btn_sheet", "SHEETButton"),
             new KeyValuePair<string, string>("btn_automap", "AUTOMAPButton"),
             new KeyValuePair<string, string>("btn_transport", "TRANSPORTButton"),
+            new KeyValuePair<string, string>("btn_usemagic", "USEMAGICButton"),
         };
 
         [MenuItem("Tools/Daggerfall Mobile/Import Touch Icons")]
