@@ -1,0 +1,37 @@
+{
+  "name": "Daggerfall Unity iOS",
+  "identifier": "net.codex64.daggerfall.source",
+  "subtitle": "Pre-alpha builds of the Daggerfall Unity iOS port",
+  "description": "Sideloadable pre-alpha builds of the Daggerfall Unity iOS/iPadOS port. Unsigned; SideStore or AltStore signs them with your own Apple ID.",
+  "iconURL": "https://codex64ai.github.io/daggerfall-unity-ios/icon.png",
+  "website": "https://github.com/Codex64ai/daggerfall-unity-ios",
+  "tintColor": "#8B5A2B",
+  "apps": [
+    {
+      "name": "Daggerfall Unity",
+      "bundleIdentifier": "net.codex64.daggerfall",
+      "developerName": "Codex64",
+      "subtitle": "The 1996 RPG on iPad and iPhone, with touch, controller and mods.",
+      "localizedDescription": "An iOS/iPadOS port of Daggerfall Unity, the open-source recreation of The Elder Scrolls II. Free, non-commercial and source-only. You supply your own copy of Daggerfall's arena2 folder; no game data is distributed.\n\nPre-alpha: expect rough edges. Touch layout, controller and keyboard/mouse support, real travel along roads, and loose-file mods are in. Full instructions and the mod guide live in README-iOS.md in the repository.",
+      "iconURL": "https://codex64ai.github.io/daggerfall-unity-ios/icon.png",
+      "tintColor": "#8B5A2B",
+      "category": "games",
+      "versions": [
+        {
+          "version": "0.1.9",
+          "buildVersion": "0",
+          "date": "2026-09-01T04:23:52Z",
+          "localizedDescription": "Pre-Alpha 0.1.9 — Mods on iOS, and Daggerfall Unity 1.1.1\n\nAn iOS/iPadOS port of Daggerfall Unity.\nFree, non-commercial, source-only, installed by sideloading. You supply your own copy of\nDaggerfall; no game data is distributed here.\n\nThis release does two things: it brings the port up to upstream Daggerfall Unity 1.1.1,\nand it makes mods actually usable on iOS. The mod work is the reason to read further.\n\nSince v0.1.8-prealpha: 418 commits on the branch. 105 of those are merge commits; of the\n313 remaining, 264 are upstream Daggerfall Unity work by 23 contributors and 49 are the\nport's own.\n\nUpstream Daggerfall Unity 1.1.1\n\nVersionInfo.DaggerfallUnityVersion moves from 1.0.0 to 1.1.1. The practical effect for\nplayers: mods that declare a minimum of 1.1.1 no longer trip the launcher's \"incompatible\nmods\" prompt.\n\nThe 264 upstream commits are the community's work, not this port's. Broadly they cover\nweapon collision and missile/line-of-sight handling, enemy and static-NPC behaviour, quest\nand item serialization fixes, main-quest and guild quest script fixes, one-way staircase\nfixes across several cities, tree placement at zone boundaries, font rendering, UI and\ntooltip fixes, and mod-loader improvements (mod list search, copy-modlist-to-clipboard,\ncustom door support). Please read upstream's own changelog for the authoritative list.\n\nFull release notes: https://github.com/Codex64ai/daggerfall-unity-ios/releases/tag/v0.1.9-prealpha",
+          "downloadURL": "https://github.com/Codex64ai/daggerfall-unity-ios/releases/download/v0.1.9-prealpha/DaggerfallUnity-iOS-v0.1.9-prealpha.ipa",
+          "size": 77942321,
+          "minOSVersion": "15.0"
+        }
+      ],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {}
+      }
+    }
+  ],
+  "news": []
+}
