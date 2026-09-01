@@ -23,7 +23,9 @@ namespace DaggerfallWorkshop.Game
 
         void OnGUI()
         {
-            if (CrosshairTexture != null)
+            // Repaint guard as per ShowPlayerDamage: DaggerfallUI.DrawTexture is an immediate
+            // Graphics.DrawTexture on Metal and must not run on layout or input events.
+            if (Event.current.type.Equals(EventType.Repaint) && CrosshairTexture != null)
             {
                 Color color = new Color(1, 1, 1, 0.75f);
                 DaggerfallUI.DrawTexture(

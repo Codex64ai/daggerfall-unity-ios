@@ -43,8 +43,18 @@ namespace DaggerfallWorkshop.Game
                 alphaFadeValue -= fadeSpeed * Time.deltaTime;
                 if (alphaFadeValue > 0)
                 {
-                    Color color = new Color(1, 0, 0, alphaFadeValue);
-                    DaggerfallUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), damageTexture, ScaleMode.StretchToFill, true, color);
+                    // Only draw on repaint, as every other OnGUI draw in the project does.
+                    // DaggerfallUI.DrawTexture goes through Graphics.DrawTexture on Metal, and
+                    // that is a real immediate-mode draw rather than the no-op GUI.DrawTexture
+                    // performs outside a repaint event. Drawing on layout and input events puts
+                    // extra copies of the flash into whatever render target happens to be current,
+                    // in an undefined rect, which reads as a hard-edged bright red block sitting
+                    // over the correct full-screen tint.
+                    if (Event.current.type.Equals(EventType.Repaint))
+                    {
+                        Color color = new Color(1, 0, 0, alphaFadeValue);
+                        DaggerfallUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), damageTexture, ScaleMode.StretchToFill, true, color);
+                    }
                 }
                 else
                 {

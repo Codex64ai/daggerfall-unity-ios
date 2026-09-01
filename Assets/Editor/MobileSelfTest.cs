@@ -107,6 +107,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestRoadDirectionReciprocity();
             TestRoadRouting();
             TestWaypointOvershoot();
+            TestImmediateModeDrawGuards();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -3353,6 +3354,45 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                              MobileJourneyPilot.WaypointRadius(1000f) <=
                              MobileJourneyPilot.WaypointRadius(10000f);
             Check(monotonic, "waypoint: radius grows with speed");
+        }
+
+        /// <summary>
+        /// Every OnGUI that draws through DaggerfallUI.DrawTexture must guard on
+        /// EventType.Repaint. On the desktop path DrawTexture wraps GUI.DrawTexture, which
+        /// Unity silently ignores outside a repaint event, so a missing guard costs nothing
+        /// and stays invisible. On Metal - macOS upstream, and iOS here - it wraps
+        /// Graphics.DrawTexture, an immediate draw that Unity documents as repaint-only.
+        /// Unguarded, it also runs on layout and input events, into whatever render target is
+        /// current and in an undefined rect. That is what put a hard-edged red block over the
+        /// top of the screen while the player was taking hits, on top of the correct
+        /// full-screen damage tint. Source scan rather than a behavioural test because the
+        /// symptom only exists in a Metal player, but the rule it breaks is textual.
+        /// </summary>
+        static void TestImmediateModeDrawGuards()
+        {
+            string[] sources = Directory.GetFiles("Assets/Scripts", "*.cs", SearchOption.AllDirectories);
+            var unguarded = new System.Collections.Generic.List<string>();
+            int drawSites = 0;
+
+            foreach (string file in sources)
+            {
+                string text = File.ReadAllText(file);
+                if (!text.Contains("void OnGUI") || !text.Contains("DaggerfallUI.DrawTexture"))
+                    continue;
+
+                drawSites++;
+                if (!text.Contains("EventType.Repaint"))
+                    unguarded.Add(Path.GetFileName(file));
+            }
+
+            // Guards the premise: if the scan stops finding these files it has silently
+            // stopped testing anything, and would keep passing.
+            Check(drawSites >= 6, "the scan still finds the OnGUI sites that draw textures",
+                  "sites=" + drawSites);
+
+            Check(unguarded.Count == 0,
+                  "every OnGUI drawing through DaggerfallUI.DrawTexture guards on EventType.Repaint",
+                  string.Join(", ", unguarded.ToArray()));
         }
 
         #endregion
