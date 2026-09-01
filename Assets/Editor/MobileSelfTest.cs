@@ -21,6 +21,7 @@
 
 using System;
 using DaggerfallWorkshop.Game.Mobile;
+using DaggerfallWorkshop.Game.MagicAndEffects;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
 using FullSerializer;
 using DaggerfallWorkshop.Utility;
@@ -110,6 +111,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestWaypointOvershoot();
             TestImmediateModeDrawGuards();
             TestSpellCastAnimNeverStrands();
+            TestCastStateTearsDownOnFailure();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -3434,15 +3436,26 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             if (!wired)
                 return;
 
+            FieldInfo castAnimsField = type.GetField("castAnims", priv);
+            Check(castAnimsField != null, "spell cast: the animation cache is still reachable to test");
+            if (castAnimsField == null)
+                return;
+
             GameObject go = new GameObject("SelfTest_FPSSpellCasting");
             bool logging = Debug.unityLogger.logEnabled;
             try
             {
                 FPSSpellCasting casting = go.AddComponent<FPSSpellCasting>();
                 int frameCount = ((int[])frameIndicesField.GetValue(casting)).Length;
+                var castAnims = (System.Collections.IDictionary)castAnimsField.GetValue(casting);
+
+                // Seeding the cache lets PlayOneShot run for real without arena2 on disk:
+                // SetCurrentAnims returns the cached entry before it touches any file.
+                castAnims[ElementTypes.Magic] = Array.CreateInstance(recordType, frameCount);
+                castAnims[ElementTypes.Fire] = Array.CreateInstance(recordType, 0);
 
                 // Stands in for whatever throws on device. The point is not which listener fails
-                // but that the animation must survive any of them.
+                // but that a cast must survive any of them.
                 int raised = 0;
                 FPSSpellCasting.OnReleaseFrameEventHandler thrower = delegate
                 {
@@ -3451,16 +3464,28 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 };
                 casting.OnReleaseFrame += thrower;
 
-                // Non-empty anims, so the loop body runs and reaches the release frame.
-                currentAnimsField.SetValue(casting, Array.CreateInstance(recordType, frameCount));
-                currentFrameField.SetValue(casting, 0);
-
                 // The listener's exception is expected here and is logged by the fix; keep it out
                 // of the build log so a genuine failure stays easy to spot.
                 Debug.unityLogger.logEnabled = false;
+                casting.PlayOneShot(ElementTypes.Magic);
+                bool entered = (int)currentFrameField.GetValue(casting) == 0;
                 bool survived = PumpAnim(animMethod, casting, frameCount * 4);
+
+                // The invariant that actually broke on device: after a cast whose listener threw,
+                // the next cast must still be accepted.
+                bool secondAccepted = false;
+                bool secondReachedRelease = false;
+                int raisedAfterFirst = raised;
+                if (!casting.IsPlayingAnim)
+                {
+                    casting.PlayOneShot(ElementTypes.Magic);
+                    secondAccepted = (int)currentFrameField.GetValue(casting) == 0;
+                    PumpAnim(animMethod, casting, frameCount * 4);
+                    secondReachedRelease = raised > raisedAfterFirst;
+                }
                 Debug.unityLogger.logEnabled = logging;
 
+                Check(entered, "spell cast: a normal cast enters the animation");
                 Check(raised > 0, "spell cast: the release frame is actually reached",
                       "raised=" + raised);
                 Check(survived,
@@ -3468,26 +3493,86 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 Check((int)currentFrameField.GetValue(casting) < 0,
                       "spell cast: a throwing release-frame listener leaves no stuck casting pose",
                       "currentFrame=" + currentFrameField.GetValue(casting));
+                Check(secondAccepted,
+                      "spell cast: a second cast is still accepted after a listener threw on the first");
+                Check(secondReachedRelease,
+                      "spell cast: the second cast reaches its release frame, so it really casts");
 
                 casting.OnReleaseFrame -= thrower;
 
-                // The other shape of the same trap: a cast started with nothing to animate. The
-                // loop body is skipped entirely for an empty animation, so this must self-clear.
-                currentAnimsField.SetValue(casting, Array.CreateInstance(recordType, 0));
-                currentFrameField.SetValue(casting, 0);
-                PumpAnim(animMethod, casting, 8);
+                // A cast with nothing to animate must still release its spell - losing the
+                // animation must not cost the player the spell - and must do it exactly once.
+                int quietRaised = 0;
+                FPSSpellCasting.OnReleaseFrameEventHandler counter = delegate { quietRaised++; };
+                casting.OnReleaseFrame += counter;
 
+                Debug.unityLogger.logEnabled = false;
+                casting.PlayOneShot(ElementTypes.Fire);
+                bool stayedOutOfAnim = !casting.IsPlayingAnim;
+                PumpAnim(animMethod, casting, 12);
+                Debug.unityLogger.logEnabled = logging;
+
+                Check(stayedOutOfAnim,
+                      "spell cast: a cast with no animation does not enter the animation state");
+                Check(quietRaised == 1,
+                      "spell cast: a cast with no animation still releases its spell exactly once",
+                      "raised=" + quietRaised);
                 Check((int)currentFrameField.GetValue(casting) < 0,
                       "spell cast: an empty animation leaves no stuck casting pose",
                       "currentFrame=" + currentFrameField.GetValue(casting));
                 Check(!casting.IsPlayingAnim,
                       "spell cast: IsPlayingAnim always clears, so later casts stay possible");
+
+                casting.OnReleaseFrame -= counter;
             }
             finally
             {
                 Debug.unityLogger.logEnabled = logging;
                 UnityEngine.Object.DestroyImmediate(go);
             }
+        }
+
+        /// <summary>
+        /// The other half of the same failure, and the one that actually stopped casting on device.
+        ///
+        /// EntityEffectManager.Update() re-fires any ready spell flagged instantCast on the very
+        /// next frame, and every caster-only spell is flagged that way. The release handler clears
+        /// readySpell and instantCast at the very end, after AssignBundle - so when AssignBundle
+        /// threw part way (HUD icon refresh runs there for caster-only spells), the spell applied
+        /// but the ready spell was never cleared. It then re-cast every frame, holding
+        /// castInProgress true, and SetReadySpell() refuses new spells while that is set: the first
+        /// cast worked and the cast button was dead from then on. The teardown has to be in a
+        /// finally, so pin that it stays there.
+        /// </summary>
+        static void TestCastStateTearsDownOnFailure()
+        {
+            string path = "Assets/Scripts/Game/MagicAndEffects/EntityEffectManager.cs";
+            Check(File.Exists(path), "cast state: EntityEffectManager is where expected", path);
+            if (!File.Exists(path))
+                return;
+
+            string text = File.ReadAllText(path);
+            int handler = text.IndexOf("private void PlayerSpellCasting_OnReleaseFrame", StringComparison.Ordinal);
+            Check(handler >= 0, "cast state: the release handler is still there to check");
+            if (handler < 0)
+                return;
+
+            // Bounded to the handler body so an unrelated finally elsewhere cannot satisfy this.
+            int end = text.IndexOf("private void EntityEffectBroker_OnNewMagicRound", handler, StringComparison.Ordinal);
+            if (end < 0)
+                end = Math.Min(text.Length, handler + 4000);
+            string body = text.Substring(handler, end - handler);
+
+            int fin = body.IndexOf("finally", StringComparison.Ordinal);
+            Check(fin >= 0, "cast state: the release handler tears the cast state down in a finally");
+            if (fin < 0)
+                return;
+
+            string teardown = body.Substring(fin);
+            Check(teardown.Contains("readySpell = null"),
+                  "cast state: readySpell is cleared in the finally, so it cannot re-cast forever");
+            Check(teardown.Contains("instantCast = false"),
+                  "cast state: instantCast is cleared in the finally, so Update() stops re-firing it");
         }
 
         /// <summary>

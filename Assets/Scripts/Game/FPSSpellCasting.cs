@@ -54,6 +54,8 @@ namespace DaggerfallWorkshop.Game
         Dictionary<ElementTypes, AnimationRecord[]> castAnims = new Dictionary<ElementTypes, AnimationRecord[]>();
         AnimationRecord[] currentAnims;
         int currentFrame = -1;
+        bool releaseWithoutAnim = false;
+        HashSet<ElementTypes> loggedAnimFailures = new HashSet<ElementTypes>();
 
         Rect leftHandPosition;
         Rect rightHandPosition;
@@ -138,14 +140,33 @@ namespace DaggerfallWorkshop.Game
                 return; 
 
             // Start playing anim
-            SetCurrentAnims(elementType);
+            string animFailure = null;
+            try
+            {
+                SetCurrentAnims(elementType);
+            }
+            catch (Exception ex)
+            {
+                // Missing or unreadable CIF. Left to propagate this would abort the caller midway
+                // through starting the cast, leaving its ready spell set and re-firing every frame.
+                animFailure = ex.Message;
+            }
 
-            // Never enter the casting state with nothing to animate.
-            // The animation loop below is the only thing that can clear currentFrame back to -1,
-            // and it will not run for an empty animation - so starting at frame 0 here would
-            // leave IsPlayingAnim true forever and block every future cast.
-            if (currentAnims == null || currentAnims.Length == 0 || frameIndices == null || frameIndices.Length == 0)
+            // Nothing to animate. The release event that actually applies the spell is raised from
+            // the animation loop, so returning here without it would lose the spell silently and
+            // strand the caller's ready spell. A missing animation costs the player a visual,
+            // never the spell - so release anyway and skip the animation.
+            if (animFailure != null || currentAnims == null || currentAnims.Length == 0 || frameIndices == null || frameIndices.Length == 0)
+            {
+                LogCastAnimFailure(elementType, animFailure);
+
+                // Deferred to the animation loop rather than raised here: the caller sets its own
+                // casting flags immediately after this returns, so releasing inside this call would
+                // tear those flags down before they are set and latch them on with no spell left to
+                // clear them - the same stuck-cast failure this method is avoiding.
+                releaseWithoutAnim = true;
                 return;
+            }
 
             currentFrame = 0;
         }
@@ -282,30 +303,21 @@ namespace DaggerfallWorkshop.Game
         {
             while (true)
             {
-                if (currentAnims != null && currentAnims.Length > 0 && currentFrame >= 0)
+                // A cast that could not animate still has to release its spell. Done here rather
+                // than in PlayOneShot so it lands outside the caller's own cast setup.
+                if (releaseWithoutAnim)
+                {
+                    releaseWithoutAnim = false;
+                    RaiseReleaseFrameSafely();
+                }
+                else if (currentAnims != null && currentAnims.Length > 0 && currentFrame >= 0)
                 {
                     // Step frame
                     currentFrame++;
 
                     // Trigger cast frame
-                    // Listeners run arbitrary game logic from inside this coroutine - the spell is
-                    // released here, which starts effects and refreshes the HUD. Unity terminates a
-                    // coroutine permanently once MoveNext() throws, so an exception escaping a
-                    // listener would strand currentFrame short of the end of the animation: the
-                    // casting hands would stay frozen on screen and IsPlayingAnim would block every
-                    // later cast for the rest of the session. Report it and keep the loop running so
-                    // the animation still terminates.
                     if (currentFrame == releaseFrame)
-                    {
-                        try
-                        {
-                            RaiseOnReleaseFrameEvent();
-                        }
-                        catch (Exception ex)
-                        {
-                            Debug.LogError(string.Format("FPSSpellCasting: OnReleaseFrame listener threw, spell release may be incomplete. {0}", ex));
-                        }
-                    }
+                        RaiseReleaseFrameSafely();
 
                     // Handle end of frames
                     if (currentFrame >= frameIndices.Length)
@@ -320,6 +332,41 @@ namespace DaggerfallWorkshop.Game
 
                 yield return new WaitForSeconds(animSpeed);
             }
+        }
+
+        /// <summary>
+        /// Raises the release frame event without letting a failing listener kill the animation.
+        /// Listeners run arbitrary game logic from inside the animation coroutine - the spell is
+        /// released there, which starts effects and refreshes the HUD. Unity terminates a coroutine
+        /// permanently once MoveNext() throws, so an exception escaping a listener would strand
+        /// currentFrame short of the end of the animation: the casting hands would stay frozen on
+        /// screen and IsPlayingAnim would block every later cast for the rest of the session.
+        /// </summary>
+        void RaiseReleaseFrameSafely()
+        {
+            try
+            {
+                RaiseOnReleaseFrameEvent();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError(string.Format("FPSSpellCasting: OnReleaseFrame listener threw, spell release may be incomplete. {0}", ex));
+            }
+        }
+
+        /// <summary>
+        /// Reports a cast that could not animate, once per element so a repeating failure does not
+        /// flood the log. The spell is still released; only the visual is lost.
+        /// </summary>
+        void LogCastAnimFailure(ElementTypes elementType, string reason)
+        {
+            if (!loggedAnimFailures.Add(elementType))
+                return;
+
+            Debug.LogError(string.Format(
+                "FPSSpellCasting: no casting animation for element {0} ({1}). Spell is still released, without its animation.",
+                elementType,
+                string.IsNullOrEmpty(reason) ? "animation contains no frames" : reason));
         }
 
         private bool ReadyCheck()

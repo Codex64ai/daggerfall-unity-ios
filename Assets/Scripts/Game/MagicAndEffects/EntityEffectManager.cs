@@ -2103,44 +2103,62 @@ namespace DaggerfallWorkshop.Game.MagicAndEffects
             if (readySpell == null)
                 return;
 
-            // Always tally magic skills when player physically casts a spell
-            // Cancelled spells do not reach this point
-            TallyPlayerReadySpellEffectSkills();
+            try
+            {
+                // Always tally magic skills when player physically casts a spell
+                // Cancelled spells do not reach this point
+                TallyPlayerReadySpellEffectSkills();
 
-            // Play cast sound from caster audio source
-            if (readySpell.CasterEntityBehaviour)
-            {
-                PlayCastSound(readySpell.CasterEntityBehaviour, GetCastSoundID(readySpell.Settings.ElementType));
-            }
+                // Play cast sound from caster audio source
+                if (readySpell.CasterEntityBehaviour)
+                {
+                    PlayCastSound(readySpell.CasterEntityBehaviour, GetCastSoundID(readySpell.Settings.ElementType));
+                }
 
-            // Assign bundle directly to self if target is caster
-            // Otherwise instatiate missile prefab based on element type
-            if (readySpell.Settings.TargetType == TargetTypes.CasterOnly)
-            {
-                AssignBundle(readySpell);
-            }
-            else
-            {
-                DaggerfallMissile missile = InstantiateSpellMissile(readySpell.Settings.ElementType);
-                if (missile)
-                    missile.Payload = readySpell;
-            }
+                // Assign bundle directly to self if target is caster
+                // Otherwise instatiate missile prefab based on element type
+                if (readySpell.Settings.TargetType == TargetTypes.CasterOnly)
+                {
+                    AssignBundle(readySpell);
+                }
+                else
+                {
+                    DaggerfallMissile missile = InstantiateSpellMissile(readySpell.Settings.ElementType);
+                    if (missile)
+                        missile.Payload = readySpell;
+                }
 
-            // Clear ready spell and reset casting - do not update last spell if casting from item
-            RaiseOnCastReadySpell(readySpell);
-            if (readySpellDoesNotCostSpellPoints)
-            {
-                lastReadySpellCastingCost = 0;
+                // Clear ready spell and reset casting - do not update last spell if casting from item
+                RaiseOnCastReadySpell(readySpell);
+                if (readySpellDoesNotCostSpellPoints)
+                {
+                    lastReadySpellCastingCost = 0;
+                }
+                else
+                {
+                    lastSpell = readySpell;
+                    lastReadySpellCastingCost = readySpellCastingCost;
+                }
             }
-            else
+            catch (Exception ex)
             {
-                lastSpell = readySpell;
-                lastReadySpellCastingCost = readySpellCastingCost;
+                // Releasing the spell failed part way through - the effect may have been applied
+                // before the failure. Report it, but never skip the teardown below.
+                Debug.LogError(string.Format("EntityEffectManager: releasing ready spell '{0}' threw, cast state cleared so casting stays possible. {1}",
+                    readySpell.Settings.Name, ex));
             }
-            readySpell = null;
-            readySpellCastingCost = 0;
-            instantCast = false;
-            readySpellDoesNotCostSpellPoints = false;
+            finally
+            {
+                // This has to happen whatever went wrong above. Update() re-fires any ready spell
+                // flagged instantCast on the very next frame, so a readySpell left behind by an
+                // exception would re-cast itself forever - holding castInProgress true, which makes
+                // SetReadySpell() refuse every spell the player picks afterwards. The cast button
+                // then looks dead for the rest of the session even though the first cast worked.
+                readySpell = null;
+                readySpellCastingCost = 0;
+                instantCast = false;
+                readySpellDoesNotCostSpellPoints = false;
+            }
         }
 
         private void EntityEffectBroker_OnNewMagicRound()
