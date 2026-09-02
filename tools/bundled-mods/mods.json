@@ -1,0 +1,18 @@
+{
+  "dest_root": "Assets/Game/Mods",
+  "mods": [
+    {"name": "FixedDungeonExteriors",     "repo": "https://github.com/Cliffworms/FixedDungeonExteriors.git",     "commit": "f384bb3f26aca8844615ce7c42a51ba999a52c0b", "manifest": "FixedDungeonExteriors.dfmod.json"},
+    {"name": "VariedWealthyHomes",        "repo": "https://github.com/Cliffworms/VariedWealthyHomes.git",        "commit": "085a9f2aee56a58555d5848a58448ad4c185f3b3", "manifest": "VariedWealthyHomes.dfmod.json"},
+    {"name": "MainQuestConsequences",     "repo": "https://github.com/Cliffworms/MainQuestConsequences.git",     "commit": "1cca6534e4f022c24f8bda4595679a91ab9c207f", "manifest": "MainQuestConsequences.dfmod.json", "manifest_override": "manifests/MainQuestConsequences.dfmod.json"},
+    {"name": "DetailedDungeonExteriors",  "repo": "https://github.com/Cliffworms/DetailedDungeonExteriors.git",  "commit": "6d886ad9261601d58a931573125bdddcf36ed09c", "manifest": "DetailedDungeonExteriors.dfmod.json", "manifest_override": "manifests/DetailedDungeonExteriors.dfmod.json"},
+    {"name": "DetailedMainQuestDungeons", "repo": "https://github.com/Cliffworms/DetailedMainQuestDungeons.git", "commit": "045022efe4e839f7f02e4d6f133ba20ad3b0b317", "manifest": "DetailedMainQuestDungeons.dfmod.json"},
+    {"name": "AquaticSprites",            "repo": "https://github.com/Cliffworms/AquaticSprites.git",            "commit": "ea195e77a707cce4bd2a36a96b024534cd420ebb", "manifest": "UnderwaterSprites.dfmod.json"},
+    {"name": "SmallerMQDungeons",         "repo": "https://github.com/Cliffworms/SmallerMQDungeons.git",         "commit": "51dc8db3449f33b0e1837be68b8305fe8c0d9b3e", "manifest": "Smaller Main Quest Dungeons.dfmod.json"},
+    {"name": "LevelingInspiration",       "repo": "https://github.com/Cliffworms/LevelingInspiration.git",       "commit": "37aefbbec5cf0b063959507d7cd0c7d4571400ee", "manifest": "Leveling Inspiration.dfmod.json"},
+    {"name": "SkyrimsAdventures",         "repo": "https://github.com/Cliffworms/SkyrimsAdventures.git",         "commit": "e5083f298e46d9c761701407c9352fc023dd8a78", "manifest": "Skyrim's Adventures.dfmod.json"},
+    {"name": "JOTG",                      "repo": "https://github.com/Cliffworms/JOTG.git",                      "commit": "701440f383eece827ce8bbdc7ff39dd2a21709a5", "manifest": "JobsOfTheThievesGuild.dfmod.json"},
+    {"name": "ArenasAdventures",          "repo": "https://github.com/Cliffworms/ArenasAdventures.git",          "commit": "9352a9288113607c5efbf5f51a3e1a7d6bb7687a", "manifest": "Arena's Adventures.dfmod.json"},
+    {"name": "TownGreetingsIliacBay",     "repo": "https://github.com/Cliffworms/TownGreetingsIliacBay.git",     "commit": "203f9d2a7426995d8400e00112ac1c929fc58a02", "manifest": "Town Greetings of the Iliac Bay.dfmod.json"},
+    {"name": "RumorsOfTheIliacBay",       "repo": "https://github.com/Cliffworms/RumorsOfTheIliacBay.git",       "commit": "b5641cd12a47b65b374401825bebd00dfa96ede2", "manifest": "RumorsOfTheIliacBay.dfmod.json"}
+  ]
+}

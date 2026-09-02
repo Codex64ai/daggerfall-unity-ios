@@ -111,12 +111,12 @@ The `manifest` value is the file name the repo uses (the `.dfmod` output takes t
     "... one entry per WorldData/*.RMB.json in the repo (10 total) — list them explicitly after the first fetch ..."
   ],
   "Dependencies": [
-    {"Name": "fixeddungeonexteriors", "IsOptional": false, "IsPeer": false}
+    {"Name": "FixedDungeonExteriors", "IsOptional": false, "IsPeer": false}
   ]
 }
 ```
 
-Dependency names in DFU are the dependency's **file name stem, lower-cased** (see `ModManager.CheckModDependencies`, it compares against `mod.FileName.ToLower()`); Fixed Dungeon Exteriors' file name is `FixedDungeonExteriors.dfmod`, hence `fixeddungeonexteriors`. Verify that comparison in `ModManager.cs` before finalising; if it compares GUIDs instead, use `4038da33-51a4-4238-8290-8b2cc73320b3`.
+Dependency names in DFU are the dependency's **file name stem, exact case** (see `ModManager.CheckModDependencies`, `GetModFromName` compares `mod.FileName` with `StringComparison.Ordinal`); Fixed Dungeon Exteriors' file name is `FixedDungeonExteriors.dfmod`, hence `FixedDungeonExteriors`. Verify that comparison in `ModManager.cs` before finalising; if it compares GUIDs instead, use `4038da33-51a4-4238-8290-8b2cc73320b3`.
 
 - [ ] **Step 3: Write the failing tests**
 
