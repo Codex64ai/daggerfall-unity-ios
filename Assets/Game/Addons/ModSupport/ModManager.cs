@@ -344,6 +344,41 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
             return selection.ToArray();
         }
 
+        // MOBILE: the shipped Mods folder inside the app bundle. On iOS it holds the bundled
+        // MIT mods and is read-only; ModDirectory (Documents/Mods) stays the writable one
+        // where Mods.json and per-mod settings live. Elsewhere the two are the same folder.
+        public static string ShippedModDirectory
+        {
+            get { return Path.Combine(Application.streamingAssetsPath, "Mods"); }
+        }
+
+        /// <summary>
+        /// MOBILE: merge the player's .dfmod files with the shipped ones. Player files come first
+        /// and win: a shipped file with the same file name is dropped, so a player who installs
+        /// their own copy of a bundled mod is not shadowed by ours. Pure so the self-test can
+        /// pin the rule on the Mac.
+        /// </summary>
+        public static string[] MergeModFiles(string[] playerFiles, string[] shippedFiles)
+        {
+            var merged = new List<string>();
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (playerFiles != null)
+                foreach (string f in playerFiles)
+                {
+                    string n = GetModNameFromPath(f);
+                    if (!string.IsNullOrEmpty(n) && names.Add(n))
+                        merged.Add(f);
+                }
+            if (shippedFiles != null)
+                foreach (string f in shippedFiles)
+                {
+                    string n = GetModNameFromPath(f);
+                    if (!string.IsNullOrEmpty(n) && names.Add(n))
+                        merged.Add(f);
+                }
+            return merged.ToArray();
+        }
+
         /// <summary>
         /// Get array of ModInfo objects for each loaded mod
         /// </summary>
@@ -590,13 +625,25 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
         /// <param name="refresh">Checks for mods to unload.</param>
         private void FindModsFromDirectory(bool refresh = false)
         {
-            if (!Directory.Exists(ModDirectory))
+            // MOBILE: on iOS the player's Documents/Mods and the app's shipped Mods folder are
+            // both scanned, player first (see MergeModFiles). Off iOS ShippedModDirectory IS
+            // ModDirectory, so nothing is merged and behaviour is unchanged.
+            string[] playerFiles = Directory.Exists(ModDirectory)
+                ? Directory.GetFiles(ModDirectory, "*" + MODEXTENSION, SearchOption.AllDirectories)
+                : new string[0];
+            string[] shippedFiles = new string[0];
+            if (MobileContentPath.Active && Directory.Exists(ShippedModDirectory)
+                && !string.Equals(Path.GetFullPath(ShippedModDirectory), Path.GetFullPath(ModDirectory), StringComparison.Ordinal))
+            {
+                shippedFiles = Directory.GetFiles(ShippedModDirectory, "*" + MODEXTENSION, SearchOption.AllDirectories);
+            }
+            if (playerFiles.Length == 0 && shippedFiles.Length == 0 && !Directory.Exists(ModDirectory))
             {
                 Debug.Log("invalid mod directory: " + ModDirectory);
                 return;
             }
 
-            var modFiles = Directory.GetFiles(ModDirectory, "*" + MODEXTENSION, SearchOption.AllDirectories);
+            var modFiles = MergeModFiles(playerFiles, shippedFiles);
             var modFileNames = new string[modFiles.Length];
             var loadedModNames = GetAllModFileNames();
 

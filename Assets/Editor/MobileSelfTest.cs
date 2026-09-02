@@ -29,6 +29,7 @@ using DaggerfallWorkshop.Utility.AssetInjection;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using UnityEngine;
@@ -79,6 +80,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestRelinquish();
             TestContentPathRemap();
             TestUserContentFolders();
+            TestMergeModFiles();
+            TestBundledModManifests();
+            TestBundledModLicences();
             TestWavDecoder();
             TestJourneyBearing();
             TestJourneyArrivalRect();
@@ -208,6 +212,97 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             copy[0] = "clobbered";
             Check(MobileContentPath.UserFolderNames[0] != "clobbered",
                   "UserFolderNames returns a copy, not the backing array");
+        }
+
+        /// <summary>
+        /// On iOS two folders hold .dfmod files: the player's Documents/Mods and the shipped
+        /// StreamingAssets/Mods with the bundled MIT mods. The scanner merges them, player
+        /// first, and a shipped file whose name the player also has is dropped - so a player
+        /// who installs their own copy of a bundled mod gets theirs, not ours.
+        /// </summary>
+        static void TestMergeModFiles()
+        {
+            string p = "/Documents/Mods/", s = "/App/StreamingAssets/Mods/";
+
+            string[] r = ModManager.MergeModFiles(
+                new string[0], new[] { s + "JOTG.dfmod", s + "FixedDungeonExteriors.dfmod" });
+            Check(r.Length == 2 && r[0] == s + "JOTG.dfmod", "shipped-only: all shipped files, in order");
+
+            r = ModManager.MergeModFiles(new[] { p + "dream-sound.dfmod" }, new string[0]);
+            Check(r.Length == 1 && r[0] == p + "dream-sound.dfmod", "player-only: unchanged");
+
+            r = ModManager.MergeModFiles(new[] { p + "dream-sound.dfmod" }, new[] { s + "JOTG.dfmod" });
+            Check(r.Length == 2 && r[0] == p + "dream-sound.dfmod" && r[1] == s + "JOTG.dfmod",
+                  "disjoint: player first, then shipped");
+
+            r = ModManager.MergeModFiles(
+                new[] { p + "JOTG.dfmod" }, new[] { s + "JOTG.dfmod", s + "VariedWealthyHomes.dfmod" });
+            Check(r.Length == 2 && r[0] == p + "JOTG.dfmod" && r[1] == s + "VariedWealthyHomes.dfmod",
+                  "same file name in both: the player's copy is kept and the shipped one dropped");
+
+            r = ModManager.MergeModFiles(null, null);
+            Check(r != null && r.Length == 0, "null inputs give an empty list, not an exception");
+        }
+
+        /// <summary>
+        /// Every fetched mod manifest (Assets/Game/Mods/*, minus the IOSPilot fixture) must
+        /// parse, name no script, and reference only files that exist - the same rule the
+        /// fetch script applies, enforced from the editor so a stale or hand-edited fetch
+        /// cannot reach a build. Skips with a note when nothing has been fetched.
+        /// </summary>
+        static void TestBundledModManifests()
+        {
+            string[] manifests = MobileBuildSetup.BundledManifests();
+            if (manifests.Length == 0)
+            {
+                log.AppendLine("  SKIP  bundled mod manifests (none fetched - run tools/bundled-mods/fetch.py)");
+                return;
+            }
+            Check(manifests.Length == 13, "thirteen bundled mod manifests are present", manifests.Length + " found");
+            Check(!manifests.Any(m => m.Replace('\\', '/').Contains("/IOSPilot/")), "IOSPilot is never bundled");
+
+            int bad = 0;
+            var titles = new HashSet<string>();
+            foreach (string path in manifests)
+            {
+                ModInfo info = null;
+                bool ok = !ModManager._serializer.TryDeserialize(
+                    fsJsonParser.Parse(File.ReadAllText(path)), ref info).Failed && info != null;
+                if (!ok || string.IsNullOrWhiteSpace(info.ModTitle) || !titles.Add(info.ModTitle)) { bad++; continue; }
+                if (info.Files == null || info.Files.Count == 0) { bad++; continue; }
+                if (info.Files.Any(f => f.EndsWith(".cs") || f.EndsWith(".dll.bytes"))) { bad++; continue; }
+                if (info.Files.Any(f => !File.Exists(f))) { bad++; continue; }
+            }
+            Check(bad == 0, "every bundled manifest parses, has a unique title, no scripts, and all files present",
+                  bad + " bad");
+        }
+
+        /// <summary>
+        /// MIT requires the notice to travel with the copy, so each shipped bundle must have its
+        /// LICENSE beside it. Only meaningful after BuildBundledMods has run; skips otherwise.
+        /// </summary>
+        static void TestBundledModLicences()
+        {
+            string root = MobileBuildSetup.ShippedModsPath;
+            string[] bundles = Directory.Exists(root)
+                ? Directory.GetFiles(root, "*" + ModManager.MODEXTENSION, SearchOption.TopDirectoryOnly)
+                : new string[0];
+            if (bundles.Length == 0)
+            {
+                log.AppendLine("  SKIP  bundled mod licences (no bundles built yet - run MobileBuildSetup.BuildBundledMods)");
+                return;
+            }
+            int missing = 0;
+            foreach (string b in bundles)
+            {
+                string stem = Path.GetFileNameWithoutExtension(b);
+                string lic = Path.Combine(root, "Licenses", stem + "-LICENSE.txt");
+                if (!File.Exists(lic) || !File.ReadAllText(lic).TrimStart().StartsWith("MIT License"))
+                    missing++;
+            }
+            Check(missing == 0, "every shipped bundle has an MIT LICENSE beside it", missing + " missing");
+            Check(bundles.Length == MobileBuildSetup.BundledManifests().Length,
+                  "one bundle per fetched manifest", bundles.Length + " bundles");
         }
 
         /// <summary>
