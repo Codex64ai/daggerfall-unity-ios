@@ -75,7 +75,41 @@ class ValidateManifest(unittest.TestCase):
         self.assertEqual(fetch.payload_roots(m), {"WorldData", "QuestPacks"})
 
 
+class WorldDataArchives(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.mod = os.path.join(self.tmp, "Assets", "Game", "Mods", "X")
+        os.makedirs(os.path.join(self.mod, "WorldData"))
+
+    def block(self, name, archives):
+        flats = ",".join('{"Resources":{"FlatResource":{"TextureArchive":%d,"TextureRecord":0}}}' % a for a in archives)
+        with open(os.path.join(self.mod, "WorldData", name), "w") as fh:
+            fh.write('{"RdbBlock":{"ObjectRootList":[{"RdbObjects":[%s]}]}}' % flats)
+        return "Assets/Game/Mods/X/WorldData/" + name
+
+    def test_vanilla_archives_pass(self):
+        m = manifest("X", [self.block("A.RDB.json", [199, 210, 511])])
+        self.assertEqual(fetch.worlddata_archive_problems(m, self.mod), [])
+
+    def test_expanded_textures_archives_are_rejected(self):
+        m = manifest("X", [self.block("S0000999.RDB.json", [199, 10021, 20050])])
+        probs = fetch.worlddata_archive_problems(m, self.mod)
+        self.assertEqual(len(probs), 1)
+        self.assertIn("S0000999.RDB.json", probs[0])
+        self.assertIn("10021", probs[0])
+
+
 class ValidateSet(unittest.TestCase):
+    def test_required_dependency_must_be_in_the_pack(self):
+        fixed = manifest("Fixed Dungeon Exteriors", []); fixed["_stem"] = "FixedDungeonExteriors"
+        dde = manifest("Detailed Dungeon Exteriors", []); dde["_stem"] = "DetailedDungeonExteriors"
+        dde["Dependencies"] = [{"Name": "fixeddungeonexteriors", "IsOptional": False}]
+        self.assertEqual(fetch.validate_set([fixed, dde]), [])
+        dde["Dependencies"] = [{"Name": "daggerfall expanded textures", "IsOptional": False}]
+        self.assertTrue(any("REQUIRES 'daggerfall expanded textures'" in p for p in fetch.validate_set([fixed, dde])))
+        dde["Dependencies"] = [{"Name": "mudex", "IsOptional": True}]
+        self.assertEqual(fetch.validate_set([fixed, dde]), [])
+
     def test_duplicate_questlist_names_across_mods(self):
         a = manifest("A", [], {"QuestLists": ["SKYRIM"]})
         b = manifest("B", [], {"QuestLists": ["SKYRIM"]})

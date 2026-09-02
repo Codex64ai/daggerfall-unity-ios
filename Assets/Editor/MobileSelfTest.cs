@@ -258,7 +258,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 log.AppendLine("  SKIP  bundled mod manifests (none fetched - run tools/bundled-mods/fetch.py)");
                 return;
             }
-            Check(manifests.Length == 13, "thirteen bundled mod manifests are present", manifests.Length + " found");
+            // The pin list (tools/bundled-mods/mods.json) is the source of truth for how many.
+            int pinned = 0;
+            try
+            {
+                string pins = File.ReadAllText("tools/bundled-mods/mods.json");
+                pinned = System.Text.RegularExpressions.Regex.Matches(pins, "\"repo\"\\s*:").Count;
+            }
+            catch (Exception) { }
+            Check(pinned > 0 && manifests.Length == pinned, "one fetched manifest per pinned mod",
+                  manifests.Length + " fetched, " + pinned + " pinned");
             Check(!manifests.Any(m => m.Replace('\\', '/').Contains("/IOSPilot/")), "IOSPilot is never bundled");
 
             int bad = 0;
