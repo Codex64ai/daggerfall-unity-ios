@@ -29,8 +29,8 @@ with this repository; players supply their own `arena2` folder.
 
 ## Bundled mods
 
-Thirteen Daggerfall Unity mods by **Cliffworms** ship inside the iOS app as `.dfmod` bundles,
-each switchable in the launcher's MODS window. All are MIT licensed (`Copyright (c) 2025
+Ten Daggerfall Unity mods by **Cliffworms** are built into iOS `.dfmod` bundles and published as a
+mod pack alongside each release (and may ship inside the app), each switchable in the launcher's MODS window. All are MIT licensed (`Copyright (c) 2025
 Cliffworms`); the licence text ships in the app at `StreamingAssets/Mods/Licenses/`. They are
 fetched at the pinned commits by `tools/bundled-mods/fetch.py` and are not part of this
 repository's history.
@@ -39,10 +39,7 @@ repository's history.
 |---|---|---|---|
 | Fixed Dungeon Exteriors | https://github.com/Cliffworms/FixedDungeonExteriors | f384bb3f | upstream |
 | Varied Wealthy Homes | https://github.com/Cliffworms/VariedWealthyHomes | 085a9f2a | upstream |
-| Main Quest Consequences | https://github.com/Cliffworms/MainQuestConsequences | 1cca6534 | ours: adds the control quest upstream's manifest omits |
-| Detailed Dungeon Exteriors | https://github.com/Cliffworms/DetailedDungeonExteriors | 6d886ad9 | ours: upstream ships none |
-| Detailed Main Quest Dungeons | https://github.com/Cliffworms/DetailedMainQuestDungeons | 045022ef | upstream |
-| Aquatic Sprites | https://github.com/Cliffworms/AquaticSprites | ea195e77 | upstream |
+|||| Aquatic Sprites | https://github.com/Cliffworms/AquaticSprites | ea195e77 | upstream |
 | Smaller Main Quest Dungeons | https://github.com/Cliffworms/SmallerMQDungeons | 51dc8db3 | upstream |
 | Leveling Inspiration | https://github.com/Cliffworms/LevelingInspiration | 37aefbbe | upstream |
 | Skyrim's Adventures | https://github.com/Cliffworms/SkyrimsAdventures | e5083f29 | upstream |
@@ -51,5 +48,11 @@ repository's history.
 | Town Greetings of the Iliac Bay | https://github.com/Cliffworms/TownGreetingsIliacBay | 203f9d2a | upstream |
 | Rumors of the Iliac Bay | https://github.com/Cliffworms/RumorsOfTheIliacBay | b5641cd1 | upstream |
 
-Our two manifests are in `tools/bundled-mods/manifests/`. The data in every bundle is
-Cliffworms' work, unmodified except that one texture file name was lower-cased for iOS.
+Every manifest is the author's own. The data in every bundle is Cliffworms' work, unmodified.
+
+Not included, and why: **Detailed Main Quest Dungeons**, **Main Quest Consequences** and **Detailed
+Dungeon Exteriors** reference texture archives and models from Daggerfall Expanded Textures and
+Decor & Miscellanea, which we cannot redistribute; without them a block's flats throw during
+layout and the whole dungeon fails to build (verified 2026-09-01). `tools/bundled-mods/fetch.py`
+now rejects any block that references a non-vanilla texture archive or a required dependency the
+pack does not ship.

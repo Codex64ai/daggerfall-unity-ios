@@ -183,3 +183,21 @@ registered" and no manifest errors.
 Anything needing code compiled in (phase 3). Nexus-only or unlicensed content. An in-game
 "about this mod / licence" viewer — the MODS window already shows author and description.
 Changing DFU's mod-settings UI.
+
+## Addendum 2026-09-01 (after device test)
+
+- **Delivery changed to a zip mod pack** (`MIT-ModPack-ios.zip` on the release), at Ikram's request:
+  players pick and choose. The bundles are identical files; the in-app route stays available.
+- **Three mods removed after a black-screen dungeon on device**, reproduced on the Mac with
+  `Assets/Editor/MobileDungeonProbe.cs` (starts a new character in Privateer's Hold, or the Nth
+  dungeon via `DFU_PROBE_DUNGEON=N`, and reports whether the dungeon built):
+  Detailed Main Quest Dungeons (Privateer's Hold block: 332 flats from Daggerfall Expanded Textures /
+  Decor & Miscellanea archives -> `DaggerfallBillboard.SetMaterial` IndexOutOfRange per flat -> block
+  build aborted -> dungeon with zero blocks), Main Quest Consequences (3 castle variants use DET
+  archives, 4 use model 99800) and Detailed Dungeon Exteriors (3 of 10 exterior blocks use DET).
+  The research table had marked all three clean.
+- **Two validator rules added** to `fetch.py`: a WorldData block may only reference the 472 vanilla
+  texture archives (list embedded), and a required `Dependencies` entry must name a mod in the pack.
+  Both catch all three retroactively.
+- Pack is now **ten** mods; the `manifests/` override folder is gone (both overrides belonged to
+  removed mods).

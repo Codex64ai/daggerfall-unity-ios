@@ -452,21 +452,21 @@ Two iOS-specific rules:
   replacements are not covered by the headless builder, which does not run the GUI Mod
   Builder's prefab serialization pass.
 
-### Bundled mods
+### The MIT mod pack
 
-Thirteen of Cliffworms' MIT-licensed mods ship inside the app and appear in the launcher's
-MODS window like any other mod, switched on by default:
+Ten of Cliffworms' MIT-licensed mods are built for iOS and published with each release as
+`MIT-ModPack-ios.zip`. Install any or all of them like any other mod: copy the `.dfmod` files you
+want into `Documents/Mods` with the Files app and restart. Each appears in the launcher's MODS
+window, switched on; untick to switch off.
 
-- **World:** Fixed Dungeon Exteriors, Detailed Dungeon Exteriors, Varied Wealthy Homes,
-  Main Quest Consequences, Smaller Main Quest Dungeons, Detailed Main Quest Dungeons,
+- **World:** Fixed Dungeon Exteriors, Varied Wealthy Homes, Smaller Main Quest Dungeons,
   Aquatic Sprites.
 - **Quests:** Leveling Inspiration, Skyrim's Adventures, Jobs of the Thieves Guild, Arena's
   Adventures, Town Greetings of the Iliac Bay, Rumors of the Iliac Bay.
 
-Untick any of them in MODS to switch it off; the choice persists. If you install your own
-copy of one of these mods into `Documents/Mods`, yours is used and the bundled one is ignored.
-Authors, licences and pinned versions are in `THIRD-PARTY.md`; the licence texts ship in the
-app. Detailed Dungeon Exteriors needs Fixed Dungeon Exteriors on.
+Authors, licences and pinned versions are in `THIRD-PARTY.md`; the licence texts are in the zip.
+A build can also carry these inside the app (`StreamingAssets/Mods`); if it does, a copy you
+install yourself in `Documents/Mods` takes precedence.
 
 ### Converting a desktop `.dfmod`
 
@@ -738,6 +738,6 @@ Two MIT-licensed works are compiled into this port, with their headers intact - 
   (`MobileJourneyController.cs`, `MobileJourneyPilot.cs`, `MobileJourneyWindow.cs`), reworked
   for this port.
 
-Thirteen MIT-licensed mods by Cliffworms are bundled as `.dfmod` files - see `THIRD-PARTY.md`.
+Ten MIT-licensed mods by Cliffworms are built into `.dfmod` files and published as a mod pack - see `THIRD-PARTY.md`.
 
 Daggerfall itself is copyright Bethesda Softworks. No game assets are distributed here.
