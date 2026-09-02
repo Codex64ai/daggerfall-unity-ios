@@ -833,6 +833,14 @@ namespace DaggerfallWorkshop
                     // Apply billboard batches
                     natureBillboardBatch.Apply();
                     lightsBillboardBatch.Apply();
+
+                    // MOBILE: CurrentPlayerLocationObject was looked up in UpdateLocations() in the same
+                    // call that STARTED this coroutine, so for a freshly entered pixel it was null and
+                    // stayed null until the next pixel change or terrain rebuild - the journey pilot
+                    // (and anything else asking "is the town here yet?") saw no town while standing in
+                    // one. Refresh it now that this location actually exists.
+                    if (terrainArray[index].mapPixelX == MapPixelX && terrainArray[index].mapPixelY == MapPixelY)
+                        currentPlayerLocationObject = dfLocation;
                     animalsBillboardBatch.Apply();
                     //miscBillboardBatch.Apply();
 
