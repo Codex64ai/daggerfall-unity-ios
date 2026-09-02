@@ -12,6 +12,7 @@
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using System.Collections;
@@ -238,6 +239,10 @@ namespace DaggerfallWorkshop
         /// <param name="record">Texture record index.</param>
         /// <param name="frame">Frame index.</param>
         /// <returns>Material.</returns>
+        // MOBILE: archives already reported missing by SetMaterial, so a block with hundreds of
+        // such flats produces one line, not hundreds.
+        static readonly HashSet<int> missingFlatArchivesWarned = new HashSet<int>();
+
         public override Material SetMaterial(int archive, int record, int frame = 0)
         {
             // Get DaggerfallUnity
@@ -273,6 +278,21 @@ namespace DaggerfallWorkshop
                     0,
                     false,
                     true);
+
+                // MOBILE: a flat whose texture archive is not in arena2 (a mod block built against
+                // Daggerfall Expanded Textures, say) used to throw IndexOutOfRange here, and that
+                // exception aborted the whole block layout - the player saw a black dungeon with
+                // no geometry. Fail soft instead: log once per archive, leave the flat unrendered,
+                // let the rest of the block build. A missing sprite beats a missing dungeon.
+                if (summary.AtlasIndices == null || record < 0 || record >= summary.AtlasIndices.Length)
+                {
+                    if (missingFlatArchivesWarned.Add(archive))
+                        Debug.LogWarningFormat(
+                            "DaggerfallBillboard: texture archive {0} has no record {1} (archive missing or too short) - " +
+                            "flat skipped. A mod block probably needs a texture pack that is not installed.",
+                            archive, record);
+                    return null;
+                }
                 mesh = dfUnity.MeshReader.GetBillboardMesh(
                     summary.AtlasRects[summary.AtlasIndices[record].startIndex],
                     archive,
