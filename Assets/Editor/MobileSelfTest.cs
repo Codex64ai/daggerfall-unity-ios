@@ -88,6 +88,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestJourneyArrivalRect();
             TestJourneyCompressionClamp();
             TestJourneySpeedTiers();
+            TestJourneyVitals();
             TestRouteRule();
             TestNightDecision();
             TestPassThroughGeometry();
@@ -1261,6 +1262,36 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// binned most medium trips. Plus the reset that used to wipe the planned route is a
         /// code-shape bug the tests cannot see; it is documented in Resume().
         /// </summary>
+        /// <summary>
+        /// The engine kills a player outright when fatigue reaches zero with enemies nearby or
+        /// in water (PlayerEntity_OnExhausted -> SetHealth(0)); otherwise they collapse for an
+        /// hour. A journey runs at 20-30x, so reckless travel with no fatigue guard walked the
+        /// player into that death (device report: "healthy, only stamina low, just died").
+        /// The guard must apply in EVERY mode, and must camp when resting is possible.
+        /// </summary>
+        static void TestJourneyVitals()
+        {
+            var V = MobileJourneyController.VitalsAction.Continue;
+            Check(MobileJourneyController.DecideVitals(100, 100, cautious: false, enemiesNearby: false, swimming: false)
+                  == MobileJourneyController.VitalsAction.Continue, "vitals: healthy and rested -> continue");
+            Check(MobileJourneyController.DecideVitals(100, 15, cautious: false, enemiesNearby: false, swimming: false)
+                  == MobileJourneyController.VitalsAction.Camp, "vitals: RECKLESS + low fatigue -> camp (not walk on to collapse)");
+            Check(MobileJourneyController.DecideVitals(100, 15, cautious: true, enemiesNearby: false, swimming: false)
+                  == MobileJourneyController.VitalsAction.Camp, "vitals: cautious + low fatigue -> camp");
+            Check(MobileJourneyController.DecideVitals(100, 15, cautious: false, enemiesNearby: true, swimming: false)
+                  == MobileJourneyController.VitalsAction.Stop, "vitals: low fatigue + enemies nearby -> stop (cannot rest; engine would kill at 0)");
+            Check(MobileJourneyController.DecideVitals(100, 15, cautious: false, enemiesNearby: false, swimming: true)
+                  == MobileJourneyController.VitalsAction.Stop, "vitals: low fatigue in water -> stop (exhaustion in water is death)");
+            Check(MobileJourneyController.DecideVitals(3, 100, cautious: true, enemiesNearby: false, swimming: false)
+                  == MobileJourneyController.VitalsAction.Stop, "vitals: cautious + low health -> stop");
+            Check(MobileJourneyController.DecideVitals(3, 100, cautious: false, enemiesNearby: false, swimming: false)
+                  == MobileJourneyController.VitalsAction.Continue, "vitals: reckless accepts low health (its stated trade)");
+            Check(MobileJourneyController.DecideVitals(100, 20, cautious: false, enemiesNearby: false, swimming: false)
+                  == MobileJourneyController.VitalsAction.Camp, "vitals: exactly the threshold counts as low");
+            Check(MobileJourneyController.DecideVitals(100, 21, cautious: false, enemiesNearby: false, swimming: false)
+                  == MobileJourneyController.VitalsAction.Continue, "vitals: one above the threshold continues");
+        }
+
         static void TestRouteRule()
         {
             Check(MobileJourneyController.RouteWorthTaking(30, 10, 35), "route: a road with short off-road ends is taken");

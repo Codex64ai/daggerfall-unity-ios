@@ -777,30 +777,62 @@ namespace DaggerfallWorkshop.Game.Mobile
             CheckEnemies();
         }
 
+        public enum VitalsAction { Continue, Stop, Camp }
+
         /// <summary>
-        /// Cautious travel stops rather than letting the player arrive dead. Reckless travel
-        /// accepts the risk, which is the whole point of choosing it.
+        /// Pure: what a journey does about the player's health and fatigue this frame.
+        ///
+        /// FATIGUE IS GUARDED IN EVERY MODE. The engine's own exhaustion handler
+        /// (PlayerEntity_OnExhausted) kills the player outright when fatigue reaches zero with
+        /// enemies nearby or in water, and otherwise drops them for an hour. At 20-30x a
+        /// journey reaches zero in seconds of real time, so reckless travel with no fatigue
+        /// check walked a healthy player straight into that death (device report: "healthy,
+        /// only stamina was low, I just died"). Nobody chose reckless to die of tiredness -
+        /// its stated trade is encounters and a straight line, so LOW HEALTH stays its own
+        /// risk, but low fatigue makes camp when resting is possible and stops when it is not.
         /// </summary>
+        public static VitalsAction DecideVitals(int healthPercent, int fatiguePercent, bool cautious,
+                                                bool enemiesNearby, bool swimming)
+        {
+            if (fatiguePercent <= defaultFatigueMinPercent)
+                return (enemiesNearby || swimming) ? VitalsAction.Stop : VitalsAction.Camp;
+            if (cautious && healthPercent <= defaultHealthMinPercent)
+                return VitalsAction.Stop;
+            return VitalsAction.Continue;
+        }
+
         bool CheckVitals()
         {
-            if (!SpeedCautious)
-                return false;
-
             PlayerEntity player = GameManager.Instance.PlayerEntity;
-
-            bool healthLow = player.MaxHealth > 0 &&
-                             player.CurrentHealth * 100 / player.MaxHealth <= defaultHealthMinPercent;
-            bool fatigueLow = player.MaxFatigue > 0 &&
-                              player.CurrentFatigue * 100 / player.MaxFatigue <= defaultFatigueMinPercent;
-
-            if (!healthLow && !fatigueLow)
+            if (player == null)
                 return false;
 
-            Stop(JourneyEnd.Interrupted);
-            DaggerfallUI.MessageBox(healthLow
-                ? "You are too badly hurt to continue your journey."
-                : "You are too exhausted to continue your journey.");
-            return true;
+            int healthPct = player.MaxHealth > 0 ? player.CurrentHealth * 100 / player.MaxHealth : 100;
+            int fatiguePct = player.MaxFatigue > 0 ? player.CurrentFatigue * 100 / player.MaxFatigue : 100;
+            bool fatigueLow = fatiguePct <= defaultFatigueMinPercent;
+            bool enemies = fatigueLow && GameManager.Instance.AreEnemiesNearby(resting: true);
+            bool swimming = fatigueLow && GameManager.Instance.PlayerEnterExit != null &&
+                            GameManager.Instance.PlayerEnterExit.IsPlayerSwimming;
+
+            switch (DecideVitals(healthPct, fatiguePct, SpeedCautious, enemies, swimming))
+            {
+                case VitalsAction.Camp:
+                    BeginCampNight("You are exhausted. You make camp to rest.");
+                    return true;
+
+                case VitalsAction.Stop:
+                    Stop(JourneyEnd.Interrupted);
+                    if (fatigueLow)
+                        DaggerfallUI.MessageBox(swimming
+                            ? "You are too exhausted to swim on. You stop before the water takes you."
+                            : "You are too exhausted to continue, and cannot rest with enemies nearby.");
+                    else
+                        DaggerfallUI.MessageBox("You are too badly hurt to continue your journey.");
+                    return true;
+
+                default:
+                    return false;
+            }
         }
 
         bool CheckDisease()
