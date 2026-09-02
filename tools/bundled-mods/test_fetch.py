@@ -62,6 +62,14 @@ class ValidateManifest(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.mod, "Textures", "1210_2-0.png")))
         self.assertEqual(fetch.validate_manifest(fixed, self.mod), [])
 
+    def test_files_must_live_under_this_mods_folder(self):
+        m = manifest("X", ["Assets/Game/Mods/AuthorsLocalName/WorldData/a.json"])
+        probs = fetch.validate_manifest(m, self.mod)
+        self.assertTrue(any("outside this mod's folder" in p for p in probs))
+        fixed = fetch.normalize_paths(m, "X")
+        self.assertEqual(fixed["Files"], ["Assets/Game/Mods/X/WorldData/a.json"])
+        self.assertEqual(fetch.validate_manifest(fixed, self.mod), [])
+
     def test_payload_roots(self):
         m = manifest("X", self.files("WorldData/a.json", "QuestPacks/Cliff/X/X01.txt"))
         self.assertEqual(fetch.payload_roots(m), {"WorldData", "QuestPacks"})

@@ -48,11 +48,23 @@ def payload_roots(manifest):
     return roots
 
 
+def normalize_paths(manifest, name):
+    """Point every Files entry at Assets/Game/Mods/<name>/... - authors' manifests carry
+    whatever folder name they used locally (AquaticSprites ships as UnderwaterSprites/)."""
+    fixed = dict(manifest)
+    fixed["Files"] = ["Assets/Game/Mods/%s/%s" % (name, _rel(f)) for f in manifest.get("Files", [])]
+    return fixed
+
+
 def validate_manifest(manifest, mod_dir):
     problems = []
     files = manifest.get("Files") or []
     if not files:
         problems.append("Files is empty")
+    expected_prefix = "Assets/Game/Mods/%s/" % os.path.basename(os.path.normpath(mod_dir))
+    for f in files:
+        if not f.replace("\\", "/").startswith(expected_prefix):
+            problems.append("path is outside this mod's folder (author's local name?): " + f)
     contributes = manifest.get("Contributes") or {}
     quest_lists = set(contributes.get("QuestLists") or [])
     loose_quests = set(contributes.get("LooseQuestsList") or [])
@@ -147,6 +159,8 @@ def fetch_one(cfg, entry):
         else:
             with open(os.path.join(tmp, entry["manifest"]), encoding="utf-8") as fh:
                 manifest = json.load(fh)
+
+        manifest = normalize_paths(manifest, entry["name"])
 
         if os.path.isdir(dest):
             shutil.rmtree(dest)
