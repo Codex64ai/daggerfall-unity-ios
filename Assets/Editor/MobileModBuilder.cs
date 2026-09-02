@@ -27,7 +27,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 {
     public static class MobileModBuilder
     {
-        public static string[] BuildMod(string manifestPath, string outputRoot, BuildTarget[] targets)
+        public static string[] BuildMod(string manifestPath, string outputRoot, BuildTarget[] targets, bool flatOutput = false)
         {
             if (!File.Exists(manifestPath))
                 throw new FileNotFoundException("Mod manifest not found", manifestPath);
@@ -63,12 +63,25 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             var built = new List<string>();
             foreach (BuildTarget target in targets)
             {
-                string dir = Path.Combine(outputRoot, target.ToString());
+                // flatOutput: the bundle goes straight into outputRoot (the app's shipped Mods
+                // folder - scanned recursively, but kept flat for tidiness). Otherwise the
+                // per-target subfolder the DREAM workflow expects.
+                string dir = flatOutput ? outputRoot : Path.Combine(outputRoot, target.ToString());
                 Directory.CreateDirectory(dir);
                 if (BuildPipeline.BuildAssetBundles(dir, buildMap,
                         BuildAssetBundleOptions.ChunkBasedCompression, target) == null)
                     throw new Exception("BuildAssetBundles failed for " + fileName + " (" + target + ")");
                 built.Add(Path.Combine(dir, fileName));
+
+                if (flatOutput)
+                {
+                    // BuildAssetBundles also drops a master bundle named after the folder and a
+                    // .manifest per bundle. Neither is a mod; neither ships.
+                    string master = Path.Combine(dir, Path.GetFileName(dir.TrimEnd('/', '\\')));
+                    foreach (string junk in new[] { master, master + ".manifest", Path.Combine(dir, fileName + ".manifest") })
+                        if (File.Exists(junk))
+                            File.Delete(junk);
+                }
             }
             return built.ToArray();
         }

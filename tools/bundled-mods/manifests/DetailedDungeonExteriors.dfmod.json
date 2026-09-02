@@ -20,7 +20,7 @@
   ],
   "Dependencies": [
     {
-      "Name": "FixedDungeonExteriors",
+      "Name": "fixeddungeonexteriors",
       "IsOptional": false,
       "IsPeer": false
     }

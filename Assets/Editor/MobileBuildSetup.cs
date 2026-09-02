@@ -20,6 +20,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEditor;
 using UnityEditor.SceneManagement;
+using DaggerfallWorkshop.Game.Utility.ModSupport;
 
 namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 {
@@ -462,9 +463,74 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// </summary>
         public const string GameScenePath = "Assets/Scenes/DaggerfallUnityGame.unity";
 
+        /// <summary>Where bundled mods are written; scanned by ModManager on iOS.</summary>
+        public const string ShippedModsPath = "Assets/StreamingAssets/Mods";
+        const string BundledSourceRoot = "Assets/Game/Mods";
+
+        /// <summary>
+        /// Every fetched bundled-mod manifest. IOSPilot is a build-path fixture with placeholder
+        /// art and already loads as a virtual mod in the editor, so it is never bundled.
+        /// </summary>
+        public static string[] BundledManifests()
+        {
+            if (!Directory.Exists(BundledSourceRoot))
+                return new string[0];
+            return Directory.GetFiles(BundledSourceRoot, "*" + ModManager.MODINFOEXTENSION, SearchOption.AllDirectories)
+                .Select(p => p.Replace('\\', '/'))
+                .Where(p => !p.Contains("/IOSPilot/"))
+                .OrderBy(p => p, System.StringComparer.Ordinal)
+                .ToArray();
+        }
+
+        /// <summary>
+        /// Build the bundled MIT mods (tools/bundled-mods/fetch.py puts their sources under
+        /// Assets/Game/Mods/) into iOS AssetBundles in the shipped Mods folder, each with its
+        /// LICENSE beside it. Part of ApplyAll; also its own -executeMethod for iteration:
+        ///   -executeMethod DaggerfallWorkshop.Game.Mobile.EditorTools.MobileBuildSetup.BuildBundledMods
+        /// A clone that never ran fetch.py still builds an app - just without the bundle.
+        /// </summary>
+        public static void BuildBundledMods()
+        {
+            string[] manifests = BundledManifests();
+            if (manifests.Length == 0)
+            {
+                Debug.LogWarning("[MobileBuildSetup] no bundled mods under " + BundledSourceRoot +
+                                 " - run tools/bundled-mods/fetch.py. Building without them.");
+                return;
+            }
+
+            string licDir = Path.Combine(ShippedModsPath, "Licenses");
+            Directory.CreateDirectory(licDir);
+
+            // Stale bundles from a previous fetch must not linger.
+            foreach (string old in Directory.GetFiles(ShippedModsPath, "*" + ModManager.MODEXTENSION))
+                File.Delete(old);
+            foreach (string old in Directory.GetFiles(licDir, "*-LICENSE.txt"))
+                File.Delete(old);
+
+            foreach (string manifest in manifests)
+            {
+                string[] built = MobileModBuilder.BuildMod(manifest, ShippedModsPath, new[] { BuildTarget.iOS }, flatOutput: true);
+                string modDir = Path.GetDirectoryName(manifest);
+                string licence = Path.Combine(modDir, "LICENSE");
+                if (!File.Exists(licence))
+                    throw new FileNotFoundException("bundled mod has no LICENSE - refusing to ship it", manifest);
+                // BuildAssetBundles lower-cases the bundle file name; the licence follows it so the
+                // pairing survives iOS's case-sensitive filesystem.
+                string stem = Path.GetFileName(manifest).Replace(ModManager.MODINFOEXTENSION, "").ToLowerInvariant();
+                File.Copy(licence, Path.Combine(licDir, stem + "-LICENSE.txt"), true);
+                Debug.Log("[MobileBuildSetup] bundled " + string.Join(", ", built));
+            }
+            AssetDatabase.Refresh();
+            Debug.Log("[MobileBuildSetup] bundled mods: " + manifests.Length);
+        }
+
         public static void ApplyAll()
         {
             ApplyIOSSettings();
+
+            // Bundled MIT mods first: they are plain asset bundles and independent of the scene.
+            BuildBundledMods();
 
             // MobileHudBuilder edits the OPEN scene. In batchmode nothing is loaded, so
             // without this the HUD would be built into an empty throwaway scene and lost.
