@@ -471,8 +471,16 @@ namespace DaggerfallWorkshop.Game.Mobile
             PlayerGPS startGps = GameManager.Instance.PlayerGPS;
             if (startGps != null && startGps.HasCurrentLocation)
                 offeredPlaces.Add(startGps.CurrentMapID);
-            nightHandled = false;
-            wasNight = false;
+
+            // THE NIGHT DECISION SURVIVES A RESUME. This used to reset nightHandled here, so a
+            // player who closed the camp screen without sleeping (or slept an hour) resumed into
+            // the same night, was asked to camp again on the very next frame, and again, and
+            // again - measured on the Mac as three camps in under a second (journey probe run 6).
+            // Reported from the device as the journey "just getting stuck". The flag now clears
+            // only when night actually ends (CheckNightfall), never on resume.
+            bool nightNow = DaggerfallUnity.Instance.WorldTime != null && DaggerfallUnity.Instance.WorldTime.Now.IsNight;
+            nightHandled = NightFlagOnResume(nightNow, nightHandled);
+            wasNight = nightNow;
             travellingOnToInn = false;
 
             diseaseCount = GameManager.Instance.PlayerEffectManager.DiseaseCount;
@@ -760,6 +768,10 @@ namespace DaggerfallWorkshop.Game.Mobile
             SampleSpeed();
             ApplySpawnSuppression(SpeedCautious);
             LogPixelPaths();
+
+            // Stand still while the town (or dungeon exterior) under the player is still being
+            // built, at 1x, and do not judge arrival or offer a stop until it exists.
+            bool holding = UpdateLocationHold();
             pilot.Update();
 
             // pilot.Update() may have arrived and stopped us mid-frame.
@@ -770,11 +782,53 @@ namespace DaggerfallWorkshop.Game.Mobile
                 return;
             if (CheckDisease())
                 return;
-            if (CheckPassingPlace())
+            if (!holding && CheckPassingPlace())
                 return;
             if (CheckNightfall())
                 return;
             CheckEnemies();
+        }
+
+        const float maxLocationHoldSeconds = 8f;
+        float locationHoldStarted = -1f;
+        bool holdCapWarned;
+
+        /// <summary>See ShouldHoldForLocation. Returns true while holding.</summary>
+        bool UpdateLocationHold()
+        {
+            PlayerGPS gps = GameManager.Instance.PlayerGPS;
+            StreamingWorld world = GameManager.Instance.StreamingWorld;
+            bool hasLocation = gps != null && gps.HasCurrentLocation;
+            bool built = world != null && world.CurrentPlayerLocationObject != null;
+
+            if (hasLocation && !built)
+            {
+                if (locationHoldStarted < 0f)
+                {
+                    locationHoldStarted = Time.unscaledTime;
+                    Debug.Log("[Journey] holding: '" + gps.CurrentLocation.Name + "' is not built yet");
+                }
+            }
+            else if (locationHoldStarted >= 0f)
+            {
+                Debug.Log(string.Format("[Journey] hold released after {0:F1}s", Time.unscaledTime - locationHoldStarted));
+                locationHoldStarted = -1f;
+            }
+
+            bool hold = ShouldHoldForLocation(hasLocation, built,
+                locationHoldStarted < 0f ? 0f : Time.unscaledTime - locationHoldStarted, maxLocationHoldSeconds);
+            if (hasLocation && !built && !hold && locationHoldStarted >= 0f && !holdCapWarned)
+            {
+                holdCapWarned = true;
+                Debug.LogWarning("[Journey] hold cap reached; travelling on through an unbuilt location");
+            }
+            if (built || !hasLocation)
+                holdCapWarned = false;
+
+            pilot.SetHold(hold);
+            if (hold && !Mathf.Approximately(Time.timeScale, 1f))
+                SetTimeScale(1);
+            return hold;
         }
 
         public enum VitalsAction { Continue, Stop, Camp }
@@ -927,6 +981,25 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// where there is one and walks on to the next town where there is not - and camps if
         /// the purse is empty. Once per night.
         /// </summary>
+        /// <summary>Pure: nightHandled after a resume - kept while it is still the same night.</summary>
+        public static bool NightFlagOnResume(bool isNightNow, bool wasHandled)
+        {
+            return isNightNow && wasHandled;
+        }
+
+        /// <summary>
+        /// Pure: should the journey stand still because the location under the player has not
+        /// been built yet? StreamingWorld builds a town some seconds after the player's pixel
+        /// enters it - 7 s real at 8x on the Mac (probe runs 6-7), longer on an iPad - and in that
+        /// window the pilot used to walk on through the empty footprint, count arrival, and
+        /// offer "stop here?" for a town that was not there. Holding caps at maxHoldSeconds so a
+        /// location that never builds cannot pin the journey forever.
+        /// </summary>
+        public static bool ShouldHoldForLocation(bool hasLocation, bool locationBuilt, float heldSeconds, float maxHoldSeconds)
+        {
+            return hasLocation && !locationBuilt && heldSeconds < maxHoldSeconds;
+        }
+
         public static NightAction DecideNight(bool night, bool handledTonight, bool sleepModeInn,
                                               bool inSettlement, int gold, int innCost)
         {

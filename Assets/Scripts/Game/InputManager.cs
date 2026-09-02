@@ -588,7 +588,7 @@ namespace DaggerfallWorkshop.Game
             // Deliberately outside PollGameplayStage(), which stands down in menu mode and when
             // a gamepad or keyboard is attached. A journey must keep walking regardless - the
             // travel bar is itself a window, and controller users travel too.
-            if (Mobile.MobileJourneyPilot.Active)
+            if (Mobile.MobileJourneyPilot.Active && !Mobile.MobileJourneyPilot.Holding)
             {
                 ApplyVerticalForce(1);
             }

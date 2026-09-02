@@ -53,11 +53,34 @@ Quest sources and quest packs resolve from Documents first, then the 265 shipped
 Additive by necessity: a straight redirect would leave the game with no quests.
 *Rebase risk: LOW.*
 
-### Mods — `ModManager.cs` (+11), `ModSupport/Editor/CreateModEditorWindow.cs` (+10)
+### Mods — `ModManager.cs` (+11, +45), `ModSupport/Editor/CreateModEditorWindow.cs` (+10)
 `ModDirectory` points at Documents on iOS (the shipped folder is read-only, so the mod
 system was enabled but permanently empty), and the mod builder gains an iOS build target,
-off by default.
+off by default. 2026-09-01: `FindModsFromDirectory` scans BOTH Documents/Mods and the
+shipped `StreamingAssets/Mods` on iOS (`MobileContentPath.Active`), merged by
+`MergeModFiles` with the player's copy winning by file name - so bundled `.dfmod` files can
+ship inside the app. Off iOS the two roots are the same folder and nothing changes.
 *Rebase risk: LOW.*
+
+### Billboards — `Internal/DaggerfallBillboard.cs` (+16)
+`SetMaterial` returns null with one warning per archive when a flat's texture archive has no
+such record, instead of throwing IndexOutOfRange from inside RDBLayout and aborting the
+whole block - a mod block built against Daggerfall Expanded Textures blacked out
+Privateer's Hold this way on device (2026-09-01). NOT platform-guarded on purpose: a
+missing sprite beats a missing dungeon on desktop too, and nothing upstream relies on the
+throw. *Rebase risk: LOW.* One guarded block after `GetMaterialAtlas`.
+
+### Streaming world — `Terrain/StreamingWorld.cs` (+8)
+`UpdateLocation()` refreshes `currentPlayerLocationObject` when it finishes building the
+location for the player's own pixel. `UpdateLocations()` had looked it up in the same call
+that STARTED the build coroutine, so for a freshly entered town the property stayed null
+until the next pixel change - the journey pilot (and anything else asking whether the town
+under the player exists) was told "no town" while standing in one. Correctness fix, not
+guarded. *Rebase risk: LOW.* One block at the end of the coroutine.
+
+### Input, journey hold — `InputManager.cs` (+1)
+The journey's forward force is skipped while `MobileJourneyPilot.Holding` (the town under
+the player is still being built). Part of the Input patch above.
 
 ### Lockpicking feedback — `Internal/DaggerfallActionDoor.cs` (+15)
 `AttemptLockpicking()` returns silently when the player has already failed this door at

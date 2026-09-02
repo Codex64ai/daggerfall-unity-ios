@@ -83,6 +83,22 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public static bool Active { get; private set; }
 
+        /// <summary>
+        /// True while the controller wants the player to stand still (the location under them is
+        /// still being built). InputManager applies no forward force while set, arrival is not
+        /// judged, and blocked recovery is suspended - standing still on purpose is not a wall.
+        /// </summary>
+        public static bool Holding { get; private set; }
+
+        public void SetHold(bool hold)
+        {
+            if (hold == Holding)
+                return;
+            Holding = hold;
+            if (!hold)
+                ClearBlockedState();
+        }
+
         readonly ContentReader.MapSummary destinationSummary;
         DFPosition destinationMapPixel;
         Rect destinationWorldRect;
@@ -195,6 +211,12 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             Active = true;
 
+            if (Holding)
+            {
+                lastProgressTime = Time.unscaledTime;      // a deliberate halt is not "no progress"
+                return;
+            }
+
             TrackMovement();
             UpdateBlockedRecovery();
 
@@ -274,6 +296,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public void Release()
         {
+            Holding = false;
             Active = false;
             ClearBlockedState();
 

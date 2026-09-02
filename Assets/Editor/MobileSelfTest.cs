@@ -89,6 +89,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestJourneyCompressionClamp();
             TestJourneySpeedTiers();
             TestJourneyVitals();
+            TestJourneyNightResume();
+            TestJourneyLocationHold();
             TestRouteRule();
             TestNightDecision();
             TestPassThroughGeometry();
@@ -1290,6 +1292,42 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   == MobileJourneyController.VitalsAction.Camp, "vitals: exactly the threshold counts as low");
             Check(MobileJourneyController.DecideVitals(100, 21, cautious: false, enemiesNearby: false, swimming: false)
                   == MobileJourneyController.VitalsAction.Continue, "vitals: one above the threshold continues");
+        }
+
+        /// <summary>
+        /// Resuming after a camp used to reset the night flag, so a player who closed the rest
+        /// screen without sleeping was asked to camp again at once, forever (probe run 6: three
+        /// camps in under a second). The flag must survive a resume while it is still night.
+        /// </summary>
+        static void TestJourneyNightResume()
+        {
+            Check(MobileJourneyController.NightFlagOnResume(isNightNow: true, wasHandled: true),
+                  "night: resuming into the same night keeps 'handled' (no instant re-camp)");
+            Check(!MobileJourneyController.NightFlagOnResume(isNightNow: false, wasHandled: true),
+                  "night: resuming by day clears 'handled' for the coming night");
+            Check(!MobileJourneyController.NightFlagOnResume(isNightNow: true, wasHandled: false),
+                  "night: a fresh journey at night has not handled tonight yet");
+            Check(!MobileJourneyController.NightFlagOnResume(isNightNow: false, wasHandled: false),
+                  "night: day, nothing handled");
+        }
+
+        /// <summary>
+        /// A town is built some seconds after the player's pixel enters it. Until then the journey
+        /// must stand still: no arrival, no "stop here?" for a town that is not there, no walking
+        /// on through the empty footprint. Capped so a location that never builds cannot pin it.
+        /// </summary>
+        static void TestJourneyLocationHold()
+        {
+            Check(MobileJourneyController.ShouldHoldForLocation(hasLocation: true, locationBuilt: false, heldSeconds: 0f, maxHoldSeconds: 20f),
+                  "hold: in a location that is not built yet -> hold");
+            Check(!MobileJourneyController.ShouldHoldForLocation(hasLocation: true, locationBuilt: true, heldSeconds: 0f, maxHoldSeconds: 20f),
+                  "hold: location built -> travel on");
+            Check(!MobileJourneyController.ShouldHoldForLocation(hasLocation: false, locationBuilt: false, heldSeconds: 0f, maxHoldSeconds: 20f),
+                  "hold: wilderness never holds");
+            Check(!MobileJourneyController.ShouldHoldForLocation(hasLocation: true, locationBuilt: false, heldSeconds: 20f, maxHoldSeconds: 20f),
+                  "hold: the cap releases a location that never builds");
+            Check(MobileJourneyController.ShouldHoldForLocation(hasLocation: true, locationBuilt: false, heldSeconds: 19.9f, maxHoldSeconds: 20f),
+                  "hold: just under the cap still holds");
         }
 
         static void TestRouteRule()
