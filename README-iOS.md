@@ -452,6 +452,22 @@ Two iOS-specific rules:
   replacements are not covered by the headless builder, which does not run the GUI Mod
   Builder's prefab serialization pass.
 
+### Bundled mods
+
+Thirteen of Cliffworms' MIT-licensed mods ship inside the app and appear in the launcher's
+MODS window like any other mod, switched on by default:
+
+- **World:** Fixed Dungeon Exteriors, Detailed Dungeon Exteriors, Varied Wealthy Homes,
+  Main Quest Consequences, Smaller Main Quest Dungeons, Detailed Main Quest Dungeons,
+  Aquatic Sprites.
+- **Quests:** Leveling Inspiration, Skyrim's Adventures, Jobs of the Thieves Guild, Arena's
+  Adventures, Town Greetings of the Iliac Bay, Rumors of the Iliac Bay.
+
+Untick any of them in MODS to switch it off; the choice persists. If you install your own
+copy of one of these mods into `Documents/Mods`, yours is used and the bundled one is ignored.
+Authors, licences and pinned versions are in `THIRD-PARTY.md`; the licence texts ship in the
+app. Detailed Dungeon Exteriors needs Fixed Dungeon Exteriors on.
+
 ### Converting a desktop `.dfmod`
 
 One mod per run, from a checkout of this fork with the Unity editor installed:
@@ -721,5 +737,7 @@ Two MIT-licensed works are compiled into this port, with their headers intact - 
 - **Tedious Travel** by TheNewBob / Jedidia (copyright (c) 2018) - the origin of real travel
   (`MobileJourneyController.cs`, `MobileJourneyPilot.cs`, `MobileJourneyWindow.cs`), reworked
   for this port.
+
+Thirteen MIT-licensed mods by Cliffworms are bundled as `.dfmod` files - see `THIRD-PARTY.md`.
 
 Daggerfall itself is copyright Bethesda Softworks. No game assets are distributed here.
