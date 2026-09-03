@@ -95,6 +95,10 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
         #region Properties
 
         public DFPosition EndPos { get { return endPos; } set { endPos = value;} }
+
+        // MOBILE: how many ocean pixels the straight line to EndPos crosses, from the last
+        // travel-time calculation. Real travel refuses sea routes (see MobileJourneyController).
+        public int RouteOceanPixels { get { return travelTimeCalculator.OceanPixels; } }
         public DaggerfallTravelMapWindow TravelWindow { get { return travelWindow; } protected internal set { travelWindow = value; } }
         public bool SpeedCautious { get { return speedCautious;} set {speedCautious = value; } }
         public bool TravelShip { get { return travelShip;} set { travelShip = value;} }

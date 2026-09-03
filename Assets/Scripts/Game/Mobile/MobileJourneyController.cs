@@ -394,7 +394,25 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (!JourneyModeEnabled || !HasInstance || popup == null)
                 return false;
 
+            // SEA ROUTES ARE NOT WALKED. Vanilla's calculator counts the ocean pixels on the
+            // straight line to the destination; Ship only changes what those cost (51 min each
+            // by ship, 255 swimming) and is selectable anywhere. The pilot cannot sail, and
+            // walking across open water at 50x was the worst outcome of all - so any route that
+            // crosses ocean uses classic fast travel (the vanilla teleport, with vanilla time
+            // and fare), whatever the Ship toggle says. On an all-land route Ship is moot.
+            if (!RouteCanBeWalked(popup.RouteOceanPixels))
+            {
+                Debug.Log("[Journey] route crosses " + popup.RouteOceanPixels + " ocean pixels - classic fast travel");
+                return false;
+            }
+
             return Instance.StoreDestination(popup.EndPos);
+        }
+
+        /// <summary>Pure: a journey walks only routes with no ocean on the straight line.</summary>
+        public static bool RouteCanBeWalked(int oceanPixels)
+        {
+            return oceanPixels <= 0;
         }
 
         /// <summary>

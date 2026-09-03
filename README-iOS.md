@@ -710,11 +710,11 @@ plain text and safe to delete.
   iPadOS 26, with a Magic Keyboard and one Bluetooth controller. Untested: iPhone hardware
   (the physical-inch layout is designed for it but has never run on one), other controller
   models, older iPadOS versions, and other Xcode/Unity 6000.3 pairings.
-- **Journeys do not sail.** Real travel walks. A destination pixel with no location on it
-  (open sea, empty wilderness) falls back to classic fast travel automatically - but a real
-  destination across open water is walked toward in a straight line, over the water. For
-  overseas trips, use classic fast travel (switch Real travel off for that trip, or travel
-  recklessly and expect wet feet).
+- **Journeys do not sail.** Real travel walks. A route whose straight line to the destination
+  crosses any ocean pixel uses classic fast travel instead (the vanilla teleport, with vanilla time
+  and fare), whatever the Ship toggle says - Ship in Daggerfall never meant owning a boat, only
+  paying passage, and it only affects what ocean pixels cost. A destination pixel with no
+  location on it (open sea, empty wilderness) also falls back to classic fast travel.
 - **Free Apple ID signing expires after 7 days.** SideStore and AltStore re-sign
   automatically (see [Installing the app](#installing-the-app)); with Xcode or
   Sideloadly you re-sign and redeploy by hand.

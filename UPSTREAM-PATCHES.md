@@ -78,6 +78,11 @@ until the next pixel change - the journey pilot (and anything else asking whethe
 under the player exists) was told "no town" while standing in one. Correctness fix, not
 guarded. *Rebase risk: LOW.* One block at the end of the coroutine.
 
+### Travel popup — `UserInterfaceWindows/DaggerfallTravelPopUp.cs` (+3)
+`RouteOceanPixels` exposes the calculator's ocean-pixel count so real travel can refuse sea
+routes and fall back to classic fast travel. The journey call site in this file predates
+this ledger entry (see the MOBILE comment there). *Rebase risk: LOW.*
+
 ### Input, journey hold — `InputManager.cs` (+1)
 The journey's forward force is skipped while `MobileJourneyPilot.Holding` (the town under
 the player is still being built). Part of the Input patch above.

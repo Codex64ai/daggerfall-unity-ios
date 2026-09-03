@@ -491,6 +491,24 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// </summary>
         public static void BuildBundledMods()
         {
+            // DFU_BUNDLED_MODS=0: ship no mods inside the app (the MIT pack is a zip on the release,
+            // Ikram's call 2026-09-01). Any bundles left from an earlier build are removed so a
+            // stale one cannot ride along.
+            if (System.Environment.GetEnvironmentVariable("DFU_BUNDLED_MODS") == "0")
+            {
+                int removed = 0;
+                if (Directory.Exists(ShippedModsPath))
+                {
+                    foreach (string old in Directory.GetFiles(ShippedModsPath, "*" + ModManager.MODEXTENSION))
+                    { File.Delete(old); removed++; }
+                    string lic = Path.Combine(ShippedModsPath, "Licenses");
+                    if (Directory.Exists(lic)) Directory.Delete(lic, true);
+                }
+                AssetDatabase.Refresh();
+                Debug.Log("[MobileBuildSetup] DFU_BUNDLED_MODS=0: no mods inside the app (" + removed + " stale bundles removed)");
+                return;
+            }
+
             string[] manifests = BundledManifests();
             if (manifests.Length == 0)
             {

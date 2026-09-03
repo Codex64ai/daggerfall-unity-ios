@@ -91,6 +91,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestJourneyVitals();
             TestJourneyNightResume();
             TestJourneyLocationHold();
+            TestJourneySeaRoute();
             TestRouteRule();
             TestNightDecision();
             TestPassThroughGeometry();
@@ -1328,6 +1329,19 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "hold: the cap releases a location that never builds");
             Check(MobileJourneyController.ShouldHoldForLocation(hasLocation: true, locationBuilt: false, heldSeconds: 19.9f, maxHoldSeconds: 20f),
                   "hold: just under the cap still holds");
+        }
+
+        /// <summary>
+        /// Ship on Daggerfall's travel map is selectable anywhere; it only changes what ocean
+        /// pixels cost. The pilot cannot sail, and used to walk across open water at 50x. Any
+        /// route whose straight line crosses ocean falls back to classic fast travel.
+        /// </summary>
+        static void TestJourneySeaRoute()
+        {
+            Check(MobileJourneyController.RouteCanBeWalked(0), "sea: an all-land route is walked");
+            Check(!MobileJourneyController.RouteCanBeWalked(1), "sea: one ocean pixel -> classic fast travel");
+            Check(!MobileJourneyController.RouteCanBeWalked(40), "sea: a crossing -> classic fast travel");
+            Check(MobileJourneyController.RouteCanBeWalked(-1), "sea: a negative count (never computed) is treated as land");
         }
 
         static void TestRouteRule()
