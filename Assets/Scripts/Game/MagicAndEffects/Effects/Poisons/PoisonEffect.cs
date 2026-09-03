@@ -190,6 +190,15 @@ namespace DaggerfallWorkshop.Game.MagicAndEffects.MagicEffects
             uint currentMinute = DaggerfallUnity.Instance.WorldTime.DaggerfallDateTime.ToClassicDaggerfallTime();
             int minutesPassed = (int)(currentMinute - lastMinute);
 
+            // MOBILE: while a real-travel journey walks, poison neither damages nor counts down -
+            // the minutes are consumed without effect and the poison resumes on arrival. See
+            // MobileJourneyController.StatusEffectsPaused. No-op unless a journey is running.
+            if (Game.Mobile.MobileJourneyController.StatusEffectsPaused)
+            {
+                lastMinute = currentMinute;
+                return;
+            }
+
             // Increment poison effect for each game minute passed or until poison is complete
             while (minutesPassed-- > 0 && minutesRemaining > 0 && currentState != PoisonStates.Complete)
             {

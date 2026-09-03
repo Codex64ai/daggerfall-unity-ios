@@ -710,6 +710,11 @@ plain text and safe to delete.
   iPadOS 26, with a Magic Keyboard and one Bluetooth controller. Untested: iPhone hardware
   (the physical-inch layout is designed for it but has never run on one), other controller
   models, older iPadOS versions, and other Xcode/Unity 6000.3 pairings.
+- **Poison and disease pause while you travel.** Classic fast travel heals you to full on
+  arrival; a real journey instead runs every hour through the game's magic rounds, and a poison
+  that would tick over minutes emptied a health bar in seconds. So while a journey walks, poison
+  and disease neither damage nor count down, and resume where they were when you arrive.
+  Travel is not a cure - deal with it in town.
 - **Journeys do not sail.** Real travel walks. A route whose straight line to the destination
   crosses any ocean pixel uses classic fast travel instead (the vanilla teleport, with vanilla time
   and fare), whatever the Ship toggle says - Ship in Daggerfall never meant owning a boat, only

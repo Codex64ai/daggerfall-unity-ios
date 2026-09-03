@@ -92,6 +92,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestJourneyNightResume();
             TestJourneyLocationHold();
             TestJourneySeaRoute();
+            TestJourneyStatusEffectPause();
             TestRouteRule();
             TestNightDecision();
             TestPassThroughGeometry();
@@ -1342,6 +1343,19 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(!MobileJourneyController.RouteCanBeWalked(1), "sea: one ocean pixel -> classic fast travel");
             Check(!MobileJourneyController.RouteCanBeWalked(40), "sea: a crossing -> classic fast travel");
             Check(MobileJourneyController.RouteCanBeWalked(-1), "sea: a negative count (never computed) is treated as land");
+        }
+
+        /// <summary>
+        /// Poison and disease pause while a journey walks (they would otherwise run at 50x and
+        /// kill on the road, where vanilla fast travel heals to full). The gate is the pilot's
+        /// Active flag; with no journey running it must be off, so desktop and vanilla travel are
+        /// untouched.
+        /// </summary>
+        static void TestJourneyStatusEffectPause()
+        {
+            Check(!MobileJourneyPilot.Active, "status pause: no journey is running in the editor");
+            Check(!MobileJourneyController.StatusEffectsPaused,
+                  "status pause: with no journey, poison and disease tick normally");
         }
 
         static void TestRouteRule()

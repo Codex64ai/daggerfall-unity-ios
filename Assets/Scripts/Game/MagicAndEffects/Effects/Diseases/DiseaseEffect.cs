@@ -136,6 +136,15 @@ namespace DaggerfallWorkshop.Game.MagicAndEffects.MagicEffects
             uint currentDay = DaggerfallUnity.Instance.WorldTime.DaggerfallDateTime.ToClassicDaggerfallTime() / DaggerfallDateTime.MinutesPerDay;
             int daysPast = (int)(currentDay - lastDay);
 
+            // MOBILE: while a real-travel journey walks, disease does not progress - the days are
+            // consumed without effect and it resumes on arrival. See
+            // MobileJourneyController.StatusEffectsPaused. No-op unless a journey is running.
+            if (Game.Mobile.MobileJourneyController.StatusEffectsPaused)
+            {
+                lastDay = currentDay;
+                return;
+            }
+
             // Do nothing if still same day or disease has run its course
             // if this is same day host contracted disease it is considered incubation time
             if (daysPast == 0 || daysOfSymptomsLeft == completedDiseaseValue)

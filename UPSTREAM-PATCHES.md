@@ -78,6 +78,13 @@ until the next pixel change - the journey pilot (and anything else asking whethe
 under the player exists) was told "no town" while standing in one. Correctness fix, not
 guarded. *Rebase risk: LOW.* One block at the end of the coroutine.
 
+### Status effects during real travel — `Effects/Poisons/PoisonEffect.cs` (+8), `Effects/Diseases/DiseaseEffect.cs` (+8)
+While a journey walks, `UpdatePoison`/`UpdateDisease` consume the elapsed minutes/days
+without applying them, so neither can kill a travelling player (vanilla fast travel heals to
+full on arrival and never had this problem). Gated by
+`MobileJourneyController.StatusEffectsPaused`, i.e. the pilot's Active flag - a no-op on
+desktop and during vanilla fast travel. *Rebase risk: LOW.* One block each.
+
 ### Travel popup — `UserInterfaceWindows/DaggerfallTravelPopUp.cs` (+3)
 `RouteOceanPixels` exposes the calculator's ocean-pixel count so real travel can refuse sea
 routes and fall back to classic fast travel. The journey call site in this file predates

@@ -409,6 +409,20 @@ namespace DaggerfallWorkshop.Game.Mobile
             return Instance.StoreDestination(popup.EndPos);
         }
 
+        /// <summary>
+        /// True while a journey is walking: poison and disease do not advance. Vanilla fast travel
+        /// heals the player to full on arrival, so a status effect can never kill a fast-travelling
+        /// player there. Real travel ran every hour of the trip through the magic rounds at 50x
+        /// instead, and a poison that would tick over minutes emptied the health bar in seconds
+        /// (device report 2026-09-02). The effects PAUSE rather than cure - they resume where they
+        /// were on arrival, in a town where cures are - so travel is never a free cure either.
+        /// Read by PoisonEffect and DiseaseEffect.
+        /// </summary>
+        public static bool StatusEffectsPaused
+        {
+            get { return MobileJourneyPilot.Active; }
+        }
+
         /// <summary>Pure: a journey walks only routes with no ocean on the straight line.</summary>
         public static bool RouteCanBeWalked(int oceanPixels)
         {
