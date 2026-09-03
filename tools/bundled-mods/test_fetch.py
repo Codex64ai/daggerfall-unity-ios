@@ -129,6 +129,47 @@ class Licence(unittest.TestCase):
         self.assertTrue(fetch.licence_problems("All rights reserved"))
         self.assertTrue(fetch.licence_problems(""))
 
+    def test_permission_note_only_when_the_entry_declares_it(self):
+        note = fetch.licence_text_for({"licence": "permission:Jay_H granted redistribution, 2026-09-02"})
+        self.assertTrue(note.startswith("Permission\n"))
+        self.assertIn("Jay_H", note)
+        self.assertEqual(fetch.licence_problems(note, allow_permission=True), [])
+        self.assertTrue(fetch.licence_problems(note, allow_permission=False))
+        self.assertIsNone(fetch.licence_text_for({}))
+        self.assertTrue(fetch.licence_problems("Permission\n", allow_permission=True))  # a bare word is not a record
+
+
+class GeneratedManifest(unittest.TestCase):
+    FILES = ["QuestPacks/X/JHRLQ/QuestList-RLQ.txt", "QuestPacks/X/JHRLQ/RLQ01.txt",
+             "QuestPacks/X/JHRLQ/RLQ02.txt", "QuestPacks/X/README.txt", "QuestPacks/X/overview.txt"]
+
+    def test_lists_and_quests_are_declared_and_readmes_dropped(self):
+        m = fetch.generate_manifest("X", self.FILES, "Random Little Quests", "Jay_H", "desc")
+        self.assertEqual(m["Contributes"]["QuestLists"], ["RLQ"])
+        self.assertEqual(sorted(m["Contributes"]["LooseQuestsList"]), ["RLQ01", "RLQ02"])
+        self.assertEqual(len(m["Files"]), 3)
+        self.assertTrue(all(f.startswith("Assets/Game/Mods/X/") for f in m["Files"]))
+        self.assertEqual(m["ModAuthor"], "Jay_H")
+
+    def test_guid_is_stable_per_name_and_distinct_per_pack(self):
+        a = fetch.generate_manifest("X", self.FILES, "t", "a", "")["GUID"]
+        b = fetch.generate_manifest("X", self.FILES, "t2", "a", "")["GUID"]
+        c = fetch.generate_manifest("Y", self.FILES, "t", "a", "")["GUID"]
+        self.assertEqual(a, b)
+        self.assertNotEqual(a, c)
+
+    def test_questlist_rename_changes_the_declared_name_and_the_file(self):
+        files = ["QuestPacks/X/IM/QuestList-IronmanMadness.txt", "QuestPacks/X/IM/IM01.txt"]
+        m = fetch.generate_manifest("X", files, "t", "a", "", renames={"IronmanMadness": "IronmanMadnessInfighting"})
+        self.assertEqual(m["Contributes"]["QuestLists"], ["IronmanMadnessInfighting"])
+        self.assertIn("Assets/Game/Mods/X/QuestPacks/X/IM/QuestList-IronmanMadnessInfighting.txt", m["Files"])
+
+    def test_is_quest_txt(self):
+        self.assertTrue(fetch.is_quest_txt("QP1/Commoner/JHC001.txt"))
+        self.assertFalse(fetch.is_quest_txt("QP1/README.txt"))
+        self.assertFalse(fetch.is_quest_txt("AFR/overview.txt"))
+        self.assertFalse(fetch.is_quest_txt("thing.json"))
+
 
 if __name__ == "__main__":
     unittest.main()

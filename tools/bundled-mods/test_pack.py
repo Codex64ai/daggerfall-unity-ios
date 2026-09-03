@@ -51,6 +51,8 @@ class Readme(unittest.TestCase):
     def test_lists_every_mod_with_its_title(self):
         txt = pack.readme_text(CFG, {"jobsofthethievesguild": "Jobs of the Thieves Guild"})
         self.assertIn("2 mods by Cliffworms", txt)
+        cfg2 = {"dest_root": "x", "mods": CFG["mods"] + [{"name": "JH", "manifest": "JH.dfmod.json", "generate": {"author": "Jay_H"}}]}
+        self.assertIn("3 mods by Cliffworms and Jay_H", pack.readme_text(cfg2, {}))
         self.assertIn("jobsofthethievesguild.dfmod", txt)
         self.assertIn("Jobs of the Thieves Guild", txt)
         self.assertIn("skyrim's adventures.dfmod", txt)

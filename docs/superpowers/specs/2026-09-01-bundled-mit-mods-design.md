@@ -201,3 +201,15 @@ Changing DFU's mod-settings UI.
   Both catch all three retroactively.
 - Pack is now **ten** mods; the `manifests/` override folder is gone (both overrides belonged to
   removed mods).
+
+## Addendum 2026-09-02 (permissions)
+
+Ikram obtained permission from Jay_H (quest packs), Daggerfall Expanded Textures' author, and
+Cliffworms. The pack grew to **31**: the ten Cliffworms mods plus 21 Jay_H packs. `fetch.py`
+gained: `subdir` (many packs in one repo), `generate` (a manifest built from a folder of loose
+quest files, GUID derived from the pack name), `rename_questlists` (the two Ironman variants
+collide), and `licence: permission:<record>` (a `Permission` file in place of a LICENSE, accepted
+by the validator only when declared). Left for later: A New Main Quest and AFR (no QuestList to
+start them), Warm Ashes (needs a list written), the main-quest edits (need the Quests/ override
+path), Invisible Trees (textures), and the three Cliffworms mods that need DET, which return once
+DET is converted. The `reduce player health` action (23 quests inert) is a port-side item.

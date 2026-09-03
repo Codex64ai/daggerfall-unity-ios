@@ -42,12 +42,21 @@ def check_bundles(cfg, mods_dir):
     return problems
 
 
+def authors_line(cfg):
+    seen = []
+    for m in cfg["mods"]:
+        a = (m.get("generate") or {}).get("author") or "Cliffworms"
+        if a not in seen:
+            seen.append(a)
+    return " and ".join(seen) if len(seen) <= 2 else ", ".join(seen[:-1]) + " and " + seen[-1]
+
+
 def readme_text(cfg, titles):
     lines = [
         "Daggerfall Unity iOS - MIT mod pack",
         "",
-        "%d mods by Cliffworms, all MIT licensed. Built for iOS from the authors' GitHub repositories" % len(cfg["mods"]),
-        "with the port's mod builder; the data is the authors' work, unmodified.",
+        "%d mods by %s. Built for iOS from the authors' GitHub repositories with the port's mod builder;" % (len(cfg["mods"]), authors_line(cfg)),
+        "the data is the authors' work, unmodified. Each mod's licence or permission record is in Mods/Licenses/.",
         "",
         "INSTALL: copy the .dfmod files you want from Mods/ into the app's Documents/Mods folder with",
         "the Files app (On My iPad > Daggerfall Unity > Mods), then restart the app. Each mod appears in",
@@ -60,7 +69,7 @@ def readme_text(cfg, titles):
         lines.append("  %-40s %s" % (stem + ".dfmod", titles.get(stem, m["name"])))
     lines += [
         "",
-        "Licences: Mods/Licenses/ (MIT, Copyright (c) 2025 Cliffworms).",
+        "Licences: Mods/Licenses/ - MIT for Cliffworms' mods; Jay_H's are redistributed with his permission.",
         "Sources, pinned versions and what was deliberately left out: " + THIRD_PARTY_URL,
     ]
     return "\n".join(lines) + "\n"

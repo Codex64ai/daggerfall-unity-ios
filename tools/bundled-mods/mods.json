@@ -60,6 +60,284 @@
       "repo": "https://github.com/Cliffworms/RumorsOfTheIliacBay.git",
       "commit": "b5641cd12a47b65b374401825bebd00dfa96ede2",
       "manifest": "RumorsOfTheIliacBay.dfmod.json"
+    },
+    {
+      "name": "JH-QuestPack1",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "QP1",
+      "manifest": "JH-QuestPack1.dfmod.json",
+      "generate": {
+        "title": "Quest Pack 1",
+        "author": "Jay_H",
+        "description": "Jay_H's Quest Pack 1: about 300 new quests across the guilds, temples, nobles, commoners, Dark Brotherhood, vampires and witches. Note: 16 quests use the 'reduce player health' action, which this port does not yet provide; those quests load but do nothing."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-RandomLittleQuests",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "Random Little Quests",
+      "manifest": "JH-RandomLittleQuests.dfmod.json",
+      "generate": {
+        "title": "Random Little Quests",
+        "author": "Jay_H",
+        "description": "Over a hundred small quests offered by commoners and at specific locations. Six use the 'reduce player health' action, not yet provided by this port."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-ImmersionRoles",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "Immersion Roles",
+      "manifest": "JH-ImmersionRoles.dfmod.json",
+      "generate": {
+        "title": "Immersion Roles",
+        "author": "Jay_H",
+        "description": "Eight role quest lines: Cursed of Mephala, Dark Brotherhood Initiate, Escaped Slave, Headhunter, Noble Child, Outlaw, Speaker for the Dead, Vindicator."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-ReputationConsequences",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "ReputationConsequences",
+      "manifest": "JH-ReputationConsequences.dfmod.json",
+      "generate": {
+        "title": "Reputation Consequences",
+        "author": "Jay_H",
+        "description": "Your reputation has consequences: quests that react to how factions see you. One quest uses 'reduce player health', not yet provided by this port."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-ChronicleOfTheGreatKnight",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "chronicle-great-knight",
+      "manifest": "JH-ChronicleOfTheGreatKnight.dfmod.json",
+      "generate": {
+        "title": "Chronicle of the Great Knight",
+        "author": "Jay_H",
+        "description": "A knightly quest line."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-TheTaleContinues",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "thetalecontinues",
+      "manifest": "JH-TheTaleContinues.dfmod.json",
+      "generate": {
+        "title": "The Tale Continues",
+        "author": "Jay_H",
+        "description": "Follow-on quests after the main story."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-BattleCreatures",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "Battle Creatures",
+      "manifest": "JH-BattleCreatures.dfmod.json",
+      "generate": {
+        "title": "Battle Creatures",
+        "author": "Jay_H",
+        "description": "Creature-hunting quests."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-MundaneJobs",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "Mundane Jobs",
+      "manifest": "JH-MundaneJobs.dfmod.json",
+      "generate": {
+        "title": "Mundane Jobs",
+        "author": "Jay_H",
+        "description": "Everyday work: courier runs and tree felling."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-MedicalEmergency",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "medicalemergency",
+      "manifest": "JH-MedicalEmergency.dfmod.json",
+      "generate": {
+        "title": "Medical Emergency",
+        "author": "Jay_H",
+        "description": "A medical emergency quest."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-BecomeDarkBrotherhood",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "becomedarkb",
+      "manifest": "JH-BecomeDarkBrotherhood.dfmod.json",
+      "generate": {
+        "title": "Become a Dark Brotherhood Member",
+        "author": "Jay_H",
+        "description": "Join the Dark Brotherhood by quest."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-BecomeThief",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "becomethieves",
+      "manifest": "JH-BecomeThief.dfmod.json",
+      "generate": {
+        "title": "Become a Thief",
+        "author": "Jay_H",
+        "description": "Join the Thieves Guild by quest."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-BecomeVampire",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "becomevampire",
+      "manifest": "JH-BecomeVampire.dfmod.json",
+      "generate": {
+        "title": "Become a Vampire",
+        "author": "Jay_H",
+        "description": "Seek out vampirism by quest."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-BecomeWereboar",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "becomewereboar",
+      "manifest": "JH-BecomeWereboar.dfmod.json",
+      "generate": {
+        "title": "Become a Wereboar",
+        "author": "Jay_H",
+        "description": "Seek out the wereboar curse by quest."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-BecomeWerewolf",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "becomewerewolf",
+      "manifest": "JH-BecomeWerewolf.dfmod.json",
+      "generate": {
+        "title": "Become a Werewolf",
+        "author": "Jay_H",
+        "description": "Seek out the werewolf curse by quest."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-CheatArmory",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "cheatarmory",
+      "manifest": "JH-CheatArmory.dfmod.json",
+      "generate": {
+        "title": "Cheat Armory",
+        "author": "Jay_H",
+        "description": "A cheat: an armory of gear on request."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-WeatherItems",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "Weather-Items",
+      "manifest": "JH-WeatherItems.dfmod.json",
+      "generate": {
+        "title": "Weather Items",
+        "author": "Jay_H",
+        "description": "Items that change the weather."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-RandomMonsterNoises",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "Random Monster Noises",
+      "manifest": "JH-RandomMonsterNoises.dfmod.json",
+      "generate": {
+        "title": "Random Monster Noises",
+        "author": "Jay_H",
+        "description": "Ambient monster noises as a fun surprise."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-MQRepFix",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "MQrepfix",
+      "manifest": "JH-MQRepFix.dfmod.json",
+      "generate": {
+        "title": "Main Quest Reputation Fix",
+        "author": "Jay_H",
+        "description": "Fixes reputation after main quest events."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-IronmanMadnessInfighting",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "JH Ironman Madness INFIGHTING",
+      "manifest": "JH-IronmanMadnessInfighting.dfmod.json",
+      "generate": {
+        "title": "Ironman Madness (infighting)",
+        "author": "Jay_H",
+        "description": "Ironman mode with monster infighting. Do not enable together with the no-infighting variant.",
+        "rename_questlists": {
+          "IronmanMadness": "IronmanMadnessInfighting"
+        }
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-IronmanMadnessNoInfighting",
+      "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
+      "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
+      "subdir": "JH Ironman Madness NO INFIGHTING",
+      "manifest": "JH-IronmanMadnessNoInfighting.dfmod.json",
+      "generate": {
+        "title": "Ironman Madness (no infighting)",
+        "author": "Jay_H",
+        "description": "Ironman mode without monster infighting. Do not enable together with the infighting variant.",
+        "rename_questlists": {
+          "IronmanMadness": "IronmanMadnessNoInfighting"
+        }
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "JH-StartingDungeonRandomizer",
+      "repo": "https://github.com/JayH2971/dfu-starting-dungeon-randomizer.git",
+      "commit": "72276305b60a7a8b80a4609ee3d019deb07ff047",
+      "manifest": "JH-StartingDungeonRandomizer.dfmod.json",
+      "generate": {
+        "title": "Starting Dungeon Randomizer",
+        "author": "Jay_H",
+        "description": "Start a new character in a random dungeon instead of Privateer's Hold."
+      },
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
     }
   ]
 }

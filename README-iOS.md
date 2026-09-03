@@ -452,21 +452,29 @@ Two iOS-specific rules:
   replacements are not covered by the headless builder, which does not run the GUI Mod
   Builder's prefab serialization pass.
 
-### The MIT mod pack
+### The mod pack
 
-Ten of Cliffworms' MIT-licensed mods are built for iOS and published with each release as
-`MIT-ModPack-ios.zip`. Install any or all of them like any other mod: copy the `.dfmod` files you
-want into `Documents/Mods` with the Files app and restart. Each appears in the launcher's MODS
-window, switched on; untick to switch off.
+Thirty-one mods are built for iOS and published with each release as `MIT-ModPack-ios.zip`:
+ten by Cliffworms (MIT) and twenty-one quest packs by Jay_H (redistributed with his permission).
+Install any or all of them like any other mod: copy the `.dfmod` files you want into
+`Documents/Mods` with the Files app and restart. Each appears in the launcher's MODS window,
+switched on; untick to switch off.
 
-- **World:** Fixed Dungeon Exteriors, Varied Wealthy Homes, Smaller Main Quest Dungeons,
-  Aquatic Sprites.
-- **Quests:** Leveling Inspiration, Skyrim's Adventures, Jobs of the Thieves Guild, Arena's
-  Adventures, Town Greetings of the Iliac Bay, Rumors of the Iliac Bay.
+- **World (Cliffworms):** Fixed Dungeon Exteriors, Varied Wealthy Homes, Smaller Main Quest
+  Dungeons, Aquatic Sprites.
+- **Quests (Cliffworms):** Leveling Inspiration, Skyrim's Adventures, Jobs of the Thieves Guild,
+  Arena's Adventures, Town Greetings of the Iliac Bay, Rumors of the Iliac Bay.
+- **Quests (Jay_H):** Quest Pack 1, Random Little Quests, Immersion Roles, Reputation Consequences,
+  Chronicle of the Great Knight, The Tale Continues, Battle Creatures, Mundane Jobs, Medical
+  Emergency, Become a Dark Brotherhood Member / Thief / Vampire / Wereboar / Werewolf, Cheat
+  Armory, Weather Items, Random Monster Noises, Main Quest Reputation Fix, Ironman Madness (two
+  variants - enable one), Starting Dungeon Randomizer.
 
-Authors, licences and pinned versions are in `THIRD-PARTY.md`; the licence texts are in the zip.
-A build can also carry these inside the app (`StreamingAssets/Mods`); if it does, a copy you
-install yourself in `Documents/Mods` takes precedence.
+A few of Jay_H's quests use the `reduce player health` action, which this port does not provide
+yet; they load and do nothing. Authors, licences, permissions and pinned versions are in
+`THIRD-PARTY.md`; the licence texts and permission records are in the zip. A build can also carry
+these inside the app (`StreamingAssets/Mods`); if it does, a copy you install yourself in
+`Documents/Mods` takes precedence.
 
 ### Converting a desktop `.dfmod`
 
@@ -743,6 +751,6 @@ Two MIT-licensed works are compiled into this port, with their headers intact - 
   (`MobileJourneyController.cs`, `MobileJourneyPilot.cs`, `MobileJourneyWindow.cs`), reworked
   for this port.
 
-Ten MIT-licensed mods by Cliffworms are built into `.dfmod` files and published as a mod pack - see `THIRD-PARTY.md`.
+Thirty-one mods by Cliffworms (MIT) and Jay_H (by permission) are built into `.dfmod` files and published as a mod pack - see `THIRD-PARTY.md`.
 
 Daggerfall itself is copyright Bethesda Softworks. No game assets are distributed here.

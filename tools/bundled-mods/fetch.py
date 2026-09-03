@@ -136,10 +136,14 @@ def validate_set(manifests):
     return problems
 
 
-def licence_problems(text):
+def licence_problems(text, allow_permission=False):
     stripped = (text or "").strip()
     first = stripped.splitlines()[0].strip() if stripped else ""
-    return [] if first == "MIT License" else ["LICENSE first line is %r, expected 'MIT License'" % first]
+    if first == "MIT License":
+        return []
+    if allow_permission and first == "Permission" and len(stripped.splitlines()) > 1:
+        return []
+    return ["LICENSE first line is %r, expected 'MIT License'%s" % (first, " or 'Permission'" if allow_permission else "")]
 
 
 def lowercase_image_names(manifest, mod_dir):
@@ -156,6 +160,67 @@ def lowercase_image_names(manifest, mod_dir):
         new_files.append(f)
     fixed["Files"] = new_files
     return fixed
+
+
+# ----------------------------------------------------------------- generated manifests
+
+import uuid
+NON_QUEST_TXT = ("readme", "overview", "instructions", "changelog", "license", "licence")
+
+
+def is_quest_txt(filename):
+    """Quest scripts and QuestLists are .txt; READMEs are too. Tell them apart by name."""
+    stem = os.path.splitext(os.path.basename(filename))[0].lower()
+    return filename.lower().endswith(".txt") and not any(stem.startswith(n) for n in NON_QUEST_TXT)
+
+
+def generate_manifest(name, files, title, author, description, renames=None, version="1.0"):
+    """A .dfmod.json for a folder of loose quest files (Jay_H's packs ship none).
+
+    files: relative paths under the pack (e.g. 'QuestPacks/JHRLQ/QuestList-RLQ.txt'). Every
+    QuestList-*.txt becomes a Contributes.QuestLists entry and every other quest .txt a
+    LooseQuestsList entry - the two declarations the engine needs to offer the quests at all.
+    renames maps a QuestList name to a new one (the file is renamed by the caller) so two packs
+    that both ship e.g. QuestList-IronmanMadness can coexist; the engine silently drops the
+    second list of a name otherwise. The GUID is derived from the name so a rebuild is the same
+    mod to the engine and to a player's saved Mods.json.
+    """
+    renames = renames or {}
+    quest_lists, loose = [], []
+    out_files = []
+    for rel in sorted(files):
+        if not is_quest_txt(rel):
+            continue
+        stem = os.path.splitext(os.path.basename(rel))[0]
+        if stem.startswith("QuestList-"):
+            ln = stem[len("QuestList-"):]
+            new = renames.get(ln, ln)
+            quest_lists.append(new)
+            if new != ln:
+                rel = os.path.join(os.path.dirname(rel), "QuestList-" + new + ".txt").replace("\\", "/")
+        else:
+            loose.append(stem)
+        out_files.append("Assets/Game/Mods/%s/%s" % (name, rel))
+    return {
+        "ModTitle": title,
+        "ModVersion": version,
+        "ModAuthor": author,
+        "ContactInfo": "",
+        "DFUnity_Version": "1.1.1",
+        "ModDescription": description,
+        "GUID": str(uuid.uuid5(uuid.NAMESPACE_URL, "net.codex64.daggerfall/bundled-mods/" + name)),
+        "Files": out_files,
+        "Contributes": {"QuestLists": quest_lists, "LooseQuestsList": loose},
+    }
+
+
+def licence_text_for(entry):
+    """MIT packs ship the repo's LICENSE verbatim; packs redistributed by the author's permission
+    ship a Permission note instead (entry['licence'] = 'permission:<who granted what, when>')."""
+    lic = entry.get("licence", "")
+    if lic.startswith("permission:"):
+        return "Permission\n\n" + lic[len("permission:"):].strip() + "\n"
+    return None
 
 
 # ----------------------------------------------------------------- I/O
@@ -184,28 +249,65 @@ def fetch_one(cfg, entry):
                        check=True)
         subprocess.run(["git", "-C", tmp, "checkout", "-q", "FETCH_HEAD"], check=True)
 
-        if entry.get("manifest_override"):
-            with open(os.path.join(HERE, entry["manifest_override"]), encoding="utf-8") as fh:
-                manifest = json.load(fh)
-        else:
-            with open(os.path.join(tmp, entry["manifest"]), encoding="utf-8") as fh:
-                manifest = json.load(fh)
-
-        manifest = normalize_paths(manifest, entry["name"])
+        src_root = os.path.join(tmp, entry["subdir"]) if entry.get("subdir") else tmp
+        if not os.path.isdir(src_root):
+            raise SystemExit("%s: subdir %r not in repo" % (entry["name"], entry.get("subdir")))
 
         if os.path.isdir(dest):
             shutil.rmtree(dest)
         os.makedirs(dest)
-        for root in sorted(payload_roots(manifest)):
-            src = os.path.join(tmp, root)
-            if not os.path.isdir(src):
-                raise SystemExit("%s: manifest references %s/ but the repo has no such folder"
-                                 % (entry["name"], root))
-            shutil.copytree(src, os.path.join(dest, root), ignore=shutil.ignore_patterns("*.meta"))
-        lic = os.path.join(tmp, "LICENSE")
-        if not os.path.exists(lic):
-            raise SystemExit(entry["name"] + ": no LICENSE in repo - cannot bundle")
-        shutil.copyfile(lic, os.path.join(dest, "LICENSE"))
+
+        if entry.get("generate"):
+            # Loose quest files, no manifest upstream: copy every quest .txt (any depth) under
+            # QuestPacks/<Name>/ preserving its relative path, renaming clashing QuestLists.
+            g = entry["generate"]
+            renames = g.get("rename_questlists") or {}
+            rels = []
+            for dirpath, _, names in os.walk(src_root):
+                if ".git" in dirpath.split(os.sep):
+                    continue
+                for n in names:
+                    if is_quest_txt(n):
+                        rels.append(os.path.relpath(os.path.join(dirpath, n), src_root).replace(os.sep, "/"))
+            if not rels:
+                raise SystemExit(entry["name"] + ": no quest files found")
+            copied = []
+            for rel in rels:
+                out_rel = "QuestPacks/%s/%s" % (entry["name"], rel)
+                base = os.path.basename(rel)
+                if base.startswith("QuestList-"):
+                    ln = os.path.splitext(base)[0][len("QuestList-"):]
+                    if ln in renames:
+                        out_rel = os.path.join(os.path.dirname(out_rel), "QuestList-" + renames[ln] + ".txt").replace("\\", "/")
+                dst = os.path.join(dest, out_rel)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copyfile(os.path.join(src_root, rel), dst)
+                copied.append("QuestPacks/%s/%s" % (entry["name"], rel))
+            manifest = generate_manifest(entry["name"], copied, g["title"], g["author"], g.get("description", ""), renames)
+        else:
+            if entry.get("manifest_override"):
+                with open(os.path.join(HERE, entry["manifest_override"]), encoding="utf-8") as fh:
+                    manifest = json.load(fh)
+            else:
+                with open(os.path.join(src_root, entry["manifest"]), encoding="utf-8") as fh:
+                    manifest = json.load(fh)
+            manifest = normalize_paths(manifest, entry["name"])
+            for root in sorted(payload_roots(manifest)):
+                src = os.path.join(src_root, root)
+                if not os.path.isdir(src):
+                    raise SystemExit("%s: manifest references %s/ but the repo has no such folder"
+                                     % (entry["name"], root))
+                shutil.copytree(src, os.path.join(dest, root), ignore=shutil.ignore_patterns("*.meta"))
+
+        note = licence_text_for(entry)
+        if note is not None:
+            with open(os.path.join(dest, "LICENSE"), "w", encoding="utf-8") as fh:
+                fh.write(note)
+        else:
+            lic = os.path.join(tmp, "LICENSE")
+            if not os.path.exists(lic):
+                raise SystemExit(entry["name"] + ": no LICENSE in repo - cannot bundle")
+            shutil.copyfile(lic, os.path.join(dest, "LICENSE"))
 
         manifest = lowercase_image_names(manifest, dest)
         with open(os.path.join(dest, entry["manifest"]), "w", encoding="utf-8") as fh:
@@ -233,7 +335,8 @@ def check_all(cfg, entries):
             problems.append(entry["name"] + ": LICENSE missing")
         else:
             with open(lic, encoding="utf-8", errors="replace") as fh:
-                problems += [entry["name"] + ": " + p for p in licence_problems(fh.read())]
+                problems += [entry["name"] + ": " + p for p in
+                             licence_problems(fh.read(), allow_permission=str(entry.get("licence", "")).startswith("permission:"))]
     problems += validate_set(manifests)
     return problems
 

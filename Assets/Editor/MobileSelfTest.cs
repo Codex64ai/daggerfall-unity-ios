@@ -311,10 +311,15 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             {
                 string stem = Path.GetFileNameWithoutExtension(b);
                 string lic = Path.Combine(root, "Licenses", stem + "-LICENSE.txt");
-                if (!File.Exists(lic) || !File.ReadAllText(lic).TrimStart().StartsWith("MIT License"))
+                // MIT text, or a Permission record for a pack redistributed by its author's leave
+                // (Jay_H's quest packs) - never nothing.
+                string text = File.Exists(lic) ? File.ReadAllText(lic).TrimStart() : "";
+                bool ok = text.StartsWith("MIT License") ||
+                          (text.StartsWith("Permission") && text.Trim().Split('\n').Length > 1);
+                if (!ok)
                     missing++;
             }
-            Check(missing == 0, "every shipped bundle has an MIT LICENSE beside it", missing + " missing");
+            Check(missing == 0, "every shipped bundle has a licence or permission record beside it", missing + " missing");
             Check(bundles.Length == MobileBuildSetup.BundledManifests().Length,
                   "one bundle per fetched manifest", bundles.Length + " bundles");
         }
