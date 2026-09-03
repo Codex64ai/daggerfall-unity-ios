@@ -150,6 +150,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 path.StartsWith("Assets/Game/Mods/Converted/", StringComparison.Ordinal))
                 return;
             var importer = (TextureImporter)assetImporter;
+            if (Environment.GetEnvironmentVariable("DFU_IMPORT_TRACE") == "1")
+                Debug.Log("[MobileModPackTextureImporter] " + path);
             importer.npotScale = TextureImporterNPOTScale.None;
             importer.isReadable = false;
             bool twoD = false;

@@ -483,6 +483,34 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         }
 
         /// <summary>
+        /// Force a reimport of every fetched pack (not IOSPilot, not the converter's Converted/),
+        /// so MobileModPackTextureImporter's iOS settings apply to textures whose .meta arrived
+        /// from the author's repo with desktop settings baked in. Run once after a fetch:
+        ///   -executeMethod DaggerfallWorkshop.Game.Mobile.EditorTools.MobileBuildSetup.ReimportPacks
+        /// </summary>
+        public static void ReimportPacks()
+        {
+            string one = System.Environment.GetEnvironmentVariable("DFU_REIMPORT_ONE");
+            if (!string.IsNullOrEmpty(one))
+            {
+                AssetDatabase.ImportAsset(one, ImportAssetOptions.ForceUpdate);
+                AssetDatabase.SaveAssets();
+                Debug.Log("[MobileBuildSetup] reimported one asset: " + one);
+                return;
+            }
+            int n = 0;
+            foreach (string dir in Directory.GetDirectories(BundledSourceRoot))
+            {
+                string name = Path.GetFileName(dir);
+                if (name == "IOSPilot" || name == "Converted") continue;
+                AssetDatabase.ImportAsset(dir.Replace('\\', '/'), ImportAssetOptions.ImportRecursive | ImportAssetOptions.ForceUpdate);
+                n++;
+            }
+            AssetDatabase.SaveAssets();
+            Debug.Log("[MobileBuildSetup] reimported " + n + " pack folders");
+        }
+
+        /// <summary>
         /// Build the bundled MIT mods (tools/bundled-mods/fetch.py puts their sources under
         /// Assets/Game/Mods/) into iOS AssetBundles in the shipped Mods folder, each with its
         /// LICENSE beside it. Part of ApplyAll; also its own -executeMethod for iteration:

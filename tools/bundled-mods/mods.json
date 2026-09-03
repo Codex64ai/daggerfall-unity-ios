@@ -344,35 +344,50 @@
       "repo": "https://github.com/drcarademono/vanilla-enhanced.git",
       "commit": "c0c9041c101ba8b57feb93258dda7a37be1b9433",
       "manifest": "Vanilla Enhanced - Base.dfmod.json",
-      "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object."
+      "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object.",
+      "exclude_globs": [
+        "*TexArray.asset"
+      ]
     },
     {
       "name": "VanillaEnhanced-MaskedRoads",
       "repo": "https://github.com/drcarademono/vanilla-enhanced.git",
       "commit": "c0c9041c101ba8b57feb93258dda7a37be1b9433",
       "manifest": "Vanilla Enhanced - Masked Roads.dfmod.json",
-      "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object."
+      "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object.",
+      "exclude_globs": [
+        "*TexArray.asset"
+      ]
     },
     {
       "name": "VanillaEnhanced-SnowlessSwamps",
       "repo": "https://github.com/drcarademono/vanilla-enhanced.git",
       "commit": "c0c9041c101ba8b57feb93258dda7a37be1b9433",
       "manifest": "Vanilla Enhanced - Snowless Swamps and Jungles.dfmod.json",
-      "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object."
+      "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object.",
+      "exclude_globs": [
+        "*TexArray.asset"
+      ]
     },
     {
       "name": "VanillaEnhanced-WinterTracks",
       "repo": "https://github.com/drcarademono/vanilla-enhanced.git",
       "commit": "c0c9041c101ba8b57feb93258dda7a37be1b9433",
       "manifest": "Vanilla Enhanced - Winter Tracks.dfmod.json",
-      "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object."
+      "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object.",
+      "exclude_globs": [
+        "*TexArray.asset"
+      ]
     },
     {
       "name": "VanillaEnhanced-KokeysTemperate",
       "repo": "https://github.com/drcarademono/vanilla-enhanced.git",
       "commit": "c0c9041c101ba8b57feb93258dda7a37be1b9433",
       "manifest": "Kokey's Temperate.dfmod.json",
-      "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object."
+      "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object.",
+      "exclude_globs": [
+        "*TexArray.asset"
+      ]
     },
     {
       "name": "UBLaMF-BuildingOverrides",

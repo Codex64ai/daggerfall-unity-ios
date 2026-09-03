@@ -298,6 +298,17 @@ def fetch_one(cfg, entry):
                 with open(os.path.join(src_root, entry["manifest"]), encoding="utf-8") as fh:
                     manifest = json.load(fh)
             raw_files = list(manifest.get("Files", []))
+            # exclude_globs: files in the author's manifest that must not ship on iOS - Vanilla
+            # Enhanced's *TexArray.asset terrain arrays are stored in BC7, a desktop-only format an
+            # iPad cannot decode (and 108 MB of it); the engine builds terrain arrays from the 2D
+            # textures at runtime when a mod ships none.
+            import fnmatch
+            globs = entry.get("exclude_globs") or []
+            if globs:
+                before = len(raw_files)
+                raw_files = [f for f in raw_files if not any(fnmatch.fnmatch(os.path.basename(f), g) for g in globs)]
+                manifest["Files"] = raw_files
+                print("  excluded %d files by %s" % (before - len(raw_files), globs))
             manifest = normalize_paths(manifest, entry["name"])
             # Copy exactly the listed files, each with its .meta beside it: prefabs, materials and
             # Unity .asset files reference each other and their textures by the GUID in the .meta,
