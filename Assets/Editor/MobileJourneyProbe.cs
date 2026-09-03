@@ -62,6 +62,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         static string currentDestName = "";
         static float legStartedAt;
         static int instantFailures, enemiesCleared;
+        static float watchUntil = -1f, lastWatch;
         static float lastRestClosedAt = -100f;
         static string townGapName; static float townGapStart; static int townGapCount;
 
@@ -138,6 +139,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 lastMoveTime = startedAt;
                 lastTick = startedAt;
                 Debug.Log("[JourneyProbe] world ready at " + Time.realtimeSinceStartup.ToString("F0") + "s");
+                if (Environment.GetEnvironmentVariable("DFU_JOURNEY_POISON") == "1")
+                {
+                    // Reproduce the device report: poisoned and already hurt, then travel.
+                    var pe = GameManager.Instance.PlayerEntity;
+                    var fx = GameManager.Instance.PlayerEffectManager;
+                    var bundle = fx.CreatePoison(DaggerfallWorkshop.Game.MagicAndEffects.MagicEffects.Poisons.Nux_Vomica);
+                    fx.AssignBundle(bundle, DaggerfallWorkshop.Game.MagicAndEffects.AssignBundleFlags.BypassSavingThrows);
+                    pe.CurrentHealth = Mathf.Max(3, pe.MaxHealth / 3);
+                    Debug.Log(string.Format("[JourneyProbe] POISONED with Nux Vomica, hp set to {0}/{1}; poisons={2}", pe.CurrentHealth, pe.MaxHealth, fx.PoisonCount));
+                }
                 return;
             }
 
@@ -229,6 +240,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 townGapName = null;
             }
 
+            if (now < watchUntil && now - lastWatch >= 0.25f)
+            {
+                lastWatch = now;
+                var p = GameManager.Instance.PlayerEntity;
+                Debug.Log(string.Format("[JourneyProbe] WATCH hp={0}/{1} fat={2}% y={3:F1} grounded={4} falling={5} timeScale={6} holding={7} terrainHere={8}",
+                    p.CurrentHealth, p.MaxHealth, p.MaxFatigue > 0 ? p.CurrentFatigue * 100 / p.MaxFatigue : -1,
+                    GameManager.Instance.PlayerObject.transform.position.y, GameManager.Instance.PlayerMotor.IsGrounded,
+                    GameManager.Instance.AcrobatMotor.Falling, Time.timeScale, MobileJourneyPilot.Holding,
+                    GameManager.Instance.StreamingWorld.GetTerrainFromPixel(gps.CurrentMapPixel.X, gps.CurrentMapPixel.Y) != null));
+            }
             if (now - lastTick >= TickSeconds)
             {
                 lastTick = now;
@@ -323,6 +344,18 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             {
                 promptsDismissed++;
                 string text = MessageBoxText((DaggerfallMessageBox)top);
+                if (text.StartsWith("You are passing") && Environment.GetEnvironmentVariable("DFU_JOURNEY_PASS") == "no")
+                {
+                    // Answer NO like the player did: this takes the pass-through TELEPORT path, which a
+                    // dismissal does not. Then watch health and height closely for a few seconds.
+                    var p = GameManager.Instance.PlayerEntity;
+                    Debug.Log(string.Format("[JourneyProbe] answering NO to \"{0}\" hp={1} y={2:F1}", text, p.CurrentHealth,
+                        GameManager.Instance.PlayerObject.transform.position.y));
+                    var raise = typeof(DaggerfallMessageBox).GetMethod("RaiseOnButtonClickEvent", BindingFlags.Instance | BindingFlags.NonPublic);
+                    raise.Invoke(top, new object[] { top, DaggerfallMessageBox.MessageBoxButtons.No });
+                    watchUntil = Time.realtimeSinceStartup + 8f;
+                    return;
+                }
                 Debug.Log("[JourneyProbe] message box dismissed: \"" + text + "\"");
                 if (text.StartsWith("An enemy is seeking"))
                 {

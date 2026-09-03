@@ -824,6 +824,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             // message box - silently resets travel to 1x. Setting it once at departure is not
             // enough. Same reasoning as re-asserting mouse look in the pilot.
             ReleaseStalePause();
+            ReportDeathIfAny();
 
             int target = SustainableCompression();
             if (!Mathf.Approximately(Time.timeScale, target))
@@ -851,6 +852,34 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (CheckNightfall())
                 return;
             CheckEnemies();
+        }
+
+        bool deathReported;
+
+        /// <summary>
+        /// A death mid-journey writes one line naming everything that could have caused it, so a
+        /// device report can be diagnosed from Player.log instead of reconstructed from memory.
+        /// </summary>
+        void ReportDeathIfAny()
+        {
+            PlayerEntity p = GameManager.Instance.PlayerEntity;
+            if (p == null) { deathReported = false; return; }
+            if (p.CurrentHealth > 0) { deathReported = false; return; }
+            if (deathReported) return;
+            deathReported = true;
+            var gps = GameManager.Instance.PlayerGPS;
+            var motor = GameManager.Instance.PlayerMotor;
+            var fx = GameManager.Instance.PlayerEffectManager;
+            Debug.LogError(string.Format(
+                "[Journey] DEATH while travelling: hp={0}/{1} fatigue={2}/{3} poisons={4} diseases={5} enemiesNear={6} swimming={7} grounded={8} falling={9} timeScale={10} holding={11} pixel={12},{13} loc='{14}' y={15:F1}",
+                p.CurrentHealth, p.MaxHealth, p.CurrentFatigue, p.MaxFatigue,
+                fx != null ? fx.PoisonCount : -1, fx != null ? fx.DiseaseCount : -1,
+                GameManager.Instance.AreEnemiesNearby(), GameManager.Instance.PlayerEnterExit != null && GameManager.Instance.PlayerEnterExit.IsPlayerSwimming,
+                motor != null && motor.IsGrounded, GameManager.Instance.AcrobatMotor != null && GameManager.Instance.AcrobatMotor.Falling,
+                Time.timeScale, MobileJourneyPilot.Holding,
+                gps != null ? gps.CurrentMapPixel.X : -1, gps != null ? gps.CurrentMapPixel.Y : -1,
+                gps != null && gps.HasCurrentLocation ? gps.CurrentLocation.Name : "-",
+                GameManager.Instance.PlayerObject != null ? GameManager.Instance.PlayerObject.transform.position.y : 0f));
         }
 
         const float maxLocationHoldSeconds = 8f;
@@ -1284,10 +1313,13 @@ namespace DaggerfallWorkshop.Game.Mobile
             Vector2 exit = MobileJourneyPilot.ExitPointThroughRect(footprint,
                 new Vector2(gps.WorldX, gps.WorldZ), pilot.JourneyYaw, passThroughMarginWorldUnits);
 
+            float yBefore = GameManager.Instance.PlayerObject != null ? GameManager.Instance.PlayerObject.transform.position.y : 0f;
             if (!pilot.TeleportTo(exit.x, exit.y))
                 return false;
 
-            Debug.Log("[Journey] passed through " + gps.CurrentLocation.Name);
+            Debug.Log(string.Format("[Journey] passed through {0}: teleport {1},{2} -> {3},{4} (y {5:F1} -> {6:F1}, timeScale {7})",
+                gps.CurrentLocation.Name, gps.WorldX, gps.WorldZ, Mathf.RoundToInt(exit.x), Mathf.RoundToInt(exit.y), yBefore,
+                GameManager.Instance.PlayerObject != null ? GameManager.Instance.PlayerObject.transform.position.y : 0f, Time.timeScale));
             return true;
         }
 
