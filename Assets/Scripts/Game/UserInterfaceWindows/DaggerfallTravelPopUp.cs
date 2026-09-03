@@ -452,7 +452,11 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
 
             DaggerfallUI.Instance.PlayOneShot(SoundClips.ButtonClick);
             // Warns player if they have a disease
-            if (GameManager.Instance.PlayerEffectManager.DiseaseCount > 0 || GameManager.Instance.PlayerEffectManager.PoisonCount > 0)
+            // MOBILE: not when the trip will be a real-travel journey - poison and disease PAUSE
+            // while a journey walks (MobileJourneyController.StatusEffectsPaused), so "may not
+            // survive an extended period of travel" would be untrue. Classic trips keep it.
+            bool unwell = GameManager.Instance.PlayerEffectManager.DiseaseCount > 0 || GameManager.Instance.PlayerEffectManager.PoisonCount > 0;
+            if (Mobile.MobileJourneyController.WarnNotWellBeforeTravel(unwell, Mobile.MobileJourneyController.WouldWalk(this)))
             {
                 DaggerfallMessageBox messageBox = new DaggerfallMessageBox(uiManager, this);
                 TextFile.Token[] tokens = DaggerfallUnity.Instance.TextProvider.GetRandomTokens(1010);

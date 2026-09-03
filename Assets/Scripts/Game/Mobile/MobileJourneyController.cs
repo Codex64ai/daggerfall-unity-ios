@@ -423,6 +423,28 @@ namespace DaggerfallWorkshop.Game.Mobile
             get { return MobileJourneyPilot.Active; }
         }
 
+        /// <summary>
+        /// Would Begin start a walking journey for this popup's destination? Side-effect free,
+        /// unlike CanBeginJourney (which stores the destination). Used by the popup to decide
+        /// whether vanilla's "you are not well and may not survive" warning applies: it does not,
+        /// because poison and disease pause while a journey walks.
+        /// </summary>
+        public static bool WouldWalk(DaggerfallTravelPopUp popup)
+        {
+            if (!JourneyModeEnabled || !HasInstance || popup == null || popup.EndPos == null)
+                return false;
+            if (!RouteCanBeWalked(popup.RouteOceanPixels))
+                return false;
+            ContentReader.MapSummary summary;
+            return DaggerfallUnity.Instance.ContentReader.HasLocation(popup.EndPos.X, popup.EndPos.Y, out summary);
+        }
+
+        /// <summary>Pure: vanilla's not-well warning shows only for a classic (teleport) trip.</summary>
+        public static bool WarnNotWellBeforeTravel(bool unwell, bool journeyWillWalk)
+        {
+            return unwell && !journeyWillWalk;
+        }
+
         /// <summary>Pure: a journey walks only routes with no ocean on the straight line.</summary>
         public static bool RouteCanBeWalked(int oceanPixels)
         {

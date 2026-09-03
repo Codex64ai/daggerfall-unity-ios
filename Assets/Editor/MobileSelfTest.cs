@@ -1356,6 +1356,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(!MobileJourneyPilot.Active, "status pause: no journey is running in the editor");
             Check(!MobileJourneyController.StatusEffectsPaused,
                   "status pause: with no journey, poison and disease tick normally");
+
+            // Vanilla warns "you are not well and may not survive an extended period of travel"
+            // before any fast travel while poisoned or diseased. A walking journey pauses both,
+            // so the warning is kept only for classic (teleport) trips.
+            Check(MobileJourneyController.WarnNotWellBeforeTravel(unwell: true, journeyWillWalk: false),
+                  "not-well warning: sick + classic trip -> warn (vanilla)");
+            Check(!MobileJourneyController.WarnNotWellBeforeTravel(unwell: true, journeyWillWalk: true),
+                  "not-well warning: sick + walking journey -> no warning (effects pause)");
+            Check(!MobileJourneyController.WarnNotWellBeforeTravel(unwell: false, journeyWillWalk: false),
+                  "not-well warning: healthy -> no warning");
         }
 
         static void TestRouteRule()
