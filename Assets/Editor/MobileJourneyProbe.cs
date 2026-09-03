@@ -144,7 +144,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     // Reproduce the device report: poisoned and already hurt, then travel.
                     var pe = GameManager.Instance.PlayerEntity;
                     var fx = GameManager.Instance.PlayerEffectManager;
-                    var bundle = fx.CreatePoison(DaggerfallWorkshop.Game.MagicAndEffects.MagicEffects.Poisons.Nux_Vomica);
+                    var bundle = fx.CreatePoison(DaggerfallWorkshop.Game.Items.Poisons.Nux_Vomica);
                     fx.AssignBundle(bundle, DaggerfallWorkshop.Game.MagicAndEffects.AssignBundleFlags.BypassSavingThrows);
                     pe.CurrentHealth = Mathf.Max(3, pe.MaxHealth / 3);
                     Debug.Log(string.Format("[JourneyProbe] POISONED with Nux Vomica, hp set to {0}/{1}; poisons={2}", pe.CurrentHealth, pe.MaxHealth, fx.PoisonCount));
