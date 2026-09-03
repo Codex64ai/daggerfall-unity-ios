@@ -210,6 +210,9 @@ namespace DaggerfallWorkshop.Utility
             if (makeStatic)
                 TagStaticGeometry(go);
 
+            // MOBILE: device-side material audit, active only with Documents/debug-newchar.txt present.
+            Game.Mobile.MobileDebugStart.Audit("vanilla model " + modelID, go, 8);
+
             return go;
         }
 

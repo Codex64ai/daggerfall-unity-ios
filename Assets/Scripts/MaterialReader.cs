@@ -238,7 +238,7 @@ namespace DaggerfallWorkshop
         /// <returns>Material using Daggerfall/Default shader.</returns>
         public static Material CreateDefaultMaterial()
         {
-            Shader shader = Shader.Find(_DaggerfallDefaultShaderName);
+            Shader shader = Game.Mobile.MobileShaders.Find(_DaggerfallDefaultShaderName);
             Material material = new Material(shader);
             //material.EnableKeyword("_COLORBOOST");
 
@@ -251,7 +251,7 @@ namespace DaggerfallWorkshop
         /// <returns>Material using Daggerfall/Billboard shader.</returns>
         public static Material CreateBillboardMaterial()
         {
-            Shader shader = Shader.Find(_DaggerfallBillboardShaderName);
+            Shader shader = Game.Mobile.MobileShaders.Find(_DaggerfallBillboardShaderName);
             Material material = new Material(shader);
 
             return material;
@@ -268,7 +268,7 @@ namespace DaggerfallWorkshop
             float glossiness = 0)
         {
             // Create material
-            Shader shader = Shader.Find(_StandardShaderName);
+            Shader shader = Game.Mobile.MobileShaders.Find(_StandardShaderName);
             Material material = new Material(shader);
 
             // Set blend mode
@@ -709,7 +709,7 @@ namespace DaggerfallWorkshop
 
             results.albedoMap.filterMode = MainFilterMode;
 
-            Shader shader = Shader.Find(_DaggerfallTilemapShaderName);
+            Shader shader = Game.Mobile.MobileShaders.Find(_DaggerfallTilemapShaderName);
             Material material = new Material(shader);
             material.name = string.Format("TEXTURE.{0:000} [Tilemap]", archive);
             material.SetTexture("_TileAtlasTex", results.albedoMap);
@@ -761,7 +761,7 @@ namespace DaggerfallWorkshop
             Texture2DArray textureArrayTerrainTilesMetallicGloss = textureReader.GetTerrainTextureArray(archive, TextureMap.MetallicGloss);
             textureArrayTerrainTiles.filterMode = MainFilterMode;
 
-            Shader shader = Shader.Find(_DaggerfallTilemapTextureArrayShaderName);
+            Shader shader = Game.Mobile.MobileShaders.Find(_DaggerfallTilemapTextureArrayShaderName);
             Material material = new Material(shader);
             material.name = string.Format("TEXTURE.{0:000} [TilemapTextureArray]", archive);
 

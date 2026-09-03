@@ -481,6 +481,17 @@ permissions and pinned versions are in `THIRD-PARTY.md`; the licence texts and p
 are in the zip. A build can also carry these inside the app (`StreamingAssets/Mods`); if it does, a
 copy you install yourself in `Documents/Mods` takes precedence.
 
+Mod textures reach the engine without a CPU-side copy; where DFU needs pixels (sprite atlases,
+terrain texture arrays) the port makes a readable copy on the fly, so texture packs that
+replace flats or terrain work without any import flag.
+
+**Hands-free start for bug reports.** Put an empty file named `debug-newchar.txt` in the app's
+`Documents` folder and launch: the title menu is skipped, a new character starts outdoors, quest
+greetings are dismissed, and every custom model and the first vanilla meshes get one line in
+`Player.log` describing their materials (shader, texture, format). A first line of
+`pixel X Y` (for example `pixel 207 213`, Daggerfall city) teleports there and adds a
+`LOCATION` summary of every renderer in the town. Delete the file to play normally.
+
 ### Converting a desktop `.dfmod`
 
 One mod per run, from a checkout of this fork with the Unity editor installed:

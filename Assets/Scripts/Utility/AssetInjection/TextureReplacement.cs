@@ -23,6 +23,7 @@ using System.Linq;
 using System.Text;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Experimental.Rendering;
 using DaggerfallConnect;
 using DaggerfallConnect.Arena2;
 using DaggerfallWorkshop.Game.Items;
@@ -842,6 +843,43 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
         /// <summary>
         /// Assign current filtermode to all standard shader textures of the given material.
         /// </summary>
+        // MOBILE: textures from asset bundles arrive with Read/Write disabled (the iOS pack imports
+        // them that way to halve their memory), but DFU's atlas builder (Texture2D.PackTextures) and
+        // the terrain-array fallback (GetPixels32) need CPU-readable pixels and only log when they do
+        // not get them - "Texture atlas needs textures to have Readable flag set!" and every nature
+        // billboard in the wilderness loses its texture. This makes a readable RGBA32 copy through a
+        // GPU blit, which works for any sampled format (ASTC included) and needs no import flag.
+        static readonly Dictionary<int, Texture2D> readableCopies = new Dictionary<int, Texture2D>();
+        static int readableCopiesLogged;
+
+        public static Texture2D EnsureReadable(Texture2D tex)
+        {
+            if (tex == null || tex.isReadable)
+                return tex;
+            Texture2D copy;
+            if (readableCopies.TryGetValue(tex.GetInstanceID(), out copy) && copy)
+                return copy;
+            bool linear = !GraphicsFormatUtility.IsSRGBFormat(tex.graphicsFormat);
+            bool mips = tex.mipmapCount > 1;
+            RenderTexture rt = RenderTexture.GetTemporary(tex.width, tex.height, 0, RenderTextureFormat.ARGB32,
+                linear ? RenderTextureReadWrite.Linear : RenderTextureReadWrite.sRGB);
+            RenderTexture previous = RenderTexture.active;
+            Graphics.Blit(tex, rt);
+            RenderTexture.active = rt;
+            copy = new Texture2D(tex.width, tex.height, TextureFormat.RGBA32, mips, linear);
+            copy.ReadPixels(new Rect(0, 0, tex.width, tex.height), 0, 0);
+            copy.Apply(mips, false);
+            RenderTexture.active = previous;
+            RenderTexture.ReleaseTemporary(rt);
+            copy.name = tex.name;
+            copy.filterMode = tex.filterMode;
+            copy.wrapMode = tex.wrapMode;
+            readableCopies[tex.GetInstanceID()] = copy;
+            if (readableCopiesLogged++ < 3)
+                Debug.LogFormat("[TextureReplacement] made a readable copy of {0} ({1} {2}x{3}) for CPU access", tex.name, tex.format, tex.width, tex.height);
+            return copy;
+        }
+
         public static void AssignFiltermode(Material material)
         {
             FilterMode filterMode = MainFilterMode;

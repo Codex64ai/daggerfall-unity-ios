@@ -485,7 +485,7 @@ namespace DaggerfallWorkshop.Utility
                     settings.frame = frame;
                     GetTextureResults nextTextureResults = GetTexture2D(settings, alphaTextureFormat, textureImport);
 
-                    albedoTextures.Add(nextTextureResults.albedoMap);
+                    albedoTextures.Add(TextureReplacement.EnsureReadable(nextTextureResults.albedoMap));   // MOBILE: bundle textures are not readable
                     if (nextTextureResults.normalMap != null)
                     {
                         if (nextTextureResults.normalMap.width != nextTextureResults.albedoMap.width || nextTextureResults.normalMap.height != nextTextureResults.albedoMap.height)
@@ -494,7 +494,7 @@ namespace DaggerfallWorkshop.Utility
                             nextTextureResults.normalMap = nextTextureResults.albedoMap;
                         }
 
-                        normalTextures.Add(nextTextureResults.normalMap);
+                        normalTextures.Add(TextureReplacement.EnsureReadable(nextTextureResults.normalMap));
                         hasNormalMaps = true;
                     }
                     if (nextTextureResults.emissionMap != null)
@@ -505,7 +505,7 @@ namespace DaggerfallWorkshop.Utility
                             nextTextureResults.emissionMap = nextTextureResults.albedoMap;
                         }
 
-                        emissionTextures.Add(nextTextureResults.emissionMap);
+                        emissionTextures.Add(TextureReplacement.EnsureReadable(nextTextureResults.emissionMap));
                         hasEmissionMaps = true;
                     }
                 }
@@ -786,7 +786,7 @@ namespace DaggerfallWorkshop.Utility
                 DFSize sz;
                 Color32[] colors;
                 if (TextureReplacement.TryImportTexture(archive, record, 0, out texture))
-                    colors = texture.GetPixels32();                                 // Import custom texture
+                    colors = TextureReplacement.EnsureReadable(texture).GetPixels32();    // Import custom texture (MOBILE: bundle textures are not readable)
                 else
                     colors = textureFile.GetColor32(record, 0, -1, 0, out sz);      // Create base image with gutter
 

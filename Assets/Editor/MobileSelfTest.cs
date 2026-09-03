@@ -121,6 +121,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestImmediateModeDrawGuards();
             TestSpellCastAnimNeverStrands();
             TestCastStateTearsDownOnFailure();
+            TestEnsureReadable();
+            TestMobileShadersFind();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -580,6 +582,47 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         }
 
         #region Assertions
+
+
+        // Bundle textures are imported without Read/Write; DFU's atlas builder and terrain-array
+        // fallback need pixels. EnsureReadable must hand back a readable RGBA32 copy with the same
+        // pixels, and must return readable textures untouched.
+        static void TestEnsureReadable()
+        {
+            var readable = new Texture2D(4, 4, TextureFormat.RGBA32, false);
+            Check(ReferenceEquals(TextureReplacement.EnsureReadable(readable), readable), "EnsureReadable: readable texture returned as is");
+
+            var src = new Texture2D(4, 2, TextureFormat.RGBA32, false);
+            var px = new Color32[8];
+            for (int i = 0; i < px.Length; i++) px[i] = new Color32((byte)(i * 30), (byte)(255 - i * 30), 7, 255);
+            src.SetPixels32(px);
+            src.Apply(false, true);     // upload and drop the CPU copy: this is what a bundle texture looks like
+            Check(!src.isReadable, "EnsureReadable: fixture is not readable");
+            Texture2D copy = TextureReplacement.EnsureReadable(src);
+            Check(copy != null && copy.isReadable, "EnsureReadable: copy is readable");
+            Check(copy != null && copy.width == 4 && copy.height == 2 && copy.format == TextureFormat.RGBA32, "EnsureReadable: copy is RGBA32 of the same size");
+            bool same = copy != null;
+            if (same)
+            {
+                Color32[] got = copy.GetPixels32();
+                for (int i = 0; i < px.Length && same; i++)
+                    same = Mathf.Abs(got[i].r - px[i].r) <= 2 && Mathf.Abs(got[i].g - px[i].g) <= 2 && Mathf.Abs(got[i].b - px[i].b) <= 2;
+            }
+            Check(same, "EnsureReadable: pixels survive the blit");
+            Check(ReferenceEquals(TextureReplacement.EnsureReadable(src), copy), "EnsureReadable: copy is cached per source");
+            UnityEngine.Object.DestroyImmediate(readable); UnityEngine.Object.DestroyImmediate(src);
+        }
+
+        // MaterialReader must get the project's own shaders, never a copy embedded in a mod bundle.
+        static void TestMobileShadersFind()
+        {
+            foreach (string name in new[] { MaterialReader._DaggerfallDefaultShaderName, MaterialReader._DaggerfallBillboardShaderName, MaterialReader._DaggerfallTilemapTextureArrayShaderName })
+            {
+                Shader s = MobileShaders.Find(name);
+                Check(s != null && s.name == name, "MobileShaders.Find resolves " + name);
+            }
+            Check(MobileShaders.Find("No/Such/Shader") == null, "MobileShaders.Find: unknown name falls through to Shader.Find (null)");
+        }
 
         static void Check(bool condition, string name, string detail = "")
         {

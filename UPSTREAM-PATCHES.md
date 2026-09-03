@@ -95,6 +95,28 @@ With Ship ticked on a route that crosses no ocean, `CallFastTravelGoldCheck` fir
 returns to the map) instead of silently walking. The journey call site in this file predates
 this ledger entry (see the MOBILE comment there). *Rebase risk: LOW.*
 
+### Texture readability — `Utility/AssetInjection/TextureReplacement.cs` (+40), `Utility/TextureReader.cs` (+4/-4)
+`TextureReplacement.EnsureReadable` returns a CPU-readable RGBA32 copy of a texture that has
+no CPU copy (GPU blit into a temporary RenderTexture, then ReadPixels; cached per source).
+`GetTexture2DAtlas` feeds atlas inputs through it before `PackTextures`, and the terrain
+texture-array fallback before `GetPixels32`. Textures inside asset bundles arrive with
+Read/Write disabled - the iOS pack imports them that way on purpose - and DFU only logs
+"Texture atlas needs textures to have Readable flag set!" when `PackTextures` refuses them;
+the nature billboard atlas then stays blank and every tree and plant in the wilderness and
+in towns renders as a flat grey rectangle (device report, 2026-09-03, with Vanilla Enhanced
+installed; reproduced in the Simulator). Format-agnostic, so it also covers ASTC. Not
+platform-guarded: readable textures pass straight through, and desktop mods with the flag
+off get the same repair. *Rebase risk: LOW.* Three wrapped `Add` calls and one `GetPixels32`.
+
+### Shader lookup — `MaterialReader.cs` (5 sites), new `Game/Mobile/MobileShaders.cs`
+`MaterialReader` resolves its shaders through `MobileShaders.Find`, which captures the
+player's own `Daggerfall/Default`, `Daggerfall/Billboard`, `Standard`, `Daggerfall/Tilemap`
+and `Daggerfall/TilemapTextureArray` before the first scene loads. A bundle that ships a
+Material embeds its own compiled copy of that material's shader, stripped to that bundle's
+variants, and `Shader.Find` by name can return the copy once the bundle is loaded (two pack
+bundles embed `Daggerfall/Default`). Guard, not a fix for an observed failure. *Rebase risk:
+LOW.* Mechanical rename of five calls.
+
 ### Input, journey hold — `InputManager.cs` (+1)
 The journey's forward force is skipped while `MobileJourneyPilot.Holding` (the town under
 the player is still being built). Part of the Input patch above.

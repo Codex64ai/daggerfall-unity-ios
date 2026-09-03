@@ -112,6 +112,8 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
 
             // Finalise gameobject
             FinaliseMaterials(modelGO);
+            // MOBILE: device-side material audit, active only with Documents/debug-newchar.txt present.
+            Game.Mobile.MobileDebugStart.Audit("custom model " + modelID, modelGO, 60);
 
             if (isAutomapRun)
                 modelGO.AddComponent<AutomapModel>();

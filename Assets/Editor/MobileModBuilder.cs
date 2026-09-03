@@ -161,6 +161,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             var ios = importer.GetPlatformTextureSettings("iPhone");
             ios.overridden = true;
             ios.format = TextureImporterFormat.ASTC_6x6;
+            // DFU_PACK_TEX_FORMAT=RGBA32: uncompressed bundles for the iOS Simulator, whose Unity
+            // player neither samples ASTC natively nor Graphics.CopyTexture()s it (terrain arrays
+            // never build there). Diagnostics only; the shipped pack stays ASTC.
+            if (Environment.GetEnvironmentVariable("DFU_PACK_TEX_FORMAT") == "RGBA32")
+                ios.format = TextureImporterFormat.RGBA32;
             ios.maxTextureSize = 4096;
             importer.SetPlatformTextureSettings(ios);
         }
