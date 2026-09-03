@@ -439,6 +439,16 @@ namespace DaggerfallWorkshop.Game.Mobile
             return DaggerfallUnity.Instance.ContentReader.HasLocation(popup.EndPos.X, popup.EndPos.Y, out summary);
         }
 
+        /// <summary>
+        /// Pure: Ship ticked, but the trip would be walked because its straight line crosses no
+        /// ocean. Vanilla ignores Ship on such a route (no fare, same time); silently walking
+        /// instead read as a bug (Ikram, 2026-09-02), so the popup asks before walking.
+        /// </summary>
+        public static bool ShipPromptNeeded(bool travelShip, bool journeyWillWalk)
+        {
+            return travelShip && journeyWillWalk;
+        }
+
         /// <summary>Pure: vanilla's not-well warning shows only for a classic (teleport) trip.</summary>
         public static bool WarnNotWellBeforeTravel(bool unwell, bool journeyWillWalk)
         {

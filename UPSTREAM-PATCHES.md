@@ -85,11 +85,14 @@ full on arrival and never had this problem). Gated by
 `MobileJourneyController.StatusEffectsPaused`, i.e. the pilot's Active flag - a no-op on
 desktop and during vanilla fast travel. *Rebase risk: LOW.* One block each.
 
-### Travel popup — `UserInterfaceWindows/DaggerfallTravelPopUp.cs` (+8)
+### Travel popup — `UserInterfaceWindows/DaggerfallTravelPopUp.cs` (+36)
 `RouteOceanPixels` exposes the calculator's ocean-pixel count so real travel can refuse sea
 routes and fall back to classic fast travel. The vanilla "you are not well and may not
 survive an extended period of travel" prompt is skipped when the trip will be a walking
-journey (`MobileJourneyController.WouldWalk`), since poison and disease pause during one. The journey call site in this file predates
+journey (`MobileJourneyController.WouldWalk`), since poison and disease pause during one.
+With Ship ticked on a route that crosses no ocean, `CallFastTravelGoldCheck` first asks
+"No ship sails to X from here. Travel there by horse/on foot instead?" (Yes continues, No
+returns to the map) instead of silently walking. The journey call site in this file predates
 this ledger entry (see the MOBILE comment there). *Rebase risk: LOW.*
 
 ### Input, journey hold — `InputManager.cs` (+1)

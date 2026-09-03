@@ -495,8 +495,40 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
                 return;
         }
 
+        // MOBILE: Ship ticked on a route that crosses no ocean. Vanilla silently ignores the toggle
+        // there (no fare, same time); real travel would silently walk. Ask instead, once.
+        bool shipPromptAnswered;
+
         protected virtual void CallFastTravelGoldCheck()
         {
+            if (!shipPromptAnswered &&
+                Mobile.MobileJourneyController.ShipPromptNeeded(travelShip, Mobile.MobileJourneyController.WouldWalk(this)))
+            {
+                string destination = "your destination";
+                ContentReader.MapSummary summary;
+                DaggerfallConnect.DFLocation location;
+                if (DaggerfallUnity.Instance.ContentReader.HasLocation(endPos.X, endPos.Y, out summary) &&
+                    DaggerfallUnity.Instance.ContentReader.GetLocation(summary.RegionIndex, summary.MapIndex, out location))
+                    destination = location.Name;
+                string transport = hasCart ? "by cart" : (hasHorse ? "by horse" : "on foot");
+
+                DaggerfallMessageBox shipBox = new DaggerfallMessageBox(uiManager, DaggerfallMessageBox.CommonMessageBoxButtons.YesNo,
+                    "No ship sails to " + destination + " from here. Travel there " + transport + " instead?", this);
+                shipBox.OnButtonClick += (sender, button) =>
+                {
+                    DaggerfallUI.Instance.PlayOneShot(SoundClips.ButtonClick);
+                    sender.CloseWindow();
+                    if (button == DaggerfallMessageBox.MessageBoxButtons.Yes)
+                    {
+                        shipPromptAnswered = true;
+                        CallFastTravelGoldCheck();
+                    }
+                };
+                uiManager.PushWindow(shipBox);
+                return;
+            }
+            shipPromptAnswered = false;
+
             if (!enoughGoldCheck())
             {
                 showNotEnoughGoldPopup();

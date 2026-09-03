@@ -1366,6 +1366,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "not-well warning: sick + walking journey -> no warning (effects pause)");
             Check(!MobileJourneyController.WarnNotWellBeforeTravel(unwell: false, journeyWillWalk: false),
                   "not-well warning: healthy -> no warning");
+
+            // Ship ticked on an all-land route: ask before walking; never for classic trips.
+            Check(MobileJourneyController.ShipPromptNeeded(travelShip: true, journeyWillWalk: true),
+                  "ship prompt: Ship + land route that would be walked -> ask");
+            Check(!MobileJourneyController.ShipPromptNeeded(travelShip: true, journeyWillWalk: false),
+                  "ship prompt: Ship + sea route -> classic teleport, no prompt");
+            Check(!MobileJourneyController.ShipPromptNeeded(travelShip: false, journeyWillWalk: true),
+                  "ship prompt: Ship off -> walk without asking");
         }
 
         static void TestRouteRule()
