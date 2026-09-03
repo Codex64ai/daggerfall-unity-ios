@@ -338,6 +338,116 @@
         "description": "Start a new character in a random dungeon instead of Privateer's Hold."
       },
       "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+    },
+    {
+      "name": "VanillaEnhanced",
+      "repo": "https://github.com/drcarademono/vanilla-enhanced.git",
+      "commit": "c0c9041c101ba8b57feb93258dda7a37be1b9433",
+      "manifest": "Vanilla Enhanced - Base.dfmod.json",
+      "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object."
+    },
+    {
+      "name": "VanillaEnhanced-MaskedRoads",
+      "repo": "https://github.com/drcarademono/vanilla-enhanced.git",
+      "commit": "c0c9041c101ba8b57feb93258dda7a37be1b9433",
+      "manifest": "Vanilla Enhanced - Masked Roads.dfmod.json",
+      "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object."
+    },
+    {
+      "name": "VanillaEnhanced-SnowlessSwamps",
+      "repo": "https://github.com/drcarademono/vanilla-enhanced.git",
+      "commit": "c0c9041c101ba8b57feb93258dda7a37be1b9433",
+      "manifest": "Vanilla Enhanced - Snowless Swamps and Jungles.dfmod.json",
+      "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object."
+    },
+    {
+      "name": "VanillaEnhanced-WinterTracks",
+      "repo": "https://github.com/drcarademono/vanilla-enhanced.git",
+      "commit": "c0c9041c101ba8b57feb93258dda7a37be1b9433",
+      "manifest": "Vanilla Enhanced - Winter Tracks.dfmod.json",
+      "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object."
+    },
+    {
+      "name": "VanillaEnhanced-KokeysTemperate",
+      "repo": "https://github.com/drcarademono/vanilla-enhanced.git",
+      "commit": "c0c9041c101ba8b57feb93258dda7a37be1b9433",
+      "manifest": "Kokey's Temperate.dfmod.json",
+      "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object."
+    },
+    {
+      "name": "UBLaMF-BuildingOverrides",
+      "repo": "https://github.com/XJDHDR/DFU_UBLaMF.git",
+      "commit": "21ed9c878f33e510901c947c5eca71f532854081",
+      "subdir": "Editor_files",
+      "manifest": "UBLaMF - Building Overrides.dfmod.json",
+      "licence_file": "License.md",
+      "licence_accept": "CC BY-NC-SA 4.0"
+    },
+    {
+      "name": "UBLaMF-DungeonBlocks",
+      "repo": "https://github.com/XJDHDR/DFU_UBLaMF.git",
+      "commit": "21ed9c878f33e510901c947c5eca71f532854081",
+      "subdir": "Editor_files",
+      "manifest": "UBLaMF - Dungeon Blocks.dfmod.json",
+      "licence_file": "License.md",
+      "licence_accept": "CC BY-NC-SA 4.0"
+    },
+    {
+      "name": "UBLaMF-Locations",
+      "repo": "https://github.com/XJDHDR/DFU_UBLaMF.git",
+      "commit": "21ed9c878f33e510901c947c5eca71f532854081",
+      "subdir": "Editor_files",
+      "manifest": "UBLaMF - Locations.dfmod.json",
+      "licence_file": "License.md",
+      "licence_accept": "CC BY-NC-SA 4.0"
+    },
+    {
+      "name": "UBLaMF-MapBlocks",
+      "repo": "https://github.com/XJDHDR/DFU_UBLaMF.git",
+      "commit": "21ed9c878f33e510901c947c5eca71f532854081",
+      "subdir": "Editor_files",
+      "manifest": "UBLaMF - Map Blocks.dfmod.json",
+      "licence_file": "License.md",
+      "licence_accept": "CC BY-NC-SA 4.0"
+    },
+    {
+      "name": "UBLaMF-Models",
+      "repo": "https://github.com/XJDHDR/DFU_UBLaMF.git",
+      "commit": "21ed9c878f33e510901c947c5eca71f532854081",
+      "subdir": "Editor_files",
+      "manifest": "UBLaMF - Models.dfmod.json",
+      "licence_file": "License.md",
+      "licence_accept": "CC BY-NC-SA 4.0",
+      "extra_roots": [
+        "Models",
+        "Materials"
+      ]
+    },
+    {
+      "name": "UBLaMF-Textures",
+      "repo": "https://github.com/XJDHDR/DFU_UBLaMF.git",
+      "commit": "21ed9c878f33e510901c947c5eca71f532854081",
+      "subdir": "Editor_files",
+      "manifest": "UBLaMF - Textures.dfmod.json",
+      "licence_file": "License.md",
+      "licence_accept": "CC BY-NC-SA 4.0",
+      "extra_roots": []
+    },
+    {
+      "name": "DaggerfallExpandedTextures",
+      "bundle": "~/dev/dfu-mods/iOS/daggerfall expanded textures.dfmod",
+      "title": "Daggerfall Expanded Textures (Standard)",
+      "licence": "permission:Daggerfall Expanded Textures by Ninelan (Ninelan_Ruinar). Converted for iOS from the author's macOS release (Nexus 307, Standard edition) with the author's permission, granted to Ikram Massabini in September 2026. Not for reuse outside this pack."
+    },
+    {
+      "name": "DetailedDungeonExteriors",
+      "repo": "https://github.com/Cliffworms/DetailedDungeonExteriors.git",
+      "commit": "6d886ad9261601d58a931573125bdddcf36ed09c",
+      "manifest": "DetailedDungeonExteriors.dfmod.json",
+      "manifest_override": "manifests/DetailedDungeonExteriors.dfmod.json",
+      "archives_from": [
+        "DaggerfallExpandedTextures"
+      ]
     }
   ]
 }

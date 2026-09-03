@@ -454,27 +454,32 @@ Two iOS-specific rules:
 
 ### The mod pack
 
-Thirty-one mods are built for iOS and published with each release as `MIT-ModPack-ios.zip`:
-ten by Cliffworms (MIT) and twenty-one quest packs by Jay_H (redistributed with his permission).
+Forty-four mods are built for iOS and published with each release as `MIT-ModPack-ios.zip`.
 Install any or all of them like any other mod: copy the `.dfmod` files you want into
 `Documents/Mods` with the Files app and restart. Each appears in the launcher's MODS window,
 switched on; untick to switch off.
 
-- **World (Cliffworms):** Fixed Dungeon Exteriors, Varied Wealthy Homes, Smaller Main Quest
-  Dungeons, Aquatic Sprites.
-- **Quests (Cliffworms):** Leveling Inspiration, Skyrim's Adventures, Jobs of the Thieves Guild,
-  Arena's Adventures, Town Greetings of the Iliac Bay, Rumors of the Iliac Bay.
-- **Quests (Jay_H):** Quest Pack 1, Random Little Quests, Immersion Roles, Reputation Consequences,
-  Chronicle of the Great Knight, The Tale Continues, Battle Creatures, Mundane Jobs, Medical
-  Emergency, Become a Dark Brotherhood Member / Thief / Vampire / Wereboar / Werewolf, Cheat
-  Armory, Weather Items, Random Monster Noises, Main Quest Reputation Fix, Ironman Madness (two
-  variants - enable one), Starting Dungeon Randomizer.
+- **World (Cliffworms, MIT):** Fixed Dungeon Exteriors, Detailed Dungeon Exteriors, Varied Wealthy
+  Homes, Smaller Main Quest Dungeons, Aquatic Sprites.
+- **Quests (Cliffworms, MIT):** Leveling Inspiration, Skyrim's Adventures, Jobs of the Thieves
+  Guild, Arena's Adventures, Town Greetings of the Iliac Bay, Rumors of the Iliac Bay.
+- **Quests (Jay_H, by permission):** Quest Pack 1, Random Little Quests, Immersion Roles,
+  Reputation Consequences, Chronicle of the Great Knight, The Tale Continues, Battle Creatures,
+  Mundane Jobs, Medical Emergency, Become a Dark Brotherhood Member / Thief / Vampire / Wereboar /
+  Werewolf (pick one), Cheat Armory, Weather Items, Random Monster Noises, Main Quest Reputation
+  Fix, Ironman Madness (two variants - enable one), Starting Dungeon Randomizer.
+- **Textures:** Daggerfall Expanded Textures (Standard, by permission), Vanilla Enhanced Base plus
+  its Masked Roads, Snowless Swamps and Jungles, Winter Tracks and Kokey's Temperate options
+  (permission pending).
+- **World fixes (UBLaMF, CC BY-NC-SA):** Building Overrides, Dungeon Blocks, Locations, Map
+  Blocks, Models, Textures.
 
-A few of Jay_H's quests use the `reduce player health` action, which this port does not provide
-yet; they load and do nothing. Authors, licences, permissions and pinned versions are in
-`THIRD-PARTY.md`; the licence texts and permission records are in the zip. A build can also carry
-these inside the app (`StreamingAssets/Mods`); if it does, a copy you install yourself in
-`Documents/Mods` takes precedence.
+Detailed Dungeon Exteriors needs Fixed Dungeon Exteriors and Daggerfall Expanded Textures on. The
+Vanilla Enhanced options need its Base. A few of Jay_H's quests use the `reduce player health`
+action, which this port does not provide yet; they load and do nothing. Authors, licences,
+permissions and pinned versions are in `THIRD-PARTY.md`; the licence texts and permission records
+are in the zip. A build can also carry these inside the app (`StreamingAssets/Mods`); if it does, a
+copy you install yourself in `Documents/Mods` takes precedence.
 
 ### Converting a desktop `.dfmod`
 
@@ -751,6 +756,6 @@ Two MIT-licensed works are compiled into this port, with their headers intact - 
   (`MobileJourneyController.cs`, `MobileJourneyPilot.cs`, `MobileJourneyWindow.cs`), reworked
   for this port.
 
-Thirty-one mods by Cliffworms (MIT) and Jay_H (by permission) are built into `.dfmod` files and published as a mod pack - see `THIRD-PARTY.md`.
+Forty-four mods are built into `.dfmod` files and published as a mod pack - see `THIRD-PARTY.md` for every author and licence.
 
 Daggerfall itself is copyright Bethesda Softworks. No game assets are distributed here.

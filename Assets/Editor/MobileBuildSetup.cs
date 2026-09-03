@@ -477,7 +477,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 return new string[0];
             return Directory.GetFiles(BundledSourceRoot, "*" + ModManager.MODINFOEXTENSION, SearchOption.AllDirectories)
                 .Select(p => p.Replace('\\', '/'))
-                .Where(p => !p.Contains("/IOSPilot/"))
+                .Where(p => !p.Contains("/IOSPilot/") && !p.Contains("/Converted/"))   // Converted/ is the DREAM converter's staging area
                 .OrderBy(p => p, System.StringComparer.Ordinal)
                 .ToArray();
         }

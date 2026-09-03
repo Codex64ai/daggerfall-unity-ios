@@ -29,9 +29,12 @@ with this repository; players supply their own `arena2` folder.
 
 ## Bundled mods
 
-Thirty-one Daggerfall Unity mods are built into iOS `.dfmod` bundles and published as a mod pack
+Forty-four Daggerfall Unity mods are built into iOS `.dfmod` bundles and published as a mod pack
 alongside each release (and may ship inside the app), each switchable in the launcher's MODS window.
-Ten are by **Cliffworms** (MIT); twenty-one are by **Jay_H** (redistributed with his permission). All are MIT licensed (`Copyright (c) 2025
+Eleven are by **Cliffworms** (MIT); twenty-one are by **Jay_H** (redistributed with his permission);
+five are Vanilla Enhanced modules by **drcarademono and Kokey** (permission pending); six are UBLaMF
+modules by **XJDHDR** (CC BY-NC-SA 4.0); one is **Daggerfall Expanded Textures** by Ninelan
+(converted from the macOS release with the author's permission). All are MIT licensed (`Copyright (c) 2025
 Cliffworms`); the licence text ships in the app at `StreamingAssets/Mods/Licenses/`. They are
 fetched at the pinned commits by `tools/bundled-mods/fetch.py` and are not part of this
 repository's history.
@@ -90,8 +93,34 @@ Those quests load and do nothing until the port provides that action.
 | Ironman Madness (no infighting) | https://github.com/JayH2971/dfunity-questpacks | 0dd7c6fb | generated from `JH Ironman Madness NO INFIGHTING/` |
 | Starting Dungeon Randomizer | https://github.com/JayH2971/dfu-starting-dungeon-randomizer | 72276305 | generated from `repo root/` |
 
-Not included yet: **Detailed Main Quest Dungeons**, **Main Quest Consequences** and **Detailed
-Dungeon Exteriors** reference texture archives and models from Daggerfall Expanded Textures and
+
+### Vanilla Enhanced (drcarademono, Kokey)
+
+Five modules built from https://github.com/drcarademono/vanilla-enhanced at `c0c9041c` using the
+authors' own manifests: Base (1,246 textures at 256 px plus materials), Masked Roads, Snowless
+Swamps and Jungles, Winter Tracks, and Kokey's Temperate. **No licence is declared and the authors
+have not yet been asked**; included at the port owner's request with a "permission pending" record
+in each bundle. Remove on request.
+
+### UBLaMF (XJDHDR)
+
+Six of the seven modules of *Unofficial Block, Location and Model Fixes*, built from
+https://github.com/XJDHDR/DFU_UBLaMF at `21ed9c87` with the author's manifests: Building
+Overrides, Dungeon Blocks, Locations, Map Blocks, Models (105 prefabs with their OBJ meshes and
+materials) and Textures. The Scripting module (a GitHub update checker) is not included - iOS cannot
+run mod code. Licence: **CC BY-NC-SA 4.0** (`License.md`), which permits redistribution with
+attribution for a free, non-commercial port; ShareAlike applies to derivatives.
+
+### Daggerfall Expanded Textures (Ninelan)
+
+The Standard edition, converted for iOS from the author's macOS `.dfmod` (Nexus 307) with the
+port's converter, with the author's permission granted to Ikram Massabini in September 2026. Its
+prefabs are not converted (the converter handles textures, audio, text and materials); the texture
+archives are, which is what the Cliffworms dungeon mods need. Detailed Dungeon Exteriors returns to
+the pack on the strength of it; Detailed Main Quest Dungeons and Main Quest Consequences still wait on
+Decor & Miscellanea.
+
+Not included yet: **Detailed Main Quest Dungeons** and **Main Quest Consequences** reference texture archives and models from Daggerfall Expanded Textures and
 Decor & Miscellanea; DET's author has since given permission, so these return once DET itself is
 converted and bundled; without them a block's flats throw during
 layout and the whole dungeon fails to build (verified 2026-09-01). `tools/bundled-mods/fetch.py`

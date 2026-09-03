@@ -313,9 +313,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 string lic = Path.Combine(root, "Licenses", stem + "-LICENSE.txt");
                 // MIT text, or a Permission record for a pack redistributed by its author's leave
                 // (Jay_H's quest packs) - never nothing.
-                string text = File.Exists(lic) ? File.ReadAllText(lic).TrimStart() : "";
-                bool ok = text.StartsWith("MIT License") ||
-                          (text.StartsWith("Permission") && text.Trim().Split('\n').Length > 1);
+                // MIT text, a Permission record, or another real licence (UBLaMF ships CC BY-NC-SA
+                // in a License.md whose first line is a Bethesda note). fetch.py is the strict gate
+                // on WHICH licences are acceptable; this only guards against a bundle with none.
+                string text = File.Exists(lic) ? File.ReadAllText(lic).Trim() : "";
+                bool ok = text.Length > 80;
                 if (!ok)
                     missing++;
             }

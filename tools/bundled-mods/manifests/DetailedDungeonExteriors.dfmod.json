@@ -1,0 +1,33 @@
+{
+  "ModTitle": "Detailed Dungeon Exteriors",
+  "ModVersion": "1.0",
+  "ModAuthor": "Cliffworms",
+  "ContactInfo": "https://github.com/Cliffworms/DetailedDungeonExteriors",
+  "DFUnity_Version": "1.1.1",
+  "ModDescription": "More detailed dungeon exteriors. Requires Fixed Dungeon Exteriors (block names) and Daggerfall Expanded Textures (archives). Manifest written by the iOS port; the data is Cliffworms' (MIT).",
+  "GUID": "9c1f4d2e-7b3a-4e6f-9a0d-2d5c8e1b7f31",
+  "Files": [
+    "Assets/Game/Mods/DetailedDungeonExteriors/WorldData/FDEBARROWAA00.RMB.json",
+    "Assets/Game/Mods/DetailedDungeonExteriors/WorldData/FDEBARROWAA01.RMB.json",
+    "Assets/Game/Mods/DetailedDungeonExteriors/WorldData/FDECOVENAA01.RMB.json",
+    "Assets/Game/Mods/DetailedDungeonExteriors/WorldData/FDECOVENAA02.RMB.json",
+    "Assets/Game/Mods/DetailedDungeonExteriors/WorldData/FDEGRVEAA01.RMB.json",
+    "Assets/Game/Mods/DetailedDungeonExteriors/WorldData/FDEGRVEAABANDONED.RMB.json",
+    "Assets/Game/Mods/DetailedDungeonExteriors/WorldData/FDELABAA01.RMB.json",
+    "Assets/Game/Mods/DetailedDungeonExteriors/WorldData/FDERUINFARMACAVE01.RMB.json",
+    "Assets/Game/Mods/DetailedDungeonExteriors/WorldData/FDETOWERACOVEN00.RMB.json",
+    "Assets/Game/Mods/DetailedDungeonExteriors/WorldData/FDEVILRUINCAVEAA01.RMB.json"
+  ],
+  "Dependencies": [
+    {
+      "Name": "fixeddungeonexteriors",
+      "IsOptional": false,
+      "IsPeer": false
+    },
+    {
+      "Name": "daggerfall expanded textures",
+      "IsOptional": false,
+      "IsPeer": false
+    }
+  ]
+}

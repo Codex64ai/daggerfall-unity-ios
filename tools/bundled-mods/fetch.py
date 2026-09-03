@@ -93,10 +93,14 @@ def validate_manifest(manifest, mod_dir):
     return problems
 
 
-def worlddata_archive_problems(manifest, mod_dir):
-    """Flat texture archives referenced by the mod's WorldData blocks that vanilla does not have."""
+def worlddata_archive_problems(manifest, mod_dir, provided_by_pack=False):
+    """Flat texture archives referenced by the mod's WorldData blocks that vanilla does not have.
+    provided_by_pack: the pin declares (archives_from) a texture pack in this same pack that
+    supplies the extra archives - Daggerfall Expanded Textures for the Cliffworms dungeon mods."""
     import re
     problems = []
+    if provided_by_pack:
+        return problems
     for f in manifest.get("Files") or []:
         rel = _rel(f)
         if not (rel.startswith("WorldData/") and rel.endswith(".json")):
@@ -136,11 +140,13 @@ def validate_set(manifests):
     return problems
 
 
-def licence_problems(text, allow_permission=False):
+def licence_problems(text, allow_permission=False, accept_substring=None):
     stripped = (text or "").strip()
     first = stripped.splitlines()[0].strip() if stripped else ""
     if first == "MIT License":
         return []
+    if accept_substring and accept_substring in stripped:
+        return []          # e.g. UBLaMF's License.md: CC BY-NC-SA 4.0 stated on its third line
     if allow_permission and first == "Permission" and len(stripped.splitlines()) > 1:
         return []
     return ["LICENSE first line is %r, expected 'MIT License'%s" % (first, " or 'Permission'" if allow_permission else "")]
@@ -291,20 +297,37 @@ def fetch_one(cfg, entry):
             else:
                 with open(os.path.join(src_root, entry["manifest"]), encoding="utf-8") as fh:
                     manifest = json.load(fh)
+            raw_files = list(manifest.get("Files", []))
             manifest = normalize_paths(manifest, entry["name"])
-            for root in sorted(payload_roots(manifest)):
+            # Copy exactly the listed files, each with its .meta beside it: prefabs, materials and
+            # Unity .asset files reference each other and their textures by the GUID in the .meta,
+            # so stripping metas (as the first Cliffworms packs did, harmlessly - JSON and quest text
+            # have no links) silently breaks a model or material pack. Copying only what is listed
+            # also keeps a 6,900-texture repo like Vanilla Enhanced down to its 1,268 used files.
+            for f in raw_files:
+                rel = _rel(f)
+                src = os.path.join(src_root, rel)
+                if not os.path.exists(src):
+                    raise SystemExit("%s: manifest lists %s but the repo has no such file" % (entry["name"], rel))
+                dst = os.path.join(dest, rel)
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copyfile(src, dst)
+                if os.path.exists(src + ".meta"):
+                    shutil.copyfile(src + ".meta", dst + ".meta")
+            # extra_roots: folders the listed assets depend on by GUID but do not list (UBLaMF's
+            # prefabs -> Models/*.obj + Materials/*.mat). Unity pulls them into the bundle itself.
+            for root in entry.get("extra_roots") or []:
                 src = os.path.join(src_root, root)
                 if not os.path.isdir(src):
-                    raise SystemExit("%s: manifest references %s/ but the repo has no such folder"
-                                     % (entry["name"], root))
-                shutil.copytree(src, os.path.join(dest, root), ignore=shutil.ignore_patterns("*.meta"))
+                    raise SystemExit("%s: extra root %s/ not in repo" % (entry["name"], root))
+                shutil.copytree(src, os.path.join(dest, root), dirs_exist_ok=True)
 
         note = licence_text_for(entry)
         if note is not None:
             with open(os.path.join(dest, "LICENSE"), "w", encoding="utf-8") as fh:
                 fh.write(note)
         else:
-            lic = os.path.join(tmp, "LICENSE")
+            lic = os.path.join(tmp, entry.get("licence_file", "LICENSE"))
             if not os.path.exists(lic):
                 raise SystemExit(entry["name"] + ": no LICENSE in repo - cannot bundle")
             shutil.copyfile(lic, os.path.join(dest, "LICENSE"))
@@ -329,14 +352,26 @@ def check_all(cfg, entries):
         manifest["_stem"] = entry["manifest"].replace(".dfmod.json", "")   # what the engine calls it
         manifests.append(manifest)
         problems += [entry["name"] + ": " + p for p in validate_manifest(manifest, dest)]
-        problems += [entry["name"] + ": " + p for p in worlddata_archive_problems(manifest, dest)]
+        providers = entry.get("archives_from") or []
+        names = set(m["name"] for m in cfg["mods"])
+        for prov in providers:
+            if prov not in names:
+                problems.append("%s: archives_from names %r, which is not in the pack" % (entry["name"], prov))
+        problems += [entry["name"] + ": " + p for p in
+                     worlddata_archive_problems(manifest, dest, provided_by_pack=bool(providers) and all(p in names for p in providers))]
         lic = os.path.join(dest, "LICENSE")
         if not os.path.exists(lic):
             problems.append(entry["name"] + ": LICENSE missing")
         else:
             with open(lic, encoding="utf-8", errors="replace") as fh:
                 problems += [entry["name"] + ": " + p for p in
-                             licence_problems(fh.read(), allow_permission=str(entry.get("licence", "")).startswith("permission:"))]
+                             licence_problems(fh.read(), allow_permission=str(entry.get("licence", "")).startswith("permission:"),
+                                              accept_substring=entry.get("licence_accept"))]
+    # Pre-built bundles (converted desktop mods) are pack members too: dependencies may name them.
+    for m in cfg["mods"]:
+        if m.get("bundle"):
+            manifests.append({"ModTitle": m.get("title", m["name"]), "GUID": None,
+                              "_stem": os.path.splitext(os.path.basename(m["bundle"]))[0]})
     problems += validate_set(manifests)
     return problems
 
@@ -347,7 +382,7 @@ def main(argv=None):
     ap.add_argument("--check", action="store_true", help="validate what is on disk; no network")
     args = ap.parse_args(argv)
     cfg = load_mods()
-    entries = [m for m in cfg["mods"] if not args.only or m["name"] == args.only]
+    entries = [m for m in cfg["mods"] if (not args.only or m["name"] == args.only) and not m.get("bundle")]
     if not entries:
         raise SystemExit("no mod named " + str(args.only))
     if not args.check:

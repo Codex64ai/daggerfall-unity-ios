@@ -132,12 +132,43 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
     }
 
     /// <summary>
+    /// Import settings for texture packs fetched from source (Vanilla Enhanced and the like) under
+    /// Assets/Game/Mods/&lt;Pack&gt;/. DFU draws these 1:1 in place of arena2 art, so no NPOT scaling;
+    /// ASTC 6x6 on iOS is what the DREAM conversion settled on (~9-16x smaller than the ARGB32
+    /// a loose PNG becomes); 2D art (UI, inventory, paperdoll, portraits) gets no mipmaps. Not
+    /// applied to IOSPilot (its own rules below) or Converted/ (the extractor already decided).
+    /// </summary>
+    class MobileModPackTextureImporter : AssetPostprocessor
+    {
+        static readonly string[] noMipFolders = { "/UI/", "/Img/", "/CifRci/", "/Inventory/", "/Paint/", "/Portraits/" };
+
+        void OnPreprocessTexture()
+        {
+            string path = assetPath.Replace('\\', '/');
+            if (!path.StartsWith("Assets/Game/Mods/", StringComparison.Ordinal) ||
+                path.StartsWith("Assets/Game/Mods/IOSPilot/", StringComparison.Ordinal) ||
+                path.StartsWith("Assets/Game/Mods/Converted/", StringComparison.Ordinal))
+                return;
+            var importer = (TextureImporter)assetImporter;
+            importer.npotScale = TextureImporterNPOTScale.None;
+            importer.isReadable = false;
+            bool twoD = false;
+            foreach (string f in noMipFolders)
+                if (path.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0) twoD = true;
+            importer.mipmapEnabled = !twoD;
+            var ios = importer.GetPlatformTextureSettings("iPhone");
+            ios.overridden = true;
+            ios.format = TextureImporterFormat.ASTC_6x6;
+            ios.maxTextureSize = 4096;
+            importer.SetPlatformTextureSettings(ios);
+        }
+    }
+
+    /// <summary>
     /// Import settings for the in-repo pilot mod's art only (Assets/Game/Mods/IOSPilot/).
     /// Classic-art replacements are odd sizes (320x200 IMGs, tiny CIF frames): Unity's
     /// default NPOT scaling would silently resize them and DFU draws them 1:1, so pin
     /// NPOT off, and Point filtering because the vanilla look is unfiltered pixels at 1:1.
-    /// Deliberately scoped to the pilot: real texture packs (DREAM-class) pick their own
-    /// import settings, and DFU leaves that choice to the mod author.
     /// </summary>
     class MobileModTextureImporter : AssetPostprocessor
     {

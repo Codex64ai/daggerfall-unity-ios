@@ -21,25 +21,52 @@ MODS_JSON = os.path.join(HERE, "mods.json")
 THIRD_PARTY_URL = "https://github.com/Codex64ai/daggerfall-unity-ios/blob/unity6-upgrade/THIRD-PARTY.md"
 
 
+def stem_of(m):
+    """Bundle file stem, lower-cased the way Unity writes them; a pre-built bundle keeps its own name."""
+    if m.get("bundle"):
+        return os.path.splitext(os.path.basename(m["bundle"]))[0].lower()
+    return m["manifest"].replace(".dfmod.json", "").lower()
+
+
 def stems(cfg):
-    """Bundle file stems, lower-cased the way Unity writes them."""
-    return sorted(m["manifest"].replace(".dfmod.json", "").lower() for m in cfg["mods"])
+    return sorted(stem_of(m) for m in cfg["mods"])
+
+
+def prebuilt(cfg):
+    """Entries whose bundle was converted from a desktop .dfmod (the DREAM pipeline) rather than
+    built from source: {stem: (bundle path, licence text)}."""
+    out = {}
+    for m in cfg["mods"]:
+        if m.get("bundle"):
+            out[stem_of(m)] = (os.path.expanduser(m["bundle"]), m.get("licence", ""))
+    return out
 
 
 def check_bundles(cfg, mods_dir):
     """Problems that stop packing: missing bundle/licence for a pinned mod, or an unpinned bundle."""
     problems = []
-    want = set(stems(cfg))
+    pre = prebuilt(cfg)
+    want = set(stems(cfg)) - set(pre)
     have = set(os.path.splitext(f)[0].lower() for f in os.listdir(mods_dir) if f.endswith(".dfmod")) \
         if os.path.isdir(mods_dir) else set()
     for s in sorted(want - have):
         problems.append("pinned mod has no bundle: %s.dfmod (run BuildBundledMods)" % s)
-    for s in sorted(have - want):
+    for s in sorted(have - want - set(pre)):
         problems.append("bundle is not in the pin list: %s.dfmod (stale - remove it)" % s)
     for s in sorted(want & have):
         if not os.path.exists(os.path.join(mods_dir, "Licenses", s + "-LICENSE.txt")):
             problems.append("bundle has no licence beside it: %s" % s)
+    for s, (path, lic) in sorted(pre.items()):
+        if not os.path.exists(path):
+            problems.append("pre-built bundle missing: %s (run the converter)" % path)
+        if not lic.startswith("permission:") and not lic.startswith("text:"):
+            problems.append("pre-built bundle %s has no licence text in the pin" % s)
     return problems
+
+
+def prebuilt_licence_text(lic):
+    body = lic.split(":", 1)[1].strip() if ":" in lic else lic
+    return ("Permission\n\n" if lic.startswith("permission:") else "") + body + "\n"
 
 
 def authors_line(cfg):
@@ -65,7 +92,7 @@ def readme_text(cfg, titles):
         "Mods in this pack:",
     ]
     for m in cfg["mods"]:
-        stem = m["manifest"].replace(".dfmod.json", "").lower()
+        stem = stem_of(m)
         lines.append("  %-40s %s" % (stem + ".dfmod", titles.get(stem, m["name"])))
     lines += [
         "",
@@ -79,8 +106,11 @@ def titles_from_sources(cfg):
     """Mod titles from the fetched manifests when present, else the pin-list names."""
     out = {}
     for m in cfg["mods"]:
+        if m.get("bundle"):
+            out[stem_of(m)] = m.get("title") or m["name"]
+            continue
         path = os.path.join(REPO_ROOT, cfg["dest_root"], m["name"], m["manifest"])
-        stem = m["manifest"].replace(".dfmod.json", "").lower()
+        stem = stem_of(m)
         try:
             with open(path, encoding="utf-8") as fh:
                 out[stem] = json.load(fh).get("ModTitle") or m["name"]
@@ -106,7 +136,13 @@ def main(argv=None):
         os.remove(args.out)
     with zipfile.ZipFile(args.out, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("README.txt", readme_text(cfg, titles_from_sources(cfg)))
+        pre = prebuilt(cfg)
         for s in stems(cfg):
+            if s in pre:
+                path, lic = pre[s]
+                z.write(path, "Mods/" + s + ".dfmod")
+                z.writestr("Mods/Licenses/" + s + "-LICENSE.txt", prebuilt_licence_text(lic))
+                continue
             z.write(os.path.join(MODS_DIR, s + ".dfmod"), "Mods/" + s + ".dfmod")
             z.write(os.path.join(MODS_DIR, "Licenses", s + "-LICENSE.txt"), "Mods/Licenses/" + s + "-LICENSE.txt")
     print("wrote %s (%d mods, %.1f MB)" % (args.out, len(cfg["mods"]), os.path.getsize(args.out) / 1e6))
