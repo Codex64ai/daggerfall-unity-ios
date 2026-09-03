@@ -420,8 +420,24 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public static bool StatusEffectsPaused
         {
-            get { return MobileJourneyPilot.Active; }
+            get { return StatusEffectsPausedFor(MobileJourneyPilot.Active, restingForJourney); }
         }
+
+        /// <summary>
+        /// Pure. The pause must also cover the journey's own camps and inn nights: camping
+        /// releases the pilot (Active drops), the rest jumps the clock 8-12 hours, and the FIRST
+        /// poison tick after the jump applied every missed minute at once - full health to dead
+        /// in one frame before the resumed pilot re-armed the pause (probe run 17, reproducing
+        /// the device death). restingForJourney is set when the journey stops to rest and cleared
+        /// when it resumes or ends for any other reason, so the effect resumes only when the
+        /// player is genuinely off the road.
+        /// </summary>
+        public static bool StatusEffectsPausedFor(bool pilotActive, bool restingForJourney)
+        {
+            return pilotActive || restingForJourney;
+        }
+
+        static bool restingForJourney;
 
         /// <summary>
         /// Would Begin start a walking journey for this popup's destination? Side-effect free,
@@ -795,6 +811,8 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         void Update()
         {
+            ReportDeathIfAny();
+
             if (pilot == null)
             {
                 if (resumeAfterRestQueued)
@@ -824,7 +842,6 @@ namespace DaggerfallWorkshop.Game.Mobile
             // message box - silently resets travel to 1x. Setting it once at departure is not
             // enough. Same reasoning as re-asserting mouse look in the pilot.
             ReleaseStalePause();
-            ReportDeathIfAny();
 
             int target = SustainableCompression();
             if (!Mathf.Approximately(Time.timeScale, target))
@@ -838,6 +855,8 @@ namespace DaggerfallWorkshop.Game.Mobile
             // built, at 1x, and do not judge arrival or offer a stop until it exists.
             bool holding = UpdateLocationHold();
             pilot.Update();
+            if (restingForJourney && MobileJourneyPilot.Active)
+                restingForJourney = false;     // the running pilot now carries the pause
 
             // pilot.Update() may have arrived and stopped us mid-frame.
             if (pilot == null)
@@ -862,10 +881,12 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         void ReportDeathIfAny()
         {
+            if (!GameManager.HasInstance) return;
             PlayerEntity p = GameManager.Instance.PlayerEntity;
             if (p == null) { deathReported = false; return; }
             if (p.CurrentHealth > 0) { deathReported = false; return; }
             if (deathReported) return;
+            if (!IsTravelling && !restingForJourney && !destinationValid) return;   // not our death to explain
             deathReported = true;
             var gps = GameManager.Instance.PlayerGPS;
             var motor = GameManager.Instance.PlayerMotor;
@@ -1174,6 +1195,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         void BeginCampNight(string message)
         {
+            restingForJourney = true;          // poison/disease stay paused through the camp
             Stop(JourneyEnd.Resting);
             DaggerfallUI.AddHUDText(message, 3f);
 
@@ -1203,6 +1225,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         void SpendNightAtInn(string townName)
         {
+            restingForJourney = true;          // the clock jumps to dawn below; see StatusEffectsPausedFor
             PlayerEntity player = GameManager.Instance.PlayerEntity;
             int cost = InnCost();
             if (player != null && cost > 0)
@@ -1240,16 +1263,24 @@ namespace DaggerfallWorkshop.Game.Mobile
         void ResumeAfterRest()
         {
             if (!destinationValid || IsTravelling)
+            {
+                restingForJourney = false;
                 return;
+            }
 
             if (GameManager.HasInstance && GameManager.Instance.AreEnemiesNearby())
             {
                 DaggerfallUI.AddHUDText("Something is nearby. Your journey waits.", 3f);
+                restingForJourney = false;     // the player is in control again; effects resume
                 return;
             }
 
             if (Resume())
                 DaggerfallUI.AddHUDText("You break camp and travel on.", 3f);
+            else
+                restingForJourney = false;     // could not resume: the player is off the road
+            // On success the flag stays up until the pilot's first Update sets Active (see Update):
+            // clearing it here left a one-frame gap in which the catch-up tick killed (probe run 18).
         }
 
         /// <summary>
@@ -1462,6 +1493,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public void Stop(JourneyEnd reason)
         {
+            if (reason != JourneyEnd.Resting)
+                restingForJourney = false;
             RestoreNormalTime();
             ApplySpawnSuppression(false);
 

@@ -1361,6 +1361,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(!MobileJourneyPilot.Active, "status pause: no journey is running in the editor");
             Check(!MobileJourneyController.StatusEffectsPaused,
                   "status pause: with no journey, poison and disease tick normally");
+            // Camping releases the pilot and jumps the clock; the pause must hold across it, or
+            // the first tick after the jump applies every missed minute at once (probe run 17).
+            Check(MobileJourneyController.StatusEffectsPausedFor(pilotActive: false, restingForJourney: true),
+                  "status pause: camping mid-journey keeps poison paused across the time jump");
+            Check(MobileJourneyController.StatusEffectsPausedFor(pilotActive: true, restingForJourney: false),
+                  "status pause: a walking pilot pauses");
+            Check(!MobileJourneyController.StatusEffectsPausedFor(pilotActive: false, restingForJourney: false),
+                  "status pause: off the road, effects tick");
 
             // Vanilla warns "you are not well and may not survive an extended period of travel"
             // before any fast travel while poisoned or diseased. A walking journey pauses both,
