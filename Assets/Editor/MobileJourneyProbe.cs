@@ -81,8 +81,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             EditorSceneManager.OpenScene(MobileBuildSetup.GameScenePath, OpenSceneMode.Single);
             var start = UnityEngine.Object.FindFirstObjectByType<StartGameBehaviour>();
             if (start == null) { Debug.LogError("[JourneyProbe] no StartGameBehaviour"); EditorApplication.Exit(2); return; }
-            if (UnityEngine.Object.FindFirstObjectByType<ModManager>() == null)
-                new GameObject("ModManager (probe)").AddComponent<ModManager>();
+            // Mods off for travel probing: the editor otherwise loads every fetched pack under
+            // Assets/Game/Mods as a virtual mod, and 31 start-of-game prompts swamp a run.
+            var mm = UnityEngine.Object.FindFirstObjectByType<ModManager>();
+            if (mm == null)
+                mm = new GameObject("ModManager (probe)").AddComponent<ModManager>();
+            mm.LoadVirtualMods = Environment.GetEnvironmentVariable("DFU_JOURNEY_MODS") == "1";
 
             // Settings are static and reload with the domain when play mode starts, so the
             // outdoor start is applied from Tick (after the reload) and only then is the start
@@ -145,10 +149,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 {
                     // Start at 19:30 so the first town passed is reached after dark: exercises the
                     // inn / camp night within the first leg instead of after minutes of walking.
-                    var now = DaggerfallUnity.Instance.WorldTime.Now;
-                    int hours = (19 - now.Hour + 24) % 24;
-                    now.RaiseTime(hours * DaggerfallDateTime.SecondsPerHour + 30 * 60);
-                    Debug.Log("[JourneyProbe] clock moved to " + now.Hour + ":" + now.Minute.ToString("00") + " (evening start)");
+                    var clock = DaggerfallUnity.Instance.WorldTime.Now;
+                    int hours = (19 - clock.Hour + 24) % 24;
+                    clock.RaiseTime(hours * DaggerfallDateTime.SecondsPerHour + 30 * 60);
+                    Debug.Log("[JourneyProbe] clock moved to " + clock.Hour + ":" + clock.Minute.ToString("00") + " (evening start)");
                 }
                 if (Environment.GetEnvironmentVariable("DFU_JOURNEY_POISON") == "1")
                 {
@@ -368,7 +372,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     return;
                 }
                 Debug.Log("[JourneyProbe] message box dismissed: \"" + text + "\"");
-                if (text.StartsWith("An enemy is seeking"))
+                if (text.StartsWith("An enemy is seeking") || text.StartsWith("You interrupt your journey"))
                 {
                     // Reckless travel keeps spawns, and the same enemy interrupts every new leg on its
                     // first frame until dealt with. The probe tests travel, not combat: remove them.
