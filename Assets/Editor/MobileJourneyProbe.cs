@@ -108,6 +108,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             {
                 journeyLog.Add(condition);
                 if (condition.Contains("blocked")) blockedEvents++;
+                if (condition.Contains("night: inn") || condition.Contains("break camp"))
+                    watchUntil = Time.realtimeSinceStartup + 8f;      // watch health closely after a clock jump
             }
         }
 
@@ -139,6 +141,15 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 lastMoveTime = startedAt;
                 lastTick = startedAt;
                 Debug.Log("[JourneyProbe] world ready at " + Time.realtimeSinceStartup.ToString("F0") + "s");
+                if (Environment.GetEnvironmentVariable("DFU_JOURNEY_EVENING") == "1")
+                {
+                    // Start at 19:30 so the first town passed is reached after dark: exercises the
+                    // inn / camp night within the first leg instead of after minutes of walking.
+                    var now = DaggerfallUnity.Instance.WorldTime.Now;
+                    int hours = (19 - now.Hour + 24) % 24;
+                    now.RaiseTime(hours * DaggerfallDateTime.SecondsPerHour + 30 * 60);
+                    Debug.Log("[JourneyProbe] clock moved to " + now.Hour + ":" + now.Minute.ToString("00") + " (evening start)");
+                }
                 if (Environment.GetEnvironmentVariable("DFU_JOURNEY_POISON") == "1")
                 {
                     // Reproduce the device report: poisoned and already hurt, then travel.
@@ -426,6 +437,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
             bool cautious = Env("DFU_JOURNEY_CAUTIOUS", 0) == 1;
             typeof(MobileJourneyController).GetProperty("SpeedCautious").GetSetMethod(true).Invoke(ctl, new object[] { cautious });
+            // DFU_JOURNEY_INN=1: the popup's "Inns" sleep mode - nights are spent at the next town
+            // (SpendNightAtInn, a 8-12 h clock jump with the pilot still running), the device's path.
+            typeof(MobileJourneyController).GetProperty("SleepModeInn").GetSetMethod(true).Invoke(ctl, new object[] { Env("DFU_JOURNEY_INN", 0) == 1 });
+            if (Env("DFU_JOURNEY_INN", 0) == 1 && GameManager.Instance.PlayerEntity.GoldPieces < 100)
+                GameManager.Instance.PlayerEntity.GoldPieces = 500;      // a new character cannot afford a room; the device player could
             int comp = Env("DFU_JOURNEY_COMPRESSION", MobileJourneyController.MaxTimeCompression);
             ctl.SetTimeCompression(comp);
 
