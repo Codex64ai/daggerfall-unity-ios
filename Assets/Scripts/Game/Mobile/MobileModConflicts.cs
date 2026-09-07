@@ -215,10 +215,12 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
             else
             {
-                var titles = mods.Select(m => m.Title).ToList();
+                var titles = mods.Select(m => m.Title).Distinct().ToList();
                 var chosen = new HashSet<string>(titles.Where(t => Matches(choice, t)));
                 var others = new HashSet<string>(titles.Where(t => !chosen.Contains(t) && present.Any(m => Matches(m, t))));
-                var byTitle = mods.ToDictionary(m => m.Title, m => m);
+                var byTitle = new Dictionary<string, Mod>();
+                foreach (Mod m in mods)
+                    if (!byTitle.ContainsKey(m.Title)) byTitle[m.Title] = m;   // duplicate titles: first one wins
                 Func<string, IEnumerable<string>> dependsOn = t =>
                 {
                     Mod mod;
@@ -289,10 +291,18 @@ namespace DaggerfallWorkshop.Game.Mobile
                     {
                         if (picked || index < 0 || index >= present.Count) return;
                         picked = true;
-                        Apply(g, present[index], present);
-                        record[g.Id] = Signature(present.Select(m => m.Label));
-                        SaveRecord(record);
-                        picker.CloseWindow();
+                        Debug.Log("[ModConflicts] " + g.Id + ": picked " + present[index].Label);
+                        try
+                        {
+                            Apply(g, present[index], present);
+                            record[g.Id] = Signature(present.Select(m => m.Label));
+                            SaveRecord(record);
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.LogError("[ModConflicts] " + g.Id + ": applying the choice failed: " + ex);
+                        }
+                        picker.CloseWindow();      // the player must never be stuck on this list
                     };
                     picker.OnItemPicked += (index, text) => choose(index);
                     // A single tap is the choice: the list's "use" gesture is a double-click or Enter,
