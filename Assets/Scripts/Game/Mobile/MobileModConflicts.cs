@@ -282,15 +282,26 @@ namespace DaggerfallWorkshop.Game.Mobile
                     sender.CloseWindow();
                     var picker = new DaggerfallListPickerWindow(ui, ui.TopWindow);
                     bool picked = false;
+                    float shownAt = Time.realtimeSinceStartup;
                     foreach (Member m in present)
                         picker.ListBox.AddItem(m.Label);
-                    picker.OnItemPicked += (index, text) =>
+                    Action<int> choose = index =>
                     {
+                        if (picked || index < 0 || index >= present.Count) return;
                         picked = true;
                         Apply(g, present[index], present);
                         record[g.Id] = Signature(present.Select(m => m.Label));
                         SaveRecord(record);
                         picker.CloseWindow();
+                    };
+                    picker.OnItemPicked += (index, text) => choose(index);
+                    // A single tap is the choice: the list's "use" gesture is a double-click or Enter,
+                    // which touch never produces. The first half second is ignored so the list's own
+                    // initial selection cannot answer for the player.
+                    picker.ListBox.OnSelectItem += () =>
+                    {
+                        if (Time.realtimeSinceStartup - shownAt > 0.5f)
+                            choose(picker.ListBox.SelectedIndex);
                     };
                     picker.OnClose += () => { if (!picked) Debug.Log("[ModConflicts] " + g.Id + ": no choice made, will ask again next launch"); Next(); };
                     ui.PushWindow(picker);
