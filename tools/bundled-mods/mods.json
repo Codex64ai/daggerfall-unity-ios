@@ -463,6 +463,46 @@
       "archives_from": [
         "DaggerfallExpandedTextures"
       ]
+    },
+    {
+      "name": "RoleplayRealism",
+      "repo": "https://github.com/ajrb/dfunity-mods.git",
+      "commit": "0af2ec99b5ad7e6722ddc9ce284987d4d6fa262d",
+      "subdir": "RoleplayRealism",
+      "manifest": "RoleplayRealism.dfmod.json",
+      "strip_code": true,
+      "builtin": true,
+      "licence": "text:MIT License\n\nCopyright (C) 2020 Hazelnut. Every source file carries the header 'License: MIT License (http://www.opensource.org/licenses/mit-license.php)'. Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files, to deal in the Software without restriction, subject to the MIT conditions. Shipped inside the iOS app: this data bundle plus the code compiled in under Assets/Scripts/Game/Mobile/Ports/RoleplayRealism (see THIRD-PARTY.md)."
+    },
+    {
+      "name": "RoleplayRealismItems",
+      "repo": "https://github.com/ajrb/dfunity-mods.git",
+      "commit": "0af2ec99b5ad7e6722ddc9ce284987d4d6fa262d",
+      "subdir": "RoleplayRealismItems",
+      "manifest": "RoleplayRealism-Items.dfmod.json",
+      "strip_code": true,
+      "builtin": true,
+      "licence": "text:MIT License\n\nCopyright (C) 2020 Hazelnut and Ralzar. Every source file carries the header 'License: MIT License (http://www.opensource.org/licenses/mit-license.php)'. Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files, to deal in the Software without restriction, subject to the MIT conditions. Shipped inside the iOS app: this data bundle plus the code compiled in under Assets/Scripts/Game/Mobile/Ports/RoleplayRealismItems (see THIRD-PARTY.md)."
+    },
+    {
+      "name": "ClimatesCalories",
+      "repo": "https://github.com/Ralzar81/Climates-Calories.git",
+      "commit": "c33a04f8d200615b01d09987262b1ed318e7615a",
+      "subdir": "Climates & Calories",
+      "manifest": "Climates & Calories.dfmod.json",
+      "strip_code": true,
+      "builtin": true,
+      "exclude_globs": [
+        "blb_tent.fbx",
+        "41606.prefab",
+        "RALZARTAVERN.PNG",
+        "BLANKMENU_TAVERN.PNG",
+        "*.mat"
+      ],
+      "drop_dependencies": [
+        "traveloptions"
+      ],
+      "licence": "text:MIT License\n\nCopyright (C) 2020 Ralzar. Every shipped source file carries the header 'License: MIT License (http://www.opensource.org/licenses/mit-license.php)'. Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files, to deal in the Software without restriction, subject to the MIT conditions. NOT shipped: TavernWindow.cs (no licence header; replaced by the port's own MobileTavernWindow), the tent model blb_tent.fbx / 41606.prefab and the two tavern PNGs (author unstated). Code compiled in under Assets/Scripts/Game/Mobile/Ports/ClimatesCalories (see THIRD-PARTY.md)."
     }
   ]
 }

@@ -47,6 +47,28 @@ class CheckBundles(unittest.TestCase):
         self.assertTrue(any("no licence" in p for p in pack.check_bundles(CFG, self.dir)))
 
 
+class BuiltIn(unittest.TestCase):
+    """Entries with builtin: true are data bundles shipped inside the app, never in the pack zip."""
+    CFG2 = {"dest_root": "x", "mods": CFG["mods"] + [
+        {"name": "RoleplayRealism", "manifest": "RoleplayRealism.dfmod.json", "builtin": True, "strip_code": True}]}
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.dir, "Licenses"))
+        for stem in ("jobsofthethievesguild", "skyrim's adventures"):
+            open(os.path.join(self.dir, stem + ".dfmod"), "w").close()
+            open(os.path.join(self.dir, "Licenses", stem + "-LICENSE.txt"), "w").close()
+
+    def test_builtin_is_not_a_pack_member(self):
+        self.assertNotIn("roleplayrealism", pack.stems(self.CFG2))
+        self.assertEqual(pack.check_bundles(self.CFG2, self.dir), [])          # absent built-in bundle: fine
+
+    def test_builtin_bundle_present_is_not_stale(self):
+        open(os.path.join(self.dir, "roleplayrealism.dfmod"), "w").close()
+        self.assertEqual(pack.check_bundles(self.CFG2, self.dir), [])          # present: fine, not "unpinned"
+        self.assertNotIn("roleplayrealism.dfmod", pack.readme_text(self.CFG2, {}))
+
+
 class Readme(unittest.TestCase):
     def test_lists_every_mod_with_its_title(self):
         txt = pack.readme_text(CFG, {"jobsofthethievesguild": "Jobs of the Thieves Guild"})

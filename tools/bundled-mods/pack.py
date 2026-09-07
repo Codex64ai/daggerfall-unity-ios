@@ -28,8 +28,18 @@ def stem_of(m):
     return m["manifest"].replace(".dfmod.json", "").lower()
 
 
+def builtin_stems(cfg):
+    """Data bundles for mods whose code is compiled into the app (builtin: true): they ship inside
+    the app, never in the pack zip, so the pack neither requires nor refuses them."""
+    return set(stem_of(m) for m in cfg["mods"] if m.get("builtin"))
+
+
+def pack_mods(cfg):
+    return [m for m in cfg["mods"] if not m.get("builtin")]
+
+
 def stems(cfg):
-    return sorted(stem_of(m) for m in cfg["mods"])
+    return sorted(stem_of(m) for m in pack_mods(cfg))
 
 
 def prebuilt(cfg):
@@ -51,7 +61,7 @@ def check_bundles(cfg, mods_dir):
         if os.path.isdir(mods_dir) else set()
     for s in sorted(want - have):
         problems.append("pinned mod has no bundle: %s.dfmod (run BuildBundledMods)" % s)
-    for s in sorted(have - want - set(pre)):
+    for s in sorted(have - want - set(pre) - builtin_stems(cfg)):
         problems.append("bundle is not in the pin list: %s.dfmod (stale - remove it)" % s)
     for s in sorted(want & have):
         if not os.path.exists(os.path.join(mods_dir, "Licenses", s + "-LICENSE.txt")):
@@ -71,7 +81,7 @@ def prebuilt_licence_text(lic):
 
 def authors_line(cfg):
     seen = []
-    for m in cfg["mods"]:
+    for m in pack_mods(cfg):
         a = (m.get("generate") or {}).get("author") or "Cliffworms"
         if a not in seen:
             seen.append(a)
@@ -82,7 +92,7 @@ def readme_text(cfg, titles):
     lines = [
         "Daggerfall Unity iOS - MIT mod pack",
         "",
-        "%d mods by %s. Built for iOS from the authors' GitHub repositories with the port's mod builder;" % (len(cfg["mods"]), authors_line(cfg)),
+        "%d mods by %s. Built for iOS from the authors' GitHub repositories with the port's mod builder;" % (len(pack_mods(cfg)), authors_line(cfg)),
         "the data is the authors' work, unmodified. Each mod's licence or permission record is in Mods/Licenses/.",
         "",
         "INSTALL: copy the .dfmod files you want from Mods/ into the app's Documents/Mods folder with",
@@ -91,7 +101,7 @@ def readme_text(cfg, titles):
         "",
         "Mods in this pack:",
     ]
-    for m in cfg["mods"]:
+    for m in pack_mods(cfg):
         stem = stem_of(m)
         lines.append("  %-40s %s" % (stem + ".dfmod", titles.get(stem, m["name"])))
     lines += [
@@ -105,7 +115,7 @@ def readme_text(cfg, titles):
 def titles_from_sources(cfg):
     """Mod titles from the fetched manifests when present, else the pin-list names."""
     out = {}
-    for m in cfg["mods"]:
+    for m in pack_mods(cfg):
         if m.get("bundle"):
             out[stem_of(m)] = m.get("title") or m["name"]
             continue
@@ -145,7 +155,7 @@ def main(argv=None):
                 continue
             z.write(os.path.join(MODS_DIR, s + ".dfmod"), "Mods/" + s + ".dfmod")
             z.write(os.path.join(MODS_DIR, "Licenses", s + "-LICENSE.txt"), "Mods/Licenses/" + s + "-LICENSE.txt")
-    print("wrote %s (%d mods, %.1f MB)" % (args.out, len(cfg["mods"]), os.path.getsize(args.out) / 1e6))
+    print("wrote %s (%d mods, %.1f MB)" % (args.out, len(pack_mods(cfg)), os.path.getsize(args.out) / 1e6))
     return 0
 
 

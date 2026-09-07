@@ -221,11 +221,14 @@ def generate_manifest(name, files, title, author, description, renames=None, ver
 
 
 def licence_text_for(entry):
-    """MIT packs ship the repo's LICENSE verbatim; packs redistributed by the author's permission
-    ship a Permission note instead (entry['licence'] = 'permission:<who granted what, when>')."""
+    """LICENSE text to write for an entry that carries its own licence record: "permission:..." (an
+    author's grant) or "text:..." (a licence stated in file headers rather than a LICENSE file, as
+    Hazelnut's and Ralzar's repos do). None means: copy the repo's LICENSE file."""
     lic = entry.get("licence", "")
     if lic.startswith("permission:"):
         return "Permission\n\n" + lic[len("permission:"):].strip() + "\n"
+    if lic.startswith("text:"):
+        return lic[len("text:"):].strip() + "\n"
     return None
 
 
@@ -309,6 +312,17 @@ def fetch_one(cfg, entry):
                 raw_files = [f for f in raw_files if not any(fnmatch.fnmatch(os.path.basename(f), g) for g in globs)]
                 manifest["Files"] = raw_files
                 print("  excluded %d files by %s" % (before - len(raw_files), globs))
+            # strip_code: the mod's C# is compiled into the app (Ports/), so only its DATA is bundled.
+            if entry.get("strip_code"):
+                before = len(raw_files)
+                raw_files = [f for f in raw_files if not f.endswith(SCRIPT_EXTS)]
+                manifest["Files"] = raw_files
+                print("  stripped %d code files (compiled into the app instead)" % (before - len(raw_files)))
+            # drop_dependencies: dependencies satisfied by the port itself (Travel Options is answered
+            # by Real travel's bridge), so the shipped manifest names only mods that exist here.
+            drops = set(d.lower() for d in entry.get("drop_dependencies") or [])
+            if drops and manifest.get("Dependencies"):
+                manifest["Dependencies"] = [d for d in manifest["Dependencies"] if d.get("Name", "").lower() not in drops]
             manifest = normalize_paths(manifest, entry["name"])
             # Copy exactly the listed files, each with its .meta beside it: prefabs, materials and
             # Unity .asset files reference each other and their textures by the GUID in the .meta,
