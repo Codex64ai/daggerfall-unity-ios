@@ -124,6 +124,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestEnsureReadable();
             TestMobileShadersFind();
             TestModConflictOrder();
+            TestPortedModGate();
+            TestTravelOptionsBridge();
+            TestTavernAlcohol();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -654,6 +657,53 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(q2.StartsWith("Vanilla Enhanced and Kokey's Temperate replace"), "QuestionFor names the two installed members", q2);
             string q3 = MobileModConflicts.QuestionFor(MobileModConflicts.Groups[0], new List<string> { "DREAM", "Vanilla Enhanced", "Kokey's Temperate" });
             Check(q3.StartsWith("DREAM, Vanilla Enhanced and Kokey's Temperate replace"), "QuestionFor lists three members with commas", q3);
+        }
+
+
+        static void TestPortedModGate()
+        {
+            Check(string.Join(",", MobilePortedMods.Gate(true, true, true).Select(b => b ? "1" : "0").ToArray()) == "1,1,1", "Gate: all on run");
+            Check(string.Join(",", MobilePortedMods.Gate(false, true, true).Select(b => b ? "1" : "0").ToArray()) == "0,0,0", "Gate: without RR nothing runs");
+            Check(string.Join(",", MobilePortedMods.Gate(true, false, true).Select(b => b ? "1" : "0").ToArray()) == "1,0,0", "Gate: C&C needs Items");
+            Check(string.Join(",", MobilePortedMods.Gate(true, true, false).Select(b => b ? "1" : "0").ToArray()) == "1,1,0", "Gate: C&C off leaves the others");
+        }
+
+        class FakeJourney : IJourneyState
+        {
+            public bool Active { get; set; }
+            public bool FollowingRoad { get; set; }
+            public int Pauses; public string LastHud;
+            public void Pause() { Pauses++; }
+            public void Hud(string text) { LastHud = text; }
+        }
+
+        static void TestTravelOptionsBridge()
+        {
+            var j = new FakeJourney { Active = true, FollowingRoad = true };
+            object got = null;
+            Check(MobileTravelOptionsBridge.Handle("isTravelActive", null, (m, d) => got = d, j) && (bool)got, "bridge: isTravelActive answers the pilot state");
+            j.Active = false; got = null;
+            MobileTravelOptionsBridge.Handle("isTravelActive", null, (m, d) => got = d, j);
+            Check(got is bool && !(bool)got, "bridge: isTravelActive false when idle");
+            MobileTravelOptionsBridge.Handle("pauseTravel", null, null, j);
+            Check(j.Pauses == 0, "bridge: pauseTravel when idle does nothing");
+            j.Active = true;
+            MobileTravelOptionsBridge.Handle("pauseTravel", null, null, j);
+            Check(j.Pauses == 1, "bridge: pauseTravel while travelling pauses once");
+            MobileTravelOptionsBridge.Handle("showMessage", "You are cold.", null, j);
+            Check(j.LastHud == "You are cold.", "bridge: showMessage reaches the HUD");
+            got = null; MobileTravelOptionsBridge.Handle("isFollowingRoad", null, (m, d) => got = d, j);
+            Check(got is bool && (bool)got, "bridge: isFollowingRoad true on a road while travelling");
+            j.FollowingRoad = false; got = null; MobileTravelOptionsBridge.Handle("isPathFollowing", null, (m, d) => got = d, j);
+            Check(got is bool && !(bool)got, "bridge: isPathFollowing false off road");
+            bool called = false;
+            Check(!MobileTravelOptionsBridge.Handle("somethingElse", null, (m, d) => called = true, j) && !called, "bridge: unknown message ignored, no callback");
+        }
+
+        static void TestTavernAlcohol()
+        {
+            Check(MobileTavernWindow.AlcoholFor(0) > 0 && MobileTavernWindow.AlcoholFor(3) > MobileTavernWindow.AlcoholFor(0), "tavern: drinks carry alcohol, wine more than ale");
+            Check(MobileTavernWindow.AlcoholFor(4) == 0 && MobileTavernWindow.AlcoholFor(10) == 0 && MobileTavernWindow.AlcoholFor(-1) == 0, "tavern: food rows carry none");
         }
 
         static void Check(bool condition, string name, string detail = "")

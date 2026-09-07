@@ -94,6 +94,22 @@ namespace DaggerfallWorkshop.Game.Mobile
                 "keep their own date. Off by default: the winter date is the lore one.";
             summer.Enabled = SummerStart;
             manager.RegisterBuiltInMod(summer);
+
+            // Answers the "TravelOptions" mod messages Climates & Calories sends, from Real travel's
+            // state (MobileTravelOptionsBridge). Always on: it is plumbing, not a choice.
+            Mod bridge = new Mod();
+            bridge.ModInfo.ModTitle = MobileTravelOptionsBridge.Title;
+            bridge.ModInfo.ModVersion = "1.0";
+            bridge.ModInfo.ModAuthor = "Codex64ai";
+            bridge.ModInfo.ContactInfo = "github.com/Codex64ai/daggerfall-unity-ios";
+            bridge.ModInfo.DFUnity_Version = VersionInfo.DaggerfallUnityVersion;
+            bridge.ModInfo.GUID = "dfumobile-traveloptions-bridge";
+            bridge.ModInfo.ModDescription =
+                "Not a mod: lets mods that talk to Travel Options (Climates & Calories) talk to this " +
+                "port's Real travel instead. Always on; the checkbox has no effect.";
+            bridge.Enabled = true;
+            bridge.MessageReceiver = MobileTravelOptionsBridge.Receive;
+            manager.RegisterBuiltInMod(bridge);
         }
 
         static Mod Entry(string title)
