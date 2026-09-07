@@ -4,6 +4,7 @@
 // Daggerfall/Default found by Shader.Find at runtime is a device-only failure mode.
 //   Unity -batchmode -quit -projectPath . -executeMethod DaggerfallWorkshop.Game.Mobile.EditorTools.MobileBundleInspector.Run
 using System.IO;
+using System.Linq;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
@@ -34,6 +35,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     if (m.shader) sb.Append(m.shader == project ? " PROJECT-SHADER" : " BUNDLE-COPY(id " + m.shader.GetInstanceID() + " vs project " + project.GetInstanceID() + ", path '" + AssetDatabase.GetAssetPath(m.shader) + "')");
                     sb.Append(']');
                 }
+                foreach (var ta in ab.LoadAllAssets<TextAsset>())
+                    if (ta.name.EndsWith(".dfmod", System.StringComparison.OrdinalIgnoreCase) || ab.GetAllAssetNames().Any(n => n.EndsWith(ta.name.ToLower() + ".json")))
+                    {
+                        var m = System.Text.RegularExpressions.Regex.Match(ta.text, "\"ModTitle\"\\s*:\\s*\"([^\"]*)\"");
+                        if (m.Success) sb.Append(" TITLE='").Append(m.Groups[1].Value).Append('\'');
+                    }
                 var texs = ab.LoadAllAssets<Texture2D>();
                 sb.Append(" textures=").Append(texs.Length);
                 if (texs.Length > 0) sb.Append(" e.g. ").Append(texs[0].name).Append(' ').Append(texs[0].format).Append(texs[0].isReadable ? " readable" : " not-readable");

@@ -481,6 +481,20 @@ permissions and pinned versions are in `THIRD-PARTY.md`; the licence texts and p
 are in the zip. A build can also carry these inside the app (`StreamingAssets/Mods`); if it does, a
 copy you install yourself in `Documents/Mods` takes precedence.
 
+**Overlapping mods.** The engine settles two mods that replace the same file by load order: the
+mod lower in the MODS list wins. A fresh install gets that order from the filesystem, so the app
+asks once, at the title menu, when it finds a known overlap among the mods you have switched on:
+DREAM against Vanilla Enhanced (and Kokey's Temperate) for the ground, roads, trees and plants;
+DREAM against the UBLaMF texture fixes for a few building walls; Fixed Dungeon Exteriors against
+Smaller Main Quest Dungeons for two dungeon exteriors; the two Ironman Madness variants; Become a
+Vampire, Werewolf and Wereboar. Overlaps that are intended are not asked about: the Vanilla
+Enhanced options over their Base, Detailed Dungeon Exteriors over Fixed Dungeon Exteriors, and the
+three reputation quests that Quest Pack 1 and Reputation Consequences both carry (identical text,
+the duplicate is dropped). Your answer is written
+into the ordinary mod settings (load order for the texture packs, on/off for the exclusive pairs),
+so the MODS window shows it and you can change it there. The question returns only when the set
+of installed members changes.
+
 Mod textures reach the engine without a CPU-side copy; where DFU needs pixels (sprite atlases,
 terrain texture arrays) the port makes a readable copy on the fly, so texture packs that
 replace flats or terrain work without any import flag.

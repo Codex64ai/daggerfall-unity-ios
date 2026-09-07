@@ -123,6 +123,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestCastStateTearsDownOnFailure();
             TestEnsureReadable();
             TestMobileShadersFind();
+            TestModConflictOrder();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -622,6 +623,37 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 Check(s != null && s.name == name, "MobileShaders.Find resolves " + name);
             }
             Check(MobileShaders.Find("No/Such/Shader") == null, "MobileShaders.Find: unknown name falls through to Shader.Find (null)");
+        }
+
+
+        // The conflict prompt reorders mods by title: the chosen member (plus whatever depends on it)
+        // lands just below the last competing member, everything else keeps its place.
+        static void TestModConflictOrder()
+        {
+            Func<string, IEnumerable<string>> deps = t => t == "VE Roads" ? new[] { "VE Base" } : Enumerable.Empty<string>();
+            var order = new List<string> { "DREAM 1", "DREAM 2", "VE Base", "VE Roads", "Kokey", "Quests" };
+
+            var ve = MobileModConflicts.MoveBelow(order, new HashSet<string> { "VE Base" }, new HashSet<string> { "DREAM 1", "DREAM 2", "Kokey" }, deps);
+            Check(string.Join(",", ve.ToArray()) == "DREAM 1,DREAM 2,Kokey,VE Base,VE Roads,Quests", "MoveBelow: chosen and its dependents move below the last rival", string.Join(",", ve.ToArray()));
+
+            var dream = MobileModConflicts.MoveBelow(order, new HashSet<string> { "DREAM 1", "DREAM 2" }, new HashSet<string> { "VE Base", "Kokey" }, deps);
+            Check(string.Join(",", dream.ToArray()) == "VE Base,VE Roads,Kokey,DREAM 1,DREAM 2,Quests", "MoveBelow: multi-part chosen keeps its internal order", string.Join(",", dream.ToArray()));
+
+            var none = MobileModConflicts.MoveBelow(order, new HashSet<string> { "Kokey" }, new HashSet<string> { "Absent" }, deps);
+            Check(string.Join(",", none.ToArray()) == string.Join(",", order.ToArray()), "MoveBelow: no rival present leaves the order alone");
+
+            var already = MobileModConflicts.MoveBelow(order, new HashSet<string> { "Kokey" }, new HashSet<string> { "DREAM 1", "VE Base" }, deps);
+            Check(string.Join(",", already.ToArray()) == "DREAM 1,DREAM 2,VE Base,VE Roads,Kokey,Quests", "MoveBelow: chosen already below its rivals is a no-op");
+
+            Check(MobileModConflicts.Signature(new[] { "Vanilla Enhanced", "DREAM" }) == "DREAM|Vanilla Enhanced", "Signature is order-independent");
+            var dreamMember = MobileModConflicts.Groups[0].Members[0];
+            Check(MobileModConflicts.Matches(dreamMember, "DREAM - TEXTURES (3 of 10)") && MobileModConflicts.Matches(dreamMember, "DREAM - Sprites (1 of 2)")
+                  && !MobileModConflicts.Matches(dreamMember, "DREAM - SOUND"), "Matches: DREAM member covers textures and sprites parts only");
+            Check(MobileModConflicts.Groups.All(g => g.Members.Length >= 2 && g.Question.Contains("{mods}")), "every conflict group has two or more members and a templated question");
+            string q2 = MobileModConflicts.QuestionFor(MobileModConflicts.Groups[0], new List<string> { "Vanilla Enhanced", "Kokey's Temperate" });
+            Check(q2.StartsWith("Vanilla Enhanced and Kokey's Temperate replace"), "QuestionFor names the two installed members", q2);
+            string q3 = MobileModConflicts.QuestionFor(MobileModConflicts.Groups[0], new List<string> { "DREAM", "Vanilla Enhanced", "Kokey's Temperate" });
+            Check(q3.StartsWith("DREAM, Vanilla Enhanced and Kokey's Temperate replace"), "QuestionFor lists three members with commas", q3);
         }
 
         static void Check(bool condition, string name, string detail = "")
