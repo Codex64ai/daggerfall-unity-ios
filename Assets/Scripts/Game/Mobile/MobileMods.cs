@@ -59,7 +59,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             roads.ModInfo.ModDescription =
                 "Daggerfall's roads and tracks are drawn on the terrain (Hazelnut's Basic Roads, " +
                 "MIT). Works with or without Real travel. Built into this port; no files to " +
-                "install. Also switchable in play from Pause > Mobile Settings > Mods.";
+                "install. Switch it here, before PLAY; it holds for the session.";
             roads.Enabled = Roads;
             manager.RegisterBuiltInMod(roads);
 
@@ -74,8 +74,7 @@ namespace DaggerfallWorkshop.Game.Mobile
                 "Fast travel becomes a journey: you walk to your destination at a time " +
                 "compression you control, can stop anywhere, and cautious travel follows " +
                 "Daggerfall's roads and tracks - even when Roads & tracks is off and they are " +
-                "not drawn. Built into this port; no files to install. Also switchable in play " +
-                "from Pause > Mobile Settings > Mods.";
+                "not drawn. Built into this port; no files to install. Switch it here, before PLAY.";
             travel.Enabled = RealTravel;
             manager.RegisterBuiltInMod(travel);
 

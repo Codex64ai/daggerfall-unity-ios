@@ -16,7 +16,7 @@
 //   plain UGUI on the mobile canvas, parented to the canvas root so it survives the HUD
 //   layers hiding.
 //
-//   Layout: header, a row of section buttons (Input / HUD / Mods / Advanced), a scrolling
+//   Layout: header, a row of section buttons (Input / HUD / Advanced), a scrolling
 //   viewport for the active section, and a pinned Close. The panel is sized to the canvas,
 //   never to its content - the previous fixed 930-unit box let the last rows fall off the
 //   bottom of iPhone-shaped screens with no way to reach them.
@@ -55,9 +55,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         MobileSettingsWindow hostWindow;
 
         // Sections. One content transform each; the scroll view shows the active one.
-        enum Section { Input, HUD, Mods, Advanced }
-        readonly RectTransform[] sectionContent = new RectTransform[4];
-        readonly Image[] sectionTabs = new Image[4];
+        enum Section { Input, HUD, Advanced }   // MOBILE 2026-09-07: mod switches live only in the launcher's MODS window
+        readonly RectTransform[] sectionContent = new RectTransform[3];
+        readonly Image[] sectionTabs = new Image[3];
         Section activeSection = Section.Input;
         ScrollRect scroll;
 
@@ -285,7 +285,6 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             BuildInputSection(sectionContent[(int)Section.Input], rowW, rowH);
             BuildHudSection(sectionContent[(int)Section.HUD], rowW, rowH);
-            BuildModsSection(sectionContent[(int)Section.Mods], rowW, rowH);
             BuildAdvancedSection(sectionContent[(int)Section.Advanced], rowW, rowH);
 
             ShowSection(Section.Input);
@@ -300,7 +299,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             bar.anchoredPosition = new Vector2(0f, y);
             bar.sizeDelta = new Vector2(panelSize.x - 48f, rowH - 8f);
 
-            string[] names = { "Input", "HUD", "Mods", "Advanced" };
+            string[] names = { "Input", "HUD", "Advanced" };
             float gap = 8f;
             float w = (bar.sizeDelta.x - gap * (names.Length - 1)) / names.Length;
             for (int i = 0; i < names.Length; i++)
@@ -450,74 +449,9 @@ namespace DaggerfallWorkshop.Game.Mobile
             FinishSection(c, y);
         }
 
-        void BuildModsSection(RectTransform c, float rowW, float rowH)
-        {
-            float y = 0f;
-
-            AddNote(c, ref y, rowW,
-                "Built into this port. Each can be switched on or off here; none is needed to play.");
-
-            // TWO switches since 2026-08-30 (device decision): roads without the travel
-            // system is a real preference, and travel without drawn roads still follows the
-            // road DATA, which ships with the code whether or not the terrain is painted.
-            //
-            // Travel applies live (it is consulted when the player next travels). Roads are
-            // read once before the first scene loads - terrain already built this session
-            // cannot be repainted - so that switch records an intent for the next launch,
-            // and the note below says so while the two disagree. Same switches as the
-            // launcher's Mods window (MobileMods owns the preferences).
-            Text roadsNote = null;
-            AddToggle(c, ref y, rowW, rowH, "Roads & tracks",
-                () => MobileMods.Roads,
-                v =>
-                {
-                    MobileMods.Roads = v;
-                    if (roadsNote != null)
-                        roadsNote.text = RoadsStatusText();
-                },
-                null);
-
-            roadsNote = AddNote(c, ref y, rowW, RoadsStatusText());
-            refreshDynamic += () => { if (roadsNote != null) roadsNote.text = RoadsStatusText(); };
-
-            AddNote(c, ref y, rowW,
-                "Daggerfall's roads and tracks drawn on the terrain (Hazelnut's Basic Roads, MIT).");
-
-            AddToggle(c, ref y, rowW, rowH, "Real travel",
-                () => MobileMods.RealTravel,
-                v => MobileMods.RealTravel = v,
-                null);
-
-            AddNote(c, ref y, rowW,
-                "Fast travel becomes a journey: you walk to your destination at a time " +
-                "compression you control and can stop anywhere. Cautious journeys follow " +
-                "roads and tracks even when Roads & tracks is off and they are not drawn.");
-
-            // Listed here for parity with the launcher's Mods window, but unlike the other
-            // two it changes nothing about the session you are in: the start date is read
-            // once, when a character is created. The note says so rather than leaving the
-            // player to wonder why the sky did not change.
-            AddToggle(c, ref y, rowW, rowH, "Summer start",
-                () => MobileMods.SummerStart,
-                v => MobileMods.SummerStart = v,
-                null);
-
-            AddNote(c, ref y, rowW,
-                "A NEW character starts on the 4th of Midyear 3E405 instead of the 4th of " +
-                "Morning Star - summer instead of two months of snow. Same day, same year, " +
-                "same 13:30 start. This game and your saves keep the date they already have.");
-
-            FinishSection(c, y);
-        }
-
-        static string RoadsStatusText()
-        {
-            if (MobileRoads.RestartRequired)
-                return MobileRoads.Enabled
-                    ? "Roads: restart the app to draw them (travel walks already)."
-                    : "Roads: restart the app to remove them from the terrain.";
-            return MobileRoads.Active ? "Roads: active." : "Roads: off.";
-        }
+        // The Mods section (Roads & tracks, Real travel, Summer start) was removed on 2026-09-07:
+        // every mod switch, built-in or installed, is made in the launcher's MODS window before
+        // PLAY and holds for the session. Nothing about mods can change mid-game.
 
         void BuildAdvancedSection(RectTransform c, float rowW, float rowH)
         {

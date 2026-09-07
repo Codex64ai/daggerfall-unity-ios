@@ -126,3 +126,21 @@ converted and bundled; without them a block's flats throw during
 layout and the whole dungeon fails to build (verified 2026-09-01). `tools/bundled-mods/fetch.py`
 now rejects any block that references a non-vanilla texture archive or a required dependency the
 pack does not ship.
+
+## Survival mods (compiled in)
+
+Three desktop mods ship inside the app: their C# is compiled in under `Assets/Scripts/Game/Mobile/Ports/`
+(iOS cannot load mod code from a `.dfmod`), their data is a bundle in `StreamingAssets/Mods`, and each is
+an ordinary, off-by-default entry in the launcher's MODS window. Copied unchanged except lines marked
+`MOBILE` (the `[Invoke]` loaders removed, the tavern references redirected).
+
+| Mod | Author, licence | Source | What is NOT shipped |
+|---|---|---|---|
+| RoleplayRealism 1.8 | Hazelnut, MIT (file headers) | github.com/ajrb/dfunity-mods @ 0af2ec99 (RoleplayRealism/) | - |
+| RoleplayRealism-Items 1.3 | Hazelnut & Ralzar, MIT (file headers) | github.com/ajrb/dfunity-mods @ 0af2ec99 (RoleplayRealismItems/) | - |
+| Climates & Calories 1.7.0 | Ralzar, MIT (file headers) | github.com/Ralzar81/Climates-Calories @ c33a04f8 | `TavernWindow.cs` (no licence header) - replaced by the port's own `MobileTavernWindow`; `blb_tent.fbx`, `41606.prefab`, the three `.mat` files and the two tavern PNGs (author unstated) - the engine's own tent model is used |
+
+Climates & Calories talks to Hazelnut's Travel Options; here a built-in entry titled `TravelOptions`
+answers those messages from this port's Real travel (`MobileTravelOptionsBridge`). No Travel Options code
+is included.
+

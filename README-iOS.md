@@ -382,6 +382,24 @@ Open **Pause -> Mobile Settings -> Input** and adjust **Swipe to attack** and **
 most. Enable `showGestureDebug` on the `MobileInput` object to see the required swipe
 distance in pixels.
 
+## Survival
+
+Three desktop mods are built into the app and switched in the launcher's MODS window, all off by default:
+
+- **RoleplayRealism** (Hazelnut): realism tweaks - bed sleeping, archery, encumbrance, bandaging, loans,
+  climbing, weapon speed and materials, refined training, plus three quests. Its settings page is the
+  mod's own.
+- **RoleplayRealism-Items** (Hazelnut & Ralzar): new armour and clothing, loot and price rebalance, and the
+  food and drink items the survival system uses. Needs RoleplayRealism.
+- **Climates & Calories** (Ralzar): heat and cold exposure by climate, clothing and weather; hunger and
+  thirst with rations, waterskins, hunting and cooking; camping with a tent and fire; sleep. Needs both of
+  the above; if one is off the app switches this one off and says so in its description.
+
+What differs from the desktop mods: the tavern window is this port's own (the original file carries no
+licence), so eating and drinking in taverns feeds hunger and water and a mild drunkenness, not the
+original's full drunk behaviour; the camp tent is Daggerfall's own tent model; Travel Options messages
+are answered by Real travel, so camping and exposure prompts pause a journey.
+
 ## Mods and loose files
 
 Partly supported, and the boundary is sharp. Everything below was measured on device

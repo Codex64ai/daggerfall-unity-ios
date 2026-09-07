@@ -117,6 +117,12 @@ variants, and `Shader.Find` by name can return the copy once the bundle is loade
 bundles embed `Daggerfall/Default`). Guard, not a fix for an observed failure. *Rebase risk:
 LOW.* Mechanical rename of five calls.
 
+### Ported mods — `Game/Mobile/Ports/**` (new, not upstream code), `Game/Mobile/MobilePortedMods.cs`, `MobileTravelOptionsBridge.cs`, `MobileTavernWindow.cs`
+Third-party mod code compiled into the app; see THIRD-PARTY.md "Survival mods". No engine file is
+changed for them: the bootstrap subscribes to `StateManager.OnStateChange` and calls each mod's own
+`Init` the way `ModManager.InvokeModLoaders` would. *Rebase risk: LOW* (additive), but a DFU API change
+that breaks the mods' code shows up as compile errors in `Ports/`.
+
 ### Input, journey hold — `InputManager.cs` (+1)
 The journey's forward force is skipped while `MobileJourneyPilot.Holding` (the town under
 the player is still being built). Part of the Input patch above.

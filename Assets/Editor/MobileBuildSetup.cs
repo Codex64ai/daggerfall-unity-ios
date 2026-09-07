@@ -14,6 +14,7 @@
 //
 // Place in Assets/Editor/
 
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using UnityEngine;
@@ -475,11 +476,37 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         {
             if (!Directory.Exists(BundledSourceRoot))
                 return new string[0];
-            return Directory.GetFiles(BundledSourceRoot, "*" + ModManager.MODINFOEXTENSION, SearchOption.AllDirectories)
+            var all = Directory.GetFiles(BundledSourceRoot, "*" + ModManager.MODINFOEXTENSION, SearchOption.AllDirectories)
                 .Select(p => p.Replace('\\', '/'))
                 .Where(p => !p.Contains("/IOSPilot/") && !p.Contains("/Converted/"))   // Converted/ is the DREAM converter's staging area
                 .OrderBy(p => p, System.StringComparer.Ordinal)
                 .ToArray();
+            // DFU_BUNDLED_MODS=builtin: only the data bundles of mods whose code is compiled into the
+            // app (mods.json "builtin": true). This is what an app build ships; the pack zip's mods
+            // are downloaded separately. Unset = everything (the pack workflow builds the zip from it).
+            if (System.Environment.GetEnvironmentVariable("DFU_BUNDLED_MODS") == "builtin")
+            {
+                var names = BuiltInEntryNames();
+                all = all.Where(p => names.Contains(Path.GetFileName(Path.GetDirectoryName(p)))).ToArray();
+            }
+            return all;
+        }
+
+        /// <summary>Folder names of mods.json entries flagged builtin (their code is compiled in).</summary>
+        public static HashSet<string> BuiltInEntryNames()
+        {
+            var names = new HashSet<string>();
+            string modsJson = Path.Combine(Path.GetDirectoryName(Application.dataPath), "tools/bundled-mods/mods.json");
+            if (!File.Exists(modsJson)) return names;
+            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
+                File.ReadAllText(modsJson), "\\{[^{}]*\\}"))
+            {
+                string entry = m.Value;
+                if (!System.Text.RegularExpressions.Regex.IsMatch(entry, "\"builtin\"\\s*:\\s*true")) continue;
+                var n = System.Text.RegularExpressions.Regex.Match(entry, "\"name\"\\s*:\\s*\"([^\"]+)\"");
+                if (n.Success) names.Add(n.Groups[1].Value);
+            }
+            return names;
         }
 
         /// <summary>
