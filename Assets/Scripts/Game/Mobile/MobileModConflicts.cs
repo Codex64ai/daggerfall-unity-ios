@@ -46,7 +46,7 @@ namespace DaggerfallWorkshop.Game.Mobile
                 Id = "world-textures", Kind = Kind.Look,
                 Question = "{mods} replace the ground, roads, trees and plants. Which look do you want? " +
                            "The others stay installed and still supply everything else they have. " +
-                           "You can change this later by reordering mods in the MODS window.",
+                           "Pick None of these to switch them all off. You can change this later in the MODS window.",
                 Members = new[]
                 {
                     new Member("DREAM", "dream - textures", "dream - sprites"),
@@ -58,7 +58,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             {
                 Id = "wall-fixes", Kind = Kind.Look,
                 Question = "{mods} both replace a few building wall textures. Which should win? " +
-                           "DREAM has high-resolution walls; UBLaMF Textures has corrected vanilla ones.",
+                           "DREAM has high-resolution walls; UBLaMF Textures has corrected vanilla ones. None of these switches both off.",
                 Members = new[]
                 {
                     new Member("DREAM", "dream - textures"),
@@ -68,7 +68,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             new Group
             {
                 Id = "mq-dungeon-exteriors", Kind = Kind.Look,
-                Question = "{mods} both replace the exteriors of two main quest dungeons. Which one should win there?",
+                Question = "{mods} both replace the exteriors of two main quest dungeons. Which one should win there? None of these switches both off.",
                 Members = new[]
                 {
                     new Member("Fixed Dungeon Ext.", "fixed dungeon exteriors"),
@@ -78,7 +78,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             new Group
             {
                 Id = "ironman", Kind = Kind.Exclusive,
-                Question = "{mods} are two variants of the same mod and only one can be on at a time. Which one do you want? The other will be switched off.",
+                Question = "{mods} are two variants of the same mod and only one can be on at a time. Which one do you want? The other will be switched off, or pick None of these for neither.",
                 Members = new[]
                 {
                     new Member("Ironman (infighting)", "ironman madness (infighting)"),
@@ -88,7 +88,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             new Group
             {
                 Id = "beast", Kind = Kind.Exclusive,
-                Question = "{mods} each give one condition at the start and cannot be combined. Which one do you want? The others will be switched off.",
+                Question = "{mods} each give one condition at the start and cannot be combined. Which one do you want? The others will be switched off, or pick None of these for none.",
                 Members = new[]
                 {
                     new Member("Vampire", "become a vampire"),
@@ -201,6 +201,20 @@ namespace DaggerfallWorkshop.Game.Mobile
             return group.Members.Where(m => mods.Any(mod => mod.Enabled && Matches(m, mod.Title))).ToList();
         }
 
+        public const string NoneLabel = "None of these";
+
+        /// <summary>"None of these": switch off every installed member of the group.</summary>
+        static void ApplyNone(Group group, List<Member> present)
+        {
+            foreach (Mod mod in ModManager.Instance.GetAllMods())
+                if (mod.Enabled && present.Any(m => Matches(m, mod.Title)))
+                {
+                    mod.Enabled = false;
+                    Debug.Log("[ModConflicts] " + group.Id + ": none chosen, switched off " + mod.Title);
+                }
+            ModManager.WriteModSettings();
+        }
+
         static void Apply(Group group, Member choice, List<Member> present)
         {
             Mod[] mods = ModManager.Instance.GetAllMods(true);
@@ -287,14 +301,17 @@ namespace DaggerfallWorkshop.Game.Mobile
                     float shownAt = Time.realtimeSinceStartup;
                     foreach (Member m in present)
                         picker.ListBox.AddItem(m.Label);
+                    picker.ListBox.AddItem(NoneLabel);          // last row: switch all of them off
                     Action<int> choose = index =>
                     {
-                        if (picked || index < 0 || index >= present.Count) return;
+                        if (picked || index < 0 || index > present.Count) return;
                         picked = true;
-                        Debug.Log("[ModConflicts] " + g.Id + ": picked " + present[index].Label);
+                        bool none = index == present.Count;
+                        Debug.Log("[ModConflicts] " + g.Id + ": picked " + (none ? NoneLabel : present[index].Label));
                         try
                         {
-                            Apply(g, present[index], present);
+                            if (none) ApplyNone(g, present);
+                            else Apply(g, present[index], present);
                             record[g.Id] = Signature(present.Select(m => m.Label));
                             SaveRecord(record);
                         }

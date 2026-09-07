@@ -490,7 +490,7 @@ Smaller Main Quest Dungeons for two dungeon exteriors; the two Ironman Madness v
 Vampire, Werewolf and Wereboar. Overlaps that are intended are not asked about: the Vanilla
 Enhanced options over their Base, Detailed Dungeon Exteriors over Fixed Dungeon Exteriors, and the
 three reputation quests that Quest Pack 1 and Reputation Consequences both carry (identical text,
-the duplicate is dropped). Your answer is written
+the duplicate is dropped). Every question also offers "None of these", which switches that whole group off. Your answer is written
 into the ordinary mod settings (load order for the texture packs, on/off for the exclusive pairs),
 so the MODS window shows it and you can change it there. The question returns only when the set
 of installed members changes.
