@@ -2,10 +2,14 @@
 // License:         MIT License
 //
 // Starts the desktop mods whose code is compiled into this app: Roleplay and Realism, its Items
-// module and Climates & Calories (Assets/Scripts/Game/Mobile/Ports/). Each ships its DATA as a
-// bundle inside the app, so it has an ordinary entry in the launcher's MODS window with settings;
-// this class calls the mod's own Init exactly as DFU would have called its [Invoke] loader, but
-// only when the entry is enabled, and only with its dependencies on. Nothing runs otherwise.
+// module, Climates & Calories and Dynamic Skies (Assets/Scripts/Game/Mobile/Ports/). This class
+// calls the mod's own Init exactly as DFU would have called its [Invoke] loader, but only when the
+// entry is enabled, and only with its dependencies on. Nothing runs otherwise.
+//
+// The three survival mods ship their DATA as a bundle inside the app, so each always has an
+// ordinary entry in the launcher's MODS window with settings. Dynamic Skies' data is NOT built in:
+// the player installs that bundle themselves, so its entry - and therefore the mod - simply is not
+// there until they do, and the code stays dormant.
 
 using System.Collections;
 using UnityEngine;
@@ -18,6 +22,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         public const string RRTitle = "RoleplayRealism";
         public const string RRItemsTitle = "RoleplayRealism-Items";
         public const string CCTitle = "Climates & Calories";
+        public const string SkyTitle = "Dynamic Skies";
+        public const string DynamicSkiesShaderName = "BLB/SkyBox/BLBProceduralSkybox";
         public const string GateNote = " Needs RoleplayRealism and RoleplayRealism-Items switched on; it was switched off because one of them is not.";
 
         /// <summary>Pure: which of (rr, rrItems, cc) may run. Items needs RR; C&C needs both.</summary>
@@ -27,13 +33,17 @@ namespace DaggerfallWorkshop.Game.Mobile
             return new[] { rr, items, items && cc };
         }
 
+        /// <summary>Pure: Dynamic Skies runs only when its launcher entry exists (bundle installed) and is on.</summary>
+        public static bool SkyRuns(bool entryPresent, bool enabled) => entryPresent && enabled;
+
         /// <summary>Titles of the compiled-in mods, in dependency order.</summary>
-        public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle };
+        public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle, SkyTitle };
 
         /// <summary>
         /// Called by ModManager after it found the bundles and before it applies saved settings: a
-        /// bundle the engine has just discovered defaults to enabled, but these three are survival
-        /// systems a player must choose, so they start off. A saved choice overrides this.
+        /// bundle the engine has just discovered defaults to enabled, but these are systems a player
+        /// must choose, so they start off. A saved choice overrides this. Titles with no entry (Dynamic
+        /// Skies until its bundle is installed) are skipped.
         /// </summary>
         public static void DefaultOff(ModManager manager)
         {
@@ -121,6 +131,13 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (run[0]) { RoleplayRealism.RoleplayRealism.Init(new InitParams(rr, ModManager.Instance.GetModIndex(RRTitle), count)); Debug.Log("[PortedMods] started " + RRTitle); }
             if (run[1]) { RoleplayRealism.RoleplayRealismItemsMod.Init(new InitParams(items, ModManager.Instance.GetModIndex(RRItemsTitle), count)); Debug.Log("[PortedMods] started " + RRItemsTitle); }
             if (run[2]) { ClimatesCalories.ClimateCalories.Init(new InitParams(cc, ModManager.Instance.GetModIndex(CCTitle), count)); Debug.Log("[PortedMods] started " + CCTitle); }
+
+            Mod sky = Entry(SkyTitle);
+            if (SkyRuns(sky != null, sky != null && sky.Enabled))
+            {
+                BLBSkybox.Init(new InitParams(sky, ModManager.Instance.GetModIndex(SkyTitle), count));
+                Debug.Log("[PortedMods] started " + SkyTitle);
+            }
         }
 
         class Driver : MonoBehaviour { }

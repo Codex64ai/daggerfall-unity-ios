@@ -127,6 +127,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestModConflictOrder();
             TestPortedModGate();
             TestPortedModOrder();
+            TestPortedModTitles();
             TestTravelOptionsBridge();
             TestTavernAlcohol();
 
@@ -699,6 +700,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(string.Join(",", MobilePortedMods.OrderedPriorities(0, 1, 2, 2).Select(i => i.ToString()).ToArray()) == "0,1,2", "order: contiguous correct order kept");
             Check(string.Join(",", MobilePortedMods.OrderedPriorities(0, 2, 1, 44).Select(i => i.ToString()).ToArray()) == "45,46,47", "order: C&C before Items moves all three to the end in order");
             Check(string.Join(",", MobilePortedMods.OrderedPriorities(3, 1, 2, 10).Select(i => i.ToString()).ToArray()) == "11,12,13", "order: RR last moves all three to the end in order");
+        }
+
+        static void TestPortedModTitles()
+        {
+            Check(System.Array.IndexOf(MobilePortedMods.Titles, "Dynamic Skies") >= 0, "PortedMods: Dynamic Skies is a default-off title");
+            Check(MobilePortedMods.SkyRuns(true, true) && !MobilePortedMods.SkyRuns(true, false) && !MobilePortedMods.SkyRuns(false, true), "PortedMods: sky runs only when its entry exists and is on");
+            Check(MobilePortedMods.Gate(true, true, true).Length == 3, "PortedMods: survival gate unchanged by the sky entry");
         }
 
         class FakeJourney : IJourneyState
