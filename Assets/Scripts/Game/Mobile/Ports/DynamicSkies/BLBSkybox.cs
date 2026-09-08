@@ -104,6 +104,8 @@ public class BLBSkybox : MonoBehaviour
         if (Instance.skyboxMat == null || appShader == null)
         {
             Debug.LogError("[DynamicSkies] " + (Instance.skyboxMat == null ? "material BLBSkyboxMaterial missing from the bundle" : "shader BLB/SkyBox/BLBProceduralSkybox missing from the app") + " - keeping the vanilla sky");
+            UnityEngine.Object.Destroy(Instance.gameObject);   // MOBILE
+            Instance = null;   // MOBILE
             return;
         }
         Instance.skyboxMat.shader = appShader;
