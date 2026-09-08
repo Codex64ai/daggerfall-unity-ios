@@ -674,6 +674,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(!MobileModExtractor.IsNormalMapName("DefaultStars"), "DynamicSkies: star map is not a normal map");
             // No mods at all: null, and one expected "preset texture missing" warning in the log.
             Check(BLBSkybox.LoadPresetTexture(null, null, "nothing") == null, "DynamicSkies: fallback with no mods returns null without throwing");
+            Check(BLBSkybox.LoadPresetTexture(null, null, "") == null, "DynamicSkies: an empty preset texture name returns null quietly");
             // Everything above is pure name logic. What follows reads the fetched bundle, which is
             // gitignored: skip with a note rather than throwing out of RunAll and losing the tally.
             string root = "Assets/Game/Mods/DynamicSkies";

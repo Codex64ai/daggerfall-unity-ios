@@ -1508,6 +1508,7 @@ void UpdateWorldTime() {
     // copy and say so, instead of binding null and drawing a black sky.
     public static Texture2D LoadPresetTexture(Mod preset, Mod fallback, string name)   // public: the editor self-test assembly calls it
     {
+        if (string.IsNullOrEmpty(name)) return null;   // MOBILE: an empty name means "no texture" upstream; nothing to look up or report
         Texture2D tex = preset != null ? preset.GetAsset<Texture2D>(name) : null;
         if (tex != null) return tex;
         if (fallback != null && fallback != preset)
