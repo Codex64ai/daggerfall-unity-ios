@@ -132,7 +132,11 @@ namespace DaggerfallWorkshop.Game.Mobile
                 yield return new WaitForSecondsRealtime(1f);
             }
             try { BLBSkybox.Init(new InitParams(sky, ModManager.Instance.GetModIndex(SkyTitle), ModManager.Instance.LoadedModCount)); }
-            catch (System.Exception ex) { Debug.LogError("[PortedMods] " + SkyTitle + " start failed: " + ex); }
+            catch (System.Exception ex)
+            {
+                Debug.LogError("[PortedMods] " + SkyTitle + " start failed: " + ex);
+                BLBSkybox.Teardown();   // Init builds Instance up front, so a part-way throw leaves it alive
+            }
             Debug.Log(BLBSkybox.Instance != null
                 ? "[PortedMods] started " + SkyTitle
                 : "[PortedMods] " + SkyTitle + " did not start (see [DynamicSkies] lines)");

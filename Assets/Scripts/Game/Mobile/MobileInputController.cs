@@ -1106,7 +1106,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             // time. Cached in Update() at 1Hz - see nextSkySample.
             text += "\n" + MobileAssetStats.SkyLine(skyDynamic, skyGpuMs);
 
-            GUI.Label(new Rect(12f, 12f, 560f, 340f), text);
+            GUI.Label(new Rect(12f, 12f, 560f, 360f), text);
         }
 
         #endregion

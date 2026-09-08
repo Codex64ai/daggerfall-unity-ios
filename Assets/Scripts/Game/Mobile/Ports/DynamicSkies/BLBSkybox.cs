@@ -196,6 +196,19 @@ public class BLBSkybox : MonoBehaviour
         Debug.Log("Dynamic Skies has been set up");
     }
 
+    // MOBILE: called by MobilePortedMods when Init threw part-way. Init creates Instance on its
+    // second line, so an exception anywhere after that leaves a half-built skybox in the scene
+    // (and the caller reading Instance != null as success). Tear it down the way Init's own
+    // bail-outs do.
+    public static void Teardown()
+    {
+        if (Instance != null)
+        {
+            UnityEngine.Object.Destroy(Instance.gameObject);
+            Instance = null;
+        }
+    }
+
     void Awake ()
     {
         Mod.IsReady = true;
@@ -230,6 +243,7 @@ private const float UpdateInterval = 1.0f; // Update fog color every 1.0 seconds
 
 public void Update()
 {
+    if (worldTime == null) return;   // MOBILE: Init bailed or threw
     if (GameManager.Instance.IsPlayingGame() && !playerInside)
     {
         if (Time.time - lastUpdateTime >= UpdateInterval)

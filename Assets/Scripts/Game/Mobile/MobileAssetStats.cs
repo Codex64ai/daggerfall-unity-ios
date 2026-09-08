@@ -117,7 +117,11 @@ namespace DaggerfallWorkshop.Game.Mobile
             return string.Format(
                 "sky {0} gpu {1}",
                 dynamicSky ? "dynamic" : "vanilla",
-                gpuMs < 0 ? "n/a" : gpuMs.ToString("F1") + " ms");
+                gpuMs < 0
+                    ? "n/a"
+                    // A decimal point, not a comma, whatever the device locale: this line is read
+                    // off screenshots and pasted into bug reports.
+                    : gpuMs.ToString("F1", System.Globalization.CultureInfo.InvariantCulture) + " ms");
         }
     }
 }

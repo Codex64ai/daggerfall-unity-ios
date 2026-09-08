@@ -658,6 +658,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(!src.Contains("#pragma multi_compile _") && !src.Contains("multi_compile_local"), "DynamicSkies: keyword pragmas are pinned (fog variants only)");
             Check(src.Contains("#pragma target 3.5"), "DynamicSkies: shader target pinned");
             Check(!src.Contains("sampler3D"), "DynamicSkies: unused 3D LUT sampler removed");
+            // The four variants the removed keywords used to select are now hard-defined. Losing
+            // one of these defines with its keyword already gone silently drops a feature (a moon
+            // that spins, a full-colour sky, a low-quality sun disk) instead of failing to build.
+            Check(src.Contains("#define _MOONSPINOPTION_TIDAL_LOCK"), "DynamicSkies: Masser tidal lock pinned by define");
+            Check(src.Contains("#define _SECUNDASPINOPTION_TIDAL_LOCK"), "DynamicSkies: Secunda tidal lock pinned by define");
+            Check(src.Contains("#define REDUCE_COLOR"), "DynamicSkies: colour reduction pinned by define");
+            Check(src.Contains("#define _SUNDISK_HIGH_QUALITY"), "DynamicSkies: high-quality sun disk pinned by define");
         }
 
 
