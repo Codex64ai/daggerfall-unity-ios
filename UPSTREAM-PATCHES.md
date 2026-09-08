@@ -168,6 +168,13 @@ default ON, while a saved choice in `Mods.json` still wins because `LoadModSetti
 Upstream master uses `[SerializeField]` for this; it does not compile on a property in this Unity
 (CS0592, field-only), and `Title` is not an auto-property so `[field: SerializeField]` is out too -
 `[fsProperty]` is FullSerializer's own opt-in attribute and is honoured identically.
+One-off upgrade effect: on an existing install the three survival switches (RoleplayRealism,
+RoleplayRealism-Items, Climates & Calories) and Dynamic Skies read as OFF after the first launch of
+this build, because switch state was never actually saved before (`Mods.json` was written empty) and
+the off-by-default hook now runs; saves are unaffected, and re-enabling them in MODS now sticks.
+`MobileBuildSetup.ApplyAll` also sets `PlayerSettings.enableFrameTimingStats = true`, which the
+`sky ... gpu N ms` diagnostics line needs - a project setting, so it affects every build, not just
+ones with the sky on.
 *Rebase risk: LOW.* `MobileBuildSetup.cs` and `MobileModExtractor.cs` are new files, not upstream
 ones; the tooling change touches only this fork's own `tools/`. The two engine lines are single
 insertions next to stable upstream code - re-check them by eye after a rebase.
