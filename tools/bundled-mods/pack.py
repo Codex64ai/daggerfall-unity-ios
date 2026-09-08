@@ -28,14 +28,20 @@ def stem_of(m):
     return m["manifest"].replace(".dfmod.json", "").lower()
 
 
+def excluded_from_pack(m):
+    """builtin: true ships inside the app (code compiled in); private_only: true has no public
+    licence yet. Either way the pack zip neither requires nor refuses the bundle."""
+    return bool(m.get("builtin") or m.get("private_only"))
+
+
 def builtin_stems(cfg):
-    """Data bundles for mods whose code is compiled into the app (builtin: true): they ship inside
-    the app, never in the pack zip, so the pack neither requires nor refuses them."""
-    return set(stem_of(m) for m in cfg["mods"] if m.get("builtin"))
+    """Data bundles excluded from the pack zip (builtin or private_only - see excluded_from_pack):
+    they never appear there, so the pack neither requires nor refuses them."""
+    return set(stem_of(m) for m in cfg["mods"] if excluded_from_pack(m))
 
 
 def pack_mods(cfg):
-    return [m for m in cfg["mods"] if not m.get("builtin")]
+    return [m for m in cfg["mods"] if not excluded_from_pack(m)]
 
 
 def stems(cfg):

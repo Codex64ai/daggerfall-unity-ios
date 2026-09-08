@@ -140,7 +140,7 @@ def validate_set(manifests):
     return problems
 
 
-def licence_problems(text, allow_permission=False, accept_substring=None):
+def licence_problems(text, allow_permission=False, accept_substring=None, allow_pending=False):
     stripped = (text or "").strip()
     first = stripped.splitlines()[0].strip() if stripped else ""
     if first == "MIT License":
@@ -149,6 +149,8 @@ def licence_problems(text, allow_permission=False, accept_substring=None):
         return []          # e.g. UBLaMF's License.md: CC BY-NC-SA 4.0 stated on its third line
     if allow_permission and first == "Permission" and len(stripped.splitlines()) > 1:
         return []
+    if allow_pending and first == "Pending" and len(stripped.splitlines()) > 1:
+        return []          # private_only entry: no licence upstream, permission being sought
     return ["LICENSE first line is %r, expected 'MIT License'%s" % (first, " or 'Permission'" if allow_permission else "")]
 
 
@@ -227,6 +229,8 @@ def licence_text_for(entry):
     lic = entry.get("licence", "")
     if lic.startswith("permission:"):
         return "Permission\n\n" + lic[len("permission:"):].strip() + "\n"
+    if lic.startswith("pending:"):
+        return "Pending\n\n" + lic[len("pending:"):].strip() + "\n"
     if lic.startswith("text:"):
         return lic[len("text:"):].strip() + "\n"
     return None
@@ -384,6 +388,9 @@ def check_all(cfg, entries):
                 problems.append("%s: archives_from names %r, which is not in the pack" % (entry["name"], prov))
         problems += [entry["name"] + ": " + p for p in
                      worlddata_archive_problems(manifest, dest, provided_by_pack=bool(providers) and all(p in names for p in providers))]
+        licence_starts_pending = str(entry.get("licence", "")).startswith("pending:")
+        if licence_starts_pending and not entry.get("private_only"):
+            problems.append(entry["name"] + ": pending licence requires private_only")
         lic = os.path.join(dest, "LICENSE")
         if not os.path.exists(lic):
             problems.append(entry["name"] + ": LICENSE missing")
@@ -391,7 +398,8 @@ def check_all(cfg, entries):
             with open(lic, encoding="utf-8", errors="replace") as fh:
                 problems += [entry["name"] + ": " + p for p in
                              licence_problems(fh.read(), allow_permission=str(entry.get("licence", "")).startswith("permission:"),
-                                              accept_substring=entry.get("licence_accept"))]
+                                              accept_substring=entry.get("licence_accept"),
+                                              allow_pending=bool(entry.get("private_only")) and licence_starts_pending)]
     # Pre-built bundles (converted desktop mods) are pack members too: dependencies may name them.
     for m in cfg["mods"]:
         if m.get("bundle"):

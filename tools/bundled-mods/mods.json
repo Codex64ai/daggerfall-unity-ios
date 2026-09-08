@@ -465,6 +465,16 @@
       ]
     },
     {
+      "name": "DynamicSkies",
+      "repo": "https://github.com/drcarademono/dynamic-skies.git",
+      "commit": "04506e2ef65aff27e4882ec07ed29a6fc7a4be6b",
+      "manifest": "dynamic-skies.dfmod.json",
+      "strip_code": true,
+      "private_only": true,
+      "exclude_globs": ["*.shader", "*.cginc"],
+      "licence": "pending:No licence is declared upstream (github.com/drcarademono/dynamic-skies, authors BadLuckBurt and carademono). Permission is being sought; until then this bundle is shipped only on the private test draft, never in the public mod pack. Code compiled in under Assets/Scripts/Game/Mobile/Ports/DynamicSkies with the shader under Assets/Shaders/BLB (see THIRD-PARTY.md)."
+    },
+    {
       "name": "RoleplayRealism",
       "repo": "https://github.com/ajrb/dfunity-mods.git",
       "commit": "0af2ec99b5ad7e6722ddc9ce284987d4d6fa262d",

@@ -138,6 +138,11 @@ class Licence(unittest.TestCase):
         self.assertIsNone(fetch.licence_text_for({}))
         self.assertTrue(fetch.licence_problems("Permission\n", allow_permission=True))  # a bare word is not a record
 
+    def test_pending_licence_only_for_private_only(self):
+        assert fetch.licence_problems("Pending\n\nno licence upstream", allow_pending=True) == []
+        assert fetch.licence_problems("Pending\n\nno licence upstream") != []
+        assert fetch.licence_text_for({"licence": "pending:no licence upstream; draft only"}) == "Pending\n\nno licence upstream; draft only\n"
+
 
 class GeneratedManifest(unittest.TestCase):
     FILES = ["QuestPacks/X/JHRLQ/QuestList-RLQ.txt", "QuestPacks/X/JHRLQ/RLQ01.txt",

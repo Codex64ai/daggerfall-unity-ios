@@ -69,6 +69,28 @@ class BuiltIn(unittest.TestCase):
         self.assertNotIn("roleplayrealism.dfmod", pack.readme_text(self.CFG2, {}))
 
 
+class PrivateOnly(unittest.TestCase):
+    """Entries with private_only: true are built as a bundle but never enter the pack zip."""
+    CFG3 = {"dest_root": "x", "mods": CFG["mods"] + [
+        {"name": "DynamicSkies", "manifest": "dynamic-skies.dfmod.json", "private_only": True, "strip_code": True}]}
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.dir, "Licenses"))
+        for stem in ("jobsofthethievesguild", "skyrim's adventures"):
+            open(os.path.join(self.dir, stem + ".dfmod"), "w").close()
+            open(os.path.join(self.dir, "Licenses", stem + "-LICENSE.txt"), "w").close()
+
+    def test_private_only_is_not_a_pack_member(self):
+        self.assertNotIn("dynamic-skies", pack.stems(self.CFG3))
+        self.assertEqual(pack.check_bundles(self.CFG3, self.dir), [])          # absent private-only bundle: fine
+
+    def test_private_only_bundle_present_is_not_stale(self):
+        open(os.path.join(self.dir, "dynamic-skies.dfmod"), "w").close()
+        self.assertEqual(pack.check_bundles(self.CFG3, self.dir), [])          # present: fine, not "unpinned"
+        self.assertNotIn("dynamic-skies.dfmod", pack.readme_text(self.CFG3, {}))
+
+
 class Readme(unittest.TestCase):
     def test_lists_every_mod_with_its_title(self):
         txt = pack.readme_text(CFG, {"jobsofthethievesguild": "Jobs of the Thieves Guild"})

@@ -1,0 +1,64 @@
+{
+    "Version": "1",
+    "Sections": [
+        {
+            "Name": "FogDensity",
+            "Description": "Set Fog Thickness",
+            "IsAdvanced": false,
+            "Keys": [
+                {
+                    "Min": 1,
+                    "Max": 10,
+                    "Value": 1,
+                    "Name": "densitySetting",
+                    "Description": "Makes fog thicker",
+                    "$version": "v1",
+                    "$type": "DaggerfallWorkshop.Game.Utility.ModSupport.ModSettings.SliderIntKey"
+                }
+            ],
+            "$version": "v1"
+        },
+        {
+            "Name": "SnowSizeAndNumberOfParticles",
+            "Description": "Options for the pixel snow particle replacement",
+            "IsAdvanced": false,
+            "Keys": [
+                {
+                    "Value": false,
+                    "Name": "ActivatePixelSnow",
+                    "Description": "Turn the pixel snow replacement on or off",
+                    "$version": "v1",
+                    "$type": "DaggerfallWorkshop.Game.Utility.ModSupport.ModSettings.ToggleKey"
+                },
+                {
+                    "Min": 100,
+                    "Max": 800,
+                    "Value": 100,
+                    "Name": "MinParticleSize",
+                    "Description": "Minimum snow particle size",
+                    "$version": "v1",
+                    "$type": "DaggerfallWorkshop.Game.Utility.ModSupport.ModSettings.SliderIntKey"
+                },
+                {
+                    "Min": 100,
+                    "Max": 800,
+                    "Value": 300,
+                    "Name": "MaxParticleSize",
+                    "Description": "Maximum snow particle size",
+                    "$version": "v1",
+                    "$type": "DaggerfallWorkshop.Game.Utility.ModSupport.ModSettings.SliderIntKey"
+                },
+                {
+                    "Min": 15,
+                    "Max": 20,
+                    "Value": 20,
+                    "Name": "MaxParticles",
+                    "Description": "Maximum number of snow flake particles (multiplied by 1000)",
+                    "$version": "v1",
+                    "$type": "DaggerfallWorkshop.Game.Utility.ModSupport.ModSettings.SliderIntKey"
+                }
+            ],
+            "$version": "v1"
+        }
+    ]
+}
