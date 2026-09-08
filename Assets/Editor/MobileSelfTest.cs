@@ -667,10 +667,19 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobileModExtractor.IsNormalMapName("CdMCloudsNormal"), "DynamicSkies: CdMCloudsNormal is a normal map by name");
             Check(MobileModExtractor.IsNormalMapName("2k_sky_3_Normal"), "DynamicSkies: 2k_sky_3_Normal is a normal map by name");
             Check(!MobileModExtractor.IsNormalMapName("DefaultStars"), "DynamicSkies: star map is not a normal map");
+            // No mods at all: null, and one expected "preset texture missing" warning in the log.
+            Check(BLBSkybox.LoadPresetTexture(null, null, "nothing") == null, "DynamicSkies: fallback with no mods returns null without throwing");
+            // Everything above is pure name logic. What follows reads the fetched bundle, which is
+            // gitignored: skip with a note rather than throwing out of RunAll and losing the tally.
+            string root = "Assets/Game/Mods/DynamicSkies";
+            if (!Directory.Exists(root) || !Directory.Exists(root + "/Textures"))
+            {
+                log.AppendLine("  SKIP  Dynamic Skies preset textures (not fetched - run tools/bundled-mods/fetch.py --only DynamicSkies)");
+                return;
+            }
             // The default preset JSON names only textures the fetched bundle actually has. Every *.json
             // under the mod folder is read rather than one named folder: the presets live in
             // SkyboxSettings today, and one added elsewhere later must hold to the same rule.
-            string root = "Assets/Game/Mods/DynamicSkies";
             var have = new HashSet<string>(Directory.GetFiles(root + "/Textures").Where(f => !f.EndsWith(".meta")).Select(f => Path.GetFileNameWithoutExtension(f)));
             var wanted = new HashSet<string>();
             foreach (string json in Directory.GetFiles(root, "*.json", SearchOption.AllDirectories))
@@ -680,8 +689,6 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(wanted.Count >= 9 && absent.Length == 0,
                 "DynamicSkies: every texture named by the default presets is in the bundle (" + wanted.Count + ": " + string.Join(",", wanted.OrderBy(w => w).ToArray()) + ")",
                 "not in the bundle: " + absent);
-            // No mods at all: null, and one expected "preset texture missing" warning in the log.
-            Check(BLBSkybox.LoadPresetTexture(null, null, "nothing") == null, "DynamicSkies: fallback with no mods returns null without throwing");
         }
 
 
@@ -2044,9 +2051,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // wider than DFU's own naming, and safe because NormalUnswizzlerFor passes an
             // sRGB-flagged source through untouched, so a colour texture that merely shares the
             // tail is never swizzled.
-            Check(MobileModExtractor.IsNormalMapName("Assets/Textures/wallNormal.png")
-                  && !MobileModExtractor.IsLinearMapName("Assets/Textures/wallHeight.png"),
-                  "a bare 'Normal' tail is a normal map; the other maps still require the underscore");
+            Check(MobileModExtractor.IsNormalMapName("Assets/Textures/wallNormal.png"),
+                  "a bare 'Normal' tail is a normal map: 'wallNormal' counts");
+            Check(!MobileModExtractor.IsLinearMapName("Assets/Textures/wallHeight.png"),
+                  "the underscore is still required of the other maps: 'wallHeight' is not a height map");
             Check(!MobileModExtractor.IsNormalMapName(dfuName + "_Height.png"), "a height map is not a normal map");
             Check(MobileModExtractor.IsLinearMapName(dfuName + "_Normal.png")
                   && MobileModExtractor.IsLinearMapName(dfuName + "_Height.png")
