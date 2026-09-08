@@ -261,10 +261,10 @@ Register in `RunAll`. Run -> observe which checks fail. `HasMapSuffix(name, "Nor
 mkdir -p ~/dev/dfu-mods && cd ~/dev/daggerfall-unity && \
 env DFU_MOD_IN="/private/tmp/claude-501/-Users-ikrammassabini/3d73a6ab-7f57-4287-bf2c-0ab417b7493b/scratchpad/sky/dream - sky.dfmod" \
     DFU_MOD_OUT=$HOME/dev/dfu-mods DFU_MOD_KEEP_EXTRACTION=1 \
-/Applications/Unity/Hub/Editor/6000.3.23f1/Unity.app/Contents/MacOS/Unity -batchmode -quit -projectPath ~/dev/daggerfall-unity \
+/Applications/Unity/Hub/Editor/6000.3.23f1/Unity.app/Contents/MacOS/Unity -batchmode -projectPath ~/dev/daggerfall-unity \
   -executeMethod DaggerfallWorkshop.Game.Mobile.EditorTools.MobileModExtractor.ConvertFromEnv -logFile ~/dev/dfu-mods/dream-sky-convert.log
 ```
-(no `-nographics`: texture decode needs a GPU). Expected in the log: 13 textures, 16 TextAssets, an iOS bundle written. Note the kept extraction folder path from the log.
+(no `-nographics`: texture decode needs a GPU; no `-quit`: ConvertFromEnv refuses it and exits itself). Expected in the log: 13 textures, 16 TextAssets, an iOS bundle written as `~/dev/dfu-mods/iOS/dream - sky.dfmod` (source basename); copy it to `~/dev/dfu-mods/dream-sky.dfmod` for upload. Note the kept extraction folder path from the log.
 
 - [ ] **Step 2: Verify names.** Write `tools/bundled-mods/check_sky_preset.py`:
 ```python
