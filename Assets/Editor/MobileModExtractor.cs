@@ -1156,7 +1156,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// record of the importer settings it was built with.</summary>
         public static bool IsNormalMapName(string assetName)
         {
-            return HasMapSuffix(assetName, "Normal");
+            // A bare "Normal" tail counts too: Dynamic Skies names its cloud normal map
+            // "CdMCloudsNormal", with no underscore, and imported as colour it lights nothing.
+            return HasMapSuffix(assetName, "Normal")
+                || Path.GetFileNameWithoutExtension(assetName)
+                    .EndsWith("Normal", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>True when the name says the texture holds numbers rather than colours - the

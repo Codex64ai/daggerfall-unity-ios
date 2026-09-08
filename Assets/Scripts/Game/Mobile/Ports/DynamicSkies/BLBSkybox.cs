@@ -1487,11 +1487,10 @@ void UpdateWorldTime() {
     public static Texture2D LoadPresetTexture(Mod preset, Mod fallback, string name)   // public: the editor self-test assembly calls it
     {
         Texture2D tex = preset != null ? preset.GetAsset<Texture2D>(name) : null;
-        if (tex == null && fallback != null && fallback != preset)
-        {
+        if (tex != null) return tex;
+        if (fallback != null && fallback != preset)
             tex = fallback.GetAsset<Texture2D>(name);
-            Debug.LogWarning("[DynamicSkies] preset texture missing: " + name + (tex != null ? " (using the default)" : " (no default either)"));
-        }
+        Debug.LogWarning("[DynamicSkies] preset texture missing: " + name + (tex != null ? " (using the default)" : " (no default either)"));
         return tex;
     }
 

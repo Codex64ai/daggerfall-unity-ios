@@ -124,6 +124,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestEnsureReadable();
             TestMobileShadersFind();
             TestDynamicSkiesShader();
+            TestDynamicSkiesPresetTextures();
             TestModConflictOrder();
             TestPortedModGate();
             TestPortedModOrder();
@@ -652,6 +653,35 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(!src.Contains("#pragma multi_compile _") && !src.Contains("multi_compile_local"), "DynamicSkies: keyword pragmas are pinned (fog variants only)");
             Check(src.Contains("#pragma target 3.5"), "DynamicSkies: shader target pinned");
             Check(!src.Contains("sampler3D"), "DynamicSkies: unused 3D LUT sampler removed");
+        }
+
+
+        // Two name-only rules the sky depends on. The converter decides a texture is a normal map
+        // from its name alone, and Dynamic Skies names its cloud normals without the "_Normal"
+        // suffix DFU writes, so the rule has to cover a bare "Normal" tail as well. And every
+        // texture the shipped presets name must actually be in the fetched bundle: a name that is
+        // not there binds null on the material and draws a black sky.
+        static void TestDynamicSkiesPresetTextures()
+        {
+            // Names DREAM SKY and the default presets use for normal maps must be recognised as normals by the converter.
+            Check(MobileModExtractor.IsNormalMapName("CdMCloudsNormal"), "DynamicSkies: CdMCloudsNormal is a normal map by name");
+            Check(MobileModExtractor.IsNormalMapName("2k_sky_3_Normal"), "DynamicSkies: 2k_sky_3_Normal is a normal map by name");
+            Check(!MobileModExtractor.IsNormalMapName("DefaultStars"), "DynamicSkies: star map is not a normal map");
+            // The default preset JSON names only textures the fetched bundle actually has. Every *.json
+            // under the mod folder is read rather than one named folder: the presets live in
+            // SkyboxSettings today, and one added elsewhere later must hold to the same rule.
+            string root = "Assets/Game/Mods/DynamicSkies";
+            var have = new HashSet<string>(Directory.GetFiles(root + "/Textures").Where(f => !f.EndsWith(".meta")).Select(f => Path.GetFileNameWithoutExtension(f)));
+            var wanted = new HashSet<string>();
+            foreach (string json in Directory.GetFiles(root, "*.json", SearchOption.AllDirectories))
+                foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(json), "TextureFile\\\\?\":\\s*\\\\?\"([^\"\\\\]+)"))
+                    wanted.Add(m.Groups[1].Value);
+            string absent = string.Join(",", wanted.Where(w => !have.Contains(w)).OrderBy(w => w).ToArray());
+            Check(wanted.Count >= 9 && absent.Length == 0,
+                "DynamicSkies: every texture named by the default presets is in the bundle (" + wanted.Count + ": " + string.Join(",", wanted.OrderBy(w => w).ToArray()) + ")",
+                "not in the bundle: " + absent);
+            // No mods at all: null, and one expected "preset texture missing" warning in the log.
+            Check(BLBSkybox.LoadPresetTexture(null, null, "nothing") == null, "DynamicSkies: fallback with no mods returns null without throwing");
         }
 
 
@@ -2009,8 +2039,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobileModExtractor.IsNormalMapName(dfuName + "_Normal.png"), "DFU _Normal suffix is a normal map");
             Check(MobileModExtractor.IsNormalMapName(dfuName + "_normal.PNG"), "suffix match ignores case");
             Check(!MobileModExtractor.IsNormalMapName(dfuName + ".png"), "an albedo is not a normal map");
-            Check(!MobileModExtractor.IsNormalMapName("Assets/Textures/wallNormal.png"),
-                  "the underscore is required: 'wallNormal' is not a map suffix");
+            // The underscore is required of every map except Normal. Dynamic Skies names its cloud
+            // normal map "CdMCloudsNormal", so a bare "Normal" tail counts as well - deliberately
+            // wider than DFU's own naming, and safe because NormalUnswizzlerFor passes an
+            // sRGB-flagged source through untouched, so a colour texture that merely shares the
+            // tail is never swizzled.
+            Check(MobileModExtractor.IsNormalMapName("Assets/Textures/wallNormal.png")
+                  && !MobileModExtractor.IsLinearMapName("Assets/Textures/wallHeight.png"),
+                  "a bare 'Normal' tail is a normal map; the other maps still require the underscore");
             Check(!MobileModExtractor.IsNormalMapName(dfuName + "_Height.png"), "a height map is not a normal map");
             Check(MobileModExtractor.IsLinearMapName(dfuName + "_Normal.png")
                   && MobileModExtractor.IsLinearMapName(dfuName + "_Height.png")
