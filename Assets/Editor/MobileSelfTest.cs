@@ -125,6 +125,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestMobileShadersFind();
             TestModConflictOrder();
             TestPortedModGate();
+            TestPortedModOrder();
             TestTravelOptionsBridge();
             TestTavernAlcohol();
 
@@ -328,8 +329,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     missing++;
             }
             Check(missing == 0, "every shipped bundle has a licence or permission record beside it", missing + " missing");
-            Check(bundles.Length == MobileBuildSetup.BundledManifests().Length,
-                  "one bundle per fetched manifest", bundles.Length + " bundles");
+            // StreamingAssets/Mods holds either every fetched pack (pack-zip workflow) or only the
+            // built-in data bundles (DFU_BUNDLED_MODS=builtin, what an app build ships).
+            int all = MobileBuildSetup.BundledManifests().Length, builtin = MobileBuildSetup.BuiltInEntryNames().Count;
+            Check(bundles.Length == all || bundles.Length == builtin,
+                  "one bundle per fetched manifest (all " + all + ") or per built-in entry (" + builtin + ")", bundles.Length + " bundles");
         }
 
         /// <summary>
@@ -666,6 +670,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(string.Join(",", MobilePortedMods.Gate(false, true, true).Select(b => b ? "1" : "0").ToArray()) == "0,0,0", "Gate: without RR nothing runs");
             Check(string.Join(",", MobilePortedMods.Gate(true, false, true).Select(b => b ? "1" : "0").ToArray()) == "1,0,0", "Gate: C&C needs Items");
             Check(string.Join(",", MobilePortedMods.Gate(true, true, false).Select(b => b ? "1" : "0").ToArray()) == "1,1,0", "Gate: C&C off leaves the others");
+        }
+
+        static void TestPortedModOrder()
+        {
+            Check(string.Join(",", MobilePortedMods.OrderedPriorities(2, 5, 9, 40).Select(i => i.ToString()).ToArray()) == "2,5,9", "order: already RR<Items<C&C is kept");
+            Check(string.Join(",", MobilePortedMods.OrderedPriorities(0, 1, 2, 2).Select(i => i.ToString()).ToArray()) == "0,1,2", "order: contiguous correct order kept");
+            Check(string.Join(",", MobilePortedMods.OrderedPriorities(0, 2, 1, 44).Select(i => i.ToString()).ToArray()) == "45,46,47", "order: C&C before Items moves all three to the end in order");
+            Check(string.Join(",", MobilePortedMods.OrderedPriorities(3, 1, 2, 10).Select(i => i.ToString()).ToArray()) == "11,12,13", "order: RR last moves all three to the end in order");
         }
 
         class FakeJourney : IJourneyState

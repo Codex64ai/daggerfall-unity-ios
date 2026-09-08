@@ -43,6 +43,9 @@ namespace DaggerfallWorkshop.Game.Mobile
             var go = new GameObject("MobileDebugStart");
             Object.DontDestroyOnLoad(go);
             go.AddComponent<Driver>();
+            // Who restarted the game? Log the events with a stack so a reset after spawn can be traced.
+            StartGameBehaviour.OnNewGame += () => Debug.Log("[DebugStart] OnNewGame\n" + System.Environment.StackTrace);
+            Serialization.SaveLoadManager.OnStartLoad += (saveData) => Debug.Log("[DebugStart] OnStartLoad\n" + System.Environment.StackTrace);
         }
 
         class Driver : MonoBehaviour
@@ -63,6 +66,8 @@ namespace DaggerfallWorkshop.Game.Mobile
                 if (!fired && t > 3f)
                 {
                     fired = true;
+                    if (GameManager.Instance.PlayerEntity != null)
+                        GameManager.Instance.PlayerEntity.OnDeath += (e) => Debug.Log("[DebugStart] player OnDeath\n" + System.Environment.StackTrace);
                     DaggerfallUnity.Settings.StartInDungeon = false;
                     sgb.StartMethod = StartGameBehaviour.StartMethods.NewCharacter;
                     Debug.Log("[DebugStart] StartMethod -> NewCharacter (outdoors)");
@@ -71,6 +76,17 @@ namespace DaggerfallWorkshop.Game.Mobile
                 {
                     popped = true;
                     try { DaggerfallUI.Instance.PopToHUD(); } catch (System.Exception) { }
+                    // A new character starts barefoot (vanilla gear is shirt and trousers). Outdoors in
+                    // winter that kills within a minute once Climates & Calories is on, so wear whatever
+                    // footwear the inventory holds - the survival systems can then be watched, not the death.
+                    try
+                    {
+                        var player = GameManager.Instance.PlayerEntity;
+                        if (player != null && player.ItemEquipTable.GetItem(Items.EquipSlots.Feet) == null)
+                            foreach (var item in player.Items.CloneAll())
+                                if (item.EquipSlot == Items.EquipSlots.Feet) { player.ItemEquipTable.EquipItem(item, true, false); Debug.Log("[DebugStart] equipped " + item.LongName); break; }
+                    }
+                    catch (System.Exception ex) { Debug.Log("[DebugStart] footwear: " + ex.Message); }
                     Shader sh = Shader.Find("Daggerfall/Default");
                     Debug.Log("[DebugStart] popped UI to HUD; Daggerfall/Default " + (sh ? "found supported=" + sh.isSupported + " id=" + sh.GetInstanceID() : "MISSING")
                         + " captured id=" + (MobileShaders.Find("Daggerfall/Default") ? MobileShaders.Find("Daggerfall/Default").GetInstanceID() : 0));

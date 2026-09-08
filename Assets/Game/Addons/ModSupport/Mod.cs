@@ -964,6 +964,10 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
                 return null;
 #endif
 
+            // MOBILE: a built-in entry (no bundle: Roads & tracks, Real travel, the TravelOptions
+            // bridge) has no source list at all; there is nothing to compile.
+            if (sources == null)
+                return null;
             // MOBILE: iOS runs IL2CPP with no JIT - mod scripts can be neither compiled from
             // source nor Assembly.Load-ed. Skip cleanly so an asset-only mod is unaffected and
             // a script mod degrades to its assets instead of throwing per source file.

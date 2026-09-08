@@ -27,6 +27,47 @@ namespace DaggerfallWorkshop.Game.Mobile
             return new[] { rr, items, items && cc };
         }
 
+        /// <summary>Titles of the compiled-in mods, in dependency order.</summary>
+        public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle };
+
+        /// <summary>
+        /// Called by ModManager after it found the bundles and before it applies saved settings: a
+        /// bundle the engine has just discovered defaults to enabled, but these three are survival
+        /// systems a player must choose, so they start off. A saved choice overrides this.
+        /// </summary>
+        public static void DefaultOff(ModManager manager)
+        {
+            foreach (string title in Titles)
+                if (manager.GetModIndex(title) >= 0)
+                    manager.GetMod(title).Enabled = false;
+        }
+
+        /// <summary>
+        /// Pure: load priorities for (RR, Items, C&C) that keep RR &lt; Items &lt; C&amp;C, the order the
+        /// desktop manifests' dependencies produce. C&amp;C registers the same bed and campfire activations
+        /// as RR and the engine gives them to the mod with the higher priority, so C&amp;C must be last.
+        /// Already ordered: unchanged. Otherwise the three move to the end, after <paramref name="maxPriority"/>.
+        /// </summary>
+        public static int[] OrderedPriorities(int rr, int items, int cc, int maxPriority)
+        {
+            if (rr < items && items < cc)
+                return new[] { rr, items, cc };
+            return new[] { maxPriority + 1, maxPriority + 2, maxPriority + 3 };
+        }
+
+        static void EnsureOrder(Mod rr, Mod items, Mod cc)
+        {
+            if (rr == null || items == null || cc == null) return;
+            int max = -1;
+            foreach (Mod m in ModManager.Instance.GetAllMods()) if (m.LoadPriority > max) max = m.LoadPriority;
+            int[] p = OrderedPriorities(rr.LoadPriority, items.LoadPriority, cc.LoadPriority, max);
+            if (p[0] == rr.LoadPriority && p[1] == items.LoadPriority && p[2] == cc.LoadPriority) return;
+            rr.LoadPriority = p[0]; items.LoadPriority = p[1]; cc.LoadPriority = p[2];
+            ModManager.Instance.SortMods();
+            ModManager.WriteModSettings();
+            Debug.Log("[PortedMods] load order fixed: RoleplayRealism < Items < Climates & Calories");
+        }
+
         static bool started;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -61,6 +102,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         static void StartEnabled()
         {
             Mod rr = Entry(RRTitle), items = Entry(RRItemsTitle), cc = Entry(CCTitle);
+            EnsureOrder(rr, items, cc);
             bool[] run = Gate(rr != null && rr.Enabled, items != null && items.Enabled, cc != null && cc.Enabled);
             if (cc != null && cc.Enabled && !run[2])
             {
