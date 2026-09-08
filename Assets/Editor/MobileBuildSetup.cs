@@ -242,6 +242,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "Daggerfall/UIBlend",
                 "Daggerfall/PixelFont",
                 "Daggerfall/SDFFont",
+                "BLB/SkyBox/BLBProceduralSkybox",
             };
 
             var settings = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/GraphicsSettings.asset");
@@ -289,7 +290,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             if (added > 0)
                 so.ApplyModifiedProperties();
 
-            log.AppendLine("  always-included shaders  = " + added + " newly pinned (UIBlit/UIBlend/fonts, anti-stripping)");
+            log.AppendLine("  always-included shaders  = " + added + " newly pinned (UIBlit/UIBlend/fonts/BLB skybox, anti-stripping)");
         }
 
         /// <summary>

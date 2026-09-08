@@ -123,6 +123,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestCastStateTearsDownOnFailure();
             TestEnsureReadable();
             TestMobileShadersFind();
+            TestDynamicSkiesShader();
             TestModConflictOrder();
             TestPortedModGate();
             TestPortedModOrder();
@@ -630,6 +631,26 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 Check(s != null && s.name == name, "MobileShaders.Find resolves " + name);
             }
             Check(MobileShaders.Find("No/Such/Shader") == null, "MobileShaders.Find: unknown name falls through to Shader.Find (null)");
+        }
+
+        // The Dynamic Skies mod's procedural skybox shader ships compiled into the app with its
+        // keyword variants pinned: once the variants are #defines, a material's keyword list has
+        // no effect on rendering, so what must be proven is that the shader's own keyword space
+        // no longer carries the moon/sun/colour variants, while the fog variants (Unity's own
+        // multi_compile_fog) remain.
+        static void TestDynamicSkiesShader()
+        {
+            Shader sky = Shader.Find("BLB/SkyBox/BLBProceduralSkybox");
+            Check(sky != null, "DynamicSkies: skybox shader is in the project");
+            if (sky == null) return;
+            Check(sky.isSupported, "DynamicSkies: skybox shader compiles for this editor's graphics API");
+            var names = sky.keywordSpace.keywordNames;
+            Check(!names.Any(n => n.StartsWith("_MOONSPINOPTION") || n.StartsWith("_SECUNDASPINOPTION") || n.StartsWith("_SUNDISK") || n == "REDUCE_COLOR" || n == "PHASE_LIGHT"), "DynamicSkies: no moon/sun/colour keywords remain in the shader (variants pinned)");
+            Check(names.Any(n => n.StartsWith("FOG_")), "DynamicSkies: fog variants remain");
+            string src = System.IO.File.ReadAllText("Assets/Shaders/BLB/BLBProceduralSkybox.shader");
+            Check(!src.Contains("#pragma multi_compile _") && !src.Contains("multi_compile_local"), "DynamicSkies: keyword pragmas are pinned (fog variants only)");
+            Check(src.Contains("#pragma target 3.5"), "DynamicSkies: shader target pinned");
+            Check(!src.Contains("sampler3D"), "DynamicSkies: unused 3D LUT sampler removed");
         }
 
 
