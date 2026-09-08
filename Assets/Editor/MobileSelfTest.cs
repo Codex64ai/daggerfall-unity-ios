@@ -131,6 +131,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestPortedModTitles();
             TestTravelOptionsBridge();
             TestTavernAlcohol();
+            TestModSettingsSerialization();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -799,6 +800,41 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobileDrunkenness.RobberyLoss(1000) == 40 && MobileDrunkenness.RobberyLoss(150) == 15 && MobileDrunkenness.RobberyLoss(5) == 0, "drunk: robbery takes a tenth, at most 40");
             Check(MobileDrunkenness.PassOutHours(0) == 4 && MobileDrunkenness.PassOutHours(3) == 7 && MobileDrunkenness.PassOutHours(9) == 7, "drunk: pass out lasts 4 to 7 hours");
             MobileDrunkenness.Level = 250; Check(MobileDrunkenness.Level == 100, "drunk: level clamps at 100"); MobileDrunkenness.Level = -5; Check(MobileDrunkenness.Level == 0, "drunk: level clamps at 0");
+        }
+
+        /// <summary>
+        /// Mods.json must carry the choice, not an empty object. Mod opts in to serialization
+        /// (fsMemberSerialization.OptIn), so without [SerializeField] on the four members the
+        /// engine reads back, FullSerializer wrote "[{},{},...]" and no enabled/priority choice
+        /// ever survived a relaunch. ModManager.LoadModSettings matches on Title, so Title must
+        /// round-trip too.
+        /// </summary>
+        static void TestModSettingsSerialization()
+        {
+            Mod mod = new Mod();
+            mod.ModInfo.ModTitle = "Self test mod";
+            mod.Enabled = false;
+
+            fsData data = null;
+            fsResult result = new fsSerializer().TrySerialize<List<Mod>>(new List<Mod>() { mod }, out data);
+            Check(!result.Failed, "mod settings: a list of mods serializes", result.FormattedMessages);
+            string json = fsJsonPrinter.CompressedJson(data);
+            Check(json.Contains("\"Title\":\"Self test mod\""), "mod settings: Title is written", json);
+            Check(json.Contains("\"Enabled\":false"), "mod settings: Enabled is written", json);
+            Check(json.Contains("\"LoadPriority\":"), "mod settings: LoadPriority is written", json);
+            Check(!json.Contains("[{}]"), "mod settings: the entry is not an empty object", json);
+
+            // Read it back the way LoadModSettings does, with a load priority the writer never used.
+            string edited = json.Replace("\"LoadPriority\":0", "\"LoadPriority\":7");
+            List<Mod> back = new List<Mod>();
+            fsResult readResult = new fsSerializer().TryDeserialize<List<Mod>>(fsJsonParser.Parse(edited), ref back);
+            Check(!readResult.Failed && back.Count == 1, "mod settings: the list deserializes", readResult.FormattedMessages);
+            if (back.Count == 1)
+            {
+                Check(back[0].Title == "Self test mod", "mod settings: Title survives the round trip", back[0].Title);
+                Check(back[0].Enabled == false, "mod settings: Enabled survives the round trip");
+                Check(back[0].LoadPriority == 7, "mod settings: LoadPriority survives the round trip", back[0].LoadPriority.ToString());
+            }
         }
 
         static void Check(bool condition, string name, string detail = "")

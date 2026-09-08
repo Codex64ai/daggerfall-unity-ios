@@ -144,7 +144,7 @@ Small touch/scaling accommodations. Three lines each; check them by eye after a 
 rather than trusting the merge.
 *Rebase risk: LOW, but easy to lose silently — they are one-liners.*
 
-### Dynamic Skies support — `Assets/Editor/MobileBuildSetup.cs` (+1), `Assets/Editor/MobileModExtractor.cs` (+few lines), `tools/bundled-mods/{fetch.py,mods.json}`
+### Dynamic Skies support — `Assets/Editor/MobileBuildSetup.cs` (+1), `Assets/Editor/MobileModExtractor.cs` (+few lines), `Assets/Game/Addons/ModSupport/{ModManager.cs (+5),Mod.cs (+4)}`, `tools/bundled-mods/{fetch.py,mods.json}`
 `MobileBuildSetup.EnsureAlwaysIncludedShaders` - which already pins the classic UI's shaders into
 GraphicsSettings because nothing in the project references them by name, so the build stripper would
 otherwise cut them - now also pins `BLB/SkyBox/BLBProceduralSkybox`. Dynamic Skies' compiled-in
@@ -158,8 +158,19 @@ gained a `private_only` entry flag and a `pending:` licence form for a manifest 
 is not yet secured: `pack.py` excludes both `builtin` and `private_only` entries from the public zip,
 and `fetch.py` refuses any entry that declares a `pending:` licence without `private_only` set. This
 is what keeps Dynamic Skies (see THIRD-PARTY.md) off the public mod pack.
+Two engine files carry a line each. `ModManager.Awake` calls `MobilePortedMods.DefaultOff(this)`
+between `FindModsFromDirectory()` and `LoadModSettings()`, so a launcher entry the engine has just
+discovered (Dynamic Skies, and the survival mods) starts switched OFF instead of the engine's
+default ON, while a saved choice in `Mods.json` still wins because `LoadModSettings` runs after.
+`Mod.cs` marks `FileName`, `Title`, `Enabled` and `LoadPriority` with `[fsProperty]`: the class is
+`[fsObject(MemberSerialization = fsMemberSerialization.OptIn)]` and nothing was opted in, so
+`Mods.json` was written as `[{},{},...]` and no enabled/priority choice ever survived a relaunch.
+Upstream master uses `[SerializeField]` for this; it does not compile on a property in this Unity
+(CS0592, field-only), and `Title` is not an auto-property so `[field: SerializeField]` is out too -
+`[fsProperty]` is FullSerializer's own opt-in attribute and is honoured identically.
 *Rebase risk: LOW.* `MobileBuildSetup.cs` and `MobileModExtractor.cs` are new files, not upstream
-ones; the tooling change touches only this fork's own `tools/`.
+ones; the tooling change touches only this fork's own `tools/`. The two engine lines are single
+insertions next to stable upstream code - re-check them by eye after a rebase.
 
 ## Rebase procedure
 

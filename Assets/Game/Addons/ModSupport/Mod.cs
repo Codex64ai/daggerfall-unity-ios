@@ -60,11 +60,13 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
         /// A good name should be lowercase and without spaces (i.e "example-mod").
         /// A new "Name" property may be created to allow filename to be changed.
         /// </remarks>
+        [fsProperty]   // MOBILE
         public string FileName { get; private set; }
 
         /// <summary>
         /// The readable title of the mod, which may contain invalid path characters.
         /// </summary>
+        [fsProperty]   // MOBILE
         public string Title
         {
             get { return ModInfo.ModTitle; }
@@ -80,12 +82,14 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
         /// If this mod is enabled from the mods window, it will be loaded by the Mod Manager
         /// and methods marked with the <see cref="Invoke"/> attribute will be called at the specified state.
         /// </summary>
+        [fsProperty]   // MOBILE
         public bool Enabled { get; set; }
 
         /// <summary>
         /// The position in the load order, which affects the invocation order and
         /// the automatic asset loading by the Asset-Injection framework.
         /// </summary>
+        [fsProperty]   // MOBILE
         public int LoadPriority { get; internal set; }
 
         /// <summary>
