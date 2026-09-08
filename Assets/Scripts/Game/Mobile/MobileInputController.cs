@@ -191,6 +191,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         bool keyboardActive;
         bool mouseActive;
 
+        // Sky diagnostics cache. FrameTimingManager.CaptureFrameTimings/GetLatestTimings is not
+        // free to poll every frame, so it is sampled once a second in Update() and OnGUI only
+        // ever reads the cached values.
+        float nextSkySample;
+        bool skyDynamic;
+        double skyGpuMs = -1;
+
         // Pointer plugin state. pointerBindings is the player's own Mouse0-2 keybinds, captured
         // from InputManager BEFORE ClearPhantomProneBindings() removes them, so the pointer
         // pump can inject the same actions the bindings would have produced on PC.
@@ -439,6 +446,22 @@ namespace DaggerfallWorkshop.Game.Mobile
                     Input.multiTouchEnabled = true;
                 if (Input.simulateMouseWithTouches && !controllerConnected)
                     Input.simulateMouseWithTouches = false;
+            }
+
+            // Sky diagnostics: which skybox is active, and the GPU frame time from
+            // FrameTimingManager. Gated on the overlay being on and sampled once a second -
+            // OnGUI only ever reads the cached values, never captures directly.
+            if (showGestureDebug && Time.unscaledTime >= nextSkySample)
+            {
+                nextSkySample = Time.unscaledTime + 1f;
+
+                FrameTimingManager.CaptureFrameTimings();
+                var timings = new FrameTiming[1];
+                uint gotTimings = FrameTimingManager.GetLatestTimings(1, timings);
+                skyGpuMs = gotTimings > 0 ? timings[0].gpuFrameTime : -1;
+
+                skyDynamic = RenderSettings.skybox != null && RenderSettings.skybox.shader != null
+                             && RenderSettings.skybox.shader.name == MobilePortedMods.DynamicSkiesShaderName;
             }
 
             PollKeyboard();
@@ -1078,6 +1101,10 @@ namespace DaggerfallWorkshop.Game.Mobile
             // proof available in-game that bundled normal/height maps are being found and used -
             // it cannot be told from a screenshot of the world itself.
             text += "\n" + MobileAssetStats.Summary();
+
+            // Which skybox is active (Dynamic Skies vs vanilla) and the last sampled GPU frame
+            // time. Cached in Update() at 1Hz - see nextSkySample.
+            text += "\n" + MobileAssetStats.SkyLine(skyDynamic, skyGpuMs);
 
             GUI.Label(new Rect(12f, 12f, 560f, 340f), text);
         }

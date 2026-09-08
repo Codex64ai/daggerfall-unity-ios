@@ -492,6 +492,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && summary.Contains("loose"),
                   "the overlay line reports every column", summary.Replace("\n", " | "));
 
+            Check(MobileAssetStats.SkyLine(true, 4.25) == "sky dynamic gpu 4.3 ms"
+                  && MobileAssetStats.SkyLine(false, -1) == "sky vanilla gpu n/a",
+                  "diagnostics: sky line");
+
             MobileAssetStats.Reset();
             MobileAssetStats.Enabled = wasEnabled;
         }

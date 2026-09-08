@@ -104,5 +104,20 @@ namespace DaggerfallWorkshop.Game.Mobile
                 ModNormal, ModHeight, ModMetallicGloss, ModEmission,
                 LooseNormal, LooseHeight, LooseMetallicGloss, LooseEmission);
         }
+
+        /// <summary>
+        /// The sky diagnostics line: which skybox is active (Dynamic Skies vs vanilla) and the
+        /// most recent GPU frame time from FrameTimingManager. Pure formatting - the caller is
+        /// responsible for sampling FrameTimingManager at a sane cadence (it is not free to poll
+        /// every frame) and passing in the cached values. gpuMs &lt; 0 means no timing sample was
+        /// available yet, which reads as "n/a" rather than a misleading number.
+        /// </summary>
+        public static string SkyLine(bool dynamicSky, double gpuMs)
+        {
+            return string.Format(
+                "sky {0} gpu {1}",
+                dynamicSky ? "dynamic" : "vanilla",
+                gpuMs < 0 ? "n/a" : gpuMs.ToString("F1") + " ms");
+        }
     }
 }

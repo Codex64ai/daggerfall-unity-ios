@@ -182,6 +182,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             PlayerSettings.SetGraphicsAPIs(BuildTarget.iOS, new[] { GraphicsDeviceType.Metal });
             log.AppendLine("  graphics APIs          = Metal only (OpenGLES removed)");
 
+            // FrameTimingManager returns nothing without this - needed by the diagnostics
+            // overlay's GPU frame time line. Cheap and harmless off-device.
+            PlayerSettings.enableFrameTimingStats = true;
+            log.AppendLine("  frame timing stats     = enabled (FrameTimingManager, diagnostics overlay)");
+
             // --- orientation ------------------------------------------------------
             // Landscape lock is not cosmetic: WeaponManager._longestDim is cached once in
             // Start() from Mathf.Max(Screen.width, Screen.height). A portrait rotation
