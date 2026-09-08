@@ -144,7 +144,7 @@ Small touch/scaling accommodations. Three lines each; check them by eye after a 
 rather than trusting the merge.
 *Rebase risk: LOW, but easy to lose silently — they are one-liners.*
 
-### Dynamic Skies support — `Editor/MobileBuildSetup.cs` (+1), `Editor/MobileModExtractor.cs` (+few lines), `tools/bundled-mods/{fetch.py,mods.json}`
+### Dynamic Skies support — `Assets/Editor/MobileBuildSetup.cs` (+1), `Assets/Editor/MobileModExtractor.cs` (+few lines), `tools/bundled-mods/{fetch.py,mods.json}`
 `MobileBuildSetup.EnsureAlwaysIncludedShaders` - which already pins the classic UI's shaders into
 GraphicsSettings because nothing in the project references them by name, so the build stripper would
 otherwise cut them - now also pins `BLB/SkyBox/BLBProceduralSkybox`. Dynamic Skies' compiled-in
