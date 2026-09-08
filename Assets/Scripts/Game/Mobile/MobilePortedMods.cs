@@ -10,6 +10,11 @@
 // ordinary entry in the launcher's MODS window with settings. Dynamic Skies' data is NOT built in:
 // the player installs that bundle themselves, so its entry - and therefore the mod - simply is not
 // there until they do, and the code stays dormant.
+//
+// The survival mods start as soon as the bundles are loaded, at the title. Dynamic Skies cannot:
+// its Init reaches into the scene for the sun light and the camera, and on a player build neither
+// exists at the title. So the sky waits here, polling once a second, and starts when the scene has
+// them - which is when a game is running.
 
 using System.Collections;
 using UnityEngine;
@@ -35,6 +40,9 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         /// <summary>Pure: Dynamic Skies runs only when its launcher entry exists (bundle installed) and is on.</summary>
         public static bool SkyRuns(bool entryPresent, bool enabled) => entryPresent && enabled;
+
+        /// <summary>Pure: the sky's Init can only work once the scene holds the sun light and the camera it looks up.</summary>
+        public static bool SkySceneReady(bool sunLightPresent, bool mainCameraPresent) => sunLightPresent && mainCameraPresent;
 
         /// <summary>Titles of the compiled-in mods, in dependency order.</summary>
         public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle, SkyTitle };
@@ -99,9 +107,35 @@ namespace DaggerfallWorkshop.Game.Mobile
         static IEnumerator StartAfterModManager(GameObject go)
         {
             yield return null;      // ModManager's own Start-state handler loads the bundles first
-            try { StartEnabled(); }
+            Mod sky = null;
+            try { sky = StartEnabled(); }
             catch (System.Exception ex) { Debug.LogError("[PortedMods] start failed: " + ex); }
+            if (sky != null)
+                yield return StartSkyWhenSceneReady(sky);   // the driver must live until this finishes
             Object.Destroy(go);
+        }
+
+        /// <summary>
+        /// Waits for the scene the sky's Init needs, then starts it. Polls at 1 Hz, not per frame:
+        /// the wait normally spans the whole title screen.
+        /// </summary>
+        static IEnumerator StartSkyWhenSceneReady(Mod sky)
+        {
+            bool logged = false;
+            while (!SkySceneReady(GameObject.Find("SunLight") != null, GameObject.FindGameObjectWithTag("MainCamera") != null))
+            {
+                if (!logged)
+                {
+                    Debug.Log("[PortedMods] " + SkyTitle + " waiting for the scene (SunLight, MainCamera)");
+                    logged = true;
+                }
+                yield return new WaitForSecondsRealtime(1f);
+            }
+            try { BLBSkybox.Init(new InitParams(sky, ModManager.Instance.GetModIndex(SkyTitle), ModManager.Instance.LoadedModCount)); }
+            catch (System.Exception ex) { Debug.LogError("[PortedMods] " + SkyTitle + " start failed: " + ex); }
+            Debug.Log(BLBSkybox.Instance != null
+                ? "[PortedMods] started " + SkyTitle
+                : "[PortedMods] " + SkyTitle + " did not start (see [DynamicSkies] lines)");
         }
 
         static Mod Entry(string title)
@@ -109,7 +143,11 @@ namespace DaggerfallWorkshop.Game.Mobile
             return ModManager.Instance != null && ModManager.Instance.GetModIndex(title) >= 0 ? ModManager.Instance.GetMod(title) : null;
         }
 
-        static void StartEnabled()
+        /// <summary>
+        /// Starts the survival mods now and returns the Dynamic Skies entry when it is to be started
+        /// later, once the scene is ready; null when the sky is not to run at all.
+        /// </summary>
+        static Mod StartEnabled()
         {
             Mod rr = Entry(RRTitle), items = Entry(RRItemsTitle), cc = Entry(CCTitle);
             EnsureOrder(rr, items, cc);
@@ -133,11 +171,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (run[2]) { ClimatesCalories.ClimateCalories.Init(new InitParams(cc, ModManager.Instance.GetModIndex(CCTitle), count)); Debug.Log("[PortedMods] started " + CCTitle); }
 
             Mod sky = Entry(SkyTitle);
-            if (SkyRuns(sky != null, sky != null && sky.Enabled))
-            {
-                BLBSkybox.Init(new InitParams(sky, ModManager.Instance.GetModIndex(SkyTitle), count));
-                Debug.Log("[PortedMods] started " + SkyTitle);
-            }
+            return SkyRuns(sky != null, sky != null && sky.Enabled) ? sky : null;
         }
 
         class Driver : MonoBehaviour { }

@@ -749,6 +749,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(System.Array.IndexOf(MobilePortedMods.Titles, "Dynamic Skies") >= 0, "PortedMods: Dynamic Skies is a default-off title");
             Check(MobilePortedMods.SkyRuns(true, true) && !MobilePortedMods.SkyRuns(true, false) && !MobilePortedMods.SkyRuns(false, true), "PortedMods: sky runs only when its entry exists and is on");
             Check(MobilePortedMods.Gate(true, true, true).Length == 3, "PortedMods: survival gate unchanged by the sky entry");
+            Check(MobilePortedMods.SkySceneReady(true, true) && !MobilePortedMods.SkySceneReady(true, false) && !MobilePortedMods.SkySceneReady(false, true) && !MobilePortedMods.SkySceneReady(false, false), "PortedMods: the sky starts only when both the sun light and the camera are in the scene");
         }
 
         class FakeJourney : IJourneyState
