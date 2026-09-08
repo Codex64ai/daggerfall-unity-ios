@@ -144,6 +144,23 @@ Small touch/scaling accommodations. Three lines each; check them by eye after a 
 rather than trusting the merge.
 *Rebase risk: LOW, but easy to lose silently — they are one-liners.*
 
+### Dynamic Skies support — `Editor/MobileBuildSetup.cs` (+1), `Editor/MobileModExtractor.cs` (+few lines), `tools/bundled-mods/{fetch.py,mods.json}`
+`MobileBuildSetup.EnsureAlwaysIncludedShaders` - which already pins the classic UI's shaders into
+GraphicsSettings because nothing in the project references them by name, so the build stripper would
+otherwise cut them - now also pins `BLB/SkyBox/BLBProceduralSkybox`. Dynamic Skies' compiled-in
+skybox shader has the same problem: it is referenced only from a Material inside a `.dfmod`, never
+from project content, so without the pin the stripper cuts it on any build where that mod isn't
+already loaded. `MobileModExtractor.IsNormalMapName` now also treats
+a bare `Normal` name tail as a normal map: Dynamic Skies names its cloud normal map
+`CdMCloudsNormal`, with no underscore, and imported as colour it lit nothing; the existing
+underscore-suffix rule (`_Normal`) is unchanged for every other map. Separately, `tools/bundled-mods`
+gained a `private_only` entry flag and a `pending:` licence form for a manifest entry whose licence
+is not yet secured: `pack.py` excludes both `builtin` and `private_only` entries from the public zip,
+and `fetch.py` refuses any entry that declares a `pending:` licence without `private_only` set. This
+is what keeps Dynamic Skies (see THIRD-PARTY.md) off the public mod pack.
+*Rebase risk: LOW.* `MobileBuildSetup.cs` and `MobileModExtractor.cs` are new files, not upstream
+ones; the tooling change touches only this fork's own `tools/`.
+
 ## Rebase procedure
 
     git remote add upstream https://github.com/Interkarma/daggerfall-unity.git

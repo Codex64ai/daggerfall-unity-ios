@@ -144,3 +144,14 @@ Climates & Calories talks to Hazelnut's Travel Options; here a built-in entry ti
 answers those messages from this port's Real travel (`MobileTravelOptionsBridge`). No Travel Options code
 is included.
 
+## Dynamic Skies (compiled in, private draft only)
+
+| Mod | Author, licence | Source | What is NOT shipped |
+|---|---|---|---|
+| Dynamic Skies 2.3.4 | BadLuckBurt & carademono, NO LICENCE DECLARED (permission being sought by Ikram; not in any public release) | github.com/drcarademono/dynamic-skies @ 04506e2 | `SunShafts.cs`, `PostEffectsBase.cs`, `SunShaftsComposite.shader`, `SimpleClear.shader`, `BLBProceduralSkyboxOriginal.shader` (Unity Standard Assets terms / dead code); the skybox shader is compiled into the app with its keyword set pinned |
+
+Because no licence has ever been declared upstream, this mod ships on the private test draft only -
+never in a public release, and `private_only` in `tools/bundled-mods/mods.json` keeps it out of the
+public MIT mod pack build. DREAM SKY 1.2 (King of Worms, Nexus mods/664) is a preset for it - textures
+and weather JSON, no code - converted to `dream-sky.dfmod` for the same private draft.
+
