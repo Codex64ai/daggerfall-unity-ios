@@ -714,8 +714,21 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
         static void TestTavernAlcohol()
         {
-            Check(MobileTavernWindow.AlcoholFor(0) > 0 && MobileTavernWindow.AlcoholFor(3) > MobileTavernWindow.AlcoholFor(0), "tavern: drinks carry alcohol, wine more than ale");
-            Check(MobileTavernWindow.AlcoholFor(4) == 0 && MobileTavernWindow.AlcoholFor(10) == 0 && MobileTavernWindow.AlcoholFor(-1) == 0, "tavern: food rows carry none");
+            Check(MobileDrunkenness.AlcoholFor(0, 50) == 6 && MobileDrunkenness.AlcoholFor(3, 50) == 15, "drunk: ale 8 and wine 20 scale to 6 and 15 at endurance 50");
+            Check(MobileDrunkenness.AlcoholFor(0, 100) == 4 && MobileDrunkenness.AlcoholFor(0, 0) == 8, "drunk: endurance 100 halves a drink, 0 leaves it whole");
+            Check(MobileDrunkenness.AlcoholFor(4, 50) == 0 && MobileDrunkenness.AlcoholFor(10, 50) == 0 && MobileDrunkenness.AlcoholFor(-1, 50) == 0, "drunk: food rows carry none");
+            Check(MobileDrunkenness.StageFor(0, 60) == MobileDrunkenness.Stage.Sober && MobileDrunkenness.StageFor(20, 60) == MobileDrunkenness.Stage.Sober, "drunk: below a third of endurance is sober");
+            Check(MobileDrunkenness.StageFor(21, 60) == MobileDrunkenness.Stage.Tipsy && MobileDrunkenness.StageFor(40, 60) == MobileDrunkenness.Stage.Tipsy, "drunk: tipsy between a third and two thirds");
+            Check(MobileDrunkenness.StageFor(41, 60) == MobileDrunkenness.Stage.Drunk && MobileDrunkenness.StageFor(60, 60) == MobileDrunkenness.Stage.Drunk, "drunk: drunk up to endurance");
+            Check(MobileDrunkenness.StageFor(61, 60) == MobileDrunkenness.Stage.BlindDrunk && MobileDrunkenness.StageFor(96, 100) == MobileDrunkenness.Stage.BlindDrunk, "drunk: past endurance (capped at 95) you pass out");
+            Check(MobileDrunkenness.Sobered(50, false) == 48 && MobileDrunkenness.Sobered(50, true) == 44 && MobileDrunkenness.Sobered(1, true) == 0, "drunk: sobers 2 awake, 6 asleep, never below 0");
+            int sp, ag; MobileDrunkenness.Penalties(MobileDrunkenness.Stage.Tipsy, out sp, out ag);
+            Check(sp == -5 && ag == 0, "drunk: tipsy is a small speed penalty only");
+            MobileDrunkenness.Penalties(MobileDrunkenness.Stage.Drunk, out sp, out ag);
+            Check(sp == -15 && ag == -10, "drunk: drunk costs speed and agility");
+            Check(MobileDrunkenness.RobberyLoss(1000) == 40 && MobileDrunkenness.RobberyLoss(150) == 15 && MobileDrunkenness.RobberyLoss(5) == 0, "drunk: robbery takes a tenth, at most 40");
+            Check(MobileDrunkenness.PassOutHours(0) == 4 && MobileDrunkenness.PassOutHours(3) == 7 && MobileDrunkenness.PassOutHours(9) == 7, "drunk: pass out lasts 4 to 7 hours");
+            MobileDrunkenness.Level = 250; Check(MobileDrunkenness.Level == 100, "drunk: level clamps at 100"); MobileDrunkenness.Level = -5; Check(MobileDrunkenness.Level == 0, "drunk: level clamps at 0");
         }
 
         static void Check(bool condition, string name, string detail = "")

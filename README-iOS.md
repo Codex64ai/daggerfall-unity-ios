@@ -395,10 +395,14 @@ Three desktop mods are built into the app and switched in the launcher's MODS wi
   thirst with rations, waterskins, hunting and cooking; camping with a tent and fire; sleep. Needs both of
   the above; if one is off the app switches this one off and says so in its description.
 
-What differs from the desktop mods: the tavern window is this port's own (the original file carries no
-licence), so eating and drinking in taverns feeds hunger and water and a mild drunkenness, not the
-original's full drunk behaviour; the camp tent is Daggerfall's own tent model; Travel Options messages
-are answered by Real travel, so camping and exposure prompts pause a journey.
+What differs from the desktop mods: the tavern window and the drunkenness are this port's own (the
+original tavern file carries no licence). Tavern drinks refill water and raise a 0-100 drunkenness that
+fades with time and faster in sleep; a hardy character holds their drink better. Past a third of your
+endurance you are tipsy (a little slow), past two thirds drunk (slow, clumsy, tiring, the view sways),
+past your endurance you pass out: four to seven hours go by, the level halves, a headache keeps the
+penalties for an hour, and passing out in a tavern's common room without a rented bed can cost a tenth
+of your gold. The camp tent is Daggerfall's own tent model. Travel Options messages are answered by
+Real travel, so camping and exposure prompts pause a journey.
 
 ## Mods and loose files
 
