@@ -167,6 +167,11 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
             else
                 Debug.LogWarningFormat("Mod system is enabled but directory {0} doesn't exist.", ModDirectory);
 
+            // MOBILE: a bundle the engine has just discovered defaults to enabled; the launcher
+            // entries for the ported systems are a player choice, so they start off. Runs before
+            // LoadModSettings so a saved choice in Mods.json still wins.
+            MobilePortedMods.DefaultOff(this);
+
             LoadModSettings();
             SortMods();
         }
