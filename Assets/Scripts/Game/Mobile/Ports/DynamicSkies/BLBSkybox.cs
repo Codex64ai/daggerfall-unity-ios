@@ -117,12 +117,33 @@ public class BLBSkybox : MonoBehaviour
         //Store the original timescale and set the currentTimeScale to it
         Instance.originalTimeScale = Instance.worldTime.TimeScale;
         Instance.currentTimeScale = Instance.originalTimeScale;
+        // MOBILE: upstream dereferences these three scene lookups on the spot. Init runs at the
+        // Start state - the launcher, before a game is in progress - and on device one of them
+        // comes back null, so Init died with a NullReferenceException part-built: the vanilla sky
+        // stayed up and LateUpdate then logged an NRE every frame (5337 in a two-minute session).
+        // Resolve them once and bail the way the material/shader guard above does. Note the
+        // GameManager accessors for these (MainCamera, PlayerObject) throw instead of returning
+        // null, which is the failure being fixed, so the lookups stay raw and are checked here.
+        // GetComponent<T>() replaces GetComponent("T"): the string overload resolves the class by
+        // name at runtime and is not dependable under IL2CPP.
+        GameObject sunLightObject = GameObject.Find("SunLight");
+        GameObject mainCameraObject = GameObject.FindGameObjectWithTag("MainCamera");
+        GameObject playerObject = GameObject.FindGameObjectWithTag("Player");
+        Light sunLight = (sunLightObject != null) ? sunLightObject.GetComponent<Light>() : null;
+        Camera mainCamera = (mainCameraObject != null) ? mainCameraObject.GetComponent<Camera>() : null;
+        if (sunLight == null || mainCamera == null || playerObject == null)
+        {
+            Debug.LogError("[DynamicSkies] " + (sunLight == null ? "the sun light (SunLight)" : mainCamera == null ? "the player camera (tag MainCamera)" : "the player (tag Player)") + " not found - keeping the vanilla sky");
+            UnityEngine.Object.Destroy(Instance.gameObject);
+            Instance = null;
+            return;
+        }
         //Store a reference to the SunRig's main light
-        Instance.dfSunlight = GameObject.Find("SunLight").GetComponent("Light") as Light;
+        Instance.dfSunlight = sunLight;
         Instance.player = GameManager.Instance.PlayerEntity;
         //Store a reference to the player camera
-        Instance.playerCam = GameObject.FindGameObjectWithTag("MainCamera").GetComponent("Camera") as Camera;
-        Instance.playerAmbientLight = GameObject.FindGameObjectWithTag("Player").GetComponent("PlayerAmbientLight") as PlayerAmbientLight;
+        Instance.playerCam = mainCamera;
+        Instance.playerAmbientLight = playerObject.GetComponent<PlayerAmbientLight>();
         Instance.wm = GameManager.Instance.WeatherManager;
 
         Instance.SetLightCurve(); //Override default light curve for prolonged sunset / sunrise
@@ -333,6 +354,7 @@ public void Update()
 
     //Force skybox flag to prevent Distant Terrain from overriding it again in it's Update function
     void LateUpdate() {
+        if(playerCam == null) return;   // MOBILE: Init bailed or threw - do not log an NRE every frame
         if(!GameManager.Instance.PlayerEnterExit.IsPlayerInside) {
             if(playerCam.clearFlags != UnityEngine.CameraClearFlags.Skybox && stackedCam == null) {
                 playerCam.clearFlags = UnityEngine.CameraClearFlags.Skybox;
