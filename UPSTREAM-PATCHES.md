@@ -472,7 +472,13 @@ and no meshes. `MobileSelfTest` covers the two new shader names, the ported `Ini
 `AtlasMaxSize`, the default-off title,
 `BiomesRuns` and `BiomesDetNote`, the importer rule table, and `BiomesClimateSwap.ShouldSwap`. As with
 Location Loader itself, the rest needs a streamed world and belongs to the simulator and device runs.
-*Rebase risk: LOW.* The `DaggerfallBillboardBatch` edits are two accessibility changes and one
-mechanical `Shader.Find` rename; everything else is in files upstream does not have. The one thing a
-rebase must not quietly undo is the two `internal` fields — dropping them is a compile error in the
-port, which is the good failure mode.
+*Rebase risk: LOW.* All four edits to `Assets/Scripts/Internal/DaggerfallBillboardBatch.cs` are
+mechanical — two accessibility changes (`currentArchive`, `cachedMaterial` → `internal`) and two
+`Shader.Find(MaterialReader._DaggerfallBillboardBatch…)` → `Game.Mobile.MobileShaders.Find(...)`
+renames, at `:318-319` and `:382-383` (one in each `SetMaterial` overload); everything else is in files
+upstream does not have. The two `internal` fields are safe to lose: dropping them is a compile error in
+the port, which is the good failure mode. **The two `MobileShaders.Find` renames are not.** An upstream
+merge that takes theirs compiles cleanly and passes every self-test — `MobileSelfTest` asserts only that
+`MobileShaders` captures and resolves the two billboard-batch shader names, never that this engine file
+calls it — while silently restoring the bundle-embedded-shader ambiguity the patch exists to remove.
+Re-check both call sites by hand after any rebase that touches this file.

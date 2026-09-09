@@ -48,7 +48,10 @@ materials when the entry exists and is enabled - no change needed there.
      `FindObjectsOfType`; cache the swapped `Material` beside the atlas; `force:false` plus a
      `HashSet<DaggerfallBillboardBatch>` of already-swapped batches so `Apply()` runs once per batch;
      guard `climateMap == null || !climateMap.isReadable` (log once, do nothing).
-   - `atlasMaxSize` pinned to 1024 (32 records of 64x64 need ~512^2; avoids the transient 85 MB 4096^2).
+   - `atlasMaxSize` pinned to 1024, which avoids the transient 85 MB 4096^2. 1024 and not 512: archive
+     10030's 32 records are NOT 64x64 - they run up to 130x153, 115x272 and 113x296, ~202 k px of content
+     and ~225 k px once padded, so 1024^2 (1,048,576 px) leaves ~4.6x headroom while 512^2 (262,144 px)
+     would be marginal. Do not "optimise" the pin down.
    - climate map read through `TextureReplacement.EnsureReadable` as belt-and-braces.
 2. **Launcher entry**: the data bundle's own entry `World of Daggerfall - Biomes`, default OFF via
    `MobilePortedMods.Titles`; gated like WoD: switched off (log line; note is best-effort) when Daggerfall
@@ -61,7 +64,9 @@ materials when the entry exists and is enabled - no change needed there.
    uncompressed RGBA32 on iPhone, `mipmapEnabled = false` for `climate_map`, `filterMode = Point` kept, and
    the 224 tiles uncompressed too (DFU decompresses them into an ARGB32 `Texture2DArray` anyway; ASTC only
    costs quality). Expressed as a data-driven list in the importer (mod folder name -> rule), unit-tested
-   where pure. Bundle name = lowercased manifest file name: `world of daggerfall - biomes.dfmod` (~5 MB).
+   where pure. Bundle name = lowercased manifest file name: `world of daggerfall - biomes.dfmod`
+   (~2 MB on disk, ~7 MB uncompressed). The file name is not load-bearing - nothing resolves this mod by
+   `FileName` - so the draft release asset is `wod-biomes.dfmod` (GitHub rewrites spaces in asset names).
 4. **Location Loader side (type-5 nature swap)**: restore carademono's `BiomesClimateSwap` (101 lines,
    LL `rmb-object` @ 896a574) into `Ports/LocationLoader/`, with the climate map taken from the compiled-in
    Biomes port (a `public static Texture2D ClimateMap` set by `NatureBatchOverriderInstaller.Init`) instead

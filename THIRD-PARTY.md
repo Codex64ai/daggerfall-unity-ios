@@ -234,10 +234,17 @@ Because no licence has ever been declared upstream, this ships on the private te
 in a public release. The `tools/bundled-mods/mods.json` entry `WorldOfDaggerfallBiomes` is
 `private_only` with a `pending:` licence, the combination `fetch.py` requires and `pack.py` hard-refuses
 in the public MIT mod pack; the fetched `LICENSE` record beside the mod is that pending text, not an
-upstream licence. The bundle is `world of daggerfall - biomes.dfmod` (the lower-cased manifest file
-name, `World of Daggerfall - Biomes.dfmod.json`; GUID `3b4319ac-34bb-411d-aa2c-d52b7b9eb69d`). Without
-that file there is no `World of Daggerfall - Biomes` entry, the compiled code never runs, and deleting
-it removes every byte the feature added.
+upstream licence. The builder writes the bundle as `world of daggerfall - biomes.dfmod` (the lower-cased
+manifest file name, `World of Daggerfall - Biomes.dfmod.json`; GUID
+`3b4319ac-34bb-411d-aa2c-d52b7b9eb69d`), but the draft release asset is named **`wod-biomes.dfmod`**:
+GitHub rewrites spaces in release-asset names to dots, so the built name was not used. That is safe
+because **nothing resolves this mod by `FileName`** - the launcher entry keys on the manifest `ModTitle`
+`World of Daggerfall - Biomes`, and the feature's only `FileName` match is the Daggerfall Expanded
+Textures dependency below. So any file name works here, and a tester who downloads `wod-biomes.dfmod`
+should install it under that name rather than renaming it. The contrast matters: Expanded Textures
+**must** keep its exact file name, because both this mod and World of Daggerfall find it by that name.
+Without some Biomes bundle in `Mods` there is no `World of Daggerfall - Biomes` entry, the compiled code
+never runs, and deleting it removes every byte the feature added.
 
 Its one requirement is Daggerfall Expanded Textures (Ninelan; already in the pack, see above), which
 supplies archive 10030 - the manifest declares it as a non-optional peer at 1.2.0, and it is detected
