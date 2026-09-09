@@ -125,6 +125,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestEnsureReadable();
             TestMobileShadersFind();
             TestWODBiomesPort();
+            TestBiomesClimateKey();
             TestDynamicSkiesShader();
             TestDynamicSkiesPresetTextures();
             TestModConflictOrder();
@@ -672,6 +673,22 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check((climateProp != null && climateProp.PropertyType == typeof(Texture2D))
                   || (climateField != null && climateField.FieldType == typeof(Texture2D)),
                 "WODBiomes: ClimateMap is exposed for the Location Loader nature swap");
+        }
+
+        // The Biomes nature swap keys off an exact colour match in a colour-key map, which is why the
+        // map must import raw (Task 2) and why the port reads it through TextureReplacement.EnsureReadable:
+        // one resampled or block-compressed pixel and #FFA500 stops being #FFA500. The atlas is pinned to
+        // 1024 so the 32 records of 64x64 never allocate upstream's transient 4096x4096 (85 MB).
+        static void TestBiomesClimateKey()
+        {
+            Check(WorldOfDaggerfall.NatureBatchOverrider.IsSubtropicalKey(new Color32(255, 165, 0, 255)),
+                "Biomes: #FFA500 is the subtropical key");
+            Check(!WorldOfDaggerfall.NatureBatchOverrider.IsSubtropicalKey(new Color32(254, 165, 0, 255)),
+                "Biomes: an off-by-one colour is not the key (exact match - this is why the map must not be ASTC)");
+            Check(!WorldOfDaggerfall.NatureBatchOverrider.MapReadable(null),
+                "Biomes: a missing climate map is not readable");
+            Check(WorldOfDaggerfall.NatureBatchOverrider.AtlasMaxSize == 1024,
+                "Biomes: atlas capped at 1024 (32 records of 64x64)");
         }
 
         // The Dynamic Skies mod's procedural skybox shader ships compiled into the app with its

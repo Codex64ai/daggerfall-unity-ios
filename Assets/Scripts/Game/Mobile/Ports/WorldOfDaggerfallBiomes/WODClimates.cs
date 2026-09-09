@@ -20,11 +20,29 @@ namespace WorldOfDaggerfall
 {
     public static class NatureBatchOverriderInstaller
     {
-        public static Texture2D climateMap;
+        // MOBILE: private now, so nothing can read the raw asset around EnsureReadableMap and get a
+        // texture the CPU cannot sample. Everything goes through the ClimateMap property.
+        static Texture2D climateMap;
 
         // MOBILE: Location Loader's type-5 nature swap reads the climate map from here instead of
-        // GetAsset-ing a copy out of its own bundle. A property, so it always tracks climateMap.
-        public static Texture2D ClimateMap => climateMap;
+        // GetAsset-ing a copy out of its own bundle. A property, so it always tracks climateMap - and
+        // it serves the readable copy, because EnsureReadableMap writes that copy back into the field.
+        public static Texture2D ClimateMap => EnsureReadableMap();
+
+        /// <summary>
+        /// MOBILE: the colour key is compared exactly, so the map has to be sampled on the CPU. The pack
+        /// importer already imports this one texture readable and uncompressed (MobileModPackTextureRules),
+        /// but a bundle built before that rule - or one loaded from Documents/Mods - would come back
+        /// unreadable and GetPixel would throw. EnsureReadable makes a readable RGBA32 copy through a GPU
+        /// blit; the result is written back to climateMap so the blit happens at most once per session.
+        /// Idempotent: a readable map is returned untouched.
+        /// </summary>
+        public static Texture2D EnsureReadableMap()
+        {
+            if (climateMap != null && !climateMap.isReadable)
+                climateMap = TextureReplacement.EnsureReadable(climateMap);
+            return climateMap;
+        }
 
         // MOBILE: started by MobilePortedMods when the launcher entry is on
         // (upstream: [Invoke(StateManager.StateTypes.Start, 0)])
@@ -37,6 +55,8 @@ namespace WorldOfDaggerfall
 
             // try loading our map
             climateMap = mod.GetAsset<Texture2D>("climate_map");
+            // MOBILE: convert here, at start-up, rather than on the first terrain update mid-travel.
+            EnsureReadableMap();
             if (climateMap == null)
                 Debug.LogError("[NatureBatch] 🌡️ climate_map asset NOT found!");
             else
@@ -52,24 +72,116 @@ namespace WorldOfDaggerfall
     {
         const int NEW_ARCHIVE = 10030;
 
+        /// <summary>
+        /// MOBILE: the vanilla nature archive whose batches this mod re-skins. Everything else is left
+        /// alone, and a batch we have already swapped reports NEW_ARCHIVE, so it never matches again.
+        /// </summary>
+        const int NATURE_ARCHIVE = 501;
+
+        /// <summary>
+        /// MOBILE: pinned atlas size, replacing upstream's 4096 (or 2048). Archive 10030 is 32 records of
+        /// 64x64, which pack into ~512x512 with padding, but upstream allocated the full square up front:
+        /// a transient 4096x4096 ARGB32 with mips is ~85 MB, on a device that has to survive a jetsam
+        /// limit. 1024 is a fourfold headroom over what the atlas actually needs.
+        /// </summary>
+        public const int AtlasMaxSize = 1024;
+
+        // MOBILE: batches this overrider has put on NEW_ARCHIVE. Skipping them is what keeps the
+        // per-update cost near zero: it avoids the parent-component walk, the GetPixel and above all
+        // batch.Apply(), which rebuilds the batch mesh. The batch's own archive is the real invariant
+        // (a swapped batch reports NEW_ARCHIVE, so the archive filter below also excludes it); this set
+        // is the cheap first test and the record that lets RevisedSetMaterial be called with force:false.
+        static readonly HashSet<DaggerfallBillboardBatch> swapped = new HashSet<DaggerfallBillboardBatch>();
+
+        // MOBILE: one line per distinct failure, not one per terrain update.
+        static readonly HashSet<string> loggedErrors = new HashSet<string>();
+        static bool warnedUnreadableMap;
+
         void OnEnable()  => StreamingWorld.OnUpdateTerrainsEnd += ApplyOverrides;
         void OnDisable() => StreamingWorld.OnUpdateTerrainsEnd -= ApplyOverrides;
 
+        /// <summary>
+        /// MOBILE: pure, so the self-test can pin it. The map is a colour-key image and the test is an
+        /// exact match - #FFA500 and nothing near it. That is why the climate map must import raw and
+        /// uncompressed (MobileModPackTextureRules): one ASTC block and every key pixel drifts.
+        /// </summary>
+        public static bool IsSubtropicalKey(Color32 c)
+        {
+            return c.r == 255 && c.g == 165 && c.b == 0;
+        }
+
+        /// <summary>
+        /// MOBILE: pure guard, shared with Location Loader's BiomesClimateSwap. A map that is missing or
+        /// not CPU-readable cannot be sampled, and GetPixel on it throws rather than returning anything.
+        /// </summary>
+        public static bool MapReadable(Texture2D map)
+        {
+            return map != null && map.isReadable && map.width > 0;
+        }
+
         void ApplyOverrides()
         {
-            if (NatureBatchOverriderInstaller.climateMap == null)
+            // MOBILE: whole body guarded. This runs on every OnUpdateTerrainsEnd - the busiest frame in
+            // the game - and an exception thrown here would take the rest of the terrain-update
+            // subscribers with it. Logged once per distinct message.
+            try
             {
-                Debug.LogWarning("[NatureBatch] climateMap is null, skipping overrides.");
+                ApplyOverridesInner();
+            }
+            catch (System.Exception ex)
+            {
+                if (loggedErrors.Add(ex.Message))
+                    Debug.LogError("[Biomes] nature swap failed: " + ex);
+            }
+        }
+
+        void ApplyOverridesInner()
+        {
+            // MOBILE: the property hands back the readable copy (see EnsureReadableMap). Read once.
+            Texture2D map = NatureBatchOverriderInstaller.ClimateMap;
+            if (!MapReadable(map))
+            {
+                // MOBILE: was an unconditional LogWarning on every terrain update.
+                if (!warnedUnreadableMap)
+                {
+                    Debug.LogWarning("[Biomes] climate map missing or not readable; nature swap disabled");
+                    warnedUnreadableMap = true;
+                }
                 return;
             }
 
-            int mapW = NatureBatchOverriderInstaller.climateMap.width;
-            int mapH = NatureBatchOverriderInstaller.climateMap.height;
+            int mapW = map.width;
+            int mapH = map.height;
 
-            foreach (var batch in FindObjectsOfType<DaggerfallBillboardBatch>())
+            // MOBILE: terrain objects are pooled and destroyed as the player travels; drop the dead ones
+            // so the set cannot grow without bound over a long session.
+            swapped.RemoveWhere(b => b == null);
+
+            // MOBILE: was FindObjectsOfType<DaggerfallBillboardBatch>() - a full scene scan with an
+            // allocation on every terrain update. StreamingWorld parents both kinds of nature batch under
+            // StreamingTarget: a terrain's batch hangs off its terrain object (StreamingWorld.cs:1157 +
+            // :1165) and a location's off its DaggerfallLocation object (:747 + :1198), so one walk from
+            // that root sees everything the scan used to. true = include inactive: pooled-out terrains
+            // are deactivated, not destroyed, and are reactivated without a fresh nature layout.
+            StreamingWorld world = GameManager.Instance.StreamingWorld;
+            if (world == null)
+                return;
+            DaggerfallBillboardBatch[] batches = world.StreamingTarget.GetComponentsInChildren<DaggerfallBillboardBatch>(true);
+
+            int n = 0;
+            foreach (var batch in batches)
             {
-                if (batch.TextureArchive != 501)
+                // MOBILE: already ours - no parent walk, no GetPixel, no Apply().
+                if (batch.TextureArchive == NEW_ARCHIVE && swapped.Contains(batch))
                     continue;
+
+                if (batch.TextureArchive != NATURE_ARCHIVE)
+                    continue;
+
+                // MOBILE: back on the vanilla archive, so the engine laid this terrain's or location's
+                // nature out again (StreamingWorld.UpdateTerrainNature / DaggerfallLocation) and undid
+                // our swap. Forget it, so it is swapped afresh below.
+                swapped.Remove(batch);
 
                 // 1) Try location first
                 int mx = -1, my = -1;
@@ -99,15 +211,26 @@ namespace WorldOfDaggerfall
 
                 // 3) Flip Y, sample
                 int ty = mapH - 1 - my;
-                Color32 c = NatureBatchOverriderInstaller.climateMap.GetPixel(mx, ty);
+                Color32 c = map.GetPixel(mx, ty);
 
                 // 4) Match #FFA500
-                if (c.r == 255 && c.g == 165 && c.b == 0)
+                if (IsSubtropicalKey(c))                    // MOBILE: pure, self-tested
                 {
-                    CustomBillboardHelper.RevisedSetMaterial(batch, NEW_ARCHIVE, true);
+                    // MOBILE: force:false. Upstream passed true, so the "already on this archive"
+                    // early-out never fired and a new Material was built per batch per update - an
+                    // unbounded leak plus a Shader.Find each time. The material is cached per archive
+                    // in CustomBillboardHelper now, and this set stops Apply() re-running.
+                    CustomBillboardHelper.RevisedSetMaterial(batch, NEW_ARCHIVE, false);
                     batch.Apply();
+                    swapped.Add(batch);
+                    n++;
                 }
             }
+
+            // MOBILE: only when something actually changed - this used to be silent, and the simulator
+            // and device runs grep for this line as the proof the swap fired.
+            if (n > 0)
+                Debug.Log("[Biomes] swapped " + n + " nature batches to archive " + NEW_ARCHIVE);
         }
     }
 
@@ -134,6 +257,13 @@ namespace WorldOfDaggerfall
         // stash our generated albedo atlas so RevisedSetMaterial can grab it
         static Texture2D _lastAtlas = null;
 
+        // MOBILE: archive → the Material built over that archive's atlas. Upstream cached the atlas but
+        // not the Material, so every swap ran `new Material(Shader.Find(...))` again and the old ones
+        // were never released - the per-update material leak in the research notes (Risk 3). The shader
+        // choice below depends only on a settings flag, so one Material per archive is all that is ever
+        // needed, and every batch on that archive can share it (sharedMaterial, not material).
+        static readonly Dictionary<int, Material> _materialCache = new Dictionary<int, Material>();
+
         /// <summary>
         /// Replacement for DaggerfallBillboardBatch.SetMaterial that supports archives > 511.
         /// </summary>
@@ -153,15 +283,22 @@ namespace WorldOfDaggerfall
                 out int          key);
 
             // 2) build your material using the freshly‐packed albedo atlas
-            string shaderName = DaggerfallUnity.Settings.NatureBillboardShadows
-                ? MaterialReader._DaggerfallBillboardBatchShaderName
-                : MaterialReader._DaggerfallBillboardBatchNoShadowsShaderName;
-            // MOBILE: MobileShaders.Find, so this is the player's own billboard-batch shader and never
-            // the copy a mod bundle embeds alongside its materials.
-            var mat = new Material(DaggerfallWorkshop.Game.Mobile.MobileShaders.Find(shaderName))
+            // MOBILE: cached per archive - built once, then reused by every batch on that archive.
+            Material mat;
+            if (!_materialCache.TryGetValue(archive, out mat) || mat == null)
             {
-                mainTexture = _lastAtlas
-            };
+                string shaderName = DaggerfallUnity.Settings.NatureBillboardShadows
+                    ? MaterialReader._DaggerfallBillboardBatchShaderName
+                    : MaterialReader._DaggerfallBillboardBatchNoShadowsShaderName;
+                // MOBILE: MobileShaders.Find, so this is the player's own billboard-batch shader and never
+                // the copy a mod bundle embeds alongside its materials.
+                mat = new Material(DaggerfallWorkshop.Game.Mobile.MobileShaders.Find(shaderName))
+                {
+                    mainTexture = _lastAtlas
+                };
+                mat.name = "WODBiomesNature" + archive;
+                _materialCache[archive] = mat;
+            }
 
             // 3) assemble a CachedMaterial
             var cm = new CachedMaterial
@@ -220,7 +357,8 @@ namespace WorldOfDaggerfall
             {
                 archive      = archive,
                 stayReadable = true,
-                atlasMaxSize = DaggerfallUnity.Settings.AssetInjection ? 4096 : 2048,
+                // MOBILE: pinned - see NatureBatchOverrider.AtlasMaxSize. Was `AssetInjection ? 4096 : 2048`.
+                atlasMaxSize = NatureBatchOverrider.AtlasMaxSize,
                 atlasPadding = 4
             };
 
@@ -244,7 +382,10 @@ namespace WorldOfDaggerfall
             var texFile = settings.textureFile;
 
             bool hasNormals = false, hasEmissive = false, hasAnim = false;
-            var importMode = settings.atlasMaxSize == 4096
+            // MOBILE: upstream derived this from `atlasMaxSize == 4096`, which was itself just
+            // `Settings.AssetInjection`. The atlas size is pinned now, so read the setting directly and
+            // the import mode stays exactly what it was upstream.
+            var importMode = DaggerfallUnity.Settings.AssetInjection
                          ? TextureImport.AllLocations
                          : TextureImport.None;
 
