@@ -57,6 +57,22 @@ namespace Monobelisk
         /// </summary>
         public const int LocationBufferSize = 1089;
 
+        /// <summary>
+        /// MOBILE: (a) the y dimension of MainHeightmapComputer's CSMain thread group, [numthreads(10,5,1)].
+        /// Dispatch takes a count of GROUPS, so every band handed to it must be a whole multiple of this
+        /// or the integer division silently drops the remainder rows.
+        /// </summary>
+        public const int GroupRowsY = 5;
+
+        /// <summary>
+        /// MOBILE: (a) how many row bands the start-up world heightmap is generated in. Upstream ran the
+        /// whole 1000x500 map as one 500,000-thread dispatch followed by one GetData - a single Metal
+        /// command buffer that iOS's execution-time limit can kill outright (the watchdog does not care
+        /// that the work is legitimate). Ten bands of 50 rows is ten small submits with a readback
+        /// between them; the arithmetic and the output layout are identical.
+        /// </summary>
+        public const int StartupBands = 10;
+
         public static byte[] originalHeightmapBuffer;
         public static byte[] alteredHeightmapBuffer;
 
@@ -107,7 +123,14 @@ namespace Monobelisk
         /// MOBILE: (a) splits a height into contiguous row bands, the last taking the remainder, so the
         /// start-up world heightmap can be dispatched as several small Metal command buffers instead of
         /// one 500,000-thread submit that iOS's command-buffer execution limit can kill. Pure: no GPU,
-        /// no Unity state, so the self-test can pin it. Task 4 wires it into InitializeWoodsFileHeightmap.
+        /// no Unity state, so the self-test can pin it.
+        ///
+        /// Every band but the last is rounded DOWN to a multiple of GroupRowsY, because the caller feeds
+        /// rows / GroupRowsY to Dispatch, which counts thread GROUPS. A band of 71 rows would dispatch 14
+        /// groups = 70 rows and lose the 71st; the next band would start where this one claimed to end,
+        /// so the lost row would never be written by anyone and the world heightmap would carry a stripe
+        /// of whatever the buffer held. The last band absorbs the remainder, which for the only size that
+        /// matters (500, a multiple of 5) is itself always a whole number of groups.
         /// </summary>
         public static (int yStart, int rows)[] Bands(int height, int bands)
         {
@@ -115,11 +138,21 @@ namespace Monobelisk
                 return new (int yStart, int rows)[0];
             if (bands < 1)
                 bands = 1;
-            if (bands > height)
-                bands = height;
+
+            // MOBILE: (a) more bands than there are whole thread groups would force a band under one
+            // group, so cap the count instead of emitting bands the dispatch cannot express.
+            int maxBands = height / GroupRowsY;
+            if (maxBands < 1)
+                maxBands = 1;
+            if (bands > maxBands)
+                bands = maxBands;
+
+            int per = height / bands;
+            per -= per % GroupRowsY;          // MOBILE: (a) whole thread groups only
+            if (per < GroupRowsY)
+                per = GroupRowsY;             // MOBILE: (a) only reachable when height < GroupRowsY, where bands == 1
 
             var result = new (int yStart, int rows)[bands];
-            int per = height / bands;
             int y = 0;
 
             for (int i = 0; i < bands; i++)
@@ -178,10 +211,36 @@ namespace Monobelisk
             cs.SetBuffer(k, "Result", alteredHeights);
             InterestingTerrains.instance.csParams.ApplyToCS(cs);
 
-            cs.Dispatch(k, WoodsFile.MapWidth / 10, WoodsFile.MapHeight / 5, 1);
-
+            // MOBILE: (a) upstream ran the whole 1000x500 map as ONE dispatch of 500,000 threads
+            // followed by one GetData - a single Metal command buffer whose execution time iOS's
+            // watchdog is free to kill, and it does not care that the work is legitimate. The same
+            // work is now submitted as StartupBands row bands with a readback between them, so no
+            // single command buffer carries more than a tenth of it.
+            //
+            // The kernel writes world row y to buffer row (MapHeight - 1 - y) - the "(499 - id.y)"
+            // in the index formula, which is deliberately left untouched so the output array layout
+            // is identical to upstream's. That flip is why the readback range below is computed from
+            // the END of the band: the rows a band dispatches land in the MIRRORED region of the
+            // buffer, and reading back band.yStart * MapWidth would hand back a region that has not
+            // been written yet (it belongs to the band at the other end of the map).
             var floatHeights = new float[original.Length];
-            alteredHeights.GetData(floatHeights);
+            var bands = Bands(WoodsFile.MapHeight, StartupBands);
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+
+            foreach (var band in bands)
+            {
+                cs.SetInt("yOffset", band.yStart);
+                cs.Dispatch(k, WoodsFile.MapWidth / 10, band.rows / GroupRowsY, 1);
+
+                int flippedStart = WoodsFile.MapHeight - band.yStart - band.rows;
+                int offset = flippedStart * WoodsFile.MapWidth;
+                alteredHeights.GetData(floatHeights, offset, offset, band.rows * WoodsFile.MapWidth);
+            }
+
+            watch.Stop();
+            // MOBILE: (h) the one-off cost of the whole start-up pass, in Ikram's Player.log.
+            Debug.Log(string.Format("[WoDTerrain] world heightmap {0} ms ({1} bands)",
+                watch.ElapsedMilliseconds, bands.Length));
 
             alteredHeightmapBuffer = Utility.ToBytes(floatHeights);
             woodsFile.Buffer = alteredHeightmapBuffer;

@@ -777,11 +777,42 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(Monobelisk.TerrainComputer.LocationBufferSize == 1089, "WoDTerrain: location buffer matches the shader's [1089] arrays (OOB write fix)");
             Check(Monobelisk.InterestingTerrains.Available(true, true) && !Monobelisk.InterestingTerrains.Available(false, true) && !Monobelisk.InterestingTerrains.Available(true, false),
                 "WoDTerrain: needs compute support and both compute shaders");
-            var bands = Monobelisk.TerrainComputer.Bands(500, 10);
+            Check(Monobelisk.TerrainComputer.StartupBands == 10 && Monobelisk.TerrainComputer.GroupRowsY == 5,
+                "WoDTerrain: the world heightmap is dispatched as ten bands of whole thread groups");
+            var bands = Monobelisk.TerrainComputer.Bands(500, Monobelisk.TerrainComputer.StartupBands);
             int rows = 0; foreach (var b in bands) rows += b.rows;
-            Check(bands.Length == 10 && rows == 500 && bands[0].yStart == 0 && bands[9].yStart == 450, "WoDTerrain: start-up dispatch splits 500 rows into 10 bands");
+            Check(bands.Length == 10 && rows == 500 && bands[0].yStart == 0 && bands[0].rows == 50 && bands[9].yStart == 450,
+                "WoDTerrain: start-up dispatch splits 500 rows into 10 bands");
             var odd = Monobelisk.TerrainComputer.Bands(500, 7); int r2 = 0; foreach (var b in odd) r2 += b.rows;
-            Check(r2 == 500, "WoDTerrain: uneven band split still covers every row");
+            Check(r2 == 500 && odd.Length == 7 && odd[0].rows == 70 && odd[6].rows == 80,
+                "WoDTerrain: uneven band split still covers every row, in whole groups (7 bands -> 6x70 + 80)");
+            // The second Dispatch argument is a count of THREAD GROUPS, not rows: Dispatch(k, 1000/10,
+            // rows/5, 1). A band whose row count is not a multiple of the kernel's y group size (5)
+            // therefore either drops rows (integer division) or runs rows that belong to the next
+            // band, and nothing downstream would say so - the world heightmap would simply be wrong
+            // in horizontal stripes, on a code path that runs once at start-up.
+            bool wholeGroups = true; string groupDetail = "";
+            for (int n = 1; n <= 120 && wholeGroups; n++)
+            {
+                var bs = Monobelisk.TerrainComputer.Bands(500, n);
+                int y = 0;
+                foreach (var b in bs)
+                {
+                    if (b.yStart != y || b.rows <= 0 || b.rows % Monobelisk.TerrainComputer.GroupRowsY != 0)
+                    {
+                        wholeGroups = false;
+                        groupDetail = "Bands(500, " + n + "): band at yStart " + b.yStart + " has " + b.rows + " rows";
+                        break;
+                    }
+                    y += b.rows;
+                }
+                if (wholeGroups && y != 500)
+                {
+                    wholeGroups = false;
+                    groupDetail = "Bands(500, " + n + ") covers " + y + " rows, not 500";
+                }
+            }
+            Check(wholeGroups, "WoDTerrain: every band is contiguous and a whole number of 5-row thread groups", groupDetail);
             // A .compute that fails to compile still loads as a NON-NULL asset carrying no kernels, so
             // a null check alone would pass on a broken shader. HasKernel is the compile evidence.
             ComputeShader terrainCS = Resources.Load<ComputeShader>("WoDTerrain/TerrainComputer");
@@ -2757,6 +2788,19 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobileModPackTextureRules.For("Assets/Game/Mods/WorldOfDaggerfallBiomes/Assets/Maps/climate_map.png") == MobileModPackTextureRules.Rule.RawData,
                 "PackTextureRules: Biomes stays raw data after adding the linear rule");
             Check(MobileModPackTextureRules.LinearDataMods.Contains("WorldOfDaggerfallTerrain"), "PackTextureRules: Terrain is in the linear-data list");
+            // MOBILE: every texture the shipped compute shaders read is a level-0 fetch - SampleLevel(
+            // ..., 0) in TerrainComputer.compute and basicRoads.cginc, "float sampleLevel = 0" in
+            // heightSampling.cginc - so a mip chain on these maps is memory nothing can ever sample:
+            // ~11 MB of GPU residency across the five (a 2048x1024 RGBA32 map costs 8 MB, its chain
+            // another 2.7 MB). The importer branch reads this constant, so pinning it here pins the
+            // import; the meta's "enableMipMap: 0" is the other half of the proof.
+            Check(MobileModPackTextureRules.NoMipsForLinearData,
+                "PackTextureRules: linear-data maps carry no mip chain (the compute shaders only fetch level 0)");
+            // A name in BOTH lists would silently take whichever loop For() walks first (raw data),
+            // giving a compute-only data map the readable, mipped, sRGB-untouched treatment - the
+            // opposite of what it needs, with nothing in any log to say which rule won.
+            Check(MobileModPackTextureRules.ListsDisjoint,
+                "PackTextureRules: no mod name is in both the raw-data and the linear-data list");
             // Every check above pins the rule against the SAME literal the rule holds, so a rename or a
             // case change of the mods.json entry - which is the fetched folder name, which is what For()
             // matches - leaves this suite green while 225 textures silently revert to ASTC and the

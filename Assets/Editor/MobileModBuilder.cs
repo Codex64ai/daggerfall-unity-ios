@@ -174,10 +174,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             {
                 // MOBILE: data maps read as numbers by a compute shader (heights, biome weights, port flags).
                 // The project is Linear, so sRGB sampling would silently remap them; block compression
-                // would quantise them. Keep the upstream mip/filter settings.
+                // would quantise them. No mip chain either: every read of these maps in the shipped
+                // compute shaders is a level-0 fetch, so the chain is ~11 MB of GPU memory nothing can
+                // sample (see MobileModPackTextureRules.NoMipsForLinearData). Filter mode is left as
+                // the upstream meta set it.
                 importer.npotScale = TextureImporterNPOTScale.None;
                 importer.sRGBTexture = false;
                 importer.isReadable = false;
+                importer.mipmapEnabled = !MobileModPackTextureRules.NoMipsForLinearData;
                 importer.textureCompression = TextureImporterCompression.Uncompressed;
                 var lin = importer.GetPlatformTextureSettings("iPhone");
                 lin.overridden = true;

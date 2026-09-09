@@ -2,6 +2,10 @@
 #pragma kernel CSMain
 
 float newHeight;
+// MOBILE: (a) first world row of the band being dispatched. The start-up pass now runs as ten row
+// bands instead of one 500,000-thread submit (iOS kills an over-long Metal command buffer), so the
+// kernel is told where in the map its band sits. Zero reproduces upstream's single dispatch exactly.
+int yOffset;
 float terrainSize;
 float2 terrainPosition;
 Texture2D BiomeMap;
@@ -19,9 +23,14 @@ RWStructuredBuffer<float> Result;
 [numthreads(10,5,1)]
 void CSMain (uint3 id : SV_DispatchThreadID)
 {
-    int i = id.x + (499 - id.y) * 1000;
+    // MOBILE: (a) id.y is the row WITHIN the band; y is the row in the world. The index formula and
+    // the +int2(1,0) sample offset below are otherwise untouched, so with yOffset 0 this is byte for
+    // byte upstream's mapping and the output buffer layout is unchanged.
+    uint y = id.y + (uint)yOffset;
 
-    int2 uid = id.xy + int2(1, 0);
+    int i = id.x + (499 - y) * 1000;
+
+    int2 uid = int2(id.x, y) + int2(1, 0);
 
     float extraHeight, bumps;
     float baseHeight = GetBaseHeight(float2(uid), extraHeight, bumps, false);
