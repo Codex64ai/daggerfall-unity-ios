@@ -123,6 +123,38 @@ class ValidateSet(unittest.TestCase):
         self.assertTrue(any("GUID" in p for p in fetch.validate_set([a, b])))
 
 
+class ExtraDirs(unittest.TestCase):
+    """extra_dirs: whole folders the manifest never lists but the prefabs need by GUID
+    (World of Daggerfall's Prefabs/*.prefab -> Meshes/*.fbx|.dae)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.src = os.path.join(self.tmp, "repo")
+        self.dest = os.path.join(self.tmp, "Assets", "Game", "Mods", "X")
+        for rel in ("Meshes/a.fbx", "Meshes/a.fbx.meta", "Other/x.txt"):
+            path = os.path.join(self.src, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write("")
+        os.makedirs(self.dest)
+
+    def test_named_dir_is_copied_whole_with_metas_and_nothing_else(self):
+        copied = fetch.copy_extra_dirs(self.src, self.dest, ["Meshes"])
+        self.assertTrue(os.path.exists(os.path.join(self.dest, "Meshes", "a.fbx")))
+        self.assertTrue(os.path.exists(os.path.join(self.dest, "Meshes", "a.fbx.meta")))
+        self.assertFalse(os.path.exists(os.path.join(self.dest, "Other")))
+        self.assertEqual(copied, [("Meshes", 2)])
+
+    def test_no_dirs_is_a_no_op(self):
+        self.assertEqual(fetch.copy_extra_dirs(self.src, self.dest, []), [])
+        self.assertEqual(os.listdir(self.dest), [])
+
+    def test_missing_dir_is_a_stop_naming_it(self):
+        with self.assertRaises(SystemExit) as caught:
+            fetch.copy_extra_dirs(self.src, self.dest, ["Meshes", "NotThere"])
+        self.assertIn("NotThere", str(caught.exception))
+
+
 class Licence(unittest.TestCase):
     def test_mit_first_line_required(self):
         self.assertEqual(fetch.licence_problems("MIT License\n\nCopyright (c) 2025 Cliffworms\n"), [])

@@ -253,6 +253,26 @@ def read_manifest(cfg, entry):
         return json.load(fh), path
 
 
+def copy_extra_dirs(src_root, dest, dirs):
+    """Copy whole repo folders (files and their .meta) into the mod folder, in addition to the
+    manifest's Files. Some manifests list only the assets the author authored and not the ones
+    Unity resolves for them by GUID: World of Daggerfall's Prefabs/*.prefab point at
+    Meshes/*.fbx|.dae that the manifest never names, so a manifest-only copy ships prefabs whose
+    model is missing and every WoD rock renders as nothing. The folders are NOT added to the
+    manifest - Unity follows the GUIDs when it builds the bundle. Returns [(dir, file count)].
+    """
+    copied = []
+    for d in dirs:
+        src = os.path.join(src_root, d)
+        if not os.path.isdir(src):
+            raise SystemExit("extra dir %s/ not in repo" % d)
+        shutil.copytree(src, os.path.join(dest, d), dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns(".git"))
+        n = sum(len(names) for _, _, names in os.walk(os.path.join(dest, d)))
+        copied.append((d, n))
+    return copied
+
+
 def fetch_one(cfg, entry):
     dest = dest_dir(cfg, entry)
     tmp = tempfile.mkdtemp(prefix="bundled-mod-")
@@ -343,13 +363,12 @@ def fetch_one(cfg, entry):
                 shutil.copyfile(src, dst)
                 if os.path.exists(src + ".meta"):
                     shutil.copyfile(src + ".meta", dst + ".meta")
-            # extra_roots: folders the listed assets depend on by GUID but do not list (UBLaMF's
-            # prefabs -> Models/*.obj + Materials/*.mat). Unity pulls them into the bundle itself.
-            for root in entry.get("extra_roots") or []:
-                src = os.path.join(src_root, root)
-                if not os.path.isdir(src):
-                    raise SystemExit("%s: extra root %s/ not in repo" % (entry["name"], root))
-                shutil.copytree(src, os.path.join(dest, root), dirs_exist_ok=True)
+            # extra_roots / extra_dirs: folders the listed assets depend on by GUID but do not
+            # list (UBLaMF's prefabs -> Models/*.obj + Materials/*.mat; WoD's -> Meshes/*.fbx).
+            # Unity pulls them into the bundle itself; they stay out of the manifest.
+            extra = (entry.get("extra_roots") or []) + (entry.get("extra_dirs") or [])
+            for d, n in copy_extra_dirs(src_root, dest, extra):
+                print("  copied extra dir %s (%d files)" % (d, n))
 
         note = licence_text_for(entry)
         if note is not None:
