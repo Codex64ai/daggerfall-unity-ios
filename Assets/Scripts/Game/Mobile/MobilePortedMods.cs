@@ -2,14 +2,20 @@
 // License:         MIT License
 //
 // Starts the desktop mods whose code is compiled into this app: Roleplay and Realism, its Items
-// module, Climates & Calories and Dynamic Skies (Assets/Scripts/Game/Mobile/Ports/). This class
-// calls the mod's own Init exactly as DFU would have called its [Invoke] loader, but only when the
-// entry is enabled, and only with its dependencies on. Nothing runs otherwise.
+// module, Climates & Calories, Dynamic Skies, Location Loader and World of Daggerfall
+// (Assets/Scripts/Game/Mobile/Ports/). This class calls the mod's own Init exactly as DFU would
+// have called its [Invoke] loader, but only when the entry is enabled, and only with its
+// dependencies on. Nothing runs otherwise.
 //
 // The three survival mods ship their DATA as a bundle inside the app, so each always has an
 // ordinary entry in the launcher's MODS window with settings. Dynamic Skies' data is NOT built in:
 // the player installs that bundle themselves, so its entry - and therefore the mod - simply is not
 // there until they do, and the code stays dormant.
+//
+// Location Loader is code only - it has no data of its own and does nothing alone - so it is a
+// built-in entry registered by MobileMods. World of Daggerfall is the location mod it reads: a
+// bundle, so its entry appears only once that bundle is installed, and it needs Location Loader
+// switched on. Both default off.
 //
 // The survival mods start as soon as the bundles are loaded, at the title. Dynamic Skies cannot:
 // its Init reaches into the scene for the sun light and the camera, and on a player build neither
@@ -28,8 +34,11 @@ namespace DaggerfallWorkshop.Game.Mobile
         public const string RRItemsTitle = "RoleplayRealism-Items";
         public const string CCTitle = "Climates & Calories";
         public const string SkyTitle = "Dynamic Skies";
+        public const string LLTitle = "Location Loader";
+        public const string WoDTitle = "World of Daggerfall";
         public const string DynamicSkiesShaderName = "BLB/SkyBox/BLBProceduralSkybox";
         public const string GateNote = " Needs RoleplayRealism and RoleplayRealism-Items switched on; it was switched off because one of them is not.";
+        public const string WoDGateNote = " Needs Location Loader switched on; it was switched off because Location Loader is not.";
 
         /// <summary>Pure: which of (rr, rrItems, cc) may run. Items needs RR; C&C needs both.</summary>
         public static bool[] Gate(bool rr, bool rrItems, bool cc)
@@ -44,8 +53,11 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// <summary>Pure: the sky's Init can only work once the scene holds the sun light and the camera it looks up.</summary>
         public static bool SkySceneReady(bool sunLightPresent, bool mainCameraPresent) => sunLightPresent && mainCameraPresent;
 
+        /// <summary>Pure: World of Daggerfall is a location mod - it is nothing without Location Loader reading it.</summary>
+        public static bool WodRuns(bool locationLoaderOn, bool wodOn) => locationLoaderOn && wodOn;
+
         /// <summary>Titles of the compiled-in mods, in dependency order.</summary>
-        public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle, SkyTitle };
+        public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle, SkyTitle, LLTitle, WoDTitle };
 
         /// <summary>
         /// Called by ModManager after it found the bundles and before it applies saved settings: a
@@ -173,6 +185,18 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (run[0]) { RoleplayRealism.RoleplayRealism.Init(new InitParams(rr, ModManager.Instance.GetModIndex(RRTitle), count)); Debug.Log("[PortedMods] started " + RRTitle); }
             if (run[1]) { RoleplayRealism.RoleplayRealismItemsMod.Init(new InitParams(items, ModManager.Instance.GetModIndex(RRItemsTitle), count)); Debug.Log("[PortedMods] started " + RRItemsTitle); }
             if (run[2]) { ClimatesCalories.ClimateCalories.Init(new InitParams(cc, ModManager.Instance.GetModIndex(CCTitle), count)); Debug.Log("[PortedMods] started " + CCTitle); }
+
+            Mod ll = Entry(LLTitle), wod = Entry(WoDTitle);
+            bool llOn = ll != null && ll.Enabled;
+            if (wod != null && wod.Enabled && !WodRuns(llOn, true))
+            {
+                wod.Enabled = false;
+                if (!wod.ModInfo.ModDescription.EndsWith(WoDGateNote)) wod.ModInfo.ModDescription += WoDGateNote;
+                ModManager.WriteModSettings();
+                Debug.Log("[PortedMods] World of Daggerfall switched off: Location Loader must be on");
+            }
+            if (llOn) { LocationLoader.LocationModLoader.Init(new InitParams(ll, ModManager.Instance.GetModIndex(LLTitle), count)); Debug.Log("[PortedMods] started " + LLTitle); }
+            if (WodRuns(llOn, wod != null && wod.Enabled)) { WODRocksMaterials.WODRocksMaterials.Init(new InitParams(wod, ModManager.Instance.GetModIndex(WoDTitle), count)); Debug.Log("[PortedMods] started " + WoDTitle); }
 
             Mod sky = Entry(SkyTitle);
             return SkyRuns(sky != null, sky != null && sky.Enabled) ? sky : null;

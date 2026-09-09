@@ -765,6 +765,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobilePortedMods.SkyRuns(true, true) && !MobilePortedMods.SkyRuns(true, false) && !MobilePortedMods.SkyRuns(false, true), "PortedMods: sky runs only when its entry exists and is on");
             Check(MobilePortedMods.Gate(true, true, true).Length == 3, "PortedMods: survival gate unchanged by the sky entry");
             Check(MobilePortedMods.SkySceneReady(true, true) && !MobilePortedMods.SkySceneReady(true, false) && !MobilePortedMods.SkySceneReady(false, true) && !MobilePortedMods.SkySceneReady(false, false), "PortedMods: the sky starts only when both the sun light and the camera are in the scene");
+            Check(MobilePortedMods.LLTitle == "Location Loader" && System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.LLTitle) >= 0, "PortedMods: Location Loader is a default-off title");
+            Check(MobilePortedMods.WoDTitle == "World of Daggerfall" && System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.WoDTitle) >= 0, "PortedMods: World of Daggerfall is a default-off title");
+            Check(MobilePortedMods.WodRuns(true, true) && !MobilePortedMods.WodRuns(true, false) && !MobilePortedMods.WodRuns(false, true) && !MobilePortedMods.WodRuns(false, false), "PortedMods: World of Daggerfall runs only when Location Loader is on too");
         }
 
         class FakeJourney : IJourneyState

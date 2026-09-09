@@ -18,6 +18,11 @@
 //   (see MobileStartSeason). It sits here because the Mods window is the launcher-time page
 //   this port already uses for choices the player makes before pressing PLAY.
 //
+//   "Location Loader" is registered here too, for a different reason: it is compiled-in code
+//   with no data of its own, so no bundle can be discovered for it and only an entry here lets
+//   the player switch it on. It has no PlayerPrefs mirror - MobilePortedMods reads its entry
+//   directly at the title, together with the location mods that need it.
+//
 //   A PlayerPrefs mirror keeps each choice readable before ModManager exists (and in the
 //   editor self-test, which has no ModManager at all). When a mod entry is present it is the
 //   truth. The roads pref defaults to the travel pref so the old combined switch carries
@@ -109,6 +114,23 @@ namespace DaggerfallWorkshop.Game.Mobile
             bridge.Enabled = true;
             bridge.MessageReceiver = MobileTravelOptionsBridge.Receive;
             manager.RegisterBuiltInMod(bridge);
+
+            // Location Loader is code with no data of its own, so unlike the survival mods it has no
+            // bundle to be discovered - it needs an entry here or the player could never switch it on.
+            // Off by default (MobilePortedMods.DefaultOff covers the title too); MobilePortedMods
+            // starts it, and the location mods that need it, at the title.
+            Mod ll = new Mod();
+            ll.ModInfo.ModTitle = MobilePortedMods.LLTitle;
+            ll.ModInfo.ModVersion = "0.3";
+            ll.ModInfo.ModAuthor = "KABoissonneault (fork of Uncanny_Valley), ported by Codex64ai";
+            ll.ModInfo.ContactInfo = "github.com/KABoissonneault/DFU-LocationLoader";
+            ll.ModInfo.DFUnity_Version = VersionInfo.DaggerfallUnityVersion;
+            ll.ModInfo.GUID = "fc5c0fa6-e80d-4cb1-89fa-c10be8e35bf3";
+            ll.ModInfo.ModDescription =
+                "Loads location mods such as World of Daggerfall. Does nothing on its own; switch it " +
+                "on together with a location mod. Compiled into this port.";
+            ll.Enabled = false;
+            manager.RegisterBuiltInMod(ll);
         }
 
         static Mod Entry(string title)
