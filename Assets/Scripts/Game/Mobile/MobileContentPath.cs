@@ -35,7 +35,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             "Mods", "Textures", "Textures/Img", "Textures/CifRci",
             "Sound", "Quests", "QuestPacks", "Books", "WorldData",
-            "Movies", "SpellIcons",
+            "Movies", "SpellIcons", "Presets",
         };
 
         /// <summary>
@@ -204,6 +204,7 @@ namespace DaggerfallWorkshop.Game.Mobile
                 sb.AppendLine("  WorldData/     loose location and block .json");
                 sb.AppendLine("  Movies/        replacement videos as .mp4, named like ANIM0000.VID.mp4");
                 sb.AppendLine("  SpellIcons/    spell icon packs (an atlas .png plus its .txt metadata)");
+                sb.AppendLine("  Presets/       mod settings presets (Presets/<mod>/<name>.json)");
                 sb.AppendLine("  Mods/          .dfmod packages BUILT FOR iOS");
                 sb.AppendLine();
                 sb.AppendLine("Two things will not work, and cannot be made to:");

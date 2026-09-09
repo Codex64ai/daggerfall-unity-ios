@@ -208,6 +208,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // SpellIcons: loose icon packs are enumerated out of this folder.
             Check(set.Contains("SpellIcons"), "Documents/SpellIcons is created for loose icon packs");
 
+            // Presets: mod settings presets are read from Presets/<mod file name>/*.json through
+            // the same redirect, but the folder was never created, so there was nowhere to put them.
+            Check(set.Contains("Presets"), "Documents/Presets is created for mod settings presets");
+
             // The folders the port already relied on must not be dropped by a careless edit.
             Check(set.Contains("Mods") && set.Contains("Textures") && set.Contains("Textures/Img")
                   && set.Contains("Textures/CifRci") && set.Contains("Sound") && set.Contains("Quests")
