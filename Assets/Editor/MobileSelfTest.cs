@@ -877,19 +877,32 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // serializing that list alone shrank Mods.json to the enabled mods (10 entries to 3 on
             // the simulator run). A mod with no entry defaults to enabled, so every switched-off mod
             // came back on at the next launch. The write merges the dropped entries back in.
-            Mod wasOn = new Mod(); wasOn.ModInfo.ModTitle = "A"; wasOn.Enabled = false;
-            Mod wasOff = new Mod(); wasOff.ModInfo.ModTitle = "B"; wasOff.Enabled = false;
-            Mod nowOn = new Mod(); nowOn.ModInfo.ModTitle = "A"; nowOn.Enabled = true;
-            List<Mod> merged = ModManager.MergeModSettings(new List<Mod>() { nowOn },
-                                                           new List<Mod>() { wasOn, wasOff });
+            Mod previousA = new Mod(); previousA.ModInfo.ModTitle = "A"; previousA.Enabled = false;
+            Mod currentA = new Mod(); currentA.ModInfo.ModTitle = "A"; currentA.Enabled = true;
+            // Mod.LoadPriority has an internal setter, so B gets its priority the way
+            // LoadModSettings gives one to a mod - through the serializer.
+            List<Mod> dropped = new List<Mod>();
+            fsResult droppedResult = new fsSerializer().TryDeserialize<List<Mod>>(
+                fsJsonParser.Parse("[{\"Title\":\"B\",\"Enabled\":false,\"LoadPriority\":7}]"), ref dropped);
+            Check(!droppedResult.Failed && dropped.Count == 1 && dropped[0].LoadPriority == 7,
+                  "mod settings: a dropped entry with a load priority is readable", droppedResult.FormattedMessages);
+            Mod previousB = dropped.Count == 1 ? dropped[0] : new Mod();
+            List<Mod> merged = ModManager.MergeModSettings(new List<Mod>() { currentA },
+                                                           new List<Mod>() { previousA, previousB });
             Check(merged.Count == 2, "mod settings: a mod dropped from the list still gets an entry",
                   merged.Count.ToString());
             Mod mergedOff = merged.Find(m => m.Title == "B");
             Check(mergedOff != null && !mergedOff.Enabled,
                   "mod settings: the dropped mod keeps its switched-off setting");
+            Check(mergedOff != null && mergedOff.LoadPriority == 7,
+                  "mod settings: the dropped mod keeps its load priority",
+                  mergedOff == null ? "no entry" : mergedOff.LoadPriority.ToString());
             Mod mergedBoth = merged.Find(m => m.Title == "A");
             Check(mergedBoth != null && mergedBoth.Enabled,
                   "mod settings: a mod in both lists takes its current value, not the older one");
+            Check(merged.Count == 2 && merged[0].Title == "A",
+                  "mod settings: current mods come first, in order",
+                  merged.Count == 0 ? "empty" : merged[0].Title);
         }
 
         /// <summary>

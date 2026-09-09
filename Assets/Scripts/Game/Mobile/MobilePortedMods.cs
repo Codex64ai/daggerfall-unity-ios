@@ -217,7 +217,8 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (cc != null && cc.Enabled && !run[2])
             {
                 cc.Enabled = false;
-                if (!cc.ModInfo.ModDescription.EndsWith(GateNote)) cc.ModInfo.ModDescription += GateNote;
+                if (!(cc.ModInfo.ModDescription ?? "").Contains(GateNote))
+                    cc.ModInfo.ModDescription = (cc.ModInfo.ModDescription ?? "") + GateNote;
                 ModManager.WriteModSettings();
                 Debug.Log("[PortedMods] Climates & Calories switched off: RoleplayRealism and its Items must be on");
             }
@@ -241,8 +242,9 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (wodChosen && !llOn)
             {
                 wod.Enabled = false;
-                // Contains, not EndsWith: both notes can apply, and whichever went on first is no
-                // longer at the end - EndsWith would append it again on every later start-up.
+                // Contains, not EndsWith: both notes can apply, and once the other one is on the
+                // end the first is not, so EndsWith would stop recognizing it. Nothing here spans
+                // launches - the manifest rebuilds ModDescription every time.
                 if (!(wod.ModInfo.ModDescription ?? "").Contains(WoDGateNote)) wod.ModInfo.ModDescription += WoDGateNote;
                 ModManager.WriteModSettings();
                 Debug.Log("[PortedMods] World of Daggerfall switched off: Location Loader must be on");

@@ -792,12 +792,13 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
             {
                 Mod mod = mods[i];
 
-                if (mod == null || !mod.Enabled)
+                if (mod == null)
+                    continue;
+                if (!mod.Enabled)
                 {
                     Debug.Log("removing mod at index: " + i);
                     // MOBILE: keep its settings entry, see prunedMods.
-                    if (mod != null)
-                        prunedMods.Add(mod);
+                    prunedMods.Add(mod);
                     UnloadMod(mod.Title, true);
                     continue;
                 }
@@ -919,16 +920,18 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
         {
             try
             {
-                if (ModManager.Instance.mods == null || ModManager.Instance.mods.Count <= 0)
+                // MOBILE: merged with the mods Init() dropped, so a write after start-up keeps
+                // their entries instead of shrinking the file to the enabled mods. The guard is on
+                // the merged list, not on mods: with every mod switched off, mods is empty once
+                // Init has pruned it, but the pruned entries are exactly what has to be written.
+                List<Mod> entries = MergeModSettings(ModManager.Instance.mods, ModManager.Instance.prunedMods);
+                if (entries.Count == 0)
                 {
                     return false;
                 }
 
                 fsData sdata = null;
-                // MOBILE: merged with the mods Init() dropped, so a write after start-up keeps
-                // their entries instead of shrinking the file to the enabled mods.
-                var result = _serializer.TrySerialize<List<Mod>>(
-                    MergeModSettings(ModManager.Instance.mods, ModManager.Instance.prunedMods), out sdata);
+                var result = _serializer.TrySerialize<List<Mod>>(entries, out sdata);
 
                 if (result.Failed)
                 {
