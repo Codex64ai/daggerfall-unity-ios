@@ -38,8 +38,8 @@ namespace DaggerfallWorkshop
 
         [SerializeField, HideInInspector]
         Material customMaterial = null;
-        [SerializeField, HideInInspector]
         // MOBILE: written directly by the compiled-in WoD Biomes atlas helper (was reflection)
+        [SerializeField, HideInInspector]
         internal CachedMaterial cachedMaterial;
         [SerializeField, HideInInspector]
         Mesh billboardMesh;

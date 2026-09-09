@@ -32,7 +32,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         };
 
         /// <summary>The shader names captured at startup, for verification.</summary>
-        public static IReadOnlyList<string> Names => names;
+        // MOBILE: AsReadOnly, not the array itself - an IReadOnlyList<string> that is the live array can
+        // be cast back to string[] and mutated by any caller.
+        public static IReadOnlyList<string> Names => System.Array.AsReadOnly(names);
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         static void Capture()

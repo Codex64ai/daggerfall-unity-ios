@@ -116,9 +116,13 @@ namespace LocationLoader
                 if (b.Summary.FlatType != FlatTypes.Nature)
                     continue;
 
-                // MOBILE: already ours. The retry path can re-enter the same block (a block is
-                // deferred whole, and only the flats before the unparented one were swapped), and
-                // swapping twice would double the scale and re-ground against it.
+                // MOBILE: belt-and-braces. What actually stops a second swap on the retry path (a
+                // block is deferred whole, so the flats swapped before the unparented one are seen
+                // again) is the FlatType filter one line up: SetMaterial reassigns Summary.FlatType
+                // from MaterialReader.GetFlatType(10030), which is Decoration because Nature is only
+                // archives 500-511, so a swapped flat never reaches this test. Keep the archive guard
+                // anyway - one int compare, and it is what remains if GetFlatType ever widens - but do
+                // not read it as the thing preventing the double scale and re-ground.
                 if (b.Summary.Archive == CUSTOM_ARCHIVE)
                     continue;
 
@@ -169,7 +173,14 @@ namespace LocationLoader
                 // nothing for WorldOfDaggerfall.CustomBillboardHelper to replace: RevisedSetMaterial
                 // exists only because DaggerfallBillboardBatch.SetMaterial cannot build an atlas for
                 // an archive above 511, and it takes a batch, not a billboard.
-                b.SetMaterial(CUSTOM_ARCHIVE, b.Summary.Record);
+                // MOBILE: upstream discarded the return value. DaggerfallBillboard.SetMaterial returns
+                // null and leaves Summary untouched when the archive has no such record (this fork's
+                // fail-soft guard, DaggerfallBillboard.cs:287-297), and the flat then kept its vanilla
+                // 501 texture while still being doubled, re-grounded and counted - a 2x vanilla tree,
+                // doubled again on every retry because neither guard above sees it, and a "swapped N"
+                // line claiming a swap that never happened.
+                if (b.SetMaterial(CUSTOM_ARCHIVE, b.Summary.Record) == null)
+                    continue;
                 // MOBILE: was LocationModLoader.VEModEnabled - the same Vanilla Enhanced probe, read
                 // from the compiled-in Biomes port that now owns it.
                 if (!WorldOfDaggerfall.WODBiomes.VEModEnabled)

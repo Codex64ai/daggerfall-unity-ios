@@ -644,7 +644,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // MaterialReader must get the project's own shaders, never a copy embedded in a mod bundle.
         static void TestMobileShadersFind()
         {
-            foreach (string name in new[] { MaterialReader._DaggerfallDefaultShaderName, MaterialReader._DaggerfallBillboardShaderName, MaterialReader._DaggerfallTilemapTextureArrayShaderName })
+            // The two billboard-batch names are in this loop as well as in the Names check below:
+            // membership in the capture list is not resolution, and these two are what the Biomes
+            // nature overrider and DaggerfallBillboardBatch itself build their atlas material with.
+            foreach (string name in new[] { MaterialReader._DaggerfallDefaultShaderName, MaterialReader._DaggerfallBillboardShaderName, MaterialReader._DaggerfallTilemapTextureArrayShaderName, MaterialReader._DaggerfallBillboardBatchShaderName, MaterialReader._DaggerfallBillboardBatchNoShadowsShaderName })
             {
                 Shader s = MobileShaders.Find(name);
                 Check(s != null && s.name == name, "MobileShaders.Find resolves " + name);
@@ -707,6 +710,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(!WorldOfDaggerfall.NatureBatchOverrider.NeedsReadableCopy(scratch)
                   && !WorldOfDaggerfall.NatureBatchOverrider.NeedsReadableCopy(null),
                 "Biomes: a readable record is packed as-is and a missing one is not a copy candidate");
+            // An import that found nothing is a failure, not an empty success: packing a zero-length
+            // array leaves Apply() indexing an empty atlasRects for items laid out for archive 501.
+            Check(WorldOfDaggerfall.NatureBatchOverrider.HasRecords(1)
+                  && WorldOfDaggerfall.NatureBatchOverrider.HasRecords(32)
+                  && !WorldOfDaggerfall.NatureBatchOverrider.HasRecords(0),
+                "Biomes: an atlas with no records is not a usable atlas");
             UnityEngine.Object.DestroyImmediate(scratch);
         }
 
@@ -844,8 +853,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // World of Daggerfall - Biomes: a data bundle of its own, off by default, textured out of
             // Daggerfall Expanded Textures. It re-skins terrain and swaps nature billboards on its own,
             // so unlike WoD it needs neither Location Loader nor WoD - the gate is its switch and DET.
-            Check(System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.BiomesTitle) >= 0, "PortedMods: Biomes is default-off");
-            Check(MobilePortedMods.BiomesRuns(true, true) && !MobilePortedMods.BiomesRuns(true, false) && !MobilePortedMods.BiomesRuns(false, true), "PortedMods: Biomes runs only with its switch and Daggerfall Expanded Textures on");
+            Check(MobilePortedMods.BiomesTitle == "World of Daggerfall - Biomes" && System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.BiomesTitle) >= 0, "PortedMods: Biomes is a default-off title");
+            Check(MobilePortedMods.BiomesRuns(true, true) && !MobilePortedMods.BiomesRuns(true, false) && !MobilePortedMods.BiomesRuns(false, true) && !MobilePortedMods.BiomesRuns(false, false), "PortedMods: Biomes runs only with its switch and Daggerfall Expanded Textures on");
             Check(MobilePortedMods.BiomesDetNote.Contains("Expanded Textures"), "PortedMods: Biomes note names the missing dependency");
 
             // A mod whose Init throws must not take the mods after it - or the sky's deferred start -
@@ -1126,9 +1135,15 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // of that gate are pure, so they can be pinned here; the swap itself needs a streamed world.
         static void TestBiomesClimateSwapGuard()
         {
+            // A script-created texture is readable, so the positive branch is constructible headlessly -
+            // without it a bare `return false;` would satisfy the two negatives.
+            Texture2D readableMap = new Texture2D(1, 1);
             Check(!global::LocationLoader.BiomesClimateSwap.ShouldSwap(false, null)
-                  && !global::LocationLoader.BiomesClimateSwap.ShouldSwap(true, null),
+                  && !global::LocationLoader.BiomesClimateSwap.ShouldSwap(true, null)
+                  && !global::LocationLoader.BiomesClimateSwap.ShouldSwap(false, readableMap)
+                  && global::LocationLoader.BiomesClimateSwap.ShouldSwap(true, readableMap),
                   "LL: type-5 nature swap needs Biomes running and a readable map");
+            UnityEngine.Object.DestroyImmediate(readableMap);
         }
 
         static global::LocationLoader.LocationPrefab ParseLocationPrefabXml(string xml)

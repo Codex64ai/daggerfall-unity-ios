@@ -2,7 +2,8 @@
 // License:         MIT License
 //
 // Starts the desktop mods whose code is compiled into this app: Roleplay and Realism, its Items
-// module, Climates & Calories, Dynamic Skies, Location Loader and World of Daggerfall
+// module, Climates & Calories, Dynamic Skies, Location Loader, World of Daggerfall and World of
+// Daggerfall - Biomes
 // (Assets/Scripts/Game/Mobile/Ports/). This class calls the mod's own Init exactly as DFU would
 // have called its [Invoke] loader, but only when the entry is enabled, and only with its
 // dependencies on. Nothing runs otherwise.
@@ -21,7 +22,8 @@
 // World of Daggerfall - Biomes is a bundle too, but a standalone one: it re-skins the terrain and
 // swaps the nature billboards by itself, so it needs neither Location Loader nor World of
 // Daggerfall - only Daggerfall Expanded Textures. Default off, and its two Inits run in that order
-// (terrain, then nature) because the nature overrider looks the terrain provider up.
+// (terrain, then nature) because the terrain Init sets the VEModEnabled static that the nature side
+// reads while it builds its atlas.
 //
 // The survival mods start as soon as the bundles are loaded, at the title. Dynamic Skies cannot:
 // its Init reaches into the scene for the sun light and the camera, and on a player build neither
@@ -48,7 +50,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         public const string DETFileName = "daggerfall expanded textures";
         public const string WoDDetNote = " Needs Daggerfall Expanded Textures switched on; it was switched off because that mod is off or not installed.";
         public const string BiomesTitle = "World of Daggerfall - Biomes";
-        public const string BiomesDetNote = " Needs Daggerfall Expanded Textures switched on; it was switched off because that mod is off or not installed.";
+        // MOBILE: the same note WoD uses, under the name the plan gave it - one literal, so the two
+        // cannot drift apart.
+        public const string BiomesDetNote = WoDDetNote;
 
         /// <summary>Pure: which of (rr, rrItems, cc) may run. Items needs RR; C&C needs both.</summary>
         public static bool[] Gate(bool rr, bool rrItems, bool cc)
@@ -296,8 +300,11 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
             if (BiomesRuns(biomes != null && biomes.Enabled, detOn))
             {
-                // Explicit order, not the manifest's: the terrain material provider must exist before
-                // the nature overrider installs itself, which is the upstream VEModEnabled race.
+                // Explicit order, not the manifest's: WODBiomes.Init sets the VEModEnabled static
+                // (WODBiomes.cs:29-33) that the nature side reads while it builds its atlas
+                // (WODClimates.cs, the x2 record-size scaling), so the terrain Init has to have
+                // returned first. The terrain material provider itself is installed later still, in
+                // WODBiomes.Start(), which Unity runs after both Inits have returned.
                 int bi = ModManager.Instance.GetModIndex(BiomesTitle);
                 bool terrainStarted = StartOne(BiomesTitle + " (terrain)", () => WorldOfDaggerfall.WODBiomes.Init(new InitParams(biomes, bi, count)));
                 bool natureStarted = terrainStarted && StartOne(BiomesTitle + " (nature)", () => WorldOfDaggerfall.NatureBatchOverriderInstaller.Init(new InitParams(biomes, bi, count)));

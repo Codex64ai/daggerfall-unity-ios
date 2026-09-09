@@ -133,6 +133,19 @@ namespace WorldOfDaggerfall
             return tex != null && !tex.isReadable;
         }
 
+        /// <summary>
+        /// MOBILE: pure, so the self-test can pin it. True when the probe loop actually imported
+        /// something to pack. An empty albedo list is not a success: PackTextures over a zero-length
+        /// array yields no rects, and DaggerfallBillboardBatch.Apply then indexes an empty atlasRects
+        /// for billboard items laid out for the vanilla archive - an exception in the editor, an
+        /// out-of-bounds read in an IL2CPP player with safety checks off, and either way our own log
+        /// would claim the swap worked. See CustomBillboardHelper.RevisedGetTextureResults.
+        /// </summary>
+        public static bool HasRecords(int count)
+        {
+            return count > 0;
+        }
+
         void ApplyOverrides()
         {
             // MOBILE: whole body guarded. This runs on every OnUpdateTerrainsEnd - the busiest frame in
@@ -246,8 +259,10 @@ namespace WorldOfDaggerfall
     {
         // MOBILE: the three FieldInfo caches and the static constructor that filled them are gone.
         // DaggerfallBillboardBatch.currentArchive and cachedMaterial are internal in this fork, so the
-        // fields below are assigned directly - reflection on private fields does not survive IL2CPP
-        // managed stripping reliably.
+        // fields below are assigned directly. The wins are compile-time checking (a rename now breaks
+        // the build instead of the swap), no static constructor, and no three BindingFlags lookups.
+        // Stripping was never the issue: Assets/link.xml preserves Assembly-CSharp whole, and the batch
+        // reads and writes these fields itself, so managed stripping would have kept them either way.
 
         class CachedAtlas
         {
@@ -302,6 +317,16 @@ namespace WorldOfDaggerfall
             if (_warnedUnreadableArchives.Add(archive))
                 Debug.LogError($"[Biomes] archive {archive} record {record} frame {frame} could not be made "
                              + "CPU-readable; the atlas would pack blank, so the nature swap is skipped");
+        }
+
+        // MOBILE: the other way an atlas build can come back useless - nothing was imported at all.
+        // Same once-per-archive mechanism (and the same set) as the unreadable warning above: both are
+        // terminal for that archive, so one line per archive is the whole story worth logging.
+        static void WarnEmptyAtlas(int archive)
+        {
+            if (_warnedUnreadableArchives.Add(archive))
+                Debug.LogError($"[Biomes] archive {archive} imported no records; the atlas would be empty, "
+                             + "so the nature swap is skipped");
         }
 
         /// <summary>
@@ -505,6 +530,19 @@ namespace WorldOfDaggerfall
                 // takes, so it is the one that actually matters.
                 if (!ProcessCustomTextures(settings, albedos, normalsList, emissions, indicesList, results))
                     return false;
+            }
+
+            // MOBILE: fail closed on an empty import. The probe loop can legitimately find nothing -
+            // AssetInjection off in settings.ini, or a Daggerfall Expanded Textures build without
+            // archive 10030 - and upstream treated that as success: PackTextures over a zero-length
+            // array, empty atlasIndices/frameCounts into the CachedMaterial, the batch put on 10030 and
+            // the swap counted, then Apply() indexing an empty atlasRects for items laid out for archive
+            // 501. Returning false here keeps vanilla nature, and because the cache write is below this
+            // point it leaves _atlasCache empty, so a later terrain update retries once DET resolves.
+            if (!NatureBatchOverrider.HasRecords(albedos.Count))
+            {
+                WarnEmptyAtlas(archive);
+                return false;
             }
 
             // pack albedo into _lastAtlas

@@ -386,7 +386,7 @@ DXT5's absence, empty `WWW` audio clips. None of that is expressed as a test. If
 changes behaviour in those areas it will look fine on the Mac and fail on the iPad — see
 HANDOFF-controller.md for the full list before touching input or asset injection.
 
-### World of Daggerfall - Biomes support (2026-09-09) — `Game/Mobile/{MobilePortedMods.cs (+40/-1),MobileShaders.cs (+8)}`, `Game/Mobile/Ports/WorldOfDaggerfallBiomes/` (new, +712), `Game/Mobile/Ports/LocationLoader/{BiomesClimateSwap.cs (new, +208),LocationLoader.cs (+8)}`, `Assets/Scripts/Internal/DaggerfallBillboardBatch.cs (+10/-8)`, `Assets/Editor/{MobileModPackTextureRules.cs (new, +38),MobileModBuilder.cs (+16),MobileSelfTest.cs (+86)}`, `tools/bundled-mods/mods.json (+13)`
+### World of Daggerfall - Biomes support (2026-09-09) — `Game/Mobile/{MobilePortedMods.cs (+48/-2),MobileShaders.cs (+10)}`, `Game/Mobile/Ports/WorldOfDaggerfallBiomes/` (new, +852), `Game/Mobile/Ports/LocationLoader/{BiomesClimateSwap.cs (new, +219),LocationLoader.cs (+8)}`, `Assets/Scripts/Internal/DaggerfallBillboardBatch.cs (+10/-8)`, `Assets/Editor/{MobileModPackTextureRules.cs (new, +38),MobileModBuilder.cs (+16),MobileSelfTest.cs (+120/-1)}`, `tools/bundled-mods/mods.json (+13)`
 Counts are `git diff --numstat 20fa6ba9a HEAD` (the plan commit to this feature's last).
 World of Daggerfall - Biomes compiled in (see THIRD-PARTY.md). It rides the hooks the earlier ported
 mods already added and touches **one** upstream engine file, `DaggerfallBillboardBatch.cs`.
@@ -394,18 +394,19 @@ mods already added and touches **one** upstream engine file, `DaggerfallBillboar
 
 Two changes there, both small and both `MOBILE:`-marked. `CachedMaterial cachedMaterial` and
 `int currentArchive` become `internal`, because the mod's `CustomBillboardHelper` wrote both by
-reflection (`FieldInfo`s filled in a static constructor) to install its own atlas on a batch — a
-pattern that is fine on desktop and a liability under IL2CPP managed stripping, where a field reached
-only by name can be stripped away and the reflection lookup then returns null with no diagnostic. The
-port assigns them directly and the reflection is gone. Second, the two raw
+reflection (`FieldInfo`s filled in a static constructor) to install its own atlas on a batch. The
+port assigns them directly and the reflection is gone: the wins are compile-time checking (a rename
+breaks the build instead of the swap), no static constructor and no three `BindingFlags` lookups.
+Stripping was never the risk here — `link.xml` preserves `Assembly-CSharp` whole, and the batch reads
+and writes both fields itself. Second, the two raw
 `Shader.Find(MaterialReader._DaggerfallBillboardBatchShaderName)` /
 `...NoShadowsShaderName` calls in `SetMaterial` and `SetMaterial(Material)` now go through
 `Game.Mobile.MobileShaders.Find`, and those two names are added to `MobileShaders.names` — a
 pre-existing gap in the shader-lookup patch above (a loaded mod bundle that embeds its own stripped
 copy of `Daggerfall/BillboardBatch` could win the `Shader.Find` by name). The Biomes nature overrider
 needs the same two shaders for the archive it swaps in, which is what surfaced it. `MobileShaders` also
-gained `public static IReadOnlyList<string> Names => names` so the self-test can assert the capture
-list rather than trusting it.
+gained `public static IReadOnlyList<string> Names => System.Array.AsReadOnly(names)` so the self-test
+can assert the capture list rather than trusting it, without handing out the live array.
 
 `MobilePortedMods` adds `BiomesTitle` to `Titles` (which `DefaultOff` walks, so the entry starts off),
 the pure `BiomesRuns(biomesOn, detOn) => biomesOn && detOn`, `BiomesDetNote`, and a `BiomesRunning`
@@ -467,7 +468,8 @@ The `mods.json` entry is `strip_code` (all three scripts are compiled in), `priv
 `pending:` licence, `exclude_globs` for the repo's `.7z`/`.xcf`, and `archives_from:
 ["DaggerfallExpandedTextures"]`. No `extra_dirs`: the manifest names every asset, there are no prefabs
 and no meshes. `MobileSelfTest` covers the two new shader names, the ported `Init` entry points and the
-`ClimateMap` property shape, `IsSubtropicalKey` / `MapReadable` / `AtlasMaxSize`, the default-off title,
+`ClimateMap` property shape, `IsSubtropicalKey` / `MapReadable` / `NeedsReadableCopy` / `HasRecords` /
+`AtlasMaxSize`, the default-off title,
 `BiomesRuns` and `BiomesDetNote`, the importer rule table, and `BiomesClimateSwap.ShouldSwap`. As with
 Location Loader itself, the rest needs a streamed world and belongs to the simulator and device runs.
 *Rebase risk: LOW.* The `DaggerfallBillboardBatch` edits are two accessibility changes and one
