@@ -155,18 +155,20 @@ never in a public release, and `private_only` in `tools/bundled-mods/mods.json` 
 public MIT mod pack build. DREAM SKY 1.2 (King of Worms, Nexus mods/664) is a preset for it - textures
 and weather JSON, no code - converted to `dream-sky.dfmod` for the same private draft.
 
-## World of Daggerfall (compiled in + private bundle)
+## World of Daggerfall (compiled in, private draft only)
 
 Two mods, one feature. Location Loader is pure code - it has no content of its own and does nothing
 alone - and World of Daggerfall is the location mod it reads. Both follow the Dynamic Skies pattern:
 the C# is compiled in under `Assets/Scripts/Game/Mobile/Ports/` (iOS cannot load mod code from a
-`.dfmod`), the data is a bundle the player installs, and each is an ordinary, off-by-default entry in
-the launcher's MODS window. Copied unchanged except lines marked `MOBILE` (the `[Invoke]` loaders
-removed); every ported file carries a header naming its source repo and commit.
+`.dfmod`), and each is an ordinary, off-by-default entry in the launcher's MODS window. WoD's data is
+a bundle the player installs; Location Loader has no data at all, so its entry is registered in code.
+Copied unchanged except lines marked `MOBILE` (the `[Invoke]` loaders removed); every ported file
+carries a header naming its source repo and commit, and `WODRocksMaterials.cs.meta` keeps upstream's
+own script GUID so WoD's rock prefabs still bind it.
 
 | Mod | Author, licence | Source | What is NOT shipped |
 |---|---|---|---|
-| Location Loader 0.3 | KABoissonneault, a fork of Uncanny_Valley's loader with contributions by Kamer; NO LICENCE DECLARED (permission being sought by Ikram; not in any public release) | github.com/KABoissonneault/DFU-LocationLoader @ a5e7a18 | the 3 editor scripts (`Scripts/Editor/`) - authoring tools, useless on a device. The 11 runtime files are compiled in under `Ports/LocationLoader/`; upstream's manifest carries no data, so there is no bundle at all - the launcher entry is registered in code |
+| Location Loader 0.3 | KABoissonneault, a fork of Uncanny_Valley's loader; NO LICENCE DECLARED (permission being sought by Ikram; not in any public release) | github.com/KABoissonneault/DFU-LocationLoader @ a5e7a18 | the 3 editor scripts (`Scripts/Editor/`) - authoring tools, useless on a device. The 11 runtime files are compiled in under `Ports/LocationLoader/`; upstream's manifest carries no data, so there is no bundle at all - the launcher entry is registered in code |
 | World of Daggerfall 0.4.0 | World of Daggerfall Team (KABoissonneault, Cliffworms, Kamer, carademono); NO LICENCE DECLARED (permission being sought by Ikram; not in any public release) | github.com/drcarademono/world-of-daggerfall @ 3bf8837 | WoD Terrain and WoD Biomes (separate mods, out of scope - one needs compute shaders and synchronous readbacks), Distant Terrain, and the three optional dependencies Wilderness Overhaul, RMB Resource Pack and Beautiful Villages. Its one script, `WODRocksMaterials.cs`, is compiled in under `Ports/WorldOfDaggerfall/`; its data is the bundle |
 
 Because no licence has ever been declared upstream for either repo, this ships on the private test
@@ -180,8 +182,8 @@ by default and is switched off automatically, with a note in its description, wh
 is off - a location mod is nothing without the loader reading it.
 
 WoD requires Daggerfall Expanded Textures (Ninelan; already in the pack, see above). If that mod is
-missing or off, DFU's own dependency check disables World of Daggerfall and says so in the MODS
-window; nothing else is needed. Performance is the acknowledged unknown: WoD places roughly 200,000
+off or missing, World of Daggerfall is switched off at start-up and its description in MODS says why;
+nothing else is needed. Performance is the acknowledged unknown: WoD places roughly 200,000
 instances across the world, and the cost on older iPads is unmeasured - the off-by-default switch is
 the mitigation until it is, and `TUNE > Advanced > Show diagnostics` shows the frame time. Neither mod
 was device-verified at the time of writing.

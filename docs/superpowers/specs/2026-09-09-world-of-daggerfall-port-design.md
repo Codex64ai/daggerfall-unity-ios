@@ -46,11 +46,15 @@ public pack (enforced by `private_only` in the pack tooling), exactly as DREAM a
    archives), `drop_dependencies: ["location loader", "wilderness overhaul", "rmb resource pack", "beautiful villages"]`
    (LL is built in and has no FileName; the others are not shipped) - the DET dependency stays. NEW fetch flag
    `extra_dirs: ["Meshes"]`: copy those repo folders (with .meta) into the mod folder even though the manifest
-   does not list them, so prefab GUID references resolve at bundle build. The bundle is `world of daggerfall.dfmod`
-   (or whatever the builder emits from the manifest name), shipped on the private draft only.
-4. Failure handling: LL Init is wrapped by the existing MobilePortedMods try/catch; WoD without LL is
-   switched off with a note; WoD without DET is left to DFU's dependency check (it disables WoD and the
-   launcher shows why) - documented.
+   does not list them, so prefab GUID references resolve at bundle build. The bundle is `worldofdaggerfall.dfmod` -
+   `MobileModBuilder` derives the name from the manifest file name (`WorldOfDaggerfall.dfmod.json`) and
+   Unity lower-cases it - shipped on the private draft only.
+4. Failure handling: each compiled-in mod's Init runs through `MobilePortedMods.StartOne(title, init)`,
+   which holds its own try/catch, so one mod throwing costs only that mod (the Dynamic Skies entry is
+   resolved before any Init runs, so it keeps its deferred start). WoD without LL is switched off with a
+   note; WoD needs Daggerfall Expanded Textures, and if that mod is off or missing WoD is switched off at
+   start-up too and its description in MODS says why (DFU's own dependency check only warns, so this port
+   gates it) - both documented.
 5. Verification: self-tests (gate, fetch flag, compile); simulator run with LL+WoD+DET installed (RGBA32
    rebuild of the WoD bundle for the sim; DET stays ASTC since only its presence matters) at a wilderness
    pixel near Daggerfall, expecting `[LL]` log lines and WoD instances, screenshot; then a device ipa

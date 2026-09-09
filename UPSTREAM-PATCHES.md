@@ -203,7 +203,7 @@ the session banner, before any Unity message reaches the mirror; twice in one we
 kept from an older build was read as the current one and sent a device test down the wrong path.
 *Rebase risk: LOW.* Both engine edits are small and self-contained, and both are marked `MOBILE:`.
 
-### World of Daggerfall support (2026-09-09) — `Game/Mobile/{MobileMods.cs (+22),MobilePortedMods.cs (+32/-4)}`, `Game/Mobile/Ports/{LocationLoader,WorldOfDaggerfall}/` (new), `Assets/Editor/MobileSelfTest.cs (+3)`, `tools/bundled-mods/{fetch.py,mods.json}`
+### World of Daggerfall support (2026-09-09) — `Game/Mobile/{MobileMods.cs (+22),MobilePortedMods.cs (+51/-8)}`, `Game/Mobile/Ports/{LocationLoader,WorldOfDaggerfall}/` (new), `Ports/WorldOfDaggerfall/WODRocksMaterials.cs.meta` (GUID pin), `Assets/Editor/MobileSelfTest.cs (+10)`, `tools/bundled-mods/{fetch.py,mods.json}`
 Location Loader and World of Daggerfall compiled in (see THIRD-PARTY.md). **No upstream engine file
 is touched** — the whole feature rides the hooks the survival mods and Dynamic Skies already added
 (`MobilePortedMods.DefaultOff` from `ModManager.Awake`, `Mod.cs`'s `[fsProperty]` opt-in so the
@@ -215,25 +215,38 @@ for the engine to find and the player could otherwise never switch it on. `Mobil
 titles to `Titles` (which is what `DefaultOff` walks, so both start off), the pure
 `WodRuns(locationLoaderOn, wodOn) = locationLoaderOn && wodOn`, and a gate in `StartEnabled` mirroring
 the Climates & Calories one: an enabled `World of Daggerfall` with Location Loader off is switched off,
-`WoDGateNote` appended to its description once, `WriteModSettings()`, and a log line. Then
-`LocationModLoader.Init` runs when the loader is on, and `WODRocksMaterials.Init` after it when both
-are. Both `Init` calls sit inside the existing try/catch, so a throw from either leaves the rest of
-the mods running. WoD's other requirement, Daggerfall Expanded Textures, is deliberately NOT gated
-here: DFU's own dependency check already disables WoD and shows why in MODS.
+`WoDGateNote` appended to its description once, `WriteModSettings()`, and a log line. World of
+Daggerfall's other requirement, Daggerfall Expanded Textures, is gated the same way: with that mod
+missing or switched off, World of Daggerfall is switched off at start-up and its description in MODS
+says why. Then `LocationModLoader.Init` runs when the loader is on, and `WODRocksMaterials.Init` after
+it when both are.
+Each compiled-in mod's `Init` now goes through `MobilePortedMods.StartOne(title, init)`, which holds
+its own try/catch, logs `start failed` with the exception, returns whether it got through and writes
+the `started` line only when it did. Before that there was one try/catch around the whole of
+`StartEnabled`, so a throw from any mod's `Init` abandoned every mod after it — and the sky, resolved
+last, lost its deferred start for the session. The Dynamic Skies entry is now resolved at the top of
+`StartEnabled`, before any `Init` runs, for the same reason.
+`WODRocksMaterials.cs.meta` pins upstream's script GUID `426f76434556e931a830bf5c83c73b54` instead of
+the fresh one Unity generates on import: 113 WoD prefabs (99 in `Rocks`, 14 in `Mountains`) bind the
+script by that GUID, and with a different one they build with a missing `MonoBehaviour` — no compile
+error, no log line, the climate and season rock materials simply never apply.
 `tools/bundled-mods/fetch.py` gains `extra_dirs`, a per-entry list of repo folders copied wholesale
-(files and their `.meta`, `.git` skipped) into the mod folder after the manifest's `Files`, and
-missing raises `SystemExit`. WoD's `Prefabs/*.prefab` reference `Meshes/*.fbx|.dae` by GUID and the
+(`copytree`, `.git` excluded) into the mod folder after the manifest's `Files`, and missing raises
+`SystemExit`. WoD's `Prefabs/*.prefab` reference `Meshes/*.fbx|.dae` by GUID and the
 manifest never names them, so a manifest-only copy ships prefabs with no model; the folders stay out
 of the manifest because Unity follows the GUIDs when it builds the bundle. UBLaMF's pre-existing
 `extra_roots` now routes through the same helper. The `mods.json` entry is `strip_code` (its one
 script is compiled in), `private_only` with a `pending:` licence (no licence declared upstream — the
 combination `fetch.py` requires), `archives_from: ["DaggerfallExpandedTextures"]`, and
 `drop_dependencies` for Location Loader (built in, so it has no `FileName` to match) and the three
-optional mods this port does not ship. `MobileSelfTest` covers the gate.
+optional mods this port does not ship. `MobileSelfTest` covers the default-off titles, `WodRuns` and `StartOne`.
 *Rebase risk: NONE for the engine* — no upstream file changed. A DFU API change that breaks Location
 Loader's code shows up as compile errors in `Ports/LocationLoader/`, and it hooks
 `DaggerfallTerrain.OnPromoteTerrainData` and `StreamingWorld.OnInitWorld/OnUpdateTerrainsEnd` and
-replaces `DaggerfallUnity.Instance.TerrainNature`, so watch those three after a rebase.
+replaces `DaggerfallUnity.Instance.TerrainNature`, so watch those four after a rebase. The one thing
+here that fails silently is the GUID pin: `WODRocksMaterials.cs.meta` carries upstream's script GUID
+`426f76434556e931a830bf5c83c73b54` (commit `9d6c83c1a`), and re-copying the port source from upstream
+without re-pinning the meta unbinds the rock materials in all 113 prefabs with nothing to notice it by.
 
 ## Rebase procedure
 
