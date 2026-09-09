@@ -994,6 +994,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobilePortedMods.BiomesRuns(true, true) && !MobilePortedMods.BiomesRuns(true, false) && !MobilePortedMods.BiomesRuns(false, true) && !MobilePortedMods.BiomesRuns(false, false), "PortedMods: Biomes runs only with its switch and Daggerfall Expanded Textures on");
             Check(MobilePortedMods.BiomesDetNote.Contains("Expanded Textures"), "PortedMods: Biomes note names the missing dependency");
 
+            // World of Daggerfall - Terrain: its own data bundle, off by default, and gated by nothing
+            // - Basic Roads is optional to it and Daggerfall Expanded Textures is not its dependency at
+            // all. It replaces DaggerfallUnity.TerrainSampler, so it is started LAST: an Init that threw
+            // there cannot then cost the mods before it their start.
+            Check(MobilePortedMods.TerrainTitle == "World of Daggerfall - Terrain" && System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.TerrainTitle) >= 0, "PortedMods: World of Daggerfall - Terrain is a default-off title");
+            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 1] == MobilePortedMods.TerrainTitle, "PortedMods: World of Daggerfall - Terrain is started last");
+
             // A mod whose Init throws must not take the mods after it - or the sky's deferred start -
             // down with it. The LogError below is this check working, not a failure.
             bool ranClean = false;

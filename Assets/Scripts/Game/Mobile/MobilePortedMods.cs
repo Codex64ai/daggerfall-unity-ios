@@ -2,8 +2,8 @@
 // License:         MIT License
 //
 // Starts the desktop mods whose code is compiled into this app: Roleplay and Realism, its Items
-// module, Climates & Calories, Dynamic Skies, Location Loader, World of Daggerfall and World of
-// Daggerfall - Biomes
+// module, Climates & Calories, Dynamic Skies, Location Loader, World of Daggerfall, World of
+// Daggerfall - Biomes and World of Daggerfall - Terrain
 // (Assets/Scripts/Game/Mobile/Ports/). This class calls the mod's own Init exactly as DFU would
 // have called its [Invoke] loader, but only when the entry is enabled, and only with its
 // dependencies on. Nothing runs otherwise.
@@ -23,6 +23,12 @@
 // swaps the nature billboards by itself, so it needs neither Location Loader nor World of
 // Daggerfall - only Daggerfall Expanded Textures. Default off, and its two Inits run terrain-then-
 // nature so that a terrain Init which threw stops the nature side from starting at all.
+//
+// World of Daggerfall - Terrain is a bundle as well, and gated by nothing but its own switch: it
+// replaces the terrain sampler and computes ground height on the GPU. It goes last, because that
+// replacement is the most invasive thing started here and its own Init declines to install the
+// sampler on a device without compute shaders. Default off - turning it on moves the ground under
+// existing saves and redraws the travel map.
 //
 // The survival mods start as soon as the bundles are loaded, at the title. Dynamic Skies cannot:
 // its Init reaches into the scene for the sun light and the camera, and on a player build neither
@@ -52,6 +58,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         // MOBILE: the same note WoD uses, under the name the plan gave it - one literal, so the two
         // cannot drift apart.
         public const string BiomesDetNote = WoDDetNote;
+        public const string TerrainTitle = "World of Daggerfall - Terrain";
 
         /// <summary>Pure: which of (rr, rrItems, cc) may run. Items needs RR; C&C needs both.</summary>
         public static bool[] Gate(bool rr, bool rrItems, bool cc)
@@ -85,7 +92,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         public static bool BiomesRunning;
 
         /// <summary>Titles of the compiled-in mods, in dependency order.</summary>
-        public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle, SkyTitle, LLTitle, WoDTitle, BiomesTitle };
+        public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle, SkyTitle, LLTitle, WoDTitle, BiomesTitle, TerrainTitle };
 
         /// <summary>
         /// Called by ModManager after it found the bundles and before it applies saved settings: a
@@ -312,6 +319,23 @@ namespace DaggerfallWorkshop.Game.Mobile
                 bool natureStarted = terrainStarted && StartOne(BiomesTitle + " (nature)", () => WorldOfDaggerfall.NatureBatchOverriderInstaller.Init(new InitParams(biomes, bi, count)));
                 BiomesRunning = terrainStarted && natureStarted;
                 if (BiomesRunning) Debug.Log("[PortedMods] started " + BiomesTitle);
+            }
+
+            // MOBILE: World of Daggerfall - Terrain. No dependency gate: Basic Roads is optional to it
+            // (its road map is simply unused without it) and Daggerfall Expanded Textures is not its
+            // dependency at all - its own switch is the whole condition. Started LAST of everything
+            // here because it is the one port that replaces DaggerfallUnity.TerrainSampler outright; an
+            // Init that threw at that point cannot cost any mod before it its start, and Init itself
+            // refuses to install the sampler when the device has no compute support or the shaders did
+            // not load ("[WoDTerrain] not available: ..."), leaving DFU's own terrain in place.
+            Mod terrain = Entry(TerrainTitle);
+            if (terrain != null && terrain.Enabled)
+            {
+                // Said once per launch, not a warning: the height curve it computes is a different
+                // world to the vanilla one, so a character standing on ground that has moved is the
+                // expected outcome, not a bug report.
+                Debug.Log("[PortedMods] " + TerrainTitle + ": this changes ground height under existing saves and the travel map (by design)");
+                StartOne(TerrainTitle, () => Monobelisk.InterestingTerrains.Init(new InitParams(terrain, ModManager.Instance.GetModIndex(TerrainTitle), count)));
             }
 
             return SkyRuns(sky != null, sky != null && sky.Enabled) ? sky : null;
