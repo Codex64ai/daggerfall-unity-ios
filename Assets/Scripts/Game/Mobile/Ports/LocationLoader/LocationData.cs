@@ -1,4 +1,6 @@
 // MOBILE PORT - source: github.com/KABoissonneault/DFU-LocationLoader @ a5e7a187de1e89465b29001cd7f0b88ecd6d4aa0
+// MOBILE PORT - also: github.com/drcarademono/DFU-LocationLoader @ 896a5741e5c9badd47fbb6c0f9926a95a79cb776
+//   (branch rmb-object) - object type 5 (RMB block) backport only.
 // File LocationData.cs, copied unchanged for iOS except lines marked MOBILE.
 // Upstream carries no licence header; shipped on the private draft only.
 using System;
@@ -19,6 +21,17 @@ namespace LocationLoader
         public Vector3 pos = Vector3.zero;
         public Quaternion rot = Quaternion.Euler(0, 0, 0);
         public Vector3 scale = new Vector3(1, 1, 1);
+
+        // MOBILE: backport of drcarademono/DFU-LocationLoader@896a574 (rmb-object) - object type 5 (RMB block)
+        public bool groundPlane = false;
+
+        public const int TypeMesh = 0;
+        public const int TypeBillboard = 1;
+        public const int TypeEditorMarker = 2;
+        public const int TypeLLPrefab = 3;
+        public const int TypeUnityPrefab = 4;
+        public const int TypeRMB = 5;
+        // MOBILE: end backport
     }
 
     /// <summary>

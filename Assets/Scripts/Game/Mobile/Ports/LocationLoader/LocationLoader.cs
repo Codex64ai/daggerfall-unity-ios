@@ -1,4 +1,6 @@
 // MOBILE PORT - source: github.com/KABoissonneault/DFU-LocationLoader @ a5e7a187de1e89465b29001cd7f0b88ecd6d4aa0
+// MOBILE PORT - also: github.com/drcarademono/DFU-LocationLoader @ 896a5741e5c9badd47fbb6c0f9926a95a79cb776
+//   (branch rmb-object) - object type 5 (RMB block) backport only.
 // File LocationLoader.cs, copied unchanged for iOS except lines marked MOBILE.
 // Upstream carries no licence header; shipped on the private draft only.
 using System.Collections.Generic;
@@ -13,6 +15,7 @@ using DaggerfallWorkshop.Game.Entity;
 using static DaggerfallWorkshop.Utility.ContentReader;
 using DaggerfallWorkshop.Utility.AssetInjection;
 using DaggerfallConnect;
+using DaggerfallConnect.Arena2; // MOBILE: backport of drcarademono/DFU-LocationLoader@896a574 (rmb-object) - object type 5 (RMB block)
 
 namespace LocationLoader
 {
@@ -32,6 +35,12 @@ namespace LocationLoader
             new ConditionalWeakTable<DaggerfallTerrain, LLTerrainData>();
 
         LocationResourceManager resourceManager;
+
+        // MOBILE: backport of drcarademono/DFU-LocationLoader@896a574 (rmb-object) - object type 5 (RMB block)
+        // Block names whose RMB layout already threw once. Farms repeat tens of thousands of times, so a
+        // broken block must not fill the log on every terrain-streaming step.
+        static readonly HashSet<string> failedRmbBlocks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // MOBILE: end backport
 
         public const int TERRAIN_SIZE = 128;
         public const int ROAD_WIDTH = 4; // Actually 2, but let's leave a bit of a gap
@@ -415,6 +424,67 @@ namespace LocationLoader
                         }
                     }
                 }
+                // MOBILE: backport of drcarademono/DFU-LocationLoader@896a574 (rmb-object) - object type 5 (RMB block)
+                else if (obj.type == LocationObject.TypeRMB)
+                {
+                    // MOBILE: try/catch is an iOS-side safety net. Upstream lets an RMB layout failure
+                    // throw out of the whole spawn loop, which on a streaming terrain would drop every
+                    // later object in the prefab too. Log once per block name and carry on.
+                    try
+                    {
+                        //if (blocksFile.GetBlockIndex(obj.name) == -1)
+                            //WorldDataReplacement.AssignNextIndex(obj.name); Commented out for until PR accepted
+
+                        // Step 1: Get the player's current climate index
+                        int currentClimateIndex = GameManager.Instance.PlayerGPS.CurrentClimateIndex;
+
+                        // Step 2: Use MapsFile to get the climate settings based on the current climate index
+                        var climateSettings = MapsFile.GetWorldClimateSettings(currentClimateIndex);
+
+                        // Step 3: Convert DFLocation.ClimateBaseType to ClimateBases using ClimateSwaps
+                        ClimateBases climateBase = ClimateSwaps.FromAPIClimateBase(climateSettings.ClimateType);
+
+                        // Step 4: Convert DFLocation.ClimateTextureSet to ClimateNatureSets using ClimateSwaps
+                        ClimateNatureSets climateNature = ClimateSwaps.FromAPITextureSet(climateSettings.NatureSet);
+
+                        // Step 5: Determine the season (set to Winter if it's currently Winter; otherwise, use Summer)
+                        ClimateSeason climateSeason = (DaggerfallUnity.Instance.WorldTime.Now.SeasonValue == DaggerfallDateTime.Seasons.Winter)
+                            ? ClimateSeason.Winter
+                            : ClimateSeason.Summer;
+
+                        // Create the RMB block game object
+                        DFBlock blockData;
+                        GameObject rmbBlock = RMBLayout.CreateBaseGameObject(obj.name, layoutX: 0, layoutY: 0, out blockData);
+
+                        // Add the ground plane with the determined climate base and season
+                        //if (obj.groundPlane == true) RMBLayout.AddGroundPlane(ref blockData, rmbBlock.transform, climateBase, climateSeason);
+
+                        // Add nature flats with the determined nature set and season
+                        RMBLayout.AddNatureFlats(ref blockData, rmbBlock.transform, null, climateNature, climateSeason);
+
+                        // Add Lights with billboard batching or custom lighting
+                        RMBLayout.AddLights(ref blockData, rmbBlock.transform, rmbBlock.transform, null);
+
+                        // Add other block flats, like animals and NPCs
+                        RMBLayout.AddMiscBlockFlats(ref blockData, rmbBlock.transform, mapId: 0, locationIndex: 0);
+
+                        // Add Exterior Block Flats
+                        RMBLayout.AddExteriorBlockFlats(ref blockData, rmbBlock.transform, rmbBlock.transform, mapId: 0, locationIndex: 0, climateNature, climateSeason);
+
+                        // Place and set up the final RMB block in the scene
+                        rmbBlock.transform.parent = instance.transform;
+                        rmbBlock.transform.localPosition = obj.pos;
+                        rmbBlock.transform.localRotation = obj.rot;
+                        rmbBlock.transform.localScale = obj.scale;
+                    }
+                    catch (Exception ex)
+                    {
+                        if (failedRmbBlocks.Add(obj.name))
+                            Debug.LogWarning($"[LL] RMB block {obj.name} failed: {ex.Message}");
+                        continue;
+                    }
+                }
+                // MOBILE: end backport
 
                 if (go)
                 {

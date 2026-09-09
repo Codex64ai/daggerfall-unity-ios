@@ -1,4 +1,6 @@
 // MOBILE PORT - source: github.com/KABoissonneault/DFU-LocationLoader @ a5e7a187de1e89465b29001cd7f0b88ecd6d4aa0
+// MOBILE PORT - also: github.com/drcarademono/DFU-LocationLoader @ 896a5741e5c9badd47fbb6c0f9926a95a79cb776
+//   (branch rmb-object) - object type 5 (RMB block) backport only.
 // File LocationHelper.cs, copied unchanged for iOS except lines marked MOBILE.
 // Upstream carries no licence header; shipped on the private draft only.
 using System;
@@ -1810,6 +1812,15 @@ namespace LocationLoader
                             obj.rot.z = float.Parse(node.InnerXml, cultureInfo);
                     }
 
+                    // MOBILE: backport of drcarademono/DFU-LocationLoader@896a574 (rmb-object) - object type 5 (RMB block)
+                    if (obj.type == LocationObject.TypeRMB)
+                    {
+                        var groundPlaneNode = objectNode["groundPlane"];
+                        if (groundPlaneNode != null)
+                            obj.groundPlane = bool.Parse(groundPlaneNode.InnerXml);
+                    }
+                    // MOBILE: end backport
+
                     var extraDataNode = objectNode["extraData"];
                     if (extraDataNode != null)
                         obj.extraData = extraDataNode.InnerXml;
@@ -1907,6 +1918,13 @@ namespace LocationLoader
                     writer.WriteLine("\t\t<rotY>" + obj.rot.y.ToString(cultureInfo) + "</rotY>");
                     writer.WriteLine("\t\t<rotZ>" + obj.rot.z.ToString(cultureInfo) + "</rotZ>");
                 }
+
+                // MOBILE: backport of drcarademono/DFU-LocationLoader@896a574 (rmb-object) - object type 5 (RMB block)
+                if (obj.type == LocationObject.TypeRMB && obj.groundPlane)
+                {
+                    writer.WriteLine("\t\t<groundPlane>" + obj.groundPlane.ToString().ToLower() + "</groundPlane>");
+                }
+                // MOBILE: end backport
 
                 writer.WriteLine("\t</object>");
             }
@@ -2007,11 +2025,13 @@ namespace LocationLoader
                 Debug.LogWarning("Editor marker name format is invalid, use 199.RECORDID");
                 return false;
             }
-            else if(type == 3 || type == 4)
+            // MOBILE: backport of drcarademono/DFU-LocationLoader@896a574 (rmb-object) - object type 5 (RMB block)
+            else if(type == 3 || type == 4 || type == LocationObject.TypeRMB)
             {
                 // Just assume valid for now
                 return true;
             }
+            // MOBILE: end backport
             else
             {
                 Debug.LogWarning($"Invalid obj type found: {type}");

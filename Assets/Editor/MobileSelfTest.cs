@@ -129,6 +129,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestPortedModGate();
             TestPortedModOrder();
             TestPortedModTitles();
+            TestLocationLoaderRmbObjects();
             TestTravelOptionsBridge();
             TestTavernAlcohol();
             TestModSettingsSerialization();
@@ -949,6 +950,98 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && stamp.Contains("net.codex64.daggerfall.test") && stamp.Contains("abc123")
                   && stamp.Contains("6000.3.23f1") && stamp.Contains("1.1.1"),
                   "build stamp: names product, version, bundle id, build guid, Unity and DFU versions", stamp);
+        }
+
+        /// <summary>
+        /// Location Loader object type 5 (RMB block), backported from
+        /// drcarademono/DFU-LocationLoader@896a574 (branch rmb-object).
+        ///
+        /// World of Daggerfall 0.4.0 was authored against Location Loader 0.4.x, which places a whole
+        /// RMB block as a prefab object (type 5). Our pin a5e7a18 (upstream tip, LL 0.3) rejects type 5
+        /// in LocationHelper.ValidateValue, so the object is dropped at parse time and 24 prefab
+        /// definitions - all 32,218 wilderness farmsteads and the 382 generic docks/lighthouses - spawn
+        /// as empty flattened clearings. These checks pin the parse half of the backport: the type
+        /// constant, the optional groundPlane element, and that genuinely unknown types are still
+        /// rejected. The spawn half (RMBLayout) needs a running game and cannot be tested here.
+        /// </summary>
+        static void TestLocationLoaderRmbObjects()
+        {
+            Check(global::LocationLoader.LocationObject.TypeRMB == 5,
+                  "LocationObject.TypeRMB is 5",
+                  global::LocationLoader.LocationObject.TypeRMB.ToString());
+
+            // The same public parser the runtime uses: LocationResourceManager reads prefab
+            // definitions through LocationHelper.LoadLocationPrefab(XmlDocument).
+            const string withGroundPlane =
+                "<locationPrefab>" +
+                "<height>17</height><width>17</width>" +
+                "<object>" +
+                "<type>5</type><objectID>0</objectID><name>FARMAA01.RMB</name>" +
+                "<posX>-51.2</posX><posY>0.1</posY><posZ>-51.2</posZ>" +
+                "<scaleX>1</scaleX><scaleY>1</scaleY><scaleZ>1</scaleZ>" +
+                "<groundPlane>true</groundPlane>" +
+                "</object>" +
+                "</locationPrefab>";
+
+            var prefab = ParseLocationPrefabXml(withGroundPlane);
+            Check(prefab != null && prefab.obj.Count == 1,
+                  "a type 5 object survives parsing",
+                  prefab == null ? "prefab was null" : prefab.obj.Count.ToString());
+            if (prefab != null && prefab.obj.Count == 1)
+            {
+                var obj = prefab.obj[0];
+                Check(obj.type == global::LocationLoader.LocationObject.TypeRMB && obj.name == "FARMAA01.RMB",
+                      "the parsed type 5 object keeps its type and block name",
+                      obj.type + " / " + obj.name);
+                Check(obj.groundPlane,
+                      "<groundPlane>true</groundPlane> is read into groundPlane");
+            }
+            else
+            {
+                Check(false, "the parsed type 5 object keeps its type and block name", "no object parsed");
+                Check(false, "<groundPlane>true</groundPlane> is read into groundPlane", "no object parsed");
+            }
+
+            // groundPlane is optional: the element is absent from most WoD dock prefabs, and a
+            // missing element must leave the default false rather than throw out the object.
+            const string withoutGroundPlane =
+                "<locationPrefab>" +
+                "<height>17</height><width>17</width>" +
+                "<object>" +
+                "<type>5</type><objectID>0</objectID><name>FARMAA01.RMB</name>" +
+                "<posX>-51.2</posX><posY>0.1</posY><posZ>-51.2</posZ>" +
+                "<scaleX>1</scaleX><scaleY>1</scaleY><scaleZ>1</scaleZ>" +
+                "</object>" +
+                "</locationPrefab>";
+
+            var bare = ParseLocationPrefabXml(withoutGroundPlane);
+            Check(bare != null && bare.obj.Count == 1 && !bare.obj[0].groundPlane,
+                  "a type 5 object with no <groundPlane> parses with groundPlane false",
+                  bare == null ? "prefab was null" : bare.obj.Count.ToString());
+
+            // Widening ValidateValue must not turn it into a rubber stamp: an unknown type is still
+            // dropped, and still warns.
+            const string unknownType =
+                "<locationPrefab>" +
+                "<height>17</height><width>17</width>" +
+                "<object>" +
+                "<type>99</type><objectID>0</objectID><name>FARMAA01.RMB</name>" +
+                "<posX>0</posX><posY>0</posY><posZ>0</posZ>" +
+                "<scaleX>1</scaleX><scaleY>1</scaleY><scaleZ>1</scaleZ>" +
+                "</object>" +
+                "</locationPrefab>";
+
+            var unknown = ParseLocationPrefabXml(unknownType);
+            Check(unknown != null && unknown.obj.Count == 0,
+                  "an unknown object type is still rejected",
+                  unknown == null ? "prefab was null" : unknown.obj.Count.ToString());
+        }
+
+        static global::LocationLoader.LocationPrefab ParseLocationPrefabXml(string xml)
+        {
+            var doc = new System.Xml.XmlDocument();
+            doc.LoadXml(xml);
+            return global::LocationLoader.LocationHelper.LoadLocationPrefab(doc);
         }
 
         static void Check(bool condition, string name, string detail = "")

@@ -263,8 +263,44 @@ of the manifest because Unity follows the GUIDs when it builds the bundle. UBLaM
 script is compiled in), `private_only` with a `pending:` licence (no licence declared upstream — the
 combination `fetch.py` requires), `archives_from: ["DaggerfallExpandedTextures"]`, and
 `drop_dependencies` for Location Loader (built in, so it has no `FileName` to match) and the three
-optional mods this port does not ship. `MobileSelfTest` covers the default-off titles, `WodRuns`, `DETFileName`, `WoDDetNote`, `StartOne` and
-`MergeModSettings`.
+optional mods this port does not ship. `MobileSelfTest` covers the default-off titles, `WodRuns`, `DETFileName`, `WoDDetNote`, `StartOne`,
+`MergeModSettings`, and the type-5 parse contract (`TypeRMB == 5`, `<groundPlane>` present, absent, and an
+unknown type still rejected) through the same public `LocationHelper.LoadLocationPrefab(XmlDocument)` the
+runtime uses.
+**Location Loader object type 5 (RMB blocks).** WoD 0.4.0 was authored against Location Loader 0.4.x,
+which is not upstream: type 5 — "place a whole RMB block as a prefab object" — exists only on
+`drcarademono/DFU-LocationLoader` branch `rmb-object` (@ `896a574`), and our pin `a5e7a18` already **is**
+the tip of `KABoissonneault/DFU-LocationLoader:main`, so there was nothing newer to move to. Without
+type 5, `LocationHelper.ValidateValue` dropped the object at parse time and logged
+`Invalid obj type found: 5` (8 lines on the simulator run, one per distinct prefab in streaming range):
+24 of WoD's 266 prefab definitions hold a single type-5 object and nothing else, and 32,600 location
+instances reference them — 32,218 wilderness farmsteads plus the 382 generic docks and lighthouses,
+9.9 % of WoD's 329,040 instances, each appearing as a flattened, textured, empty clearing. The fix is a
+backport of the type-5 core only, not a re-pin: `rmb-object` branched from `bee4d26` so it lacks our
+pin's own tip commit, and it carries 2,400 unreviewed lines of barred doors, fake dungeons (every RMB
+door hardcoded to `dungeonRegion = 43`), WOD-Biomes climate swapping and World Tooltips on top.
+Three files under `Ports/LocationLoader/` gained `// MOBILE: backport of
+drcarademono/DFU-LocationLoader@896a574 (rmb-object)` hunks and a second provenance line in their
+header: `LocationData.cs` (`groundPlane` plus the six `Type*` constants), `LocationHelper.cs` (parse and
+write the optional `<groundPlane>` element; `TypeRMB` joins types 3 and 4 in `ValidateValue`'s permissive
+arm, the `Invalid obj type found` warning still firing for genuinely unknown types), and
+`LocationLoader.cs` (the `else if (obj.type == LocationObject.TypeRMB)` branch in
+`InstantiateInstanceDynamicObjects`, which builds the block through `RMBLayout.CreateBaseGameObject` and
+adds nature flats, lights and misc/exterior flats at the current climate and season). Every DFU API it
+needs exists in this fork with a matching signature. The branch stops where upstream's own
+WOD-Biomes call begins: no `BiomesClimateSwap`, and none of the `DaggerfallStaticDoors`/`BarredDoor`
+code, so vanilla doors on an RMB block behave as vanilla doors. `AssignNextIndex` and `AddGroundPlane`
+stay commented exactly as upstream leaves them. The one addition beyond upstream is an iOS safety net:
+the branch body sits in a try/catch that logs `[LL] RMB block <name> failed:` once per block name and
+continues, because upstream lets a layout failure throw out of the whole spawn loop and take every
+later object in the prefab with it — on a streaming terrain that would repeat on every step.
+Residual, unchanged by this: `WOD_Dock_Daggerfall_01` still renders empty (3 instances). Its block name
+`FOO.RMB` is in neither `BLOCKS.BSA` nor any `WorldData` `BlockNames` list, so `GetBlockIndex` returns −1;
+registering it needs `WorldDataReplacement.AssignNextIndex`, which is `private` in DFU and which upstream
+left commented pending a PR that was never made. Perf is the open question and the device test is the
+judge: type 5 spawns per instance in `InstantiateInstanceDynamicObjects`, outside
+`LocationResourceManager`'s prefab cache and outside the `ModelCombiner` batching that type 0 uses, so
+each farm is an uncached, unbatched RMB block built on the terrain-streaming step that reveals it.
 *Rebase risk: LOW for the engine* — one upstream file changed, `ModManager.cs`: three `// MOBILE:`
 touch points (the `prunedMods` field, the `Init` prune recording into it, and `WriteModSettings`
 serializing `MergeModSettings(mods, prunedMods)`) plus the new method itself, all in hunks upstream
