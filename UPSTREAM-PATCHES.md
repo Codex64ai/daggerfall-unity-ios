@@ -179,6 +179,30 @@ ones with the sky on.
 ones; the tooling change touches only this fork's own `tools/`. The two engine lines are single
 insertions next to stable upstream code - re-check them by eye after a rebase.
 
+### DREAM follow-up (2026-09-08) — `ModManager.cs` (+17/-1), `UserInterface/FLCPlayer.cs` (+22/-4), `Game/Mobile/{MobileContentPath.cs,MobileLog.cs}`
+Four small fixes found while putting DREAM on the device. Two touch upstream files; the other
+two are in the port's own `Mobile/` folder and merge for free.
+`ModManager.GetModFromName` compared `x.FileName.Equals(name, ...)` straight off each mod, which
+throws the moment the walk reaches one of the four mods this port builds in code (Roads and tracks,
+Real travel, Summer start, the TravelOptions bridge) — they have no `FileName`. On the iPad it fired
+every frame the MODS window was open (`CheckDependencies`) and swallowed every conflict reorder
+(`MobileModConflicts.MoveBelow`), so the player's conflict choices never applied. The comparison is
+now `ModManager.FileNameMatches`, `public static` so the self test can reach it from the editor
+assembly, and a mod with no file never matches.
+`FLCPlayer.Load` looked for `.FLC` files only in the Movies folder inside the app bundle before
+falling back to arena2, never consulting `MobileContentPath` the way `VideoReplacement` does — so
+DREAM's 16 HD Daedra summoning animations in `Documents/Movies` were ignored. The folder now goes
+through `MobileContentPath.Override` (whose existence check covers directories as well as files) and
+the movies-or-arena2 choice is the pure, testable `FLCPlayer.ResolvePath`. **This is a newly touched
+upstream file**, not counted in the totals at the top of this document.
+`MobileContentPath` creates `Documents/Presets`: `ModSettingsData.LoadPresets` reads
+`Presets/<mod file name>/*.json` through `TextAssetReader`, which already honours the redirect —
+only the folder was missing, so a player had to create it by hand.
+`MobileLog` writes a build stamp (`[Build] <product> <version> <bundle id> guid= unity= dfu=`) with
+the session banner, before any Unity message reaches the mirror; twice in one week a `Player.log`
+kept from an older build was read as the current one and sent a device test down the wrong path.
+*Rebase risk: LOW.* Both engine edits are small and self-contained, and both are marked `MOBILE:`.
+
 ## Rebase procedure
 
     git remote add upstream https://github.com/Interkarma/daggerfall-unity.git
