@@ -2942,6 +2942,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// compute shader samples as numbers. Those need sRGB off (the project is Linear, so the
         /// default sRGB read would remap every value) and no compression, but no CPU copy.
         /// </summary>
+        const string DistantDerivMap = "Assets/Game/Mods/DistantTerrainWoD/Resources/daggerfall_deriv_map.png";
+
         static void TestPackTextureRules()
         {
             Check(MobileModPackTextureRules.For("Assets/Game/Mods/WorldOfDaggerfallBiomes/Assets/Maps/climate_map.png") == MobileModPackTextureRules.Rule.RawData,
@@ -2978,6 +2980,60 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // opposite of what it needs, with nothing in any log to say which rule won.
             Check(MobileModPackTextureRules.ListsDisjoint,
                 "PackTextureRules: no mod name is in both the raw-data and the linear-data list");
+            // MOBILE: Distant Terrain (WoD flavour). Its daggerfall_deriv_map.png is the river/coast
+            // mask DistantTerrain.ApplyDerivativeHeightmap reads with GetPixels32 and compares each
+            // pixel against a 0-255 threshold, so it needs the raw-data treatment (readable,
+            // uncompressed) for the same reason the Biomes colour key does.
+            Check(MobileModPackTextureRules.For(DistantDerivMap) == MobileModPackTextureRules.Rule.RawData,
+                "PackTextureRules: the Distant Terrain deriv map is raw data");
+            Check(MobileModPackTextureRules.RawDataMods.Contains("DistantTerrainWoD"),
+                "PackTextureRules: Distant Terrain is in the raw-data list");
+            // Nothing samples this map on the GPU - it is CPU-read once at world entry - so the mip
+            // chain is pure memory. (The Biomes tiles ARE drawn, which is why NoMips is per-file.)
+            Check(MobileModPackTextureRules.NoMips(DistantDerivMap),
+                "PackTextureRules: the Distant Terrain deriv map drops mips");
+            // The map is 8-bit greyscale and the carve reads .r only, so one channel is all that is
+            // needed: R8 instead of RGBA32 is a 4x saving on both the GPU copy and the readable CPU
+            // copy this texture is obliged to keep.
+            Check(MobileModPackTextureRules.SingleChannel(DistantDerivMap)
+                  && !MobileModPackTextureRules.SingleChannel("Assets/Game/Mods/WorldOfDaggerfallBiomes/Assets/Maps/climate_map.png"),
+                "PackTextureRules: only the Distant Terrain deriv map imports single-channel");
+            // MOBILE: World of Daggerfall - Terrain ships a DIFFERENT file with the SAME name
+            // (RGBA, 5000x2500, a compute-shader input) at WorldOfDaggerfallTerrain/Assets/Maps/.
+            // Keying either rule on the bare file name would silently drag it into the wrong branch:
+            // R8 would throw away three of its channels and NoMips would change what the compute
+            // shader reads. Both rules are keyed on mod folder + file name for exactly this reason.
+            const string terrainDerivMap = "Assets/Game/Mods/WorldOfDaggerfallTerrain/Assets/Maps/daggerfall_deriv_map.png";
+            Check(!MobileModPackTextureRules.SingleChannel(terrainDerivMap)
+                  && !MobileModPackTextureRules.NoMips(terrainDerivMap)
+                  && MobileModPackTextureRules.For(terrainDerivMap) == MobileModPackTextureRules.Rule.LinearData,
+                "PackTextureRules: the Terrain mod's same-named deriv map is untouched by the Distant Terrain rules");
+            // MOBILE: the assumption the R8 override rests on. Texture2D.GetPixels32 documents a
+            // limited format list; if R8 did not survive it, the carve would read zeros and every
+            // far-terrain cell would become ocean. Cheaper to pin here than to find out on a device.
+            bool r8ok = false;
+            string r8detail = "";
+            try
+            {
+                var probe = new Texture2D(2, 2, TextureFormat.R8, false);
+                probe.LoadRawTextureData(new byte[] { 0, 64, 128, 255 });
+                probe.Apply(false, false);
+                Color32[] back = probe.GetPixels32();
+                r8ok = back.Length == 4 && back[0].r == 0 && back[1].r == 64 && back[2].r == 128 && back[3].r == 255;
+                r8detail = "GetPixels32 .r = " + string.Join(",", back.Select(c => c.r.ToString()));
+                UnityEngine.Object.DestroyImmediate(probe);
+            }
+            catch (Exception ex) { r8detail = ex.GetType().Name + ": " + ex.Message; }
+            Check(r8ok, "PackTextureRules: R8 survives GetPixels32 in .r (what the deriv carve reads)", r8detail);
+            // MOBILE: the deriv map is 5000x2500 on disk and the importer clamps it to maxTextureSize
+            // 2048 (same value for the editor platform and for iOS, so the editor's imported size IS
+            // the shipped size). The carve maps the image onto the 1000x500 world-map grid by the
+            // texture's OWN width/height, so any size at or above the grid is correct; what matters is
+            // that it still oversamples the grid, or thin rivers would be lost between cells.
+            var derivTex = AssetDatabase.LoadAssetAtPath<Texture2D>(DistantDerivMap);
+            Check(derivTex != null && derivTex.width >= 1000 && derivTex.height >= 500,
+                "PackTextureRules: the imported deriv map still oversamples the 1000x500 world grid",
+                derivTex == null ? "asset did not load" : derivTex.width + "x" + derivTex.height);
             // Every check above pins the rule against the SAME literal the rule holds, so a rename or a
             // case change of the mods.json entry - which is the fetched folder name, which is what For()
             // matches - leaves this suite green while 225 textures silently revert to ASTC and the

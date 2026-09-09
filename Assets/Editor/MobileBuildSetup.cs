@@ -528,7 +528,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             {
                 AssetDatabase.ImportAsset(one, ImportAssetOptions.ForceUpdate);
                 AssetDatabase.SaveAssets();
-                Debug.Log("[MobileBuildSetup] reimported one asset: " + one);
+                // MOBILE: report the imported size for textures. maxTextureSize is the one import
+                // setting the .meta cannot prove (it records the limit, not the result), and for
+                // data maps read by pixel - Biomes' colour key, Distant Terrain's deriv map - the
+                // resulting resolution is the whole question.
+                var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(one);
+                Debug.Log("[MobileBuildSetup] reimported one asset: " + one +
+                    (tex != null ? " (" + tex.width + "x" + tex.height + " " + tex.format + ")" : ""));
                 return;
             }
             int n = 0;

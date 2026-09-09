@@ -165,7 +165,18 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 importer.textureCompression = TextureImporterCompression.Uncompressed;
                 var raw = importer.GetPlatformTextureSettings("iPhone");
                 raw.overridden = true;
-                raw.format = TextureImporterFormat.RGBA32;
+                // MOBILE: one-channel data maps import as R8 (see MobileModPackTextureRules.SingleChannel):
+                // Distant Terrain's deriv map is greyscale and its carve reads .r only, so RGBA32 would
+                // cost 4x on both the GPU copy and the readable CPU copy this branch always keeps.
+                raw.format = MobileModPackTextureRules.SingleChannel(path)
+                    ? TextureImporterFormat.R8
+                    : TextureImporterFormat.RGBA32;
+                // MOBILE: 2048 is deliberate for the 5000x2500 deriv map too. The carve maps image
+                // pixels onto the 1000x500 world grid by the texture's own width/height and takes the
+                // DARKEST pixel in each cell's block, so a clamped map still resolves the coastline;
+                // measured against a full-resolution carve, a 2048-clamped one loses 0.3% of water
+                // cells and gains 0.2% (a 1250x625 one, 1.0%/0.4%). Full size would cost 50 MB of GPU
+                // memory plus a 50 MB readable copy.
                 raw.maxTextureSize = 2048;
                 importer.SetPlatformTextureSettings(raw);
                 return;

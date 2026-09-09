@@ -19,8 +19,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
     {
         public enum Rule { Default, RawData, LinearData }
 
+        // MOBILE: Distant Terrain (WoD flavour). Named as a constant because three things key off it:
+        // the raw-data list below, and the NoMips/SingleChannel path tests, which must match this mod's
+        // deriv map and NOT the identically named file in WorldOfDaggerfallTerrain.
+        public const string DistantTerrainMod = "DistantTerrainWoD";
+
         // Mod folder names under Assets/Game/Mods/ (the mods.json entry name).
-        static readonly string[] rawDataMods = { "WorldOfDaggerfallBiomes" };
+        static readonly string[] rawDataMods = { "WorldOfDaggerfallBiomes", DistantTerrainMod };
 
         // MOBILE: mods whose textures are numeric data sampled only by a compute shader.
         static readonly string[] linearDataMods = { "WorldOfDaggerfallTerrain" };
@@ -93,7 +98,35 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         public static bool NoMips(string assetPath)
         {
             string p = (assetPath ?? "").Replace('\\', '/');
-            return p.EndsWith("/climate_map.png", System.StringComparison.OrdinalIgnoreCase);
+            if (p.EndsWith("/climate_map.png", System.StringComparison.OrdinalIgnoreCase))
+                return true;
+            // MOBILE: Distant Terrain's river/coast mask is read once on the CPU (GetPixels32) and
+            // never sampled by a shader, so its mip chain is memory nothing can reach.
+            return IsDistantDerivMap(p);
+        }
+
+        /// <summary>
+        /// MOBILE: textures that carry data in ONE channel and should import as R8 rather than RGBA32.
+        /// Only Distant Terrain's daggerfall_deriv_map.png qualifies: it is an 8-bit greyscale PNG and
+        /// DistantTerrain.ApplyDerivativeHeightmap reads `pixels[i].r` alone, comparing it against a
+        /// 0-255 threshold ("Image is grayscale; R == G == B, so sampling R is sufficient"). RGBA32
+        /// would store three copies of the same byte plus a constant alpha, and this texture must keep
+        /// a readable CPU copy as well as its GPU one, so the waste is paid twice: at the imported
+        /// 2048-clamped size that is 8 MB + 8 MB as RGBA32 against 2 MB + 2 MB as R8.
+        /// </summary>
+        public static bool SingleChannel(string assetPath)
+        {
+            return IsDistantDerivMap((assetPath ?? "").Replace('\\', '/'));
+        }
+
+        // MOBILE: keyed on mod folder AND file name, never the file name alone. World of Daggerfall -
+        // Terrain ships a DIFFERENT daggerfall_deriv_map.png (RGBA, a compute-shader input, LinearData)
+        // at Assets/Game/Mods/WorldOfDaggerfallTerrain/Assets/Maps/. A bare-name match would drop three
+        // of its channels and its mip chain with nothing in any log to say why the ground went wrong.
+        static bool IsDistantDerivMap(string normalizedPath)
+        {
+            return normalizedPath.StartsWith("Assets/Game/Mods/" + DistantTerrainMod + "/", System.StringComparison.Ordinal)
+                && normalizedPath.EndsWith("/daggerfall_deriv_map.png", System.StringComparison.OrdinalIgnoreCase);
         }
     }
 }
