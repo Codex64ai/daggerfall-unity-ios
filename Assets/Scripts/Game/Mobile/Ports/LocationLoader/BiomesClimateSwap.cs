@@ -139,9 +139,15 @@ namespace LocationLoader
                         warnedDeferred = true;
                     }
                     EnsureSubscribed();                 // MOBILE: subscribe only now that we need the event
+                    // MOBILE: the deferral is still whole-block and still recorded exactly once (the
+                    // Contains guard), but it no longer `return`s. Upstream returned here, so flats
+                    // already swapped and counted earlier in this same block skipped the `if (n > 0)`
+                    // line below and were invisible in the log the simulator and device runs grep as
+                    // proof. Carry on down the list instead: the retry re-walks the block whole, and the
+                    // FlatType filter above makes the already-swapped flats no-ops.
                     if (!pendingBlocks.Contains(rmbBlock))
                         pendingBlocks.Add(rmbBlock);
-                    return;
+                    continue;
                 }
 
                 int mx = terrain.MapPixelX;
@@ -197,8 +203,12 @@ namespace LocationLoader
             // MOBILE: only when something actually changed. The terrain-side overrider logs the same
             // way ("[Biomes] swapped N nature batches ..."); the simulator and device runs grep for
             // these two lines as the proof each half of the swap fired.
+            // MOBILE: the block name is on the line because Task 9's log showed identical counts
+            // repeating (22 four times, 7 four times) with no way to tell one WoD prefab placed at
+            // several pixels from one block swapped twice - and a double swap doubles the scale again.
             if (n > 0)
-                Debug.Log("[Biomes] swapped " + n + " type-5 nature flats to archive " + CUSTOM_ARCHIVE);
+                Debug.Log("[Biomes] swapped " + n + " type-5 nature flats to archive " + CUSTOM_ARCHIVE
+                          + " in " + rmbBlock.name);
         }
 
         static void OnUpdateTerrainsEnd()

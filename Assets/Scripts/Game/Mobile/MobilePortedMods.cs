@@ -21,9 +21,8 @@
 //
 // World of Daggerfall - Biomes is a bundle too, but a standalone one: it re-skins the terrain and
 // swaps the nature billboards by itself, so it needs neither Location Loader nor World of
-// Daggerfall - only Daggerfall Expanded Textures. Default off, and its two Inits run in that order
-// (terrain, then nature) because the terrain Init sets the VEModEnabled static that the nature side
-// reads while it builds its atlas.
+// Daggerfall - only Daggerfall Expanded Textures. Default off, and its two Inits run terrain-then-
+// nature so that a terrain Init which threw stops the nature side from starting at all.
 //
 // The survival mods start as soon as the bundles are loaded, at the title. Dynamic Skies cannot:
 // its Init reaches into the scene for the sun light and the camera, and on a player build neither
@@ -300,11 +299,14 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
             if (BiomesRuns(biomes != null && biomes.Enabled, detOn))
             {
-                // Explicit order, not the manifest's: WODBiomes.Init sets the VEModEnabled static
-                // (WODBiomes.cs:29-33) that the nature side reads while it builds its atlas
-                // (WODClimates.cs, the x2 record-size scaling), so the terrain Init has to have
-                // returned first. The terrain material provider itself is installed later still, in
-                // WODBiomes.Start(), which Unity runs after both Inits have returned.
+                // Explicit order, not the manifest's. What the order buys is the `terrainStarted &&`
+                // short-circuit below: a terrain Init that threw leaves no nature overrider installed,
+                // rather than one running against a VEModEnabled stuck false, which would cache a
+                // wrongly-scaled atlas for the rest of the session. The VEModEnabled read itself is
+                // safe either way - WODBiomes.Init sets it (WODBiomes.cs:29-33) and the nature side
+                // reads it only when it builds its atlas, on the first OnUpdateTerrainsEnd, long after
+                // both Inits have returned inside this one synchronous StartEnabled. The terrain
+                // material provider is installed later still, in WODBiomes.Start().
                 int bi = ModManager.Instance.GetModIndex(BiomesTitle);
                 bool terrainStarted = StartOne(BiomesTitle + " (terrain)", () => WorldOfDaggerfall.WODBiomes.Init(new InitParams(biomes, bi, count)));
                 bool natureStarted = terrainStarted && StartOne(BiomesTitle + " (nature)", () => WorldOfDaggerfall.NatureBatchOverriderInstaller.Init(new InitParams(biomes, bi, count)));

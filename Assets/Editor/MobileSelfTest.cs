@@ -657,6 +657,27 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "MobileShaders: billboard batch shader is captured");
             Check(MobileShaders.Names.Contains(MaterialReader._DaggerfallBillboardBatchNoShadowsShaderName),
                 "MobileShaders: billboard batch no-shadows shader is captured");
+            // Rebase tripwire. Everything above passes whether or not the engine file actually calls
+            // MobileShaders: DaggerfallBillboardBatch.cs is an upstream file, and an upstream merge that
+            // takes theirs at :318-319 / :382-383 restores the raw Shader.Find the patch exists to
+            // remove - compiling cleanly and silently reopening the bundle-embedded-shader ambiguity.
+            // So read the source. (Precedent: TestDynamicSkiesShader reads a shader file as text.)
+            string batchSrc = System.IO.File.ReadAllText("Assets/Scripts/Internal/DaggerfallBillboardBatch.cs");
+            Check(CountOccurrences(batchSrc, "MobileShaders.Find(MaterialReader._DaggerfallBillboardBatch") == 4,
+                "DaggerfallBillboardBatch: both SetMaterial overloads build their material with MobileShaders.Find",
+                CountOccurrences(batchSrc, "MobileShaders.Find(MaterialReader._DaggerfallBillboardBatch") + " call sites, expected 4");
+            // "Shader.Find(" is not a substring of "MobileShaders.Find(" (the char before ".Find" is
+            // 's'), so this is an exact test for a raw call, not a near-miss on the patched one.
+            Check(!batchSrc.Contains("Shader.Find("),
+                "DaggerfallBillboardBatch: no raw Shader.Find survives - a rebase that takes theirs fails here");
+        }
+
+        // Non-overlapping occurrence count, for the source-text checks.
+        static int CountOccurrences(string haystack, string needle)
+        {
+            int n = 0, i = 0;
+            while ((i = haystack.IndexOf(needle, i, StringComparison.Ordinal)) >= 0) { n++; i += needle.Length; }
+            return n;
         }
 
         // The World of Daggerfall - Biomes port is compiled in but inert: MobilePortedMods starts it
@@ -682,7 +703,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // The Biomes nature swap keys off an exact colour match in a colour-key map, which is why the
         // map must import raw (Task 2) and why the port reads it through TextureReplacement.EnsureReadable:
         // one resampled or block-compressed pixel and #FFA500 stops being #FFA500. The atlas is pinned to
-        // 1024 so the 32 records of 64x64 never allocate upstream's transient 4096x4096 (85 MB).
+        // 1024 so archive 10030 never allocates upstream's transient 4096x4096 (85 MB) - and no lower,
+        // because its 32 records run up to 130x153 / 115x272 / 113x296, ~225 k px once padded, which
+        // 1024^2 clears by ~4.6x and 512^2 would only just hold.
         static void TestBiomesClimateKey()
         {
             Check(WorldOfDaggerfall.NatureBatchOverrider.IsSubtropicalKey(new Color32(255, 165, 0, 255)),
@@ -692,7 +715,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(!WorldOfDaggerfall.NatureBatchOverrider.MapReadable(null),
                 "Biomes: a missing climate map is not readable");
             Check(WorldOfDaggerfall.NatureBatchOverrider.AtlasMaxSize == 1024,
-                "Biomes: atlas capped at 1024 (32 records of 64x64)");
+                "Biomes: atlas capped at 1024 (32 records up to 130x296, ~225k px padded - 512 would be marginal)");
             // A script-created texture is always readable, so the positive side of both guards is
             // constructible headlessly - without it a stub returning false unconditionally would pass.
             Texture2D scratch = new Texture2D(2, 2);
@@ -717,6 +740,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && !WorldOfDaggerfall.NatureBatchOverrider.HasRecords(0),
                 "Biomes: an atlas with no records is not a usable atlas");
             UnityEngine.Object.DestroyImmediate(scratch);
+            // The terrain provider's Mountain case gives Hammerfell its own ground archive, and the
+            // region name it tests comes off a GameManager chain that does not exist at the title or in
+            // this editor run - so null must fall through to the unmodified archive rather than throw
+            // inside DaggerfallTerrain.PromoteTerrainData, which has no try/catch of its own.
+            Check(WorldOfDaggerfall.WODTerrainMaterialProvider.IsHammerfellRegion("Alik'r Desert"),
+                "Biomes: Alik'r Desert is a Hammerfell mountain region");
+            Check(!WorldOfDaggerfall.WODTerrainMaterialProvider.IsHammerfellRegion("Daggerfall"),
+                "Biomes: Daggerfall is not a Hammerfell mountain region");
+            Check(!WorldOfDaggerfall.WODTerrainMaterialProvider.IsHammerfellRegion(null),
+                "Biomes: a missing region name is not a Hammerfell mountain region (no GPS, no throw)");
         }
 
         // The Dynamic Skies mod's procedural skybox shader ships compiled into the app with its
@@ -2669,6 +2702,21 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobileModPackTextureRules.NoMips("Assets/Game/Mods/WorldOfDaggerfallBiomes/Assets/Maps/climate_map.png")
                   && !MobileModPackTextureRules.NoMips("Assets/Game/Mods/WorldOfDaggerfallBiomes/Textures/Terrain/Subtropical/004_0-0.png"),
                 "PackTextureRules: only the climate map drops mips");
+            // Every check above pins the rule against the SAME literal the rule holds, so a rename or a
+            // case change of the mods.json entry - which is the fetched folder name, which is what For()
+            // matches - leaves this suite green while 225 textures silently revert to ASTC and the
+            // colour key stops matching. Tie the literal to the pin list instead. (Precedent for reading
+            // mods.json: TestBundledModManifests.)
+            string modPins = "";
+            try { modPins = File.ReadAllText("tools/bundled-mods/mods.json"); } catch (Exception) { }
+            string[] unpinned = MobileModPackTextureRules.RawDataMods
+                .Where(m => !System.Text.RegularExpressions.Regex.IsMatch(
+                    modPins, "\"name\"\\s*:\\s*\"" + System.Text.RegularExpressions.Regex.Escape(m) + "\""))
+                .ToArray();
+            Check(modPins.Length > 0 && MobileModPackTextureRules.RawDataMods.Count > 0 && unpinned.Length == 0,
+                "PackTextureRules: every raw-data mod name is a mods.json entry name",
+                unpinned.Length > 0 ? "not in mods.json: " + string.Join(", ", unpinned)
+                                    : MobileModPackTextureRules.RawDataMods.Count + " names, " + modPins.Length + "B of pins");
         }
 
         /// <summary>

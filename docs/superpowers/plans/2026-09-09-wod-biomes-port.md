@@ -330,7 +330,7 @@ RED -> `error CS`.
 ```
 (inside the existing try/catch).
 
-- [ ] **Step 4: GREEN run** -> 647/0.
+- [ ] **Step 4: GREEN run** -> 650/1 (the 1 = bundle count until Task 7).
 
 - [ ] **Step 5: Commit**
 ```bash
@@ -346,7 +346,7 @@ git commit -m "Location Loader: RMB blocks get the Biomes subtropical nature swa
 
 - [ ] **Step 1:** Preconditions: tree clean; `pgrep` empty; `Assets/StreamingAssets/Mods/*.dfmod` = 48 (ASTC). Run the FULL `MobileBuildSetup.ApplyAll` (no env vars) to `.superpowers/sdd/2026-09-09-wod-biomes-port/applyall-biomes.log` (~25 min). Expected: `[MobileBuildSetup] bundled mods: 49`, `Assets/StreamingAssets/Mods/world of daggerfall - biomes.dfmod` present with `world of daggerfall - biomes-LICENSE.txt` (pending text) beside it, 0 `error CS`.
 - [ ] **Step 2:** Import-settings proof (the load-bearing check): `Assets/Game/Mods/WorldOfDaggerfallBiomes/Assets/Maps/climate_map.png.meta` shows `isReadable: 1`, iPhone `textureFormat: 4`, `enableMipMap: 0`; a `004_0-0.png.meta` shows `isReadable: 1`, `textureFormat: 4`. Then `python3 tools/dfmod_inspect.py "Assets/StreamingAssets/Mods/world of daggerfall - biomes.dfmod"`: textures 225, formats all RGBA32 (no ASTC), size ~2 MB on disk / ~7 MB uncompressed. Quote the lines.
-- [ ] **Step 3:** Refresh `~/dev/dfu-mods/astc-backup/` (49 bundles) and `~/dev/dfu-mods/astc-backup/Licenses/` (49 records). Copy the bundle to `~/dev/dfu-mods/world of daggerfall - biomes.dfmod`. `gh release upload testapp-unity6 "Assets/StreamingAssets/Mods/world of daggerfall - biomes.dfmod" --repo Codex64ai/daggerfall-unity-ios --clobber`; verify with `gh release view ... --json assets`.
+- [ ] **Step 3:** Refresh `~/dev/dfu-mods/astc-backup/` (49 bundles) and `~/dev/dfu-mods/astc-backup/Licenses/` (49 records). Copy the bundle to `~/dev/dfu-mods/wod-biomes.dfmod`. `gh release upload testapp-unity6 "Assets/StreamingAssets/Mods/world of daggerfall - biomes.dfmod" --repo Codex64ai/daggerfall-unity-ios --clobber`; verify with `gh release view ... --json assets`.
 - [ ] **Step 4:** Self-test -> 654/0 (the bundle-count check clears once the bundle exists). `git status --short` empty after reverting churn.
 
 ---

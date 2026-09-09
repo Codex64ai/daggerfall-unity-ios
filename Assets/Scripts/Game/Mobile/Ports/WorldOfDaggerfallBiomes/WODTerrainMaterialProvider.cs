@@ -2,7 +2,8 @@
 // File WODTerrainMaterialProvider.cs, copied unchanged for iOS except lines marked MOBILE.
 // Upstream carries no licence header; shipped on the private draft only.
 using System;
-using System.Linq;
+// MOBILE: using System.Linq removed - the Hammerfell region test is a HashSet lookup now.
+using System.Collections.Generic;
 using UnityEngine;
 using DaggerfallConnect.Arena2;
 using DaggerfallConnect;
@@ -29,6 +30,25 @@ namespace WorldOfDaggerfall
             MountainWoods = 230,
             Woodlands = 231,
             HauntedWoodlands = 232 // not sure where this is?
+        }
+
+        /// <summary>
+        /// MOBILE: hoisted to class scope. Upstream built this seven-element string[] inside
+        /// GetClimateInfo, which DaggerfallTerrain.PromoteTerrainData calls for every Mountain-climate
+        /// terrain on the streaming path - an allocation plus a LINQ enumerator per terrain promote.
+        /// </summary>
+        static readonly HashSet<string> HammerfellRegions = new HashSet<string>
+        {
+            "Alik'r Desert", "Dragontail Mountains", "Dak'fron", "Lainlyn", "Tigonus", "Ephesus", "Santaki"
+        };
+
+        /// <summary>
+        /// MOBILE: pure, so the self-test can pin it - and null-tolerant, because the caller reads the
+        /// region name through a null-conditional GameManager chain (see GetClimateInfo).
+        /// </summary>
+        public static bool IsHammerfellRegion(string name)
+        {
+            return name != null && HammerfellRegions.Contains(name);
         }
 
         public abstract Material CreateMaterial();
@@ -78,8 +98,11 @@ namespace WorldOfDaggerfall
                     groundArchive = 3; // No change in winter
                     break;
                 case (int)Climates.Mountain:
-                    string[] hammerfellRegions = new string[] { "Alik'r Desert", "Dragontail Mountains", "Dak'fron", "Lainlyn", "Tigonus", "Ephesus", "Santaki" };
-                    if (hammerfellRegions.Contains(GameManager.Instance.PlayerGPS.CurrentRegionName))
+                    // MOBILE: null-guarded. This is the only unguarded dereference the port had, and it
+                    // runs inside DaggerfallTerrain.PromoteTerrainData with no try/catch of its own, so a
+                    // throw here breaks terrain promotion repeatedly and silently. No GPS (or no region
+                    // name) now falls through to the unmodified groundArchive instead.
+                    if (IsHammerfellRegion(GameManager.Instance?.PlayerGPS?.CurrentRegionName))
                     {
                         groundArchive = isWinter ? 103 : 104; // Special winter handling for Hammerfell Mountains
                     }

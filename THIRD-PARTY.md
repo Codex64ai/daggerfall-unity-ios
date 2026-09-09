@@ -280,7 +280,7 @@ rather than batches, so the streaming-world pass above never sees them - and it 
 from the compiled-in Biomes port rather than `GetAsset`-ing its own copy out of a bundle, which is why
 it was left out of the first Location Loader port. It is a no-op unless the Biomes entry actually
 started this session (`MobilePortedMods.BiomesRunning`) and the map is readable; its own log line is
-`[Biomes] swapped N type-5 nature flats to archive 10030`.
+`[Biomes] swapped N type-5 nature flats to archive 10030 in <block name>`.
 
 Not device-verified at the time of writing. Unlike WoD this mod places no objects - it changes which
 textures existing ones use - so the performance question is narrower, but the nature swap does run on

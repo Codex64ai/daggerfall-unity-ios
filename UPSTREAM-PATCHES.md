@@ -462,23 +462,29 @@ of `StreamingWorld.OnUpdateTerrainsEnd`'s subscribers. Upstream's terrain-ready 
 constructor — a static constructor fires on the first touch of *any* member, including `ShouldSwap` and
 including the editor self-test, which would have subscribed a handler in a batch-mode editor run. And
 the three per-block log lines are logged once each rather than once per block: a WoD world has tens of
-thousands of them. Its own success line is `[Biomes] swapped N type-5 nature flats to archive 10030`,
+thousands of them. Its own success line is
+`[Biomes] swapped N type-5 nature flats to archive 10030 in <block name>`,
 deliberately distinct from the terrain side's `[Biomes] swapped N nature batches to archive 10030`.
 The `mods.json` entry is `strip_code` (all three scripts are compiled in), `private_only` with a
 `pending:` licence, `exclude_globs` for the repo's `.7z`/`.xcf`, and `archives_from:
 ["DaggerfallExpandedTextures"]`. No `extra_dirs`: the manifest names every asset, there are no prefabs
 and no meshes. `MobileSelfTest` covers the two new shader names, the ported `Init` entry points and the
 `ClimateMap` property shape, `IsSubtropicalKey` / `MapReadable` / `NeedsReadableCopy` / `HasRecords` /
-`AtlasMaxSize`, the default-off title,
-`BiomesRuns` and `BiomesDetNote`, the importer rule table, and `BiomesClimateSwap.ShouldSwap`. As with
+`AtlasMaxSize` / `IsHammerfellRegion`, the default-off title,
+`BiomesRuns` and `BiomesDetNote`, the importer rule table (including that every
+`MobileModPackTextureRules.RawDataMods` name is a `mods.json` entry `name`, so a rename there fails the
+suite rather than silently reverting the textures to ASTC), and `BiomesClimateSwap.ShouldSwap`. As with
 Location Loader itself, the rest needs a streamed world and belongs to the simulator and device runs.
 *Rebase risk: LOW.* All four edits to `Assets/Scripts/Internal/DaggerfallBillboardBatch.cs` are
 mechanical — two accessibility changes (`currentArchive`, `cachedMaterial` → `internal`) and two
 `Shader.Find(MaterialReader._DaggerfallBillboardBatch…)` → `Game.Mobile.MobileShaders.Find(...)`
 renames, at `:318-319` and `:382-383` (one in each `SetMaterial` overload); everything else is in files
 upstream does not have. The two `internal` fields are safe to lose: dropping them is a compile error in
-the port, which is the good failure mode. **The two `MobileShaders.Find` renames are not.** An upstream
-merge that takes theirs compiles cleanly and passes every self-test — `MobileSelfTest` asserts only that
-`MobileShaders` captures and resolves the two billboard-batch shader names, never that this engine file
-calls it — while silently restoring the bundle-embedded-shader ambiguity the patch exists to remove.
-Re-check both call sites by hand after any rebase that touches this file.
+the port, which is the good failure mode. The two `MobileShaders.Find` renames had no failure mode at
+all — an upstream merge that took theirs compiled cleanly and passed every self-test, because
+`MobileSelfTest` asserted only that `MobileShaders` captures and resolves the two billboard-batch shader
+names, never that this engine file calls it, while the bundle-embedded-shader ambiguity the patch exists
+to remove came silently back. `TestMobileShadersFind` now reads
+`Assets/Scripts/Internal/DaggerfallBillboardBatch.cs` as text and fails unless all four
+`MobileShaders.Find(MaterialReader._DaggerfallBillboardBatch…)` call sites are there and no raw
+`Shader.Find(` is, so a rebase that takes theirs breaks the suite instead.

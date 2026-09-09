@@ -79,10 +79,13 @@ namespace WorldOfDaggerfall
         const int NATURE_ARCHIVE = 501;
 
         /// <summary>
-        /// MOBILE: pinned atlas size, replacing upstream's 4096 (or 2048). Archive 10030 is 32 records of
-        /// 64x64, which pack into ~512x512 with padding, but upstream allocated the full square up front:
-        /// a transient 4096x4096 ARGB32 with mips is ~85 MB, on a device that has to survive a jetsam
-        /// limit. 1024 is a fourfold headroom over what the atlas actually needs.
+        /// MOBILE: pinned atlas size, replacing upstream's 4096 (or 2048). Upstream allocated the full
+        /// square up front: a transient 4096x4096 ARGB32 with mips is ~85 MB, on a device that has to
+        /// survive a jetsam limit. Archive 10030's 32 records are NOT 64x64 - measured with
+        /// tools/dfmod_inspect.py on the Daggerfall Expanded Textures iOS bundle they run from 25x11 up
+        /// to 130x153, 115x272 and 113x296, ~202 k px of content and ~225 k px once padded by 4. So
+        /// 1024^2 (1,048,576 px) is the right pin, with ~4.6x headroom - and 512^2 (262,144 px) would be
+        /// marginal, not comfortable. Do not "optimise" this down.
         /// </summary>
         public const int AtlasMaxSize = 1024;
 
@@ -98,6 +101,7 @@ namespace WorldOfDaggerfall
         // MOBILE: one line per distinct failure, not one per terrain update.
         static readonly HashSet<string> loggedErrors = new HashSet<string>();
         static bool warnedUnreadableMap;
+        static bool loggedReadableCopies;
 
         void OnEnable()  => StreamingWorld.OnUpdateTerrainsEnd += ApplyOverrides;
         void OnDisable() => StreamingWorld.OnUpdateTerrainsEnd -= ApplyOverrides;
@@ -252,6 +256,17 @@ namespace WorldOfDaggerfall
             // and device runs grep for this line as the proof the swap fired.
             if (n > 0)
                 Debug.Log("[Biomes] swapped " + n + " nature batches to archive " + NEW_ARCHIVE);
+
+            // MOBILE: Task 9 left one question open. Every simulator launch showed zero
+            // "[TextureReplacement] made a readable copy of ..." lines even where the whole 10030 atlas
+            // was built out of the ASTC DET bundle, so whether CustomBillboardHelper.Readable's
+            // EnsureReadable fallback is load-bearing on real hardware is still unsettled. One line per
+            // session, printed only once the atlas exists, answers it from the device log.
+            if (!loggedReadableCopies && CustomBillboardHelper.TryGetReadableCopyCount(NEW_ARCHIVE, out int copies))
+            {
+                Debug.Log("[Biomes] archive " + NEW_ARCHIVE + ": " + copies + " records copied to readable memory");
+                loggedReadableCopies = true;
+            }
         }
     }
 
@@ -290,6 +305,18 @@ namespace WorldOfDaggerfall
         // MOBILE: archives whose atlas could not be built from readable records - warned about once each.
         static readonly HashSet<int> _warnedUnreadableArchives = new HashSet<int>();
 
+        // MOBILE: archive -> how many of its records Readable() had to copy through EnsureReadable to
+        // make them packable. Written only on a successful build, so a present entry means the atlas for
+        // that archive exists. NatureBatchOverrider prints it once; see the note there.
+        static readonly Dictionary<int, int> _readableCopies = new Dictionary<int, int>();
+        static int _readableCopiesThisBuild;
+
+        /// <summary>MOBILE: the readable-copy count for a built archive, for the one-line log.</summary>
+        public static bool TryGetReadableCopyCount(int archive, out int count)
+        {
+            return _readableCopies.TryGetValue(archive, out count);
+        }
+
         /// <summary>
         /// MOBILE: Texture2D.PackTextures needs CPU-readable inputs, and it does not fail loudly when it
         /// does not get them - it logs "Texture atlas needs textures to have Readable flag set!" and packs
@@ -308,7 +335,10 @@ namespace WorldOfDaggerfall
             if (!NatureBatchOverrider.NeedsReadableCopy(tex))
                 return tex;
             Texture2D copy = TextureReplacement.EnsureReadable(tex);
-            return (copy != null && copy.isReadable) ? copy : null;
+            if (copy == null || !copy.isReadable)
+                return null;
+            _readableCopiesThisBuild++;                     // MOBILE: counted for the one-line log
+            return copy;
         }
 
         // MOBILE: one line per archive, not one per record per batch.
@@ -432,6 +462,8 @@ namespace WorldOfDaggerfall
                 key           = archive;
                 return true;
             }
+
+            _readableCopiesThisBuild = 0;                   // MOBILE: counts this build only
 
             // prepare settings
             var settings = new GetTextureSettings
@@ -586,6 +618,7 @@ namespace WorldOfDaggerfall
                 sizes       = recordSizes,
                 scales      = recordScales
             };
+            _readableCopies[archive] = _readableCopiesThisBuild; // MOBILE: only a built archive counts
 
             return true;                                        // MOBILE
         }

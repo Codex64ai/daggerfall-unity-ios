@@ -37,10 +37,15 @@ namespace WorldOfDaggerfall
         private void Start()
         {
             // Set WOD custom terrain material provider
-            if(WODTilemapTextureArrayTerrainMaterialProvider.IsSupported)
+            // MOBILE: which of the two providers is installed decides what the ground looks like, and
+            // Task 9 could only infer it from the re-skinned terrain itself. One line, once per session
+            // (Init builds exactly one WODBiomes), so the device log says it outright.
+            bool textureArray = WODTilemapTextureArrayTerrainMaterialProvider.IsSupported;
+            if(textureArray)
                 DaggerfallUnity.Instance.TerrainMaterialProvider = new WODTilemapTextureArrayTerrainMaterialProvider();
             else                 
                 DaggerfallUnity.Instance.TerrainMaterialProvider = new WODTilemapTerrainMaterialProvider();
+            Debug.Log("[Biomes] terrain material provider installed: " + (textureArray ? "TextureArray" : "Atlas"));
         }
     }
 }

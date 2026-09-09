@@ -507,8 +507,13 @@ namespace LocationLoader
                         // terrain unload never reclaims, repeating on every stream-in.
                         if (rmbBlock != null)
                             UnityEngine.Object.Destroy(rmbBlock);
+                        // MOBILE: ex.ToString(), not ex.Message. Task 9's simulator run hit this for
+                        // two of WoD's WorldData-override blocks and got only "Object reference not set
+                        // to an instance of an object" - useless. The full string carries the stack, and
+                        // method names survive IL2CPP even when line numbers do not. Still once per
+                        // block name, so a thousand type-5 blocks cannot flood the log.
                         if (failedRmbBlocks.Add(obj.name))
-                            Debug.LogWarning($"[LL] RMB block {obj.name} failed: {ex.Message}");
+                            Debug.LogWarning($"[LL] RMB block {obj.name} failed: {ex}");
                         continue;
                     }
                 }

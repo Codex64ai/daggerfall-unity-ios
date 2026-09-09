@@ -19,6 +19,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // Mod folder names under Assets/Game/Mods/ (the mods.json entry name).
         static readonly string[] rawDataMods = { "WorldOfDaggerfallBiomes" };
 
+        /// <summary>The raw-data mod names, for verification.</summary>
+        // MOBILE: AsReadOnly, not the array itself (same reason as MobileShaders.Names) - an
+        // IReadOnlyList<string> that IS the live array can be cast back to string[] and mutated.
+        // Exposed so MobileSelfTest.TestPackTextureRules can check every name against
+        // tools/bundled-mods/mods.json: nothing else ties this literal to the fetched folder name,
+        // and a rename there reverts 225 textures to ASTC with nothing in any log to say so.
+        public static System.Collections.Generic.IReadOnlyList<string> RawDataMods => System.Array.AsReadOnly(rawDataMods);
+
         public static Rule For(string assetPath)
         {
             string p = (assetPath ?? "").Replace('\\', '/');
