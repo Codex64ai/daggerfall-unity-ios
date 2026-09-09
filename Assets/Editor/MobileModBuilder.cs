@@ -137,6 +137,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
     /// ASTC 6x6 on iOS is what the DREAM conversion settled on (~9-16x smaller than the ARGB32
     /// a loose PNG becomes); 2D art (UI, inventory, paperdoll, portraits) gets no mipmaps. Not
     /// applied to IOSPilot (its own rules below) or Converted/ (the extractor already decided).
+    /// MOBILE: one exception, in MobileModPackTextureRules - packs whose textures are read back
+    /// on the CPU or drawn as point-filtered terrain records stay readable and uncompressed.
     /// </summary>
     class MobileModPackTextureImporter : AssetPostprocessor
     {
@@ -152,6 +154,20 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             var importer = (TextureImporter)assetImporter;
             if (Environment.GetEnvironmentVariable("DFU_IMPORT_TRACE") == "1")
                 Debug.Log("[MobileModPackTextureImporter] " + path);
+            if (MobileModPackTextureRules.For(path) == MobileModPackTextureRules.Rule.RawData)
+            {
+                // MOBILE: see MobileModPackTextureRules.
+                importer.npotScale = TextureImporterNPOTScale.None;
+                importer.isReadable = true;
+                importer.mipmapEnabled = !MobileModPackTextureRules.NoMips(path);
+                importer.textureCompression = TextureImporterCompression.Uncompressed;
+                var raw = importer.GetPlatformTextureSettings("iPhone");
+                raw.overridden = true;
+                raw.format = TextureImporterFormat.RGBA32;
+                raw.maxTextureSize = 2048;
+                importer.SetPlatformTextureSettings(raw);
+                return;
+            }
             importer.npotScale = TextureImporterNPOTScale.None;
             importer.isReadable = false;
             bool twoD = false;

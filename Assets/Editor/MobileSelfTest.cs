@@ -105,6 +105,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestNormalReconstructRule();
             TestWavEncoderRule();
             TestConvertedModImportPolicy();
+            TestPackTextureRules();
             TestModExtractorRoundTrip();
             TestModExtractorPathContainment();
             TestModExtractorSurvivesBadPaths();
@@ -2550,6 +2551,31 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "the audio policy's two constants are the argued-for ones",
                   MobileConvertedModPolicy.StreamingThresholdBytes + "B q"
                       + MobileConvertedModPolicy.VorbisQuality);
+        }
+
+        /// <summary>
+        /// The fetched-pack importer's raw-data exception, as a pure rule. Most bundled packs
+        /// want ASTC 6x6 and no CPU copy, but World of Daggerfall - Biomes has two texture
+        /// classes that ASTC breaks outright: its climate_map.png is a colour-key image read
+        /// back with GetPixel and compared EXACTLY (a lossy block would move #FFA500 by a
+        /// digit and the biome would simply never match), and its 224 terrain tiles are
+        /// point-filtered records DFU decompresses into an ARGB32 Texture2DArray anyway, so
+        /// compressing them buys nothing and risks the silent record-drop that a format
+        /// mismatch causes. Keyed on the mod FOLDER name, which is the mods.json entry name.
+        /// </summary>
+        static void TestPackTextureRules()
+        {
+            Check(MobileModPackTextureRules.For("Assets/Game/Mods/WorldOfDaggerfallBiomes/Assets/Maps/climate_map.png") == MobileModPackTextureRules.Rule.RawData,
+                "PackTextureRules: the Biomes climate map is raw data");
+            Check(MobileModPackTextureRules.For("Assets/Game/Mods/WorldOfDaggerfallBiomes/Textures/Terrain/Subtropical/004_0-0.png") == MobileModPackTextureRules.Rule.RawData,
+                "PackTextureRules: Biomes terrain tiles are raw data");
+            Check(MobileModPackTextureRules.For("Assets/Game/Mods/WorldOfDaggerfall/Textures/Rocks/rock_01.png") == MobileModPackTextureRules.Rule.Default,
+                "PackTextureRules: other mods keep the default ASTC rule");
+            Check(MobileModPackTextureRules.For("Assets\\Game\\Mods\\WorldOfDaggerfallBiomes\\Assets\\Maps\\climate_map.png") == MobileModPackTextureRules.Rule.RawData,
+                "PackTextureRules: backslash paths are normalized");
+            Check(MobileModPackTextureRules.NoMips("Assets/Game/Mods/WorldOfDaggerfallBiomes/Assets/Maps/climate_map.png")
+                  && !MobileModPackTextureRules.NoMips("Assets/Game/Mods/WorldOfDaggerfallBiomes/Textures/Terrain/Subtropical/004_0-0.png"),
+                "PackTextureRules: only the climate map drops mips");
         }
 
         /// <summary>
