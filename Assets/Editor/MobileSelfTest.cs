@@ -783,18 +783,58 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         //                        Init loads through is itself the thing to verify.
         static void TestWoDTerrainPort()
         {
+            // (N2) the world heightmap's dimensions are read from the same constants production reads
+            // rather than written out as 500/1000 literals, so a change to either fails this suite
+            // instead of leaving it green against numbers the port no longer uses.
+            int mapW = DaggerfallConnect.Arena2.WoodsFile.MapWidth;
+            int mapH = DaggerfallConnect.Arena2.WoodsFile.MapHeight;
             Check(Monobelisk.TerrainComputer.LocationBufferSize == 1089, "WoDTerrain: location buffer matches the shader's [1089] arrays (OOB write fix)");
+            // (I1) the per-tile location arrays are now two statics at the shader's full [1089] length,
+            // filled in place and always passed whole. Upstream's variable-length arrays were safe only
+            // because it instantiated a fresh ComputeShader per tile; one held clone plus a first tile
+            // over open water (locationCount 0) could otherwise have locked the array length at 1 for
+            // the session and silently stopped flattening every town after it. Two things to hold: the
+            // arrays really are the shader's length, and FillLocationArrays touches nothing at or past
+            // the count it returns - which is what makes leaving the stale tail alone correct.
+            Check(Monobelisk.TerrainComputer.LocationPositions.Length == Monobelisk.TerrainComputer.LocationBufferSize
+                  && Monobelisk.TerrainComputer.LocationSizes.Length == Monobelisk.TerrainComputer.LocationBufferSize,
+                "WoDTerrain: the location arrays are allocated at the shader's full array length, once");
+            var fillPos = new Vector4[Monobelisk.TerrainComputer.LocationBufferSize];
+            var fillSize = new Vector4[Monobelisk.TerrainComputer.LocationBufferSize];
+            var sentinel = new Vector4(-7f, -7f, -7f, -7f);
+            for (int i = 0; i < fillPos.Length; i++) { fillPos[i] = sentinel; fillSize[i] = sentinel; }
+            int filled = Monobelisk.TerrainComputer.FillLocationArrays(
+                new System.Collections.Generic.List<Rect> { new Rect(1f, 2f, 3f, 4f), new Rect(5f, 6f, 7f, 8f), new Rect(9f, 10f, 11f, 12f) },
+                fillPos, fillSize);
+            bool tailUntouched = true;
+            for (int i = filled; i < fillPos.Length; i++)
+                if (fillPos[i] != sentinel || fillSize[i] != sentinel) { tailUntouched = false; break; }
+            Check(filled == 3 && tailUntouched
+                  && fillPos[0] == new Vector4(1f, 2f, 0f, 0f) && fillSize[0] == new Vector4(3f, 4f, 0f, 0f)
+                  && fillPos[2] == new Vector4(9f, 10f, 0f, 0f) && fillSize[2] == new Vector4(11f, 12f, 0f, 0f),
+                "WoDTerrain: filling three locations returns 3 and leaves every later entry alone",
+                "returned " + filled + ", tail " + (tailUntouched ? "untouched" : "overwritten"));
+            // A zero-location tile - open water in the Iliac Bay, and the case that made the old
+            // one-element guard array necessary - must still pass the full-length arrays and simply
+            // report a count of nothing.
+            Check(Monobelisk.TerrainComputer.FillLocationArrays(new System.Collections.Generic.List<Rect>(), fillPos, fillSize) == 0,
+                "WoDTerrain: a tile with no locations reports count 0 without a shorter array");
             Check(Monobelisk.InterestingTerrains.Available(true, true) && !Monobelisk.InterestingTerrains.Available(false, true) && !Monobelisk.InterestingTerrains.Available(true, false),
                 "WoDTerrain: needs compute support and both compute shaders");
             Check(Monobelisk.TerrainComputer.StartupBands == 10 && Monobelisk.TerrainComputer.GroupRowsY == 5,
                 "WoDTerrain: the world heightmap is dispatched as ten bands of whole thread groups");
-            var bands = Monobelisk.TerrainComputer.Bands(500, Monobelisk.TerrainComputer.StartupBands);
+            var bands = Monobelisk.TerrainComputer.Bands(mapH, Monobelisk.TerrainComputer.StartupBands);
             int rows = 0; foreach (var b in bands) rows += b.rows;
-            Check(bands.Length == 10 && rows == 500 && bands[0].yStart == 0 && bands[0].rows == 50 && bands[9].yStart == 450,
-                "WoDTerrain: start-up dispatch splits 500 rows into 10 bands");
-            var odd = Monobelisk.TerrainComputer.Bands(500, 7); int r2 = 0; foreach (var b in odd) r2 += b.rows;
-            Check(r2 == 500 && odd.Length == 7 && odd[0].rows == 70 && odd[6].rows == 80,
-                "WoDTerrain: uneven band split still covers every row, in whole groups (7 bands -> 6x70 + 80)");
+            int evenBand = mapH / Monobelisk.TerrainComputer.StartupBands;
+            Check(bands.Length == Monobelisk.TerrainComputer.StartupBands && rows == mapH && bands[0].yStart == 0
+                  && bands[0].rows == evenBand && bands[bands.Length - 1].yStart == mapH - evenBand,
+                "WoDTerrain: start-up dispatch splits " + mapH + " rows into " + Monobelisk.TerrainComputer.StartupBands + " bands");
+            // Seven bands do not divide MapHeight, so this is the shape the remainder takes: every band
+            // but the last a whole number of thread-group rows, the last one larger and taking the rest.
+            var odd = Monobelisk.TerrainComputer.Bands(mapH, 7); int r2 = 0; foreach (var b in odd) r2 += b.rows;
+            Check(r2 == mapH && odd.Length == 7 && odd[0].rows % Monobelisk.TerrainComputer.GroupRowsY == 0
+                  && odd[6].rows == mapH - 6 * odd[0].rows && odd[6].rows > odd[0].rows,
+                "WoDTerrain: uneven band split still covers every row, in whole groups (7 bands -> 6x" + odd[0].rows + " + " + odd[6].rows + ")");
             // The second Dispatch argument is a count of THREAD GROUPS, not rows: Dispatch(k, 1000/10,
             // rows/5, 1). A band whose row count is not a multiple of the kernel's y group size (5)
             // therefore either drops rows (integer division) or runs rows that belong to the next
@@ -849,10 +889,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // would be a stale stripe that nothing downstream can detect. Sorted, the ten ranges must
             // tile the whole 500,000-float buffer with no gap and no overlap.
             var ranges = new System.Collections.Generic.List<int[]>();
-            foreach (var b in Monobelisk.TerrainComputer.Bands(500, Monobelisk.TerrainComputer.StartupBands))
-                ranges.Add(new int[] { Monobelisk.TerrainComputer.ReadbackStartRow(500, b.yStart, b.rows) * 1000, b.rows * 1000 });
+            foreach (var b in Monobelisk.TerrainComputer.Bands(mapH, Monobelisk.TerrainComputer.StartupBands))
+                ranges.Add(new int[] { Monobelisk.TerrainComputer.ReadbackStartRow(mapH, b.yStart, b.rows) * mapW, b.rows * mapW });
             ranges.Sort((a, b) => a[0].CompareTo(b[0]));
-            bool tiles = ranges.Count == 10; string tileDetail = tiles ? "" : ranges.Count + " ranges, not 10";
+            bool tiles = ranges.Count == Monobelisk.TerrainComputer.StartupBands;
+            string tileDetail = tiles ? "" : ranges.Count + " ranges, not " + Monobelisk.TerrainComputer.StartupBands;
             int nextStart = 0;
             foreach (var r in ranges)
             {
@@ -865,12 +906,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 }
                 nextStart = r[0] + r[1];
             }
-            if (tiles && nextStart != 500 * 1000)
+            if (tiles && nextStart != mapH * mapW)
             {
                 tiles = false;
-                tileDetail = "the ranges end at " + nextStart + ", not 500000";
+                tileDetail = "the ranges end at " + nextStart + ", not " + (mapH * mapW);
             }
-            Check(tiles, "WoDTerrain: the ten mirrored readback ranges tile the 500,000-float buffer exactly once", tileDetail);
+            Check(tiles, "WoDTerrain: the " + Monobelisk.TerrainComputer.StartupBands + " mirrored readback ranges tile the "
+                  + (mapH * mapW) + "-float buffer exactly once", tileDetail);
             // GetBiomeWeights calls SampleBaseHeight unconditionally, and that function indexes shm and
             // lhm with sd/ld/hDim/div. The start-up dispatch bound none of them until this polish round;
             // an unbound - or, with the wrong hDim, a wildly out-of-range - StructuredBuffer read is
@@ -881,7 +923,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             var dummy = Monobelisk.TerrainComputer.StartupDummySizes;
             bool sampleInBounds = dummy.shm == 16 && dummy.lhm == 81;
             string sampleDetail = sampleInBounds ? "" : "dummy buffers are " + dummy.shm + "/" + dummy.lhm + ", not 16/81";
-            for (int idx = 0; sampleInBounds && idx < 1000 * 500; idx++)
+            for (int idx = 0; sampleInBounds && idx < mapW * mapH; idx++)
             {
                 var reach = Monobelisk.TerrainComputer.StartupSampleMaxIndices(
                     idx, Monobelisk.TerrainComputer.StartupSampleDim, Monobelisk.TerrainComputer.StartupSampleDiv,

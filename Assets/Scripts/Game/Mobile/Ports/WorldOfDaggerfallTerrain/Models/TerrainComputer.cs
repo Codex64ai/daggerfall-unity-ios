@@ -58,6 +58,48 @@ namespace Monobelisk
         public const int LocationBufferSize = 1089;
 
         /// <summary>
+        /// MOBILE: (I1) the two location arrays the shader reads, allocated ONCE at the shader's own
+        /// declared length and refilled in place for every tile, then always passed at FULL length.
+        ///
+        /// TerrainComputer.compute:7 declares "float4 locationPositions[1089], locationSizes[1089]" and
+        /// every consumer loops "i &lt; locationCount", so the entries past that count are never sampled
+        /// and a stale tail costs nothing. Upstream built a fresh array of exactly locationCount
+        /// elements per tile and got away with it because it also called Object.Instantiate on the
+        /// ComputeShader per tile - every tile met a fresh shader object. Fix (c) now holds ONE clone
+        /// for the whole session, which makes the array sizing question live: Unity locks a vector
+        /// array's length at the first SetVectorArray on Material/MaterialPropertyBlock and truncates
+        /// later, larger arrays, and ComputeShader.SetVectorArray is documented neither way. If it does
+        /// lock, a first tile over open water in the Iliac Bay (locationCount 0, so a one-element guard
+        /// array) would have capped every later tile of the session at one location - towns and docks
+        /// silently stop being flattened, which is the fidelity this mod exists for, and nothing logs.
+        /// Passing the full length every time makes the call size-invariant whichever way Unity
+        /// behaves, needs no zero-count special case, and drops two per-tile allocations of up to
+        /// 1089 x 16 bytes along with their LINQ Select.
+        /// </summary>
+        public static readonly Vector4[] LocationPositions = new Vector4[LocationBufferSize];
+
+        /// <summary>MOBILE: (I1) see LocationPositions.</summary>
+        public static readonly Vector4[] LocationSizes = new Vector4[LocationBufferSize];
+
+        /// <summary>
+        /// MOBILE: (I1) fills the first locations.Count entries of pos and size and returns that count,
+        /// touching no index at or beyond it - the tail is left exactly as the previous tile left it,
+        /// which is safe precisely because the shader reads only "i &lt; locationCount". Pure: no GPU, no
+        /// Unity state, so the self-test can pin both halves of that contract.
+        /// </summary>
+        public static int FillLocationArrays(IList<Rect> locations, Vector4[] pos, Vector4[] size)
+        {
+            int count = locations.Count;
+            for (int i = 0; i < count; i++)
+            {
+                var r = locations[i];
+                pos[i] = new Vector4(r.min.x, r.min.y);
+                size[i] = new Vector4(r.size.x, r.size.y);
+            }
+            return count;
+        }
+
+        /// <summary>
         /// MOBILE: (a) the y dimension of MainHeightmapComputer's CSMain thread group, [numthreads(10,5,1)].
         /// Dispatch takes a count of GROUPS, so every band handed to it must be a whole multiple of this
         /// or the integer division silently drops the remainder rows.
@@ -97,6 +139,9 @@ namespace Monobelisk
         /// stride the index was BUILT with. GetBiomeWeights builds it as Idx(id.x, id.y, terrainSize),
         /// and terrainSize is MapWidth on this path - NOT the sampler's HeightmapDimension, which is
         /// what the per-tile path passes because there terrainSize is the tile's vertex count.
+        ///
+        /// MOBILE: (N3) this is also the x component the start-up dispatch's "terrainSize" SetVector is
+        /// built from, so the stride is stated in exactly one place rather than twice.
         /// </summary>
         public static int StartupSampleDim
         {
@@ -308,7 +353,11 @@ namespace Monobelisk
                 cs.SetFloat("baseHeightScale", 8f);
                 cs.SetFloat("noiseMapScale", 4f);
                 cs.SetFloat("extraNoiseScale", 10f);
-                cs.SetVector("terrainSize", new Vector2(WoodsFile.MapWidth, WoodsFile.MapHeight));
+                // MOBILE: (N3) the x component IS StartupSampleDim - the stride SampleBaseHeight's
+                // MOBILE: index is built with - stated once instead of twice. The comment on
+                // MOBILE: StartupSampleDim explains why the two must agree; this makes them one
+                // MOBILE: expression, so they cannot drift.
+                cs.SetVector("terrainSize", new Vector2(StartupSampleDim, WoodsFile.MapHeight));
                 cs.SetVector("terrainPosition", Vector2.zero);
                 cs.SetTexture(k, "BiomeMap", InterestingTerrains.biomeMap);
                 cs.SetTexture(k, "DerivMap", InterestingTerrains.derivMap);
@@ -515,25 +564,20 @@ namespace Monobelisk
             x = (int)_x;
             y = (int)_y;
 
-            // MOBILE: (d) the sweep visits 33x33 = 1089 map pixels and adds at most one Rect each, so
-            // MOBILE: locations.Count is bounded by the shader's [1089] arrays. It can also be ZERO -
-            // MOBILE: open water in the Iliac Bay - and Unity rejects a zero-length SetVectorArray. Pass
-            // MOBILE: a one-element zero array in that case; locationCount 0 makes the shader ignore it.
-            locationCount = locations.Count;
-            var locationPositions = locationCount > 0
-                ? locations.Select(r => new Vector4(r.min.x, r.min.y)).ToArray()
-                : new Vector4[1];
-            var locationSizes = locationCount > 0
-                ? locations.Select(r => new Vector4(r.size.x, r.size.y)).ToArray()
-                : new Vector4[1];
+            // MOBILE: (d)(I1) the sweep visits 33x33 = 1089 map pixels and adds at most one Rect each,
+            // MOBILE: so locations.Count is bounded by the shader's [1089] arrays. It can also be ZERO -
+            // MOBILE: open water in the Iliac Bay - and that case needs no special array any more: the
+            // MOBILE: two statics are always passed at their full 1089 length and locationCount carries
+            // MOBILE: the real count, which is the only thing the shader loops on.
+            locationCount = FillLocationArrays(locations, LocationPositions, LocationSizes);
 
             cs.SetVector("terrainPosition", terrainPosition);
             cs.SetVector("terrainSize", terrainSize);
             cs.SetInt("heightmapResolution", heightmapResolution);
             cs.SetVector("locationPosition", locationRect.min);
             cs.SetVector("locationSize", locationRect.size);
-            cs.SetVectorArray("locationPositions", locationPositions);   // MOBILE: (d)
-            cs.SetVectorArray("locationSizes", locationSizes);           // MOBILE: (d)
+            cs.SetVectorArray("locationPositions", LocationPositions);   // MOBILE: (d)(I1)
+            cs.SetVectorArray("locationSizes", LocationSizes);           // MOBILE: (d)(I1)
             cs.SetInt("locationCount", locationCount);                   // MOBILE: (d)
             cs.SetTexture(k, "BiomeMap", InterestingTerrains.biomeMap);
             cs.SetTexture(k, "DerivMap", InterestingTerrains.derivMap);
@@ -553,9 +597,24 @@ namespace Monobelisk
 
             csParams.ApplyToCS(cs);
 
+            // MOBILE: (M1) HandleBaseMapSampleParams allocates two ComputeBuffers (:665-669), so it can
+            // MOBILE: throw under exactly the memory pressure the per-tile containment exists for. The
+            // MOBILE: sampler's catch handles the tile, but without this finally the reader would be
+            // MOBILE: left holding the ORIGINAL WOODS.WLD buffer until some later tile happened to
+            // MOBILE: complete: if the failures are systematic, the travel map, the region maps and
+            // MOBILE: every later GetMapPixelData().worldHeight silently revert to vanilla while the
+            // MOBILE: installed sampler says otherwise. The two buffers it allocates are written into
+            // MOBILE: heightmapBuffers, whose null-safe Dispose the sampler's own finally calls, so
+            // MOBILE: whichever of the two was reached is released without anything extra here.
             woodsFile.Buffer = originalHeightmapBuffer;
-            HandleBaseMapSampleParams(ref mapData, ref cs, k);
-            woodsFile.Buffer = alteredHeightmapBuffer;
+            try
+            {
+                HandleBaseMapSampleParams(ref mapData, ref cs, k);
+            }
+            finally
+            {
+                woodsFile.Buffer = alteredHeightmapBuffer;
+            }
 
             cs.Dispatch(k, res / x, res / y, 1);
 

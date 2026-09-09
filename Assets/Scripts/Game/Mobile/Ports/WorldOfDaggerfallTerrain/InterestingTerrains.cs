@@ -107,6 +107,14 @@ namespace Monobelisk
                 return;
 
             var go = new GameObject(Mod.Title);
+            // MOBILE: (M9) every other driver this port installs is marked (MobilePortedMods.cs:150,
+            // MOBILE: WODClimates.cs:66); this one was left in the game scene. A reload of that scene -
+            // MOBILE: reachable through DaggerfallUnitySetupGameWizard's SceneControl - would destroy
+            // MOBILE: it, run OnDestroy -> TerrainComputer.Cleanup() and hand the new DaggerfallUnity
+            // MOBILE: its default sampler, while MobilePortedMods' static "started" flag blocks any
+            // MOBILE: re-Init: the MODS entry would read ON over vanilla terrain with nothing in the
+            // MOBILE: log to say so. Marked before AddComponent, matching WODClimates.
+            UnityEngine.Object.DontDestroyOnLoad(go);
             instance = go.AddComponent<InterestingTerrains>();
 
             GameManager.Instance.StreamingWorld.TerrainScale = 1f;
@@ -241,7 +249,8 @@ namespace Monobelisk
 
         /// <summary>
         /// MOBILE: (M1) a refused start drops every reference it took, so the four 2048x1024 RGBA32
-        /// world maps (~43 MB GPU) and the two compute shader assets are collectable instead of pinned
+        /// world maps (~34 MB GPU with mips off - the LinearData importer rule turns them off, which is
+        /// where the design's ~43 MB estimate went) and the two compute shader assets are collectable instead of pinned
         /// by statics for the life of the session - on the one device where the gate actually fires,
         /// which is the device that could least afford it. DFU's own Mod.loadedAssets cache still holds
         /// its entries (private, stamped -1 = never pruned, no public clear), so full reclamation would
@@ -277,7 +286,25 @@ namespace Monobelisk
             DaggerfallTerrain.OnPromoteTerrainData += tileDataCache.UncacheTileData;
 
             Mod.IsReady = true;
-            Camera.main.farClipPlane = 10000f;
+
+            // MOBILE: (M2) guarded rather than dereferenced. This is the last statement of an Awake that
+            // MOBILE: runs synchronously inside AddComponent, i.e. AFTER the sampler has been replaced
+            // MOBILE: and OnPromoteTerrainData hooked - so an NRE here would land in exactly the
+            // MOBILE: half-installed state the rest of this port is built to make impossible, and (if
+            // MOBILE: Unity propagated it out of AddComponent) would also skip TerrainScale = 1f and
+            // MOBILE: report "start failed" with a live GPU sampler at scale 1.5. Camera.main is very
+            // MOBILE: probably non-null here - the MainCamera-tagged camera is an active child of the
+            // MOBILE: PlayerAdvanced prefab from scene load - but this file's neighbour is the
+            // MOBILE: counter-example: Dynamic Skies had to be deferred out of StartEnabled entirely
+            // MOBILE: because at this same state "on device one of them comes back null"
+            // MOBILE: (Ports/DynamicSkies/BLBSkybox.cs:120-127). The write is load-bearing, not
+            // MOBILE: cosmetic: the prefab's far clip is 2600 (PlayerAdvanced.prefab:750) and this
+            // MOBILE: sampler's relief goes to 5000, so without it distant terrain is clipped away.
+            var cam = Camera.main;
+            if (cam != null)
+                cam.farClipPlane = 10000f;
+            else
+                Debug.LogWarning("[WoDTerrain] no main camera at start-up; far clip plane left at its default - distant terrain will be clipped");
         }
 
         private void Start()
