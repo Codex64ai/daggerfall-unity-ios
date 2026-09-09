@@ -73,11 +73,12 @@ already Distant-Terrain-aware (`GameObject.Find("DistantTerrain")` / `"stackedCa
    `HighlightDistantLocations=false`, `BasicMode=false` (WoD is the point), `blendEnd=60000`. Docs say what the dials do.
 6. **Data pipeline**: mods.json entry `DistantTerrainWoD` (`strip_code`; `private_only`; `pending:` licence naming the MIT
    base + MaoDeVaca; `exclude_globs` for `*.shader`, `*.cginc`, `*.prefab`, `*.png~`, the three unused `*.bin.txt`,
-   `DaggerfallBillboardBatchFaded.shader`); importer rule `RawData` extended to folder `DistantTerrainWoD` (the deriv map
-   is `GetPixels32`-read: readable, uncompressed, no mips, 2048 max size is WRONG here - it must stay 5000x2500 or the carve
-   is quantised: set `maxTextureSize = 8192` for this folder's rule variant; note ~50 MB RGBA32 - OR downsample to 2500x1250
-   at fetch time with a documented tool step if the device budget bites; v1 ships full size). Bundle `distant terrain.dfmod`
-   -> GitHub asset name `distant-terrain-wod.dfmod` (spaces).
+   `DaggerfallBillboardBatchFaded.shader`); importer rule `RawData` extended to folder `DistantTerrainWoD` (the deriv map is `GetPixels32`-read: readable,
+   uncompressed, no mips). It is an 8-bit greyscale water mask that the carve scales onto the 1000x500 heightmap grid by the
+   texture's own size, so it imports at Unity's 2048 clamp (2048x1024) and single-channel R8 (`SingleChannel(path)` rule;
+   `GetPixels32().r` verified): 2 MB GPU + 2 MB readable instead of 100 MB at 5000x2500 RGBA32 (measured: 0.3% of water
+   cells differ). Bundle `distantterrain.dfmod` (manifest `distantterrain.dfmod.json`; title `Distant Terrain of the World of Daggerfall`,
+   GUID 9632a2ad-2ea0-46b6-b9b1-a4dafcca8a9a).
 7. **Failure handling**: Init gated on the shader resolving (`MobileShaders.Find` non-null + `isSupported`) and the three
    CSVs + deriv map present, else `[DistantTerrain] not available: <reason>`; `InitFarTerrain` in try/catch that tears the
    far terrain and the two cameras down and restores `Camera.main.farClipPlane`/`clearFlags` on failure; `Installed` flag
