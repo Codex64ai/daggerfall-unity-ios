@@ -509,6 +509,17 @@
       "licence": "pending:No licence is declared upstream (github.com/drcarademono/wod-biomes, World of Daggerfall Team: carademono and Kab the Bird Ranger). Permission is being sought; until then this bundle is shipped only on the private test draft, never in the public mod pack. Its three scripts (WODBiomes.cs, WODClimates.cs, WODTerrainMaterialProvider.cs) are compiled into the app under Assets/Scripts/Game/Mobile/Ports/WorldOfDaggerfallBiomes (see THIRD-PARTY.md)."
     },
     {
+      "name": "WorldOfDaggerfallTerrain",
+      "repo": "https://github.com/drcarademono/wod-terrain.git",
+      "commit": "9aeb1bcc5de5343ccb7a6b09062559ad871e9d40",
+      "manifest": "wod-terrain.dfmod.json",
+      "strip_code": true,
+      "private_only": true,
+      "exclude_globs": ["*.compute", "*.cginc"],
+      "drop_dependencies": ["basicroads"],
+      "licence": "pending:No licence is declared anywhere in the lineage (github.com/drcarademono/wod-terrain, from monobelisk's Interesting Terrains; authors monobelisk, Freak2121, carademono, Ninelan). Permission is being sought; until then this bundle is shipped only on the private test draft, never in the public mod pack. Its C# is compiled into the app under Assets/Scripts/Game/Mobile/Ports/WorldOfDaggerfallTerrain and its compute shaders under Assets/Resources/WoDTerrain (see THIRD-PARTY.md)."
+    },
+    {
       "name": "RoleplayRealism",
       "repo": "https://github.com/ajrb/dfunity-mods.git",
       "commit": "0af2ec99b5ad7e6722ddc9ce284987d4d6fa262d",
