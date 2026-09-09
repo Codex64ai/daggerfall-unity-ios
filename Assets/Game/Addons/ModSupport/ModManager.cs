@@ -1240,9 +1240,25 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
             return query.Where(x => x.Enabled);
         }
 
+        /// <summary>
+        /// MOBILE: does this mod come from a file of the given name?
+        ///
+        /// The port adds mods that were built in code rather than loaded from a .dfmod - Roads and
+        /// tracks, Real travel, Summer start, the TravelOptions bridge - and those have no FileName
+        /// at all. Calling Equals on it threw a NullReferenceException as soon as the list walk
+        /// reached one, which took out dependency checking (every frame the MODS window was open)
+        /// and conflict reordering. A mod with no file simply never matches a name.
+        ///
+        /// Public and static so the headless self test can exercise it; nothing else should need it.
+        /// </summary>
+        public static bool FileNameMatches(Mod mod, string name)
+        {
+            return mod != null && mod.FileName != null && name != null && mod.FileName.Equals(name, StringComparison.Ordinal);
+        }
+
         internal Mod GetModFromName(string name)
         {
-            return mods.FirstOrDefault(x => x.FileName.Equals(name, StringComparison.Ordinal));
+            return mods.FirstOrDefault(x => FileNameMatches(x, name));   // MOBILE: null-safe for mods built in code
         }
 
         internal void PruneCache(float time, float threshold)

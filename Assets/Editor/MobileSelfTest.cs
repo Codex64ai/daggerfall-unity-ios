@@ -132,6 +132,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestTravelOptionsBridge();
             TestTavernAlcohol();
             TestModSettingsSerialization();
+            TestModLookupTolerantOfBuiltIns();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -844,6 +845,33 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 Check(back[0].Enabled == false, "mod settings: Enabled survives the round trip");
                 Check(back[0].LoadPriority == 7, "mod settings: LoadPriority survives the round trip", back[0].LoadPriority.ToString());
             }
+        }
+
+        /// <summary>
+        /// Mod lookup by file name must survive the port's built-in entries.
+        ///
+        /// Roads and tracks, Real travel, Summer start and the TravelOptions bridge are Mod objects
+        /// built in code, never loaded from a .dfmod, so their FileName is null. The upstream lambda
+        /// called FileName.Equals directly and threw a NullReferenceException as soon as the walk
+        /// reached one: every frame the MODS window was open (CheckDependencies), and on every
+        /// conflict reorder (MobileModConflicts.MoveBelow), which is why a player's conflict choices
+        /// silently never applied.
+        /// </summary>
+        static void TestModLookupTolerantOfBuiltIns()
+        {
+            Mod builtIn = new Mod();
+            Check(builtIn.FileName == null, "mod lookup: a mod built in code really has no file name");
+            Check(!ModManager.FileNameMatches(builtIn, "roads"), "mod lookup: a null file name never matches");
+            Check(!ModManager.FileNameMatches(null, "roads"), "mod lookup: a null mod never matches");
+            Check(!ModManager.FileNameMatches(builtIn, null), "mod lookup: a null name never matches");
+
+            // Positive case: FileName is set through a private setter, so reach it the way the
+            // loader does rather than through a constructor that wants a real asset bundle.
+            Mod loaded = new Mod();
+            typeof(Mod).GetProperty("FileName").GetSetMethod(true).Invoke(loaded, new object[] { "dreamtextures" });
+            Check(ModManager.FileNameMatches(loaded, "dreamtextures"), "mod lookup: an equal file name matches");
+            Check(!ModManager.FileNameMatches(loaded, "DREAMTEXTURES"), "mod lookup: the match stays ordinal, not case folded");
+            Check(!ModManager.FileNameMatches(loaded, null), "mod lookup: a real mod does not match a null name");
         }
 
         static void Check(bool condition, string name, string detail = "")
