@@ -15,7 +15,8 @@
 // Location Loader is code only - it has no data of its own and does nothing alone - so it is a
 // built-in entry registered by MobileMods. World of Daggerfall is the location mod it reads: a
 // bundle, so its entry appears only once that bundle is installed, and it needs Location Loader
-// switched on. Both default off.
+// switched on AND started, plus Daggerfall Expanded Textures - the mod its manifest depends on for
+// the textures its scenery uses - installed and switched on. Both default off.
 //
 // The survival mods start as soon as the bundles are loaded, at the title. Dynamic Skies cannot:
 // its Init reaches into the scene for the sun light and the camera, and on a player build neither
@@ -39,6 +40,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         public const string DynamicSkiesShaderName = "BLB/SkyBox/BLBProceduralSkybox";
         public const string GateNote = " Needs RoleplayRealism and RoleplayRealism-Items switched on; it was switched off because one of them is not.";
         public const string WoDGateNote = " Needs Location Loader switched on; it was switched off because Location Loader is not.";
+        public const string DETFileName = "daggerfall expanded textures";
+        public const string WoDDetNote = " Needs Daggerfall Expanded Textures switched on; it was switched off because that mod is off or not installed.";
 
         /// <summary>Pure: which of (rr, rrItems, cc) may run. Items needs RR; C&C needs both.</summary>
         public static bool[] Gate(bool rr, bool rrItems, bool cc)
@@ -53,8 +56,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// <summary>Pure: the sky's Init can only work once the scene holds the sun light and the camera it looks up.</summary>
         public static bool SkySceneReady(bool sunLightPresent, bool mainCameraPresent) => sunLightPresent && mainCameraPresent;
 
-        /// <summary>Pure: World of Daggerfall is a location mod - it is nothing without Location Loader reading it.</summary>
-        public static bool WodRuns(bool locationLoaderOn, bool wodOn) => locationLoaderOn && wodOn;
+        /// <summary>
+        /// Pure: World of Daggerfall is a location mod - it is nothing without Location Loader reading it,
+        /// and its scenery is textured out of Daggerfall Expanded Textures, which its manifest depends on.
+        /// The loader argument is whether Location Loader actually STARTED, not whether it is switched on:
+        /// an Init that threw leaves nothing to read the locations either.
+        /// </summary>
+        public static bool WodRuns(bool locationLoaderStarted, bool wodOn, bool detOn) => locationLoaderStarted && wodOn && detOn;
 
         /// <summary>Titles of the compiled-in mods, in dependency order.</summary>
         public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle, SkyTitle, LLTitle, WoDTitle };
@@ -154,6 +162,24 @@ namespace DaggerfallWorkshop.Game.Mobile
                 : "[PortedMods] " + SkyTitle + " did not start (see [DynamicSkies] lines)");
         }
 
+        /// <summary>
+        /// Is Daggerfall Expanded Textures installed and switched on? WoD's manifest declares it as a
+        /// dependency by the name "daggerfall expanded textures", and DFU resolves a dependency name
+        /// against Mod.FileName - CheckModDependencies -> GetModFromName -> ModManager.FileNameMatches,
+        /// an ordinal Equals. This asks the same question through the same comparison, so this gate and
+        /// DFU's own dependency warning can never disagree about whether the dependency is satisfied.
+        /// DET ships as the converted bundle "daggerfall expanded textures.dfmod"; the title inside the
+        /// bundle differs, so the file name is the only thing worth matching on.
+        /// </summary>
+        static bool DetOn(ModManager manager)
+        {
+            if (manager == null) return false;
+            foreach (Mod mod in manager.Mods)
+                if (ModManager.FileNameMatches(mod, DETFileName) && mod.Enabled)
+                    return true;
+            return false;
+        }
+
         static Mod Entry(string title)
         {
             return ModManager.Instance != null && ModManager.Instance.GetModIndex(title) >= 0 ? ModManager.Instance.GetMod(title) : null;
@@ -208,15 +234,33 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             Mod ll = Entry(LLTitle), wod = Entry(WoDTitle);
             bool llOn = ll != null && ll.Enabled;
-            if (wod != null && wod.Enabled && !WodRuns(llOn, true))
+            bool detOn = DetOn(ModManager.Instance);
+            // The player's own choice, read before either gate can clear it: with both dependencies
+            // absent both notes apply, so neither gate may be conditioned on the other's result.
+            bool wodChosen = wod != null && wod.Enabled;
+            if (wodChosen && !llOn)
             {
                 wod.Enabled = false;
                 if (!wod.ModInfo.ModDescription.EndsWith(WoDGateNote)) wod.ModInfo.ModDescription += WoDGateNote;
                 ModManager.WriteModSettings();
                 Debug.Log("[PortedMods] World of Daggerfall switched off: Location Loader must be on");
             }
-            if (llOn) StartOne(LLTitle, () => LocationLoader.LocationModLoader.Init(new InitParams(ll, ModManager.Instance.GetModIndex(LLTitle), count)));
-            if (WodRuns(llOn, wod != null && wod.Enabled)) StartOne(WoDTitle, () => WODRocksMaterials.WODRocksMaterials.Init(new InitParams(wod, ModManager.Instance.GetModIndex(WoDTitle), count)));
+            if (wodChosen && !detOn)
+            {
+                wod.Enabled = false;
+                if (!wod.ModInfo.ModDescription.EndsWith(WoDDetNote)) wod.ModInfo.ModDescription += WoDDetNote;
+                ModManager.WriteModSettings();
+                Debug.Log("[PortedMods] World of Daggerfall off: Daggerfall Expanded Textures is not enabled");
+            }
+            bool llStarted = llOn && StartOne(LLTitle, () => LocationLoader.LocationModLoader.Init(new InitParams(ll, ModManager.Instance.GetModIndex(LLTitle), count)));
+            bool wodEnabled = wod != null && wod.Enabled;
+            if (WodRuns(llStarted, wodEnabled, detOn))
+                StartOne(WoDTitle, () => WODRocksMaterials.WODRocksMaterials.Init(new InitParams(wod, ModManager.Instance.GetModIndex(WoDTitle), count)));
+            else if (wodEnabled && detOn && llOn)
+                // Both switches are on and the textures are there, so the only way here is LL's Init
+                // throwing. Nothing is left to read the locations; a runtime failure is not a user
+                // choice, so the entry keeps its setting and only the log says what happened.
+                Debug.Log("[PortedMods] World of Daggerfall not started: Location Loader failed");
 
             return SkyRuns(sky != null, sky != null && sky.Enabled) ? sky : null;
         }

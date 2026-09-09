@@ -213,13 +213,19 @@ switches survive a relaunch), so there is nothing new to re-apply after a rebase
 discovered: Location Loader is pure code, its upstream manifest ships no data, so there is no bundle
 for the engine to find and the player could otherwise never switch it on. `MobilePortedMods` adds both
 titles to `Titles` (which is what `DefaultOff` walks, so both start off), the pure
-`WodRuns(locationLoaderOn, wodOn) = locationLoaderOn && wodOn`, and a gate in `StartEnabled` mirroring
-the Climates & Calories one: an enabled `World of Daggerfall` with Location Loader off is switched off,
-`WoDGateNote` appended to its description once, `WriteModSettings()`, and a log line. World of
-Daggerfall's other requirement, Daggerfall Expanded Textures, is gated the same way: with that mod
-missing or switched off, World of Daggerfall is switched off at start-up and its description in MODS
-says why. Then `LocationModLoader.Init` runs when the loader is on, and `WODRocksMaterials.Init` after
-it when both are.
+`WodRuns(locationLoaderStarted, wodOn, detOn) = locationLoaderStarted && wodOn && detOn`, and a gate in
+`StartEnabled` mirroring the Climates & Calories one: an enabled `World of Daggerfall` with Location
+Loader off is switched off, `WoDGateNote` appended to its description once, `WriteModSettings()`, and a
+log line. World of Daggerfall's other requirement, Daggerfall Expanded Textures, is gated the same way
+by a second block: with that mod missing or switched off, World of Daggerfall is switched off at
+start-up and `WoDDetNote` says why in MODS. Both gates read the player's choice before either clears
+it, so with both dependencies absent both notes apply. DET is detected as DFU itself resolves that
+manifest dependency - `CheckModDependencies` -> `GetModFromName` -> `ModManager.FileNameMatches`, an
+ordinal `Equals` against `Mod.FileName` - matching the shipped bundle `daggerfall expanded textures.dfmod`,
+never the title inside it. Then `LocationModLoader.Init` runs when the loader is on, and
+`WODRocksMaterials.Init` after it only when that `Init` actually returned and DET is on; when the loader
+was on but its `Init` threw, WoD is left unstarted with a log line and its setting untouched - a runtime
+failure is not a user choice.
 Each compiled-in mod's `Init` now goes through `MobilePortedMods.StartOne(title, init)`, which holds
 its own try/catch, logs `start failed` with the exception, returns whether it got through and writes
 the `started` line only when it did. Before that there was one try/catch around the whole of

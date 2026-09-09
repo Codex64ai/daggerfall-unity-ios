@@ -767,7 +767,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobilePortedMods.SkySceneReady(true, true) && !MobilePortedMods.SkySceneReady(true, false) && !MobilePortedMods.SkySceneReady(false, true) && !MobilePortedMods.SkySceneReady(false, false), "PortedMods: the sky starts only when both the sun light and the camera are in the scene");
             Check(MobilePortedMods.LLTitle == "Location Loader" && System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.LLTitle) >= 0, "PortedMods: Location Loader is a default-off title");
             Check(MobilePortedMods.WoDTitle == "World of Daggerfall" && System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.WoDTitle) >= 0, "PortedMods: World of Daggerfall is a default-off title");
-            Check(MobilePortedMods.WodRuns(true, true) && !MobilePortedMods.WodRuns(true, false) && !MobilePortedMods.WodRuns(false, true) && !MobilePortedMods.WodRuns(false, false), "PortedMods: World of Daggerfall runs only when Location Loader is on too");
+            Check(MobilePortedMods.WodRuns(true, true, true), "PortedMods: World of Daggerfall runs when Location Loader started and Daggerfall Expanded Textures is on");
+            Check(!MobilePortedMods.WodRuns(true, false, true) && !MobilePortedMods.WodRuns(false, false, false), "PortedMods: World of Daggerfall does not run when its own entry is off");
+            // The first argument is whether Location Loader actually STARTED, not whether it is switched
+            // on: a location mod is nothing without the loader reading it, so an LL Init that threw must
+            // keep WoD out too rather than log "started World of Daggerfall" under "Location Loader start failed".
+            Check(!MobilePortedMods.WodRuns(false, true, true), "PortedMods: World of Daggerfall does not run when Location Loader is off or its Init failed");
+            // WoD's manifest depends on Daggerfall Expanded Textures for the textures its scenery uses.
+            Check(!MobilePortedMods.WodRuns(true, true, false), "PortedMods: World of Daggerfall does not run when Daggerfall Expanded Textures is off or missing");
+            Check(MobilePortedMods.DETFileName == "daggerfall expanded textures", "PortedMods: the Daggerfall Expanded Textures dependency is matched on the bundle file name WoD's manifest names");
+            Check(!string.IsNullOrEmpty(MobilePortedMods.WoDDetNote) && MobilePortedMods.WoDDetNote.Contains("Expanded Textures"), "PortedMods: the World of Daggerfall dependency note names Daggerfall Expanded Textures");
 
             // A mod whose Init throws must not take the mods after it - or the sky's deferred start -
             // down with it. The LogError below is this check working, not a failure.
