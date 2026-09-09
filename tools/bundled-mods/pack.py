@@ -77,6 +77,13 @@ def check_bundles(cfg, mods_dir):
             problems.append("pre-built bundle missing: %s (run the converter)" % path)
         if not lic.startswith("permission:") and not lic.startswith("text:"):
             problems.append("pre-built bundle %s has no licence text in the pin" % s)
+    # A pending: licence records that we have no redistribution right yet (World of Daggerfall).
+    # private_only keeps such an entry out of pack_mods, but that is a single boolean one merge or
+    # rebase can drop; this is the second line of defence, applied to whatever WOULD be packed.
+    for m in pack_mods(cfg):
+        if str(m.get("licence", "")).startswith("pending:"):
+            problems.append("pinned mod has a pending licence and cannot ship in the public pack: %s"
+                            % m["name"])
     return problems
 
 

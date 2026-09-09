@@ -131,7 +131,8 @@ class ExtraDirs(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         self.src = os.path.join(self.tmp, "repo")
         self.dest = os.path.join(self.tmp, "Assets", "Game", "Mods", "X")
-        for rel in ("Meshes/a.fbx", "Meshes/a.fbx.meta", "Other/x.txt"):
+        for rel in ("Meshes/a.fbx", "Meshes/a.fbx.meta", "Meshes/Tool.cs", "Meshes/bake.py",
+                    "Meshes/bake.sh", "Meshes/Plug.dll", "Other/x.txt"):
             path = os.path.join(self.src, rel)
             os.makedirs(os.path.dirname(path), exist_ok=True)
             with open(path, "w") as fh:
@@ -139,20 +140,41 @@ class ExtraDirs(unittest.TestCase):
         os.makedirs(self.dest)
 
     def test_named_dir_is_copied_whole_with_metas_and_nothing_else(self):
-        copied = fetch.copy_extra_dirs(self.src, self.dest, ["Meshes"])
+        copied = fetch.copy_extra_dirs(self.src, self.dest, ["Meshes"], "X")
         self.assertTrue(os.path.exists(os.path.join(self.dest, "Meshes", "a.fbx")))
         self.assertTrue(os.path.exists(os.path.join(self.dest, "Meshes", "a.fbx.meta")))
         self.assertFalse(os.path.exists(os.path.join(self.dest, "Other")))
         self.assertEqual(copied, [("Meshes", 2)])
 
+    def test_code_and_authoring_scripts_are_never_copied(self):
+        """extra_dirs bypasses strip_code and exclude_globs, and lands in Assets/ where Unity
+        compiles any .cs it finds into the app. The copy filters them out."""
+        fetch.copy_extra_dirs(self.src, self.dest, ["Meshes"], "X")
+        meshes = os.path.join(self.dest, "Meshes")
+        self.assertEqual(sorted(os.listdir(meshes)), ["a.fbx", "a.fbx.meta"])
+        for gone in ("Tool.cs", "bake.py", "bake.sh", "Plug.dll"):
+            self.assertFalse(os.path.exists(os.path.join(meshes, gone)), gone)
+
+    def test_compiled_code_surviving_the_copy_is_a_stop_naming_the_entry(self):
+        """Belt and braces: whatever the filter missed, a .cs or .dll under the copied tree stops
+        the fetch rather than shipping code into Assets/ with no diagnostic."""
+        os.makedirs(os.path.join(self.dest, "Meshes"))
+        with open(os.path.join(self.dest, "Meshes", "Sneaked.cs"), "w") as fh:
+            fh.write("")
+        with self.assertRaises(SystemExit) as caught:
+            fetch.copy_extra_dirs(self.src, self.dest, ["Meshes"], "WorldOfDaggerfall")
+        self.assertIn("WorldOfDaggerfall", str(caught.exception))
+        self.assertIn("Sneaked.cs", str(caught.exception))
+
     def test_no_dirs_is_a_no_op(self):
-        self.assertEqual(fetch.copy_extra_dirs(self.src, self.dest, []), [])
+        self.assertEqual(fetch.copy_extra_dirs(self.src, self.dest, [], "X"), [])
         self.assertEqual(os.listdir(self.dest), [])
 
-    def test_missing_dir_is_a_stop_naming_it(self):
+    def test_missing_dir_is_a_stop_naming_the_entry_and_the_folder(self):
         with self.assertRaises(SystemExit) as caught:
-            fetch.copy_extra_dirs(self.src, self.dest, ["Meshes", "NotThere"])
+            fetch.copy_extra_dirs(self.src, self.dest, ["Meshes", "NotThere"], "WorldOfDaggerfall")
         self.assertIn("NotThere", str(caught.exception))
+        self.assertIn("WorldOfDaggerfall", str(caught.exception))
 
 
 class Licence(unittest.TestCase):

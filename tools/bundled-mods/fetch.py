@@ -253,22 +253,39 @@ def read_manifest(cfg, entry):
         return json.load(fh), path
 
 
-def copy_extra_dirs(src_root, dest, dirs):
+# extra_dirs are copied wholesale, so they never pass through the manifest's exclude_globs or
+# strip_code filters - and they land under Assets/, where Unity compiles any .cs it finds into the
+# app with no diagnostic. Code and the authors' own authoring scripts are filtered out here instead.
+EXTRA_DIR_IGNORE = (".git", "*.cs", "*.dll", "*.dll.bytes", "*.py", "*.sh")
+
+
+def copy_extra_dirs(src_root, dest, dirs, name):
     """Copy whole repo folders (files and their .meta) into the mod folder, in addition to the
     manifest's Files. Some manifests list only the assets the author authored and not the ones
     Unity resolves for them by GUID: World of Daggerfall's Prefabs/*.prefab point at
     Meshes/*.fbx|.dae that the manifest never names, so a manifest-only copy ships prefabs whose
     model is missing and every WoD rock renders as nothing. The folders are NOT added to the
     manifest - Unity follows the GUIDs when it builds the bundle. Returns [(dir, file count)].
+
+    Code is never copied (EXTRA_DIR_IGNORE), and belt and braces, a .cs or .dll surviving under the
+    copied tree stops the fetch: this path is the one way third-party source could reach Assets/
+    without the deliberate, port-header-documented compile-in that every other route requires.
     """
     copied = []
     for d in dirs:
         src = os.path.join(src_root, d)
         if not os.path.isdir(src):
-            raise SystemExit("extra dir %s/ not in repo" % d)
-        shutil.copytree(src, os.path.join(dest, d), dirs_exist_ok=True,
-                        ignore=shutil.ignore_patterns(".git"))
-        n = sum(len(names) for _, _, names in os.walk(os.path.join(dest, d)))
+            raise SystemExit("%s: extra dir %s/ not in repo" % (name, d))
+        out = os.path.join(dest, d)
+        shutil.copytree(src, out, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns(*EXTRA_DIR_IGNORE))
+        survivors = sorted(os.path.relpath(os.path.join(root, f), out)
+                           for root, _, names in os.walk(out) for f in names
+                           if f.endswith(SCRIPT_EXTS))
+        if survivors:
+            raise SystemExit("%s: extra dir %s/ still holds compiled code after the copy - Unity "
+                             "would build it into the app: %s" % (name, d, ", ".join(survivors)))
+        n = sum(len(names) for _, _, names in os.walk(out))
         copied.append((d, n))
     return copied
 
@@ -367,7 +384,7 @@ def fetch_one(cfg, entry):
             # list (UBLaMF's prefabs -> Models/*.obj + Materials/*.mat; WoD's -> Meshes/*.fbx).
             # Unity pulls them into the bundle itself; they stay out of the manifest.
             extra = (entry.get("extra_roots") or []) + (entry.get("extra_dirs") or [])
-            for d, n in copy_extra_dirs(src_root, dest, extra):
+            for d, n in copy_extra_dirs(src_root, dest, extra, entry["name"]):
                 print("  copied extra dir %s (%d files)" % (d, n))
 
         note = licence_text_for(entry)

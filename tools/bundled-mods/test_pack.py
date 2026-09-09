@@ -91,6 +91,32 @@ class PrivateOnly(unittest.TestCase):
         self.assertNotIn("dynamic-skies.dfmod", pack.readme_text(self.CFG3, {}))
 
 
+class PendingLicence(unittest.TestCase):
+    """A pending: licence means no public redistribution right yet. private_only keeps the bundle
+    out of the pack zip, but that is one boolean - so any entry that WOULD be packed with a
+    pending licence is a hard problem, whatever else is set (I3 of the final review)."""
+    WOD = {"name": "WorldOfDaggerfall", "manifest": "WorldOfDaggerfall.dfmod.json",
+           "licence": "pending:no licence upstream; asked the author, draft only"}
+
+    def cfg(self, **extra):
+        return {"dest_root": "x", "mods": CFG["mods"] + [dict(self.WOD, **extra)]}
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        os.makedirs(os.path.join(self.dir, "Licenses"))
+        for stem in ("jobsofthethievesguild", "skyrim's adventures", "worldofdaggerfall"):
+            open(os.path.join(self.dir, stem + ".dfmod"), "w").close()
+            open(os.path.join(self.dir, "Licenses", stem + "-LICENSE.txt"), "w").close()
+
+    def test_world_of_daggerfall_with_a_pending_licence_cannot_be_packed(self):
+        probs = pack.check_bundles(self.cfg(), self.dir)
+        self.assertTrue(any("pending licence" in p and "WorldOfDaggerfall" in p for p in probs), probs)
+
+    def test_world_of_daggerfall_private_only_is_no_problem(self):
+        self.assertNotIn("worldofdaggerfall", pack.stems(self.cfg(private_only=True)))
+        self.assertEqual(pack.check_bundles(self.cfg(private_only=True), self.dir), [])
+
+
 class Readme(unittest.TestCase):
     def test_lists_every_mod_with_its_title(self):
         txt = pack.readme_text(CFG, {"jobsofthethievesguild": "Jobs of the Thieves Guild"})
