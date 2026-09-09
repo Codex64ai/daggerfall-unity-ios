@@ -124,6 +124,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestCastStateTearsDownOnFailure();
             TestEnsureReadable();
             TestMobileShadersFind();
+            TestWODBiomesPort();
             TestDynamicSkiesShader();
             TestDynamicSkiesPresetTextures();
             TestModConflictOrder();
@@ -647,6 +648,30 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 Check(s != null && s.name == name, "MobileShaders.Find resolves " + name);
             }
             Check(MobileShaders.Find("No/Such/Shader") == null, "MobileShaders.Find: unknown name falls through to Shader.Find (null)");
+            Check(MobileShaders.Names.Contains(MaterialReader._DaggerfallBillboardBatchShaderName),
+                "MobileShaders: billboard batch shader is captured");
+            Check(MobileShaders.Names.Contains(MaterialReader._DaggerfallBillboardBatchNoShadowsShaderName),
+                "MobileShaders: billboard batch no-shadows shader is captured");
+        }
+
+        // The World of Daggerfall - Biomes port is compiled in but inert: MobilePortedMods starts it
+        // explicitly behind a default-off launcher entry, so no [Invoke] may survive the copy, and the
+        // Location Loader nature swap reads the climate map off the installer instead of its own bundle.
+        static void TestWODBiomesPort()
+        {
+            Type invoke = typeof(DaggerfallWorkshop.Game.Utility.ModSupport.Invoke);
+            MethodInfo biomesInit = typeof(WorldOfDaggerfall.WODBiomes).GetMethod("Init", BindingFlags.Public | BindingFlags.Static);
+            MethodInfo overriderInit = typeof(WorldOfDaggerfall.NatureBatchOverriderInstaller).GetMethod("Init", BindingFlags.Public | BindingFlags.Static);
+            Check(biomesInit != null && overriderInit != null, "WODBiomes: both Init entry points are public static");
+            Check(biomesInit != null && biomesInit.GetCustomAttributes(invoke, false).Length == 0
+                  && overriderInit != null && overriderInit.GetCustomAttributes(invoke, false).Length == 0,
+                "WODBiomes: no [Invoke] survives the port - MobilePortedMods starts it");
+            Type installer = typeof(WorldOfDaggerfall.NatureBatchOverriderInstaller);
+            PropertyInfo climateProp = installer.GetProperty("ClimateMap", BindingFlags.Public | BindingFlags.Static);
+            FieldInfo climateField = installer.GetField("ClimateMap", BindingFlags.Public | BindingFlags.Static);
+            Check((climateProp != null && climateProp.PropertyType == typeof(Texture2D))
+                  || (climateField != null && climateField.FieldType == typeof(Texture2D)),
+                "WODBiomes: ClimateMap is exposed for the Location Loader nature swap");
         }
 
         // The Dynamic Skies mod's procedural skybox shader ships compiled into the app with its

@@ -24,7 +24,15 @@ namespace DaggerfallWorkshop.Game.Mobile
             MaterialReader._StandardShaderName,
             MaterialReader._DaggerfallTilemapShaderName,
             MaterialReader._DaggerfallTilemapTextureArrayShaderName,
+            // DaggerfallBillboardBatch built its atlas material with a raw Shader.Find for these two -
+            // a pre-existing gap, now covered here and at the two call sites. The WoD Biomes nature
+            // batch overrider needs the same shaders for the archive it swaps in.
+            MaterialReader._DaggerfallBillboardBatchShaderName,
+            MaterialReader._DaggerfallBillboardBatchNoShadowsShaderName,
         };
+
+        /// <summary>The shader names captured at startup, for verification.</summary>
+        public static IReadOnlyList<string> Names => names;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         static void Capture()

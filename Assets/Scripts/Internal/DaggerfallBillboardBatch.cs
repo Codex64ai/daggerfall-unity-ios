@@ -39,7 +39,8 @@ namespace DaggerfallWorkshop
         [SerializeField, HideInInspector]
         Material customMaterial = null;
         [SerializeField, HideInInspector]
-        CachedMaterial cachedMaterial;
+        // MOBILE: written directly by the compiled-in WoD Biomes atlas helper (was reflection)
+        internal CachedMaterial cachedMaterial;
         [SerializeField, HideInInspector]
         Mesh billboardMesh;
 
@@ -70,7 +71,8 @@ namespace DaggerfallWorkshop
         public float RandomSpacing = BlocksFile.TileDimension * MeshReader.GlobalScale;
 
         DaggerfallUnity dfUnity;
-        int currentArchive = -1;
+        // MOBILE: written directly by the compiled-in WoD Biomes atlas helper (was reflection)
+        internal int currentArchive = -1;
         float lastFramesPerSecond = 0;
         bool restartAnims = true;
         MeshRenderer meshRenderer;
@@ -312,9 +314,9 @@ namespace DaggerfallWorkshop
             // Create local material
             ___createLocalMaterial.Begin();
             // TODO: This should be created by MaterialReader
-            Shader shader = (DaggerfallUnity.Settings.NatureBillboardShadows) ?
-                Shader.Find(MaterialReader._DaggerfallBillboardBatchShaderName) :
-                Shader.Find(MaterialReader._DaggerfallBillboardBatchNoShadowsShaderName);
+            Shader shader = (DaggerfallUnity.Settings.NatureBillboardShadows) ?    // MOBILE: MobileShaders.Find, never a mod bundle's embedded copy
+                Game.Mobile.MobileShaders.Find(MaterialReader._DaggerfallBillboardBatchShaderName) :
+                Game.Mobile.MobileShaders.Find(MaterialReader._DaggerfallBillboardBatchNoShadowsShaderName);
             Material atlasMaterial = new Material(shader);
             atlasMaterial.mainTexture = albedoMap;
             ___createLocalMaterial.End();
@@ -376,9 +378,9 @@ namespace DaggerfallWorkshop
             customMaterial = material;
 
             // Create local material from source
-            Shader shader = (DaggerfallUnity.Settings.NatureBillboardShadows) ?
-                Shader.Find(MaterialReader._DaggerfallBillboardBatchShaderName) :
-                Shader.Find(MaterialReader._DaggerfallBillboardBatchNoShadowsShaderName);
+            Shader shader = (DaggerfallUnity.Settings.NatureBillboardShadows) ?    // MOBILE: MobileShaders.Find, never a mod bundle's embedded copy
+                Game.Mobile.MobileShaders.Find(MaterialReader._DaggerfallBillboardBatchShaderName) :
+                Game.Mobile.MobileShaders.Find(MaterialReader._DaggerfallBillboardBatchNoShadowsShaderName);
             Material atlasMaterial = new Material(shader);
             atlasMaterial.mainTexture = customMaterial.mainTexture;
 
