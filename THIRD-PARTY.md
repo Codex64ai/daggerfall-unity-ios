@@ -174,7 +174,7 @@ that branch.
 | Mod | Author, licence | Source | What is NOT shipped |
 |---|---|---|---|
 | Location Loader 0.3 plus the type-5 backport | KABoissonneault, a fork of Uncanny_Valley's loader; NO LICENCE DECLARED (permission being sought by Ikram; not in any public release). The type-5 backport below is carademono's, from a fork which declares no licence either | github.com/KABoissonneault/DFU-LocationLoader @ a5e7a18, plus object type 5 (RMB blocks) backported from github.com/drcarademono/DFU-LocationLoader @ 896a574 (branch `rmb-object`) | the 3 editor scripts (`Scripts/Editor/`) - authoring tools, useless on a device. The 11 runtime files are compiled in under `Ports/LocationLoader/` (12 since WoD Biomes added `BiomesClimateSwap.cs`, off the same fork - see that section); upstream's manifest carries no data, so there is no bundle at all - the launcher entry is registered in code |
-| World of Daggerfall 0.4.0 | World of Daggerfall Team (KABoissonneault, Cliffworms, Kamer, carademono); NO LICENCE DECLARED (permission being sought by Ikram; not in any public release) | github.com/drcarademono/world-of-daggerfall @ 3bf8837 | WoD Terrain (a separate mod, out of scope - it needs compute shaders and synchronous readbacks), Distant Terrain, and the three optional dependencies Wilderness Overhaul, RMB Resource Pack and Beautiful Villages. WoD Biomes is a separate mod too, and is now shipped - see its own section below. Its one script, `WODRocksMaterials.cs`, is compiled in under `Ports/WorldOfDaggerfall/`; its data is the bundle |
+| World of Daggerfall 0.4.0 | World of Daggerfall Team (KABoissonneault, Cliffworms, Kamer, carademono); NO LICENCE DECLARED (permission being sought by Ikram; not in any public release) | github.com/drcarademono/world-of-daggerfall @ 3bf8837 | WoD Terrain (a separate mod, shipped in its own right since 2026-09-09 - see its section below), Distant Terrain, and the three optional dependencies Wilderness Overhaul, RMB Resource Pack and Beautiful Villages. WoD Biomes is a separate mod too, and is now shipped - see its own section below. Its one script, `WODRocksMaterials.cs`, is compiled in under `Ports/WorldOfDaggerfall/`; its data is the bundle |
 
 Because no licence has ever been declared upstream for either repo, this ships on the private test
 draft only - never in a public release. Location Loader adds only code, so it is in every build: a
@@ -219,7 +219,12 @@ What it does, in two parts. `WODTerrainMaterialProvider` takes DFU's `ITerrainMa
 and re-routes four climates to different ground archives - Subtropical to 4, the Dak'fron desert to 3,
 the Hammerfell mountain regions (Alik'r Desert, Dragontail Mountains, Dak'fron, Lainlyn, Tigonus,
 Ephesus, Santaki) to 104 or 103 in winter, and Haunted Woodlands to 304 or 303 - all archives that
-exist in vanilla `arena2`, so no engine change was needed for them. `NatureBatchOverrider` (in
+exist in vanilla `arena2`, so no engine change was needed for them. The Hammerfell branch is the one
+that had to be null-guarded, and the guard is narrower than it sounds: it runs inside
+`DaggerfallTerrain.PromoteTerrainData`, which has no try/catch of its own, so a throw there breaks
+terrain promotion repeatedly and silently - and what it actually protects against is a **missing
+region name**, which falls through to the unmodified ground archive. It is not evidence that the
+port runs without a `PlayerGPS`, and nothing here should be read as a "no GPS" case. `NatureBatchOverrider` (in
 `WODClimates.cs`) then runs on `StreamingWorld.OnUpdateTerrainsEnd` and swaps every nature billboard
 batch on archive 501 whose pixel in `climate_map.png` is exactly `#FFA500` over to archive 10030,
 Daggerfall Expanded Textures' 32-record "Makija" palm set.
@@ -280,7 +285,11 @@ rather than batches, so the streaming-world pass above never sees them - and it 
 from the compiled-in Biomes port rather than `GetAsset`-ing its own copy out of a bundle, which is why
 it was left out of the first Location Loader port. It is a no-op unless the Biomes entry actually
 started this session (`MobilePortedMods.BiomesRunning`) and the map is readable; its own log line is
-`[Biomes] swapped N type-5 nature flats to archive 10030 in <block name>`.
+`[Biomes] swapped N type-5 nature flats to archive 10030 in <block name>`. The block name is on that
+line for a reason worth knowing when reading a log: identical counts repeating (22 four times, 7 four
+times, in the run that prompted it) are innocent when the block names differ - that is one WoD prefab
+placed at several map pixels. The signature of a genuine double swap, which would double a flat's
+scale a second time, is **the same block name repeated with the same count**.
 
 Not device-verified at the time of writing. Unlike WoD this mod places no objects - it changes which
 textures existing ones use - so the performance question is narrower, but the nature swap does run on
@@ -291,3 +300,182 @@ body is wrapped so a failure logs once per distinct message rather than once per
 (`[Biomes] nature swap failed: ...`). The lines a tester should look for are
 `[PortedMods] started World of Daggerfall - Biomes` and, once terrain has streamed in,
 `[Biomes] swapped N nature batches to archive 10030`.
+
+## World of Daggerfall - Terrain (compiled in, private draft only)
+
+The fourth mod of the set and much the most invasive: it does not decorate the world, it *replaces*
+it. `Monobelisk.InterestingTerrainSampler` takes DFU's `DaggerfallUnity.TerrainSampler` slot and
+every terrain tile's 129x129 heightmap and its tilemap are computed by a Metal compute shader
+instead of by the engine. The lineage is long - monobelisk's Interesting Terrains, by way of
+Freak2121, carademono and Ninelan - and nowhere in it is a licence declared, so the same rule as the
+three sections above applies: the C# is compiled in under
+`Assets/Scripts/Game/Mobile/Ports/WorldOfDaggerfallTerrain/`, the data is an off-by-default entry in
+the launcher's MODS window fed by a bundle, and the bundle ships only on the private test draft.
+
+| Mod | Author, licence | Source | What is NOT shipped |
+|---|---|---|---|
+| World of Daggerfall - Terrain 1.5.0 | monobelisk, Freak2121, carademono, Ninelan (from monobelisk's Interesting Terrains); NO LICENCE DECLARED anywhere in the lineage (permission being sought by Ikram; not in any public release) | github.com/drcarademono/wod-terrain @ 9aeb1bcc5de5343ccb7a6b09062559ad871e9d40 | the repo's 212 MB of `.xcf` and `WOODS.WLD` authoring files (they are not in the manifest, and the fetch is manifest-only); the editor scripts and `Scripts/Models/Editor/`; `Helpers/ConsoleHandler.cs` (dev console commands, useless on a device) and the `ClearNoonRoutine` that existed only for its `clearnoon` command; the dead `MainHeightmapSmoother.compute`. The 20 remaining runtime files (+2,384 lines as ported) are compiled in under `Ports/WorldOfDaggerfallTerrain/`; the two live compute shaders and their four `.cginc` (6 files, +2,557 lines) are compiled into the app under `Assets/Resources/WoDTerrain/`; the five PNG world maps and the noise-parameter INI are the bundle |
+
+What it does, in two passes. At start-up `MainHeightmapComputer` is dispatched over the whole
+1000x500 world and the result replaces `ContentReader.WoodsFileReader.Buffer` - the small world
+heightmap the travel map, the region maps and Distant Terrain all read - so the shape of the world
+changes on the map as well as under your feet. Then, per terrain tile, `TerrainComputer.compute`
+runs its `TerrainComputer` and `TilemapComputer` kernels (13x13 groups of 10x10) and both results
+are read back **synchronously on the main thread**; that synchronous readback is deliberately kept
+for version one, and whether it hitches is exactly what the device test is for. Terrain around every
+location is flattened and blended on the GPU across a 33x33 map-pixel window
+(`IsLocationTerrainBlended() => true`), `StreamingWorld.TerrainScale` becomes 1 and
+`Camera.main.farClipPlane` 10000.
+
+**The compute shaders ship inside the app, not in the bundle.** iOS cannot load code from a
+`.dfmod`, and a `.compute` is code; so `TerrainComputer.compute`, `MainHeightmapComputer.compute`
+and `noises.cginc` / `noiseParams.cginc` / `heightSampling.cginc` / `basicRoads.cginc` live in
+`Assets/Resources/WoDTerrain/` and every `mod.GetAsset<ComputeShader>(name)` became
+`Resources.Load<ComputeShader>("WoDTerrain/" + name)`. The `mods.json` entry excludes `*.compute`
+and `*.cginc` from the fetch (`strip_code` only strips `.cs` and `.dll`), so the bundle carries data
+and nothing else. One line was deleted from `basicRoads.cginc`: `#pragma exclude_renderers d3d11
+gles`, a surface-shader pragma with no meaning inside a `.cginc` included by a `.compute` - shipping
+a renderer exclusion on trust was not worth the risk on Metal. Everything else in all six files is
+upstream's, with a provenance line added at the top.
+
+The five maps are the one import in the pack that goes through the new **`LinearData`** rule in
+`Assets/Editor/MobileModPackTextureRules.cs` (Biomes' `RawData` rule is the other exception; see
+above). They are numbers, not pictures - heights, derivatives, biome weights, port and road flags -
+and only a compute shader ever reads them, so the rule turns **sRGB sampling off** (the project is
+Linear, and sRGB would silently remap every value), keeps them **uncompressed** RGBA32 on iPhone at
+`maxTextureSize` 2048, leaves `isReadable` false (the GPU is the only reader) and the upstream
+filter modes alone, and switches **mipmaps off**. The mip chain matters twice over: every read of
+these maps in the shipped shaders is a level-0 fetch (`SampleLevel(..., 0)`, and
+`float sampleLevel = 0` in `heightSampling.cginc`), so a chain is memory nothing can ever sample,
+and a mip level of numeric data would be an average of unrelated numbers rather than a smaller
+picture. That is about 11 MB saved, and it puts the four 2048x1024 maps plus the 128x128 noise tile
+at roughly **34 MB of GPU memory**, not the ~43 MB the design estimated with mips on. As with the
+Biomes rule, **the rule keys on the mod folder name, which is the `mods.json` entry `name`**
+(`WorldOfDaggerfallTerrain`): rename that entry and the maps silently go back through sRGB and block
+compression, which shows up as wrong ground heights with nothing in any log to say so. The self-test
+checks every name in both lists against `mods.json`, and that the two lists are disjoint - a name in
+both would be treated as raw data, which is the opposite of what a compute-only map needs.
+
+Seven fixes were made in place, each marked `// MOBILE` and each with the smallest test that could
+hold it. **(a)** the start-up dispatch was one submit of 500,000 threads followed by one `GetData`;
+iOS's watchdog is free to kill a Metal command buffer that runs too long and does not care that the
+work is legitimate, so it is now ten row bands (`TerrainComputer.Bands`, `StartupBands = 10`) with a
+readback between them, a new `int yOffset` uniform in the kernel and the index formula otherwise
+untouched. The readback range is computed from the *end* of the band (`MapHeight - yStart - rows`),
+because the kernel writes world row `y` to buffer row `499 - y`: reading back `yStart * MapWidth`
+would hand back a region belonging to the band at the other end of the map, and the world would come
+out striped. `Bands` splits into whole 5-row thread groups (the kernel is `numthreads(10,5,1)`) with
+the last band taking the remainder, and because the last band is the one place a row could still be
+lost to `Dispatch`'s integer group count, a height that is not a whole number of groups is refused
+with a named exception rather than quietly producing a striped world (`WoodsFile.MapHeight` is a
+const 500, so that guard is against a future source change, not a live path). The mirrored offset is
+a pure `ReadbackStartRow(mapHeight, yStart, rows)` so the self-test can prove the ten ranges tile
+`[0, 500000)` exactly once, rather than leaving the deviation to a comment. The self-test also pins
+that every band is contiguous, whole-group and covers every row for every band count.
+**(b)** `locationHeightData` was a 289-element `ComputeBuffer`, but the shader writes
+`locationHeightData[i]` for every `i < locationCount` and `locationCount` counts the locations found
+in a **33x33 = 1089** map-pixel window (which is also what its `locationPositions[1089]` /
+`locationSizes[1089]` arrays are sized for) - so any tile with more than 289 nearby locations wrote
+out of bounds on the GPU. D3D11 silently discards out-of-range UAV writes, which is why it was never
+noticed on desktop; on Metal an out-of-bounds buffer write is undefined and can fault the command
+buffer. The buffer is now `LocationBufferSize = 1089` and the shader is untouched. **(c)** the shader was
+`Object.Instantiate`d **once per terrain tile** and never destroyed, so a session leaked one managed
+object and one Metal pipeline state per tile; there is now one held clone per kernel asset, released
+by `Cleanup()`. **(d)** `SetVectorArray` with a zero-length array throws, and open water in the
+Iliac Bay produces exactly that; a one-element zero array with `locationCount = 0` is passed
+instead. **(e)** `TileDataCache.Add` threw on a key already present (a tile regenerated before its
+texturer consumed it) and is now an indexer assignment - the same guard AsesinoBlade's fork made,
+for the same reason. **(f)** the location cache remembered only hits, so the ~1,000 map pixels in
+each 33x33 window that hold no location were re-read from MAPS.BSA through `GetMapPixelData` for
+every tile forever; misses are cached too (`Dictionary<DoubleInt, Rect?>`, a null meaning "checked,
+nothing here"), and its key type gained `IEquatable` and `GetHashCode` because 1,089 lookups per tile
+were going through reflection-based `ValueType.Equals` and boxing. **(g)** capability and
+containment: the mod has no CPU generator of any kind, so `Init` refuses rather than half-installs -
+`Available(SystemInfo.supportsComputeShaders, shadersLoaded)` must hold, both shaders must carry
+their three kernels, and all five maps and the INI must be in the bundle, and any failure logs
+`[WoDTerrain] not available: <reason>` and returns with DFU's own sampler untouched. Per tile,
+`GenerateSamples` is wrapped in try/catch/finally with `TerrainComputer.Create` **inside** the try
+(it allocates three `ComputeBuffer`s, the one thing here likely to throw under the memory pressure
+this port adds); a failure logs `[WoDTerrain] tile failed: ...` once per distinct message and falls
+back to `DefaultTerrainSampler`'s job path, pointed at this sampler's dimension and height so a
+fallen-back tile is lower relief but continuous ground rather than a 3x-too-tall spike. The buffers
+are disposed in `finally`, idempotently.
+
+Three more hardenings came out of review. The INI parse and the whole banded world-heightmap
+dispatch now run **before** the `GameObject` exists, because `AddComponent` runs `Awake`
+synchronously and `Awake` is what swaps the sampler - upstream did both afterwards, so a malformed
+INI left the GPU sampler installed with a null or half-parsed parameter set, which is garbage terrain
+instead of vanilla terrain: the exact failure the gate exists to prevent, one step later. A failure
+in that window puts `WOODS.WLD`'s buffer back the way it was found (`ShouldRestoreWoodsBuffer` is the
+pure half, and is pinned by the self-test) and drops the generated basemap, the shader clones and the
+location buffer. And a refused start nulls the five maps and both shader references so they are
+collectable rather than pinned by statics for the session - on the one device where the gate actually
+fires, which is the device that could least afford it. **A limit, honestly:** DFU's own
+`Mod.loadedAssets` cache still holds its entries for those textures (private, stamped `-1` so it is
+never pruned, with no public clear), so full reclamation would need an engine change and this port
+deliberately makes none.
+
+One more, found by reading the shader rather than by running it. `heightSampling.cginc`'s
+`GetBiomeWeights` calls `SampleBaseHeight` unconditionally, and that function reads two
+`StructuredBuffer`s (`shm`, `lhm`) and four uniforms (`hDim`, `div`, `sd`, `ld`) that only the
+*per-tile* path ever bound - so the start-up world-heightmap dispatch was reading unbound buffers
+through an undefined divisor. D3D11 hides that; on Metal an unbound or out-of-range structured read
+is undefined behaviour and is exactly the shape of a command-buffer fault at launch. The start-up
+dispatch now binds two small zero-filled dummies (4x4 and 9x9, the same shapes the per-tile path
+allocates) and sets the four uniforms to the values *this* path's index arithmetic implies - `hDim`
+is `MapWidth`, not the sampler's `HeightmapDimension`, because here the flattened index was built
+with `MapWidth` as its stride, and passing the tile value would drive the reads hundreds of elements
+out of bounds. The *values* are provably dead - `CSMain` asks for `detailedHeights: false` and the
+result is overwritten by the DerivMap-derived height a few lines later - so zeroes change no output
+pixel; what had to be true is that every read is in bounds, and the pure
+`StartupSampleMaxIndices` plus its self-test check prove that for all 500,000 sample indices the
+dispatch can produce. The dummies are released after the last blocking readback.
+
+The start-up stopwatch spans the whole method rather than only the dispatch loop, because the 500 KB
+buffer copy, the ten submits, `ToBytes` over 500,000 floats and the 1000x500 `SetPixels32`/`Apply`
+are one uninterruptible pause from the player's point of view. The number in
+`[WoDTerrain] world heightmap <ms> ms (10 bands)` is therefore the pause it names, not a fraction
+of it.
+
+**Road smoothing is inert in this build.** `BasicRoadsUtils` asks `ModManager` for a *mod titled*
+`"BasicRoads"` and then sends it a `getPathData` message; this port has no such mod - Basic Roads is
+compiled into the app as the "Roads & tracks" feature, with no message receiver - so
+`CompatibilityUtils.BasicRoadsLoaded` is always false, `GetRoadData` returns its zeroed arrays and
+the shader's road-flattening pass has nothing to flatten. The `daggerfall_road_map.png` mask that
+says *where* roads may be smoothed is still bound and still sampled; it just never has any direction
+data to work with. The visible cost is that roads on WoD Terrain's steeper hills are not levelled
+into the slope. The follow-up is to wire `BasicRoadsUtils` to the compiled-in road network directly
+rather than through the mod-message protocol; it is not done, and nothing about it is guessed at
+runtime.
+
+Two things change the moment the switch goes on, and both are by design rather than by accident.
+Ground height: `MaxTerrainHeight` goes from DFU's 1539 to 5000, `OceanElevation` from 27.2 to
+100.01, `BeachElevation` from 40 to 103.9 and the sampler `Version` from 1 to 7, so a character
+saved standing on ground computed the old way is standing on ground that has moved. And the travel
+map: the world heightmap the map draws from is rewritten at start-up, so the coastlines and relief
+on the travel and region maps change too. Turning the switch back off puts both back, so nothing is
+destroyed - but a save made while it was on was made in a world of a different shape, which is why
+this is a per-save decision rather than a per-session one. `MobilePortedMods` says so once per launch
+as a plain log line
+rather than a warning:
+`[PortedMods] World of Daggerfall - Terrain: this changes ground height under existing saves and the
+travel map (by design)`. The entry has no dependency gate at all: Basic Roads is optional to it and
+Daggerfall Expanded Textures is not its dependency, so its own switch is the whole condition. It is
+started **last** of everything in `StartEnabled`, because replacing the terrain sampler is the most
+invasive thing started there and an `Init` that threw at that point cannot cost any mod before it
+its start.
+
+Not device-verified at the time of writing, and the port carries its own measurement for when it is:
+`[WoDTerrain] world heightmap <ms> ms (10 bands)` once at start-up, and
+`[WoDTerrain] tile <x>,<y> <ms> ms (locations <n>)` for the first ten tiles and then every
+twenty-fifth - steady on a walk, and still sampled on a fast-travel arrival, which generates 49
+tiles in one non-yielding call. `Player.log` is therefore the performance report. One thing to watch
+there beyond the timings: `TerrainComputer.LocationRectCache` has no eviction, so it grows by one
+entry per distinct map pixel visited and is bounded only by the 1000x500 world; a long session is
+the case that would show it.
+
+A note for anyone diffing the port against upstream: five files were rewritten with LF line endings
+where upstream had CRLF - `InterestingTerrains.cs`, `Models/TerrainComputer.cs`,
+`Models/HeightmapBufferCollection.cs`, `Helpers/BufferIO.cs` and `Helpers/TileDataCache.cs`, which
+are exactly the five CRLF files that carry substantive `MOBILE` edits. A plain diff shows every line
+of them as changed; `diff <(tr -d '\r' < upstream/file) ported/file` shows what actually changed.

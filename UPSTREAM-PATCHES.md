@@ -488,3 +488,85 @@ to remove came silently back. `TestMobileShadersFind` now reads
 `Assets/Scripts/Internal/DaggerfallBillboardBatch.cs` as text and fails unless all four
 `MobileShaders.Find(MaterialReader._DaggerfallBillboardBatch…)` call sites are there and no raw
 `Shader.Find(` is, so a rebase that takes theirs breaks the suite instead.
+
+### World of Daggerfall - Terrain support (2026-09-09) — `Game/Mobile/MobilePortedMods.cs (+27/-3)`, `Game/Mobile/Ports/WorldOfDaggerfallTerrain/` (new, 20 files, +2,384), `Assets/Resources/WoDTerrain/` (new, 6 files, +2,557), `Assets/Editor/{MobileModPackTextureRules.cs (+54/-1),MobileModBuilder.cs (+24/-2),MobileSelfTest.cs (+225/-4)}`, `tools/bundled-mods/mods.json (+11)`
+Counts are `git diff --numstat a344bd899 HEAD` (the plan commit to this feature's last), excluding
+`.meta` files.
+World of Daggerfall - Terrain compiled in (see THIRD-PARTY.md). **It touches no upstream engine file
+at all** — not one. Everything it needed was already there: the ported-mods start-up hook, the
+shader-lookup patch, the pack importer, `Mod.LoadAllAssetsFromBundle`. `DaggerfallUnity.TerrainSampler`
+is a public settable property, so the most invasive thing this feature does — replacing the terrain
+sampler — is done through DFU's own supported seam and needed no patch. Every file in the heading is
+one upstream does not have: `MobilePortedMods.cs`, `MobileModPackTextureRules.cs`,
+`MobileModBuilder.cs` and `MobileSelfTest.cs` are all this port's own, and
+`Ports/WorldOfDaggerfallTerrain/` and `Assets/Resources/WoDTerrain/` are new trees. **Nothing here
+adds to the file and line totals at the top of this document.**
+
+`MobilePortedMods` adds `TerrainTitle` to `Titles` (which `DefaultOff` walks, so the entry starts
+off) as the **last** element, and a start block after Biomes and before `return SkyRuns`. There is no
+gate function and no dependency check here, deliberately: Basic Roads is optional to the mod and
+Daggerfall Expanded Textures is not its dependency at all, so `terrain != null && terrain.Enabled` is
+the whole condition, and the *capability* question — is there compute support, did the shaders
+compile, is the bundle complete — belongs to `InterestingTerrains.Init`, which answers it before it
+touches `DaggerfallUnity.TerrainSampler` and logs `[WoDTerrain] not available: ...` when the answer
+is no. Started last of everything in `StartEnabled` for the same reason it is the most guarded: a
+sampler swap that threw at that point cannot cost any mod before it its start. One extra log line
+goes out before `StartOne`, once per launch and at `Log` rather than `LogWarning`:
+`[PortedMods] World of Daggerfall - Terrain: this changes ground height under existing saves and the
+travel map (by design)` — the height curve it computes is a different world to the vanilla one, so a
+character standing on ground that has moved is the expected outcome, not a bug report.
+
+**The compute shaders are in `Assets/Resources/WoDTerrain/`, and that placement is a contract.** iOS
+cannot load code from a `.dfmod` and a `.compute` is code, so the two live shaders and their four
+`.cginc` are compiled into the app and loaded with `Resources.Load<ComputeShader>("WoDTerrain/" +
+name)` in place of `mod.GetAsset<ComputeShader>(name)`; the `mods.json` entry excludes `*.compute`
+and `*.cginc` from the fetch so the bundle cannot ship a second, stale copy of them. `Resources/` is
+whole-folder-included in a player build, so nothing else was needed to ship them — but a `.compute`
+that fails to compile still loads as a non-null asset with no kernels, which is why the gate checks
+`HasKernel` on all three kernels rather than the null alone. One upstream line was deleted:
+`#pragma exclude_renderers d3d11 gles` in `basicRoads.cginc`, a surface-shader pragma with no meaning
+inside a `.cginc` included by a `.compute`. `MainHeightmapComputer.compute` gained an `int yOffset`
+uniform and two lines of index arithmetic for the banded dispatch; with `yOffset` 0 it is byte for
+byte upstream's mapping.
+
+`MobileModPackTextureRules` gained a second exception kind, `Rule.LinearData`, keyed the same way as
+`RawData`: **on the path prefix `Assets/Game/Mods/<name>/`, where `<name>` is the `mods.json` entry
+name** — here the single-element list `{ "WorldOfDaggerfallTerrain" }`. The importer branch in
+`MobileModBuilder.cs` sets `sRGBTexture = false`, uncompressed, an overridden iPhone `RGBA32` at
+`maxTextureSize` 2048, `isReadable` false and `mipmapEnabled = !NoMipsForLinearData`, leaving the
+upstream filter modes alone. All three of those are load-bearing and all three fail silently: sRGB
+sampling would remap numeric maps, block compression would quantise them, and a rename of the
+`mods.json` entry reverts both to the default ASTC path with nothing in any log to say so — which is
+why the self-test checks every name in `RawDataMods` and `LinearDataMods` against `mods.json`. The
+mip decision is the one that is worth restating as a contract rather than an optimisation: every read
+of these maps in the shipped compute set is a level-0 fetch (`SampleLevel(..., 0)` in
+`TerrainComputer.compute` and `basicRoads.cginc`, `float sampleLevel = 0` in `heightSampling.cginc`),
+so the chain is ~11 MB of GPU residency nothing can sample, and the constant
+`NoMipsForLinearData = true` exists so `MobileSelfTest` can pin it without running an import. **If a
+future shader in this set ever samples a mip level, that constant is what has to change first** — the
+five metas would still say `enableMipMap: 0` and the sample would silently read level 0. The two rule
+lists must also stay disjoint (`For()` walks `rawDataMods` first, so a name in both would silently be
+treated as raw data); `ListsDisjoint` is computed once, asserted by the self-test and thrown from
+`For()` so a misconfiguration stops the import.
+
+`MobileSelfTest` covers what is pure: the 1089 location-buffer constant against the shader's arrays,
+the `Available` gate's three cases, `StartupBands == 10` and `GroupRowsY == 5`, that `Bands` splits
+contiguously into whole thread groups and covers every row for every band count and throws on a
+height that is not a whole number of groups, that `ReadbackStartRow`'s ten ranges tile
+`[0, 500000)` exactly once (the mirrored offset is the deviation from the plan most likely to be
+"corrected" back into a striped world), that `StartupSampleMaxIndices` keeps every start-up
+`shm`/`lhm` read inside the two dummy buffers, that both compute shaders load from `Resources` with
+their three kernels, that no `[Invoke]` survives, that a refused start drops the five maps and both
+shaders, `ShouldRestoreWoodsBuffer`, and the importer rule table. The rest — the readback, the
+sampler swap, the per-tile timings — needs a streamed world and a GPU and belongs to the simulator
+and device runs.
+*Rebase risk: NONE.* No upstream engine file is touched by this feature, so there is nothing here for
+a rebase to conflict with or silently take theirs on. The exposure is indirect and worth naming
+anyway: `DaggerfallUnity.TerrainSampler`, `TerrainSampler`/`DefaultTerrainSampler`,
+`TerrainHelper.GetMapPixelData`, `MapPixelData`, `ContentReader.WoodsFileReader.Buffer` and
+`DaggerfallTerrain.OnPromoteTerrainData` are all engine API the port calls into, and an upstream
+change to any of them is a compile error in `Ports/WorldOfDaggerfallTerrain/` — which is the good
+failure mode — except for `WoodsFileReader.Buffer`, where a change in what the engine expects that
+buffer to contain would be a silent one. `DefaultTerrainSampler.MaxTerrainHeight` (1539) is read by
+nothing here, but the port's own 5000 is what makes existing saves move; if upstream changes theirs,
+the migration note in THIRD-PARTY.md and README-iOS.md needs the new number.
