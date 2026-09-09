@@ -133,6 +133,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestTavernAlcohol();
             TestModSettingsSerialization();
             TestModLookupTolerantOfBuiltIns();
+            TestFlcPathResolution();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -872,6 +873,24 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(ModManager.FileNameMatches(loaded, "dreamtextures"), "mod lookup: an equal file name matches");
             Check(!ModManager.FileNameMatches(loaded, "DREAMTEXTURES"), "mod lookup: the match stays ordinal, not case folded");
             Check(!ModManager.FileNameMatches(loaded, null), "mod lookup: a real mod does not match a null name");
+        }
+
+        /// <summary>
+        /// FLC animations (DREAM ships 16 HD Daedra summoning files) resolve from the player's
+        /// Movies folder first and fall back to arena2, the same order the shipped build used -
+        /// only the folder is now the redirected one, so files in Documents/Movies are seen.
+        /// </summary>
+        static void TestFlcPathResolution()
+        {
+            Func<string, bool> exists = p => p == Path.Combine("/m", "AZURA.FLC");
+
+            Check(DaggerfallWorkshop.Game.UserInterface.FLCPlayer.ResolvePath("AZURA.FLC", "/m", "/a", exists)
+                      == Path.Combine("/m", "AZURA.FLC"),
+                  "flc: a file in the movies folder wins");
+
+            Check(DaggerfallWorkshop.Game.UserInterface.FLCPlayer.ResolvePath("BOETHIAH.FLC", "/m", "/a", exists)
+                      == Path.Combine("/a", "BOETHIAH.FLC"),
+                  "flc: anything else falls back to arena2");
         }
 
         static void Check(bool condition, string name, string detail = "")

@@ -10,8 +10,10 @@
 //
 
 using UnityEngine;
+using System;
 using System.IO;
 using DaggerfallConnect.Arena2;
+using DaggerfallWorkshop.Game.Mobile;
 using DaggerfallWorkshop.Utility;
 
 namespace DaggerfallWorkshop.Game.UserInterface
@@ -49,15 +51,31 @@ namespace DaggerfallWorkshop.Game.UserInterface
             flcFile.TransparentBlue = tBlue;
 
             // Seek from loose files Movies or Arena2 path
-            string moviePath = Path.Combine(Application.streamingAssetsPath, "Movies");
-            string path = Path.Combine(moviePath, filename);
-            if (!File.Exists(path))
-                path = Path.Combine(DaggerfallUnity.Instance.Arena2Path, filename);
+            // MOBILE: user content from the app's Documents folder (see MobileContentPath).
+            string moviePath = MobileContentPath.Override(Path.Combine(Application.streamingAssetsPath, "Movies"));
+            string path = ResolvePath(filename, moviePath, DaggerfallUnity.Instance.Arena2Path, File.Exists);
             if (!flcFile.Load(path))
                 return;
 
             flcTexture = TextureReader.CreateFromSolidColor(flcFile.Header.Width, flcFile.Header.Height, (TransparencyEnabled ? Color.clear : Color.black), false, false);
             flcTexture.filterMode = (FilterMode)DaggerfallUnity.Settings.MainFilterMode;
+        }
+
+        /// <summary>
+        /// Where an .FLC comes from: the movies folder if it holds one, otherwise arena2.
+        ///
+        /// Split out with the folder and the existence check passed in so it can be tested
+        /// headlessly - on desktop the movies folder is inside the build and MobileContentPath
+        /// is a no-op, so the interesting case (a replacement in the player's Documents folder,
+        /// which is where DREAM's HD Daedra summoning animations land) is unreachable there.
+        /// </summary>
+        public static string ResolvePath(string filename, string moviesDir, string arena2Dir, Func<string, bool> exists)
+        {
+            string moviePath = Path.Combine(moviesDir, filename);
+            if (exists != null && exists(moviePath))
+                return moviePath;
+
+            return Path.Combine(arena2Dir, filename);
         }
 
         public void Start()
