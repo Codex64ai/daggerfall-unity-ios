@@ -2026,7 +2026,7 @@ namespace LocationLoader
                 return false;
             }
             // MOBILE: backport of drcarademono/DFU-LocationLoader@896a574 (rmb-object) - object type 5 (RMB block)
-            else if(type == 3 || type == 4 || type == LocationObject.TypeRMB)
+            else if(type == LocationObject.TypeLLPrefab || type == LocationObject.TypeUnityPrefab || type == LocationObject.TypeRMB)
             {
                 // Just assume valid for now
                 return true;

@@ -293,14 +293,28 @@ code, so vanilla doors on an RMB block behave as vanilla doors. `AssignNextIndex
 stay commented exactly as upstream leaves them. The one addition beyond upstream is an iOS safety net:
 the branch body sits in a try/catch that logs `[LL] RMB block <name> failed:` once per block name and
 continues, because upstream lets a layout failure throw out of the whole spawn loop and take every
-later object in the prefab with it — on a streaming terrain that would repeat on every step.
+later object in the prefab with it — on a streaming terrain that would repeat on every step. Two
+review follow-ups tighten that net: a name whose `ContentReader.BlockFileReader.GetBlockIndex` is −1 can
+never resolve (a `WorldData` override is reachable only through `BlocksFile.GetBlock(int)`, so the name
+needs an index first), so it is skipped before the build with `[LL] RMB block <name> skipped: not in
+BLOCKS.BSA and no block index (WorldData override unreachable)` rather than surfacing as a bare
+`NullReferenceException` out of `AddModels`, and the catch now destroys the block if
+`CreateBaseGameObject` already built one, so a throw before the reparent cannot orphan a half-built block
+at the scene root on every stream-in.
 Residual, unchanged by this: `WOD_Dock_Daggerfall_01` still renders empty (3 instances). Its block name
 `FOO.RMB` is in neither `BLOCKS.BSA` nor any `WorldData` `BlockNames` list, so `GetBlockIndex` returns −1;
 registering it needs `WorldDataReplacement.AssignNextIndex`, which is `private` in DFU and which upstream
 left commented pending a PR that was never made. Perf is the open question and the device test is the
 judge: type 5 spawns per instance in `InstantiateInstanceDynamicObjects`, outside
 `LocationResourceManager`'s prefab cache and outside the `ModelCombiner` batching that type 0 uses, so
-each farm is an uncached, unbatched RMB block built on the terrain-streaming step that reveals it.
+each farm is an uncached, unbatched RMB block built on the terrain-streaming step that reveals it. It is
+a memory question as well as a frame-time one: nature flats, lights and NPCs are spawned with
+`billboardBatch = null` where DFU's own city layout passes a real `DaggerfallBillboardBatch`, so every
+flat gets a freshly allocated, uncached `Mesh` (`MeshReader.cs`) and `Material`, and `DaggerfallBillboard`
+has no `OnDestroy` to release either — upstream's behaviour and pre-existing DFU behaviour, not a port
+defect, but 32,218 farm instances streaming in and out will accumulate native meshes and materials for
+the whole session. Watch memory on the device run; the eventual fix, if it bites, is to pass a real
+`DaggerfallBillboardBatch`.
 *Rebase risk: LOW for the engine* — one upstream file changed, `ModManager.cs`: three `// MOBILE:`
 touch points (the `prunedMods` field, the `Init` prune recording into it, and `WriteModSettings`
 serializing `MergeModSettings(mods, prunedMods)`) plus the new method itself, all in hunks upstream

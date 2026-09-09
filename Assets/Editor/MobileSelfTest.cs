@@ -1015,8 +1015,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 Check(false, "<groundPlane>true</groundPlane> is read into groundPlane", "no object parsed");
             }
 
-            // groundPlane is optional: the element is absent from most WoD dock prefabs, and a
-            // missing element must leave the default false rather than throw out the object.
+            // groundPlane is optional. No WoD prefab omits it today (all 24 type-5 prefabs carry an
+            // explicit <groundPlane>: the 10 farms true, the 14 docks/lighthouses false), so this is a
+            // parser-contract check: a missing element must leave the default false rather than throw
+            // the object out.
             const string withoutGroundPlane =
                 "<locationPrefab>" +
                 "<height>17</height><width>17</width>" +

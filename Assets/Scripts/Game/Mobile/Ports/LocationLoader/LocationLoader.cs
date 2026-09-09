@@ -430,10 +430,24 @@ namespace LocationLoader
                     // MOBILE: try/catch is an iOS-side safety net. Upstream lets an RMB layout failure
                     // throw out of the whole spawn loop, which on a streaming terrain would drop every
                     // later object in the prefab too. Log once per block name and carry on.
+                    // MOBILE: hoisted out of the try so the catch can destroy a half-built block.
+                    GameObject rmbBlock = null;
                     try
                     {
                         //if (blocksFile.GetBlockIndex(obj.name) == -1)
                             //WorldDataReplacement.AssignNextIndex(obj.name); Commented out for until PR accepted
+
+                        // MOBILE: a name with no block index can never resolve - the WorldData override is
+                        // only reachable through BlocksFile.GetBlock(int), and indices for non-BSA names are
+                        // minted only by WorldDataReplacement.AssignBlockIndices. GetBlockData would still
+                        // return true with a zeroed DFBlock, so CreateBaseGameObject builds a GameObject and
+                        // then throws inside AddModels. Skip by name instead, with a message that says why.
+                        if (DaggerfallUnity.Instance.ContentReader.BlockFileReader.GetBlockIndex(obj.name) == -1)
+                        {
+                            if (failedRmbBlocks.Add(obj.name))
+                                Debug.LogWarning($"[LL] RMB block {obj.name} skipped: not in BLOCKS.BSA and no block index (WorldData override unreachable)");
+                            continue;
+                        }
 
                         // Step 1: Get the player's current climate index
                         int currentClimateIndex = GameManager.Instance.PlayerGPS.CurrentClimateIndex;
@@ -454,7 +468,7 @@ namespace LocationLoader
 
                         // Create the RMB block game object
                         DFBlock blockData;
-                        GameObject rmbBlock = RMBLayout.CreateBaseGameObject(obj.name, layoutX: 0, layoutY: 0, out blockData);
+                        rmbBlock = RMBLayout.CreateBaseGameObject(obj.name, layoutX: 0, layoutY: 0, out blockData); // MOBILE: assigns the hoisted local
 
                         // Add the ground plane with the determined climate base and season
                         //if (obj.groundPlane == true) RMBLayout.AddGroundPlane(ref blockData, rmbBlock.transform, climateBase, climateSeason);
@@ -479,6 +493,12 @@ namespace LocationLoader
                     }
                     catch (Exception ex)
                     {
+                        // MOBILE: CreateBaseGameObject builds the block and its "Models" child before any
+                        // of the layout calls can throw, and the reparent is the last statement in the try.
+                        // Without this a throw leaves a fully-built, unparented block at the scene root that
+                        // terrain unload never reclaims, repeating on every stream-in.
+                        if (rmbBlock != null)
+                            UnityEngine.Object.Destroy(rmbBlock);
                         if (failedRmbBlocks.Add(obj.name))
                             Debug.LogWarning($"[LL] RMB block {obj.name} failed: {ex.Message}");
                         continue;
