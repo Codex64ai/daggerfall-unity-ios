@@ -173,8 +173,8 @@ that branch.
 
 | Mod | Author, licence | Source | What is NOT shipped |
 |---|---|---|---|
-| Location Loader 0.3 plus the type-5 backport | KABoissonneault, a fork of Uncanny_Valley's loader; NO LICENCE DECLARED (permission being sought by Ikram; not in any public release). The type-5 backport below is carademono's, from a fork which declares no licence either | github.com/KABoissonneault/DFU-LocationLoader @ a5e7a18, plus object type 5 (RMB blocks) backported from github.com/drcarademono/DFU-LocationLoader @ 896a574 (branch `rmb-object`) | the 3 editor scripts (`Scripts/Editor/`) - authoring tools, useless on a device. The 11 runtime files are compiled in under `Ports/LocationLoader/`; upstream's manifest carries no data, so there is no bundle at all - the launcher entry is registered in code |
-| World of Daggerfall 0.4.0 | World of Daggerfall Team (KABoissonneault, Cliffworms, Kamer, carademono); NO LICENCE DECLARED (permission being sought by Ikram; not in any public release) | github.com/drcarademono/world-of-daggerfall @ 3bf8837 | WoD Terrain and WoD Biomes (separate mods, out of scope - one needs compute shaders and synchronous readbacks), Distant Terrain, and the three optional dependencies Wilderness Overhaul, RMB Resource Pack and Beautiful Villages. Its one script, `WODRocksMaterials.cs`, is compiled in under `Ports/WorldOfDaggerfall/`; its data is the bundle |
+| Location Loader 0.3 plus the type-5 backport | KABoissonneault, a fork of Uncanny_Valley's loader; NO LICENCE DECLARED (permission being sought by Ikram; not in any public release). The type-5 backport below is carademono's, from a fork which declares no licence either | github.com/KABoissonneault/DFU-LocationLoader @ a5e7a18, plus object type 5 (RMB blocks) backported from github.com/drcarademono/DFU-LocationLoader @ 896a574 (branch `rmb-object`) | the 3 editor scripts (`Scripts/Editor/`) - authoring tools, useless on a device. The 11 runtime files are compiled in under `Ports/LocationLoader/` (12 since WoD Biomes added `BiomesClimateSwap.cs`, off the same fork - see that section); upstream's manifest carries no data, so there is no bundle at all - the launcher entry is registered in code |
+| World of Daggerfall 0.4.0 | World of Daggerfall Team (KABoissonneault, Cliffworms, Kamer, carademono); NO LICENCE DECLARED (permission being sought by Ikram; not in any public release) | github.com/drcarademono/world-of-daggerfall @ 3bf8837 | WoD Terrain (a separate mod, out of scope - it needs compute shaders and synchronous readbacks), Distant Terrain, and the three optional dependencies Wilderness Overhaul, RMB Resource Pack and Beautiful Villages. WoD Biomes is a separate mod too, and is now shipped - see its own section below. Its one script, `WODRocksMaterials.cs`, is compiled in under `Ports/WorldOfDaggerfall/`; its data is the bundle |
 
 Because no licence has ever been declared upstream for either repo, this ships on the private test
 draft only - never in a public release. Location Loader adds only code, so it is in every build: a
@@ -201,3 +201,86 @@ prefabs but not the `Meshes/` folder they point at by GUID, so the flag copies t
 folders wholesale (files and their `.meta`) into the mod folder, leaving the manifest untouched, and
 Unity resolves the references when it builds the bundle. Without it every WoD rock ships as a prefab
 with no model.
+
+## World of Daggerfall - Biomes (compiled in, private draft only)
+
+A third mod from the same team, and independent of the two above: it re-skins terrain and swaps
+nature billboards by itself, so it needs neither Location Loader nor World of Daggerfall - only
+Daggerfall Expanded Textures. Same pattern again: the three C# files are compiled in under
+`Assets/Scripts/Game/Mobile/Ports/WorldOfDaggerfallBiomes/`, and the data is an ordinary,
+off-by-default entry in the launcher's MODS window fed by a bundle the player installs. No prefab
+binds these scripts, so their `.meta` files carry fresh GUIDs rather than upstream's.
+
+| Mod | Author, licence | Source | What is NOT shipped |
+|---|---|---|---|
+| World of Daggerfall - Biomes 0.4.0 | carademono and Kab the Bird Ranger (World of Daggerfall Team); NO LICENCE DECLARED (permission being sought by Ikram; not in any public release) | github.com/drcarademono/wod-biomes @ 40449fc5fc55c85c8089b068acefe1db4b61534c | the repo's `.7z` and `.xcf` authoring files (`exclude_globs`), and nothing else - the manifest names every asset, and there are no prefabs, meshes, materials or shaders, so no `extra_dirs` flag was needed. The three scripts (`WODBiomes.cs`, `WODClimates.cs`, `WODTerrainMaterialProvider.cs`, 712 lines as ported) are compiled in under `Ports/WorldOfDaggerfallBiomes/`; the 225 PNGs are the bundle |
+
+What it does, in two parts. `WODTerrainMaterialProvider` takes DFU's `ITerrainMaterialProvider` slot
+and re-routes four climates to different ground archives - Subtropical to 4, the Dak'fron desert to 3,
+the Hammerfell mountain regions (Alik'r Desert, Dragontail Mountains, Dak'fron, Lainlyn, Tigonus,
+Ephesus, Santaki) to 104 or 103 in winter, and Haunted Woodlands to 304 or 303 - all archives that
+exist in vanilla `arena2`, so no engine change was needed for them. `NatureBatchOverrider` (in
+`WODClimates.cs`) then runs on `StreamingWorld.OnUpdateTerrainsEnd` and swaps every nature billboard
+batch on archive 501 whose pixel in `climate_map.png` is exactly `#FFA500` over to archive 10030,
+Daggerfall Expanded Textures' 32-record "Makija" palm set.
+
+One optional interaction, and the only one: `WODBiomes.Init` probes Vanilla Enhanced - Base by GUID
+(`1f124f8c-dd01-48ad-a5b9-0b4a0e4702d2`), which is in this pack (see "Vanilla Enhanced" above). With
+that module enabled the swapped nature records are used at their own size; with it off or absent they
+are scaled 2x, which is the mod's own no-VE path. It is not a dependency and the manifest does not
+declare one - either way the swap happens.
+
+Because no licence has ever been declared upstream, this ships on the private test draft only - never
+in a public release. The `tools/bundled-mods/mods.json` entry `WorldOfDaggerfallBiomes` is
+`private_only` with a `pending:` licence, the combination `fetch.py` requires and `pack.py` hard-refuses
+in the public MIT mod pack; the fetched `LICENSE` record beside the mod is that pending text, not an
+upstream licence. The bundle is `world of daggerfall - biomes.dfmod` (the lower-cased manifest file
+name, `World of Daggerfall - Biomes.dfmod.json`; GUID `3b4319ac-34bb-411d-aa2c-d52b7b9eb69d`). Without
+that file there is no `World of Daggerfall - Biomes` entry, the compiled code never runs, and deleting
+it removes every byte the feature added.
+
+Its one requirement is Daggerfall Expanded Textures (Ninelan; already in the pack, see above), which
+supplies archive 10030 - the manifest declares it as a non-optional peer at 1.2.0, and it is detected
+the same way WoD's is: DFU's own ordinal, case-SENSITIVE match against the bundle file name
+`daggerfall expanded textures.dfmod`. With that mod off or missing, `World of Daggerfall - Biomes` is
+switched off at start-up: the switch is simply off the next time MODS is opened and `Player.log`
+records why (`[PortedMods] World of Daggerfall - Biomes off: Daggerfall Expanded Textures is not
+enabled`). `BiomesDetNote` is appended to the entry's description as well, but that is best-effort and
+the current launcher flow never shows it, for the reason UPSTREAM-PATCHES.md gives for WoD's own notes:
+the log line is the signal, so do not tell a tester to look for a note.
+
+**This mod's textures are the one exception to the pack's ASTC rule**, and it is load-bearing. The
+climate map is a colour key read back on the CPU and compared *exactly* (`r == 255 && g == 165 && b == 0`),
+so a lossy format silently turns every orange pixel into a near-miss and the nature swap simply never
+happens; the 224 terrain tiles are 64x64 point-filtered records DFU decompresses into an ARGB32
+`Texture2DArray` anyway, so ASTC would only cost them quality. `Assets/Editor/MobileModPackTextureRules.cs`
+holds that exemption as a data-driven list read by `MobileModPackTextureImporter`: textures under
+`Assets/Game/Mods/WorldOfDaggerfallBiomes/` import `isReadable = true`, uncompressed, RGBA32 on the
+iPhone platform, with mipmaps off for `climate_map.png` only, and the meta's Point filter left alone.
+**The rule keys on the mod folder name, which is the `mods.json` entry `name`** - rename that entry and
+the textures silently revert to ASTC, breaking the colour key with no error anywhere. The cost is
+memory: 224 tiles of 64x64 RGBA32 with mips plus a 1000x500 RGBA32 map is about 6.6 MB of texture data,
+and `isReadable` keeps a CPU-side copy of each, so about 13 MB in all, against under 1 MB had they gone
+through ASTC 6x6 unreadable. Belt and braces on top of the rule, `NatureBatchOverriderInstaller.ClimateMap`
+runs a bundle built before it (or hand-installed) through `TextureReplacement.EnsureReadable` once per
+session, so `GetPixel` cannot throw.
+
+Location Loader gets one more file for this mod: `Ports/LocationLoader/BiomesClimateSwap.cs`, carademono's,
+from the same unlicensed `rmb-object` fork the type-5 backport came from
+(github.com/drcarademono/DFU-LocationLoader @ 896a574). It applies the same subtropical nature swap to
+the RMB blocks Location Loader builds for object type 5 - whose nature is loose `Billboard` components
+rather than batches, so the streaming-world pass above never sees them - and it reads the climate map
+from the compiled-in Biomes port rather than `GetAsset`-ing its own copy out of a bundle, which is why
+it was left out of the first Location Loader port. It is a no-op unless the Biomes entry actually
+started this session (`MobilePortedMods.BiomesRunning`) and the map is readable; its own log line is
+`[Biomes] swapped N type-5 nature flats to archive 10030`.
+
+Not device-verified at the time of writing. Unlike WoD this mod places no objects - it changes which
+textures existing ones use - so the performance question is narrower, but the nature swap does run on
+every terrain-streaming update; it is bounded by the archive filter that skips any batch already
+swapped, a per-archive material cache and a 1024 atlas cap (upstream allocated 4096, a transient
+~85 MB spike), and its whole
+body is wrapped so a failure logs once per distinct message rather than once per frame
+(`[Biomes] nature swap failed: ...`). The lines a tester should look for are
+`[PortedMods] started World of Daggerfall - Biomes` and, once terrain has streamed in,
+`[Biomes] swapped N nature batches to archive 10030`.

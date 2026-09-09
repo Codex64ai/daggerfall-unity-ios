@@ -111,11 +111,13 @@ off get the same repair. *Rebase risk: LOW.* Three wrapped `Add` calls and one `
 ### Shader lookup — `MaterialReader.cs` (5 sites), new `Game/Mobile/MobileShaders.cs`
 `MaterialReader` resolves its shaders through `MobileShaders.Find`, which captures the
 player's own `Daggerfall/Default`, `Daggerfall/Billboard`, `Standard`, `Daggerfall/Tilemap`
-and `Daggerfall/TilemapTextureArray` before the first scene loads. A bundle that ships a
+and `Daggerfall/TilemapTextureArray` before the first scene loads — plus, since the WoD Biomes
+entry below, `Daggerfall/BillboardBatch` and its NoShadows variant, for the two call sites in
+`DaggerfallBillboardBatch.cs`; seven names and seven call sites in all. A bundle that ships a
 Material embeds its own compiled copy of that material's shader, stripped to that bundle's
 variants, and `Shader.Find` by name can return the copy once the bundle is loaded (two pack
 bundles embed `Daggerfall/Default`). Guard, not a fix for an observed failure. *Rebase risk:
-LOW.* Mechanical rename of five calls.
+LOW.* Mechanical rename of seven calls.
 
 ### Ported mods — `Game/Mobile/Ports/**` (new, not upstream code), `Game/Mobile/MobilePortedMods.cs`, `MobileTravelOptionsBridge.cs`, `MobileTavernWindow.cs`, `ModManager.cs` (+1), `Mod.cs` (+2)
 Third-party mod code compiled into the app; see THIRD-PARTY.md "Survival mods". One engine line:
@@ -318,7 +320,9 @@ arm, the `Invalid obj type found` warning still firing for genuinely unknown typ
 `InstantiateInstanceDynamicObjects`, which builds the block through `RMBLayout.CreateBaseGameObject` and
 adds nature flats, lights and misc/exterior flats at the current climate and season). Every DFU API it
 needs exists in this fork with a matching signature. The branch stops where upstream's own
-WOD-Biomes call begins: no `BiomesClimateSwap`, and none of the `DaggerfallStaticDoors`/`BarredDoor`
+WOD-Biomes call begins: no `BiomesClimateSwap` (it is back as its own file now that the compiled-in
+Biomes port owns the climate map — see the WoD Biomes entry below), and none of the
+`DaggerfallStaticDoors`/`BarredDoor`
 code, so vanilla doors on an RMB block behave as vanilla doors. `AssignNextIndex` and `AddGroundPlane`
 stay commented exactly as upstream leaves them. The one addition beyond upstream is an iOS safety net:
 the branch body sits in a try/catch that logs `[LL] RMB block <name> failed:` once per block name and
@@ -381,3 +385,92 @@ mouse/joystick pulses, dead UGUI pointer events, the 0.75s self-healing binding 
 DXT5's absence, empty `WWW` audio clips. None of that is expressed as a test. If a rebase
 changes behaviour in those areas it will look fine on the Mac and fail on the iPad — see
 HANDOFF-controller.md for the full list before touching input or asset injection.
+
+### World of Daggerfall - Biomes support (2026-09-09) — `Game/Mobile/{MobilePortedMods.cs (+40/-1),MobileShaders.cs (+8)}`, `Game/Mobile/Ports/WorldOfDaggerfallBiomes/` (new, +712), `Game/Mobile/Ports/LocationLoader/{BiomesClimateSwap.cs (new, +208),LocationLoader.cs (+8)}`, `Assets/Scripts/Internal/DaggerfallBillboardBatch.cs (+10/-8)`, `Assets/Editor/{MobileModPackTextureRules.cs (new, +38),MobileModBuilder.cs (+16),MobileSelfTest.cs (+86)}`, `tools/bundled-mods/mods.json (+13)`
+Counts are `git diff --numstat 20fa6ba9a HEAD` (the plan commit to this feature's last).
+World of Daggerfall - Biomes compiled in (see THIRD-PARTY.md). It rides the hooks the earlier ported
+mods already added and touches **one** upstream engine file, `DaggerfallBillboardBatch.cs`.
+**This is a newly touched upstream file**, not counted in the totals at the top of this document.
+
+Two changes there, both small and both `MOBILE:`-marked. `CachedMaterial cachedMaterial` and
+`int currentArchive` become `internal`, because the mod's `CustomBillboardHelper` wrote both by
+reflection (`FieldInfo`s filled in a static constructor) to install its own atlas on a batch — a
+pattern that is fine on desktop and a liability under IL2CPP managed stripping, where a field reached
+only by name can be stripped away and the reflection lookup then returns null with no diagnostic. The
+port assigns them directly and the reflection is gone. Second, the two raw
+`Shader.Find(MaterialReader._DaggerfallBillboardBatchShaderName)` /
+`...NoShadowsShaderName` calls in `SetMaterial` and `SetMaterial(Material)` now go through
+`Game.Mobile.MobileShaders.Find`, and those two names are added to `MobileShaders.names` — a
+pre-existing gap in the shader-lookup patch above (a loaded mod bundle that embeds its own stripped
+copy of `Daggerfall/BillboardBatch` could win the `Shader.Find` by name). The Biomes nature overrider
+needs the same two shaders for the archive it swaps in, which is what surfaced it. `MobileShaders` also
+gained `public static IReadOnlyList<string> Names => names` so the self-test can assert the capture
+list rather than trusting it.
+
+`MobilePortedMods` adds `BiomesTitle` to `Titles` (which `DefaultOff` walks, so the entry starts off),
+the pure `BiomesRuns(biomesOn, detOn) => biomesOn && detOn`, `BiomesDetNote`, and a `BiomesRunning`
+static flag. The gate block in `StartEnabled` mirrors WoD's Daggerfall Expanded Textures gate exactly —
+switched off, note appended once, `WriteModSettings()`, log line — but there is deliberately no Location
+Loader gate and no WoD gate: Biomes re-skins terrain and swaps nature billboards on its own, so it is
+independent of both. Its two `Init`s then run through `StartOne` in an explicit order, terrain provider
+first and nature overrider second, which is what fixes the upstream `[Invoke(Start, 0)]` race where
+`NatureBatchOverriderInstaller` could read `WODBiomes.VEModEnabled` before `WODBiomes.Init` had set it.
+`BiomesRunning` is set only when both returned, and only then is `[PortedMods] started World of
+Daggerfall - Biomes` written; the per-`Init` `started ... (terrain)` / `started ... (nature)` lines
+`StartOne` writes on its own are kept. As with WoD's notes, `BiomesDetNote` on `ModInfo.ModDescription`
+is best-effort and the current launcher flow never renders it — the log line
+`[PortedMods] World of Daggerfall - Biomes off: Daggerfall Expanded Textures is not enabled` is the
+signal, and a tester should not be sent looking for a note.
+
+`Assets/Editor/MobileModPackTextureRules.cs` is new and is the one thing here that can fail silently.
+`MobileModPackTextureImporter` forces ASTC 6x6 and `isReadable = false` on every fetched pack texture;
+Biomes cannot live with that, because its `climate_map.png` is a colour key read with `GetPixel` and
+compared exactly, so any lossy format turns the swap off with no error, and its 224 point-filtered
+64x64 terrain records are decompressed into an ARGB32 `Texture2DArray` by DFU regardless. The rules
+class is a small pure pair — `Rule For(string assetPath)` and `bool NoMips(string assetPath)`, both
+backslash-normalizing — and the importer consults it first and returns early with `isReadable = true`,
+uncompressed, an overridden iPhone `RGBA32` at `maxTextureSize` 2048, and mipmaps off for the climate
+map. **`For` matches on the path prefix `Assets/Game/Mods/<name>/`, where `<name>` is the `mods.json`
+entry name** — today the single-element list `{ "WorldOfDaggerfallBiomes" }`. Renaming that entry
+reverts these textures to ASTC and breaks the colour key with nothing in any log to say so, so the
+name is a contract between `mods.json` and this file; the self-test pins the rule (both paths, a
+backslash path, another mod still getting `Default`, and `NoMips` on the map but not the tiles) because
+the importer itself only runs inside an import. Belt and braces at runtime,
+`NatureBatchOverriderInstaller.ClimateMap` is a property that runs an unreadable map through
+`TextureReplacement.EnsureReadable` once per session, so a bundle built before this rule, or
+hand-installed, degrades to a GPU-blit copy instead of throwing.
+**`BiomesClimateSwap` is back** (`Ports/LocationLoader/BiomesClimateSwap.cs`, +208, carademono's, LL
+`rmb-object` @ 896a574). The type-5 backport above deliberately stopped short of it, because upstream
+reads the climate map out of Location Loader's *own* bundle (`LocationModLoader.climate_map`, from
+`mod.GetAsset<Texture2D>("climate_map")`) and the iOS Location Loader port is compiled in with no
+bundle and so no `GetAsset`. The compiled-in Biomes port owns that asset now and publishes it as
+`NatureBatchOverriderInstaller.ClimateMap`, so the file could come back and read it from there. It
+covers what the terrain-side overrider cannot see: `WODClimates.cs` re-skins *batched* nature, while a
+type-5 RMB block's nature is loose `Billboard` components, so those flats stayed vanilla in the
+subtropics. It is called from the type-5 branch in `LocationLoader.cs` right after the transform is
+assigned, behind the pure `ShouldSwap(MobilePortedMods.BiomesRunning, ClimateMap)` — both halves
+matter, the first because archive 10030 only exists when Biomes and Daggerfall Expanded Textures are
+both on, the second because the colour test samples the map on the CPU — and it shares
+`NatureBatchOverrider.IsSubtropicalKey` and `MapReadable` rather than repeating either.
+Three `MOBILE` hardenings on top of the copy. `ApplySwaps` swallows its own exceptions (one log line
+per distinct message, `[Biomes] LL type-5 nature swap failed:`) for two reasons: the call site sits
+inside `LocationLoader`'s own per-block try/catch, whose `catch` destroys and skips the block, so a
+swap failure would cost a perfectly good block; and on the retry path a throw would take out the rest
+of `StreamingWorld.OnUpdateTerrainsEnd`'s subscribers. Upstream's terrain-ready retry is kept, but the
+`OnUpdateTerrainsEnd` subscription now happens at the point of deferral instead of in a static
+constructor — a static constructor fires on the first touch of *any* member, including `ShouldSwap` and
+including the editor self-test, which would have subscribed a handler in a batch-mode editor run. And
+the three per-block log lines are logged once each rather than once per block: a WoD world has tens of
+thousands of them. Its own success line is `[Biomes] swapped N type-5 nature flats to archive 10030`,
+deliberately distinct from the terrain side's `[Biomes] swapped N nature batches to archive 10030`.
+The `mods.json` entry is `strip_code` (all three scripts are compiled in), `private_only` with a
+`pending:` licence, `exclude_globs` for the repo's `.7z`/`.xcf`, and `archives_from:
+["DaggerfallExpandedTextures"]`. No `extra_dirs`: the manifest names every asset, there are no prefabs
+and no meshes. `MobileSelfTest` covers the two new shader names, the ported `Init` entry points and the
+`ClimateMap` property shape, `IsSubtropicalKey` / `MapReadable` / `AtlasMaxSize`, the default-off title,
+`BiomesRuns` and `BiomesDetNote`, the importer rule table, and `BiomesClimateSwap.ShouldSwap`. As with
+Location Loader itself, the rest needs a streamed world and belongs to the simulator and device runs.
+*Rebase risk: LOW.* The `DaggerfallBillboardBatch` edits are two accessibility changes and one
+mechanical `Shader.Find` rename; everything else is in files upstream does not have. The one thing a
+rebase must not quietly undo is the two `internal` fields — dropping them is a compile error in the
+port, which is the good failure mode.
