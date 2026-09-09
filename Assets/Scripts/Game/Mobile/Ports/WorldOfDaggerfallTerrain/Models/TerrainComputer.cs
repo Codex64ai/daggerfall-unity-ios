@@ -182,7 +182,10 @@ namespace Monobelisk
             };
         }
 
-        public static void InitializeWoodsFileHeightmap()
+        // MOBILE: (M2) the parameters arrive as an argument rather than through
+        // MOBILE: InterestingTerrains.instance.csParams, because this now runs BEFORE the
+        // MOBILE: GameObject (and therefore `instance`) exists - see InterestingTerrains.TryPrepareWorld.
+        public static void InitializeWoodsFileHeightmap(TerrainComputerParams csParams)
         {
             var woodsFile = DaggerfallUnity.Instance.ContentReader.WoodsFileReader;
             var original = woodsFile.Buffer;
@@ -209,7 +212,7 @@ namespace Monobelisk
             cs.SetTexture(k, "BiomeMap", InterestingTerrains.biomeMap);
             cs.SetTexture(k, "DerivMap", InterestingTerrains.derivMap);
             cs.SetBuffer(k, "Result", alteredHeights);
-            InterestingTerrains.instance.csParams.ApplyToCS(cs);
+            csParams.ApplyToCS(cs);     // MOBILE: (M2)
 
             // MOBILE: (a) upstream ran the whole 1000x500 map as ONE dispatch of 500,000 threads
             // followed by one GetData - a single Metal command buffer whose execution time iOS's

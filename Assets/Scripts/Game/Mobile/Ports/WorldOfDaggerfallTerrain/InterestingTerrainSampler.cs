@@ -67,13 +67,19 @@ namespace Monobelisk
             // MOBILE: fully qualified - a "using System.Diagnostics" would make Debug ambiguous with UnityEngine.Debug.
             System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
 
-            var computer = TerrainComputer.Create(mapPixel, this);
+            // MOBILE: (g)(I1) try/catch/finally around the whole GPU path, TerrainComputer.Create
+            // MOBILE: INCLUDED. Create calls BufferIO.CreateHeightmapBuffers, which allocates three
+            // MOBILE: ComputeBuffers - the one thing here that can realistically throw on iOS, under
+            // MOBILE: exactly the memory pressure this port adds. Left outside the try it would leak
+            // MOBILE: any buffer already allocated, skip the fallback tile and the timing line, and
+            // MOBILE: let the exception kill StreamingWorld's terrain coroutine for the rest of the
+            // MOBILE: session - strictly worse than the crash the containment replaces. default()
+            // MOBILE: leaves heightmapBuffers with five nulls, which the null-safe Dispose handles.
+            TerrainComputer computer = default(TerrainComputer);
 
-            // MOBILE: (g) try/catch/finally around the whole GPU path. Upstream let a throw between
-            // MOBILE: TerrainComputer.Create and ProcessBufferValuesAndDispose leak five ComputeBuffers
-            // MOBILE: and take the terrain streaming coroutine down with it.
             try
             {
+                computer = TerrainComputer.Create(mapPixel, this);
                 computer.DispatchAndProcess(InterestingTerrains.csPrototype, ref mapPixel, InterestingTerrains.instance.csParams);
             }
             catch (Exception ex)

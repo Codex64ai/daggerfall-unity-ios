@@ -822,6 +822,38 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "WoDTerrain: compute shaders are in Resources and compiled with their three kernels");
             Check(System.Attribute.GetCustomAttributes(typeof(Monobelisk.InterestingTerrains).GetMethod("Init"), typeof(DaggerfallWorkshop.Game.Utility.ModSupport.Invoke), false).Length == 0,
                 "WoDTerrain: no [Invoke] survives");
+
+            // A refused start must leave nothing behind. Init takes references to four 2048x1024 RGBA32
+            // world maps (~43 MB GPU), a noise map and both compute shaders BEFORE it can know whether
+            // the bundle is complete, and the gate that refuses fires on exactly the device that can
+            // least afford to keep them. Seeded with a real asset and a scratch texture so the check
+            // cannot pass vacuously against statics that were already null.
+            Texture2D scratchMap = new Texture2D(2, 2);
+            Monobelisk.InterestingTerrains.biomeMap = scratchMap;
+            Monobelisk.InterestingTerrains.derivMap = scratchMap;
+            Monobelisk.InterestingTerrains.portMap = scratchMap;
+            Monobelisk.InterestingTerrains.roadMap = scratchMap;
+            Monobelisk.InterestingTerrains.tileableNoise = scratchMap;
+            Monobelisk.InterestingTerrains.csPrototype = terrainCS;
+            Monobelisk.InterestingTerrains.mainHeightComputer = mainCS;
+            Monobelisk.InterestingTerrains.ReleaseAssets();
+            Check(Monobelisk.InterestingTerrains.biomeMap == null && Monobelisk.InterestingTerrains.derivMap == null
+                  && Monobelisk.InterestingTerrains.portMap == null && Monobelisk.InterestingTerrains.roadMap == null
+                  && Monobelisk.InterestingTerrains.tileableNoise == null
+                  && Monobelisk.InterestingTerrains.csPrototype == null && Monobelisk.InterestingTerrains.mainHeightComputer == null,
+                "WoDTerrain: a refused start drops the five maps and both compute shaders");
+            UnityEngine.Object.DestroyImmediate(scratchMap);
+
+            // The world heightmap is generated before the sampler is installed, and it rewrites
+            // ContentReader.WoodsFileReader.Buffer - the travel map's own data - part way through. If it
+            // throws, the buffer has to go back, and only then: with no copy of the original taken there
+            // is nothing to restore and assigning null would blank the travel map instead of sparing it.
+            byte[] originalCopy = new byte[4];
+            byte[] altered = new byte[4];
+            Check(Monobelisk.InterestingTerrains.ShouldRestoreWoodsBuffer(originalCopy, altered)
+                  && !Monobelisk.InterestingTerrains.ShouldRestoreWoodsBuffer(null, altered)
+                  && !Monobelisk.InterestingTerrains.ShouldRestoreWoodsBuffer(originalCopy, originalCopy),
+                "WoDTerrain: a half-generated world heightmap puts WOODS.WLD back, and only when there is something to put back");
         }
 
         // The Dynamic Skies mod's procedural skybox shader ships compiled into the app with its

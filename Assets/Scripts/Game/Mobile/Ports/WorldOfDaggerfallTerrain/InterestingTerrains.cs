@@ -32,6 +32,12 @@ namespace Monobelisk
         public static ComputeShader csPrototype;
         public static ComputeShader mainHeightComputer;
 
+        // MOBILE: (M2) the parameters and the world heightmap are prepared BEFORE the GameObject
+        // MOBILE: exists, and Awake - the thing that replaces DaggerfallUnity.TerrainSampler - picks
+        // MOBILE: them up from here. So the sampler is never installed with a null or half-parsed
+        // MOBILE: csParams, not even for the length of one call stack.
+        private static TerrainComputerParams preparedParams;
+
         #region Invoke
         // MOBILE: the [Invoke(StateManager.StateTypes.Start, 0)] attribute is gone - this port has no
         // MOBILE: .dfmod assembly, so MobilePortedMods.StartEnabled calls Init directly (started last).
@@ -68,8 +74,7 @@ namespace Monobelisk
                 Debug.LogWarning("[WoDTerrain] not available: " + (SystemInfo.supportsComputeShaders
                     ? "compute shaders WoDTerrain/TerrainComputer + WoDTerrain/MainHeightmapComputer did not load with their kernels (check the shader compiler log)"
                     : "this device reports no compute shader support"));
-                csPrototype = null;
-                mainHeightComputer = null;
+                ReleaseAssets();    // MOBILE: (M1)
                 return;
             }
 
@@ -82,12 +87,17 @@ namespace Monobelisk
             if (!TryLoadBundleAssets(out paramIni))
                 return;
 
+            // MOBILE: (M2) the last fallible stage - the INI parse and the banded world-heightmap
+            // MOBILE: dispatch - runs before any GameObject exists. Everything that mutates global
+            // MOBILE: state (the sampler, TerrainScale, farClipPlane, WoodsFileReader.Buffer) is
+            // MOBILE: below this line, so a failure above it leaves DFU's own terrain untouched.
+            if (!TryPrepareWorld(paramIni))
+                return;
+
             var go = new GameObject(Mod.Title);
             instance = go.AddComponent<InterestingTerrains>();
 
             GameManager.Instance.StreamingWorld.TerrainScale = 1f;
-
-            ApplyParams(paramIni);
 
             ModMessageHandler.Init();
 
@@ -105,6 +115,7 @@ namespace Monobelisk
             if (!Mod.LoadAllAssetsFromBundle())
             {
                 Debug.LogWarning("[WoDTerrain] not available: the wod-terrain bundle could not be loaded");
+                ReleaseAssets();    // MOBILE: (M1)
                 return false;
             }
 
@@ -126,30 +137,122 @@ namespace Monobelisk
             if (missing != null)
             {
                 Debug.LogWarning("[WoDTerrain] not available: " + missing + " is missing from the wod-terrain bundle");
+                // MOBILE: (M1) whatever DID load - up to four 2048x1024 RGBA32 world maps - is dropped
+                // MOBILE: here rather than pinned by statics for the rest of the session.
+                paramIni = null;
+                ReleaseAssets();
                 return false;
             }
 
             return true;
         }
 
-        // MOBILE: what remains of LoadAssetsAndParams once the asset loading moved into the gate above.
-        private static void ApplyParams(TextAsset paramIni)
+        /// <summary>
+        /// MOBILE: (M2) what remains of LoadAssetsAndParams, moved AHEAD of the sampler swap. Upstream -
+        /// and this port before review - parsed the INI and generated the world heightmap after
+        /// AddComponent had already run Awake, and Awake is what replaces DaggerfallUnity.TerrainSampler.
+        /// A malformed INI, or a failure in the banded dispatch, therefore left the GPU sampler installed
+        /// with a null or half-populated csParams: garbage terrain instead of vanilla terrain, the exact
+        /// failure the capability gate exists to prevent, one step later. Now a throw here logs
+        /// "[WoDTerrain] not available: ..." and returns having put WOODS.WLD back and dropped every
+        /// asset, with DFU's own sampler never touched.
+        ///
+        /// Not pure and not exercisable headlessly - it dispatches a compute shader and rewrites the
+        /// world heightmap. The one decision inside it that IS pure, ShouldRestoreWoodsBuffer, is pinned
+        /// by the self test; the rest is runtime-only and is what Task 8's simulator run judges.
+        /// </summary>
+        private static bool TryPrepareWorld(TextAsset paramIni)
         {
+            try
+            {
 #if UNITY_EDITOR
-            instance.csParams = ScriptableObject.CreateInstance<TerrainComputerParams>();
+                preparedParams = ScriptableObject.CreateInstance<TerrainComputerParams>();
 #else
-            instance.csParams = new TerrainComputerParams();
+                preparedParams = new TerrainComputerParams();
 #endif
 
-            var ini = new IniParser.Parser.IniDataParser().Parse(paramIni.text);
-            instance.csParams.FromIniData(ini);
+                var ini = new IniParser.Parser.IniDataParser().Parse(paramIni.text);
+                preparedParams.FromIniData(ini);
 
-            TerrainComputer.InitializeWoodsFileHeightmap();
+                TerrainComputer.InitializeWoodsFileHeightmap(preparedParams);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning("[WoDTerrain] not available: " + ex);
+                RestoreWoodsFileBuffer();
+                ReleaseAssets();
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// MOBILE: (M2) the pure half of the WOODS.WLD restore, so the rule is pinned by the self test
+        /// rather than only by a device run. InitializeWoodsFileHeightmap copies the reader's original
+        /// buffer first and swaps in the generated one last, so a throw in between can leave the reader
+        /// holding either. Restore whenever a copy of the original exists and the reader is not already
+        /// holding it - and never when there is no copy, because then nothing was replaced.
+        /// </summary>
+        public static bool ShouldRestoreWoodsBuffer(byte[] originalCopy, byte[] currentBuffer)
+        {
+            return originalCopy != null && !ReferenceEquals(originalCopy, currentBuffer);
+        }
+
+        // MOBILE: (M2) puts the travel map's world heightmap back the way it was found and drops the
+        // MOBILE: generated basemap, the two ComputeShader clones and the location buffer, so a refused
+        // MOBILE: start leaves nothing behind for the rest of the session.
+        private static void RestoreWoodsFileBuffer()
+        {
+            DaggerfallUnity dfUnity = DaggerfallUnity.Instance;
+            var reader = dfUnity != null ? dfUnity.ContentReader : null;
+            var woodsFile = reader != null ? reader.WoodsFileReader : null;
+
+            if (woodsFile != null && ShouldRestoreWoodsBuffer(TerrainComputer.originalHeightmapBuffer, woodsFile.Buffer))
+                woodsFile.Buffer = TerrainComputer.originalHeightmapBuffer;
+
+            TerrainComputer.originalHeightmapBuffer = null;
+            TerrainComputer.alteredHeightmapBuffer = null;
+
+            if (TerrainComputer.baseHeightmap != null)
+            {
+                UnityEngine.Object.Destroy(TerrainComputer.baseHeightmap);
+                TerrainComputer.baseHeightmap = null;
+            }
+
+            TerrainComputer.Cleanup();
+        }
+
+        /// <summary>
+        /// MOBILE: (M1) a refused start drops every reference it took, so the four 2048x1024 RGBA32
+        /// world maps (~43 MB GPU) and the two compute shader assets are collectable instead of pinned
+        /// by statics for the life of the session - on the one device where the gate actually fires,
+        /// which is the device that could least afford it. DFU's own Mod.loadedAssets cache still holds
+        /// its entries (private, stamped -1 = never pruned, no public clear), so full reclamation would
+        /// need a DFU engine change; this port deliberately makes none. What can be dropped here, is.
+        /// Safe to call at any time, including before Init has ever run.
+        /// </summary>
+        public static void ReleaseAssets()
+        {
+            biomeMap = null;
+            derivMap = null;
+            portMap = null;
+            roadMap = null;
+            tileableNoise = null;
+            csPrototype = null;
+            mainHeightComputer = null;
+            preparedParams = null;
         }
         #endregion
 
         private void Awake()
         {
+            // MOBILE: (M2) the parameters are already parsed and the world heightmap already generated
+            // MOBILE: by the time this runs - see TryPrepareWorld. Taking them before the sampler swap
+            // MOBILE: means there is no instant, however brief, at which the GPU sampler is installed
+            // MOBILE: without them.
+            csParams = preparedParams;
+            preparedParams = null;
+
             DaggerfallUnity.Instance.TerrainSampler = new InterestingTerrainSampler();
 
             //DaggerfallUnity.Instance.TerrainTexturing = new WOTerrainTexturing();
