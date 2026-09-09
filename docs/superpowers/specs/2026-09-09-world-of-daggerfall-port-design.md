@@ -38,9 +38,12 @@ public pack (enforced by `private_only` in the pack tooling), exactly as DREAM a
 2. Launcher entries. `Location Loader` is a BUILT-IN entry registered by `MobileMods.Register` (like the
    TravelOptions bridge) with LL's upstream GUID, default OFF, description saying it does nothing without a
    location mod. `World of Daggerfall` is the data bundle's own entry, default OFF (via `MobilePortedMods.Titles`),
-   gated on `Location Loader` being on (pure `WodRuns(ll, wod) = ll && wod`; auto-off + description note when
-   LL is off, mirroring the C&C gate). `MobilePortedMods.StartEnabled` calls `LocationModLoader.Init` at the
-   Start state (it needs no scene objects) and `WODRocksMaterials.Init` after it when WoD is on.
+   gated on `Location Loader` being on and on Daggerfall Expanded Textures being installed and on (pure
+   `WodRuns(locationLoaderStarted, wodOn, detOn) = locationLoaderStarted && wodOn && detOn`; auto-off +
+   description note when LL is off, and a second gate with its own note when DET is off or missing, both
+   mirroring the C&C gate). `MobilePortedMods.StartEnabled` calls `LocationModLoader.Init` at the Start
+   state (it needs no scene objects) and `WODRocksMaterials.Init` after it only when that `Init` returned
+   and both dependencies are satisfied.
 3. Data pipeline. mods.json entry `WorldOfDaggerfall`: `strip_code` (drops WODRocksMaterials.cs), `private_only`,
    `pending:` licence, `archives_from: ["DaggerfallExpandedTextures"]` (WorldData blocks may reference DET
    archives), `drop_dependencies: ["location loader", "wilderness overhaul", "rmb resource pack", "beautiful villages"]`

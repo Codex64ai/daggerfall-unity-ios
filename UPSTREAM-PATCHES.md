@@ -203,7 +203,7 @@ the session banner, before any Unity message reaches the mirror; twice in one we
 kept from an older build was read as the current one and sent a device test down the wrong path.
 *Rebase risk: LOW.* Both engine edits are small and self-contained, and both are marked `MOBILE:`.
 
-### World of Daggerfall support (2026-09-09) — `Game/Mobile/{MobileMods.cs (+22),MobilePortedMods.cs (+51/-8)}`, `Game/Mobile/Ports/{LocationLoader,WorldOfDaggerfall}/` (new), `Ports/WorldOfDaggerfall/WODRocksMaterials.cs.meta` (GUID pin), `Assets/Editor/MobileSelfTest.cs (+10)`, `tools/bundled-mods/{fetch.py,mods.json}`
+### World of Daggerfall support (2026-09-09) — `Game/Mobile/{MobileMods.cs (+22),MobilePortedMods.cs (+95/-8)}`, `Game/Mobile/Ports/{LocationLoader,WorldOfDaggerfall}/` (new), `Ports/WorldOfDaggerfall/WODRocksMaterials.cs.meta` (GUID pin), `Assets/Editor/MobileSelfTest.cs (+19)`, `tools/bundled-mods/{fetch.py,mods.json}`
 Location Loader and World of Daggerfall compiled in (see THIRD-PARTY.md). **No upstream engine file
 is touched** — the whole feature rides the hooks the survival mods and Dynamic Skies already added
 (`MobilePortedMods.DefaultOff` from `ModManager.Awake`, `Mod.cs`'s `[fsProperty]` opt-in so the
@@ -222,7 +222,11 @@ start-up and `WoDDetNote` says why in MODS. Both gates read the player's choice 
 it, so with both dependencies absent both notes apply. DET is detected as DFU itself resolves that
 manifest dependency - `CheckModDependencies` -> `GetModFromName` -> `ModManager.FileNameMatches`, an
 ordinal `Equals` against `Mod.FileName` - matching the shipped bundle `daggerfall expanded textures.dfmod`,
-never the title inside it. Then `LocationModLoader.Init` runs when the loader is on, and
+never the title inside it. That comparison is ordinal, so case-SENSITIVE, because DFU's own dependency
+check is: the bundle has to be named `daggerfall expanded textures.dfmod` exactly, and a hand-installed
+copy under any other casing switches WoD off with the note while DFU logs its own "Failed to retrieve
+mod" warning - self-consistent, and the two never disagree.
+Then `LocationModLoader.Init` runs when the loader is on, and
 `WODRocksMaterials.Init` after it only when that `Init` actually returned and DET is on; when the loader
 was on but its `Init` threw, WoD is left unstarted with a log line and its setting untouched - a runtime
 failure is not a user choice.
@@ -245,7 +249,7 @@ of the manifest because Unity follows the GUIDs when it builds the bundle. UBLaM
 script is compiled in), `private_only` with a `pending:` licence (no licence declared upstream — the
 combination `fetch.py` requires), `archives_from: ["DaggerfallExpandedTextures"]`, and
 `drop_dependencies` for Location Loader (built in, so it has no `FileName` to match) and the three
-optional mods this port does not ship. `MobileSelfTest` covers the default-off titles, `WodRuns` and `StartOne`.
+optional mods this port does not ship. `MobileSelfTest` covers the default-off titles, `WodRuns`, `DETFileName`, `WoDDetNote` and `StartOne`.
 *Rebase risk: NONE for the engine* — no upstream file changed. A DFU API change that breaks Location
 Loader's code shows up as compile errors in `Ports/LocationLoader/`, and it hooks
 `DaggerfallTerrain.OnPromoteTerrainData` and `StreamingWorld.OnInitWorld/OnUpdateTerrainsEnd` and
