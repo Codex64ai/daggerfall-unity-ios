@@ -148,3 +148,10 @@ ShaderVariantCollection:
   - first: {fileID: 4800000, guid: 6e33654e7c7c2a248ae1a18b7f4053b6, type: 3}
     second:
       variants: []
+  - first: {fileID: 4800000, guid: 39d0ec48bfce941e599b735cbd64b761, type: 3}
+    second:
+      variants:
+      - keywords: 
+        passType: 4
+      - keywords: ENABLE_WATER_REFLECTIONS
+        passType: 4

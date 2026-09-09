@@ -129,6 +129,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestWoDTerrainPort();
             TestDynamicSkiesShader();
             TestDynamicSkiesPresetTextures();
+            TestDistantTerrainShader();
             TestModConflictOrder();
             TestPortedModGate();
             TestPortedModOrder();
@@ -674,6 +675,29 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         }
 
         // Non-overlapping occurrence count, for the source-text checks.
+        /// <summary>Drops // and /* */ comments from ShaderLab/HLSL source so a check for an
+        /// absent symbol cannot be satisfied by a comment that merely mentions it.</summary>
+        static string StripShaderComments(string source)
+        {
+            var sb = new StringBuilder(source.Length);
+            for (int i = 0; i < source.Length; i++)
+            {
+                if (source[i] == '/' && i + 1 < source.Length && source[i + 1] == '/')
+                {
+                    while (i < source.Length && source[i] != '\n') i++;
+                    if (i < source.Length) sb.Append('\n');
+                }
+                else if (source[i] == '/' && i + 1 < source.Length && source[i + 1] == '*')
+                {
+                    i += 2;
+                    while (i + 1 < source.Length && !(source[i] == '*' && source[i + 1] == '/')) i++;
+                    i++;
+                }
+                else sb.Append(source[i]);
+            }
+            return sb.ToString();
+        }
+
         static int CountOccurrences(string haystack, string needle)
         {
             int n = 0, i = 0;
@@ -1004,6 +1028,111 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(src.Contains("#define _SECUNDASPINOPTION_TIDAL_LOCK"), "DynamicSkies: Secunda tidal lock pinned by define");
             Check(src.Contains("#define REDUCE_COLOR"), "DynamicSkies: colour reduction pinned by define");
             Check(src.Contains("#define _SUNDISK_HIGH_QUALITY"), "DynamicSkies: high-quality sun disk pinned by define");
+        }
+
+
+
+        // Distant Terrain's far-terrain shader is compiled into the app, and its whole reason for
+        // being rewritten is memory: upstream sampled twelve 2048^2 tileset ATLASES that
+        // DistantTerrain.cs built at runtime (~270 MB resident). The rewrite samples three
+        // Texture2DArrays instead (summer / winter / rain, 224 x 64^2 slices each, ~15 MB total),
+        // which also takes the fragment stage from twelve samplers to three. These checks are the
+        // guard on that: the shader must exist and compile, the atlas machinery must be gone, the
+        // array uniforms and the slice contract Task 4's C# binds against must be present, and the
+        // visual logic the port promised to keep (skirt, cutout discard, alpha:fade, depth pass)
+        // must still be there. Source text, not reflection, because a shader's uniforms are not
+        // enumerable from managed code.
+        static void TestDistantTerrainShader()
+        {
+            const string shaderName = "Daggerfall/DistantTerrain/DistantTerrainTilemap";
+            Shader far = Shader.Find(shaderName);
+            Check(far != null, "DistantTerrain: far-terrain shader is in the project");
+            if (far == null) return;
+            Check(far.isSupported, "DistantTerrain: far-terrain shader compiles for this editor's graphics API");
+
+            // Code only: the rewrite's comments name the upstream atlas symbols on purpose (they
+            // explain what each replacement replaced), and "it is gone" checks that a comment can
+            // satisfy are worthless.
+            string cginc = StripShaderComments(File.ReadAllText("Assets/Shaders/DistantTerrain/FarTerrainCommon.cginc"));
+            string src = StripShaderComments(File.ReadAllText("Assets/Shaders/DistantTerrain/DistantTerrainTilemap.shader"));
+
+            // The texture-array source.
+            Check(CountOccurrences(cginc, "UNITY_DECLARE_TEX2DARRAY(") == 3,
+                "DistantTerrain: exactly three tile texture arrays are declared",
+                CountOccurrences(cginc, "UNITY_DECLARE_TEX2DARRAY(") + " declarations");
+            foreach (string uniform in new[] { "_TileArraySummer", "_TileArrayWinter", "_TileArrayRain" })
+            {
+                Check(cginc.Contains("UNITY_DECLARE_TEX2DARRAY(" + uniform + ")") && src.Contains(uniform),
+                    "DistantTerrain: " + uniform + " is declared and exposed as a property");
+            }
+            Check(cginc.Contains("int _SlicesPerBiome") && src.Contains("_SlicesPerBiome"),
+                "DistantTerrain: _SlicesPerBiome (56) is the slice-block stride the C# binds");
+            Check(cginc.Contains("biome * _SlicesPerBiome + record"),
+                "DistantTerrain: slice index is biome * _SlicesPerBiome + record (matches DistantTerrain.SliceIndex)");
+
+            // The atlas machinery is gone - this is the memory fix, so its absence is the test.
+            Check(!cginc.Contains("getColorByTextureAtlasIndex"),
+                "DistantTerrain: the atlas cell/gutter sampler getColorByTextureAtlasIndex is gone");
+            Check(!cginc.Contains("tex2Dgrad("),
+                "DistantTerrain: no tex2Dgrad on an atlas sampler survives");
+            Check(!cginc.Contains("sampler2D _TileAtlasTex") && !src.Contains("_TileAtlasTex"),
+                "DistantTerrain: none of the twelve 2048^2 atlas samplers survive");
+            Check(!cginc.Contains("_AtlasSize") && !cginc.Contains("_GutterSize"),
+                "DistantTerrain: atlas size / gutter uniforms are gone with the atlases");
+
+            // Dead code the port drops.
+            Check(!cginc.Contains("_CameraDepthTexture"),
+                "DistantTerrain: the dead _CameraDepthTexture read in fcolor is deleted");
+            Check(!cginc.Contains("sampler2D _TilemapTex") && !cginc.Contains("sampler2D _BumpMap"),
+                "DistantTerrain: the legacy _TilemapTex / _BumpMap samplers are deleted");
+            Check(!src.Contains("#pragma glsl"),
+                "DistantTerrain: the dead #pragma glsl is deleted");
+            Check(CountOccurrences(src, "#pragma target 3.5") == 2,
+                "DistantTerrain: both surface programs target 3.5 (texture arrays)",
+                CountOccurrences(src, "#pragma target 3.5") + " occurrences");
+
+            // Visual logic the rewrite promised to keep untouched.
+            Check(CountOccurrences(src, "alpha:fade") == 2, "DistantTerrain: alpha:fade kept on both surface programs");
+            Check(src.Contains("#pragma vertex vertDepth") && src.Contains("ColorMask 0"), "DistantTerrain: the depth-only pass is kept");
+            Check(src.Contains("farTerrainCulled") && src.Contains("discard"), "DistantTerrain: the near-terrain cutout discard is kept");
+            Check(cginc.Contains("applyFarTerrainSkirt") && cginc.Contains("_SkirtDepth"), "DistantTerrain: the boundary skirt is kept");
+            Check(cginc.Contains("applySnowCaps") && cginc.Contains("applyWoodlandDirt") && cginc.Contains("treeSpeckMask") && cginc.Contains("_HighlightLocations"),
+                "DistantTerrain: snow caps, woodland dirt, tree specks and location beacons are kept");
+            Check(CountOccurrences(src, "multi_compile_local __ ENABLE_WATER_REFLECTIONS") == 2,
+                "DistantTerrain: the one mod keyword is unchanged");
+
+            // Pinned so the iOS build cannot strip it: Always-Included list, the preloaded variant
+            // collection, and the resulting GraphicsSettings entry (all three, because each alone
+            // is silently survivable until the shader turns up pink on device).
+            string guid = AssetDatabase.AssetPathToGUID("Assets/Shaders/DistantTerrain/DistantTerrainTilemap.shader");
+            Check(File.ReadAllText("Assets/Editor/MobileBuildSetup.cs").Contains(shaderName),
+                "DistantTerrain: shader is in MobileBuildSetup's EnsureAlwaysIncludedShaders list");
+            Check(File.ReadAllText("Assets/Shaders/RequiredShaderVariants.shadervariants").Contains(guid),
+                "DistantTerrain: shader has an entry in RequiredShaderVariants (variants survive stripping)");
+            // ...and the entry names variants this shader actually has: the ShaderVariant constructor
+            // throws when the pass type or keyword set does not exist, which is precisely the mistake
+            // a hand-written .shadervariants entry makes, and it would only show up as a warning in a
+            // player log much later.
+            var collection = AssetDatabase.LoadAssetAtPath<ShaderVariantCollection>("Assets/Shaders/RequiredShaderVariants.shadervariants");
+            Check(collection != null, "DistantTerrain: the required-variants collection loads");
+            if (collection != null)
+            {
+                foreach (string[] keywords in new[] { new string[0], new[] { "ENABLE_WATER_REFLECTIONS" } })
+                {
+                    string label = keywords.Length == 0 ? "<no keywords>" : keywords[0];
+                    try
+                    {
+                        Check(collection.Contains(new ShaderVariantCollection.ShaderVariant(far, UnityEngine.Rendering.PassType.ForwardBase, keywords)),
+                            "DistantTerrain: ForwardBase variant " + label + " is in the required-variants collection");
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        Check(false, "DistantTerrain: ForwardBase variant " + label + " is in the required-variants collection", ex.Message);
+                    }
+                }
+            }
+            Check(File.ReadAllText("ProjectSettings/GraphicsSettings.asset").Contains(guid),
+                "DistantTerrain: ApplyIOSSettings pinned the shader into GraphicsSettings' always-included list");
         }
 
 

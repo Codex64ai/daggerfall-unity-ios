@@ -248,6 +248,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "Daggerfall/PixelFont",
                 "Daggerfall/SDFFont",
                 "BLB/SkyBox/BLBProceduralSkybox",
+                // Distant Terrain's far-terrain shader: resolved at runtime by MobileShaders.Find,
+                // referenced by no material in any scene, so the build pipeline would strip it and
+                // the far terrain would render pink (or not at all) on device.
+                "Daggerfall/DistantTerrain/DistantTerrainTilemap",
             };
 
             var settings = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/GraphicsSettings.asset");

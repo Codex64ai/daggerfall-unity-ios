@@ -143,6 +143,27 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                                " | " + m.message + (string.IsNullOrEmpty(m.messageDetails) ? "" : " | " + m.messageDetails.Replace("\n", " ")));
         }
 
+        /// <summary>
+        /// Per-program binding counts: the max over all Metal programs in the dump (the figure that
+        /// must stay under Metal's 16 per-stage limit) and the histogram of counts across programs.
+        /// </summary>
+        static void PerProgramMax(string text, string what, string pattern, StringBuilder log)
+        {
+            // Programs are separated by the "-- Vertex/Fragment shader for ..." headers Unity writes.
+            string[] chunks = Regex.Split(text, @"(?m)^\s*(?://\s*)?(?:-- )?(?:Vertex|Fragment|Hull|Domain|Geometry) shader for ");
+            var histogram = new System.Collections.Generic.SortedDictionary<int, int>();
+            int max = 0;
+            for (int i = 1; i < chunks.Length; i++)   // chunk 0 is the preamble before the first header
+            {
+                int n = Regex.Matches(chunks[i], pattern).Count;
+                if (n > max) max = n;
+                histogram[n] = (histogram.TryGetValue(n, out int c) ? c : 0) + 1;
+            }
+            log.AppendLine("[ShaderSpike] MAX " + what + "s in any single program: " + max
+                + "  (programs: " + (chunks.Length - 1) + ", histogram count->programs: "
+                + string.Join(", ", histogram.Select(kv => kv.Key + "->" + kv.Value)) + ")");
+        }
+
         /// <summary>Counts Metal programs and unique sampler/texture bindings in a compiled dump.</summary>
         static void Report(string text, StringBuilder log)
         {
@@ -160,8 +181,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             var textures = new System.Collections.Generic.SortedSet<string>();
             foreach (Match m in Regex.Matches(text, @"texture\d\w*<[^>]*>\s+(\w+)\s*\[\[\s*texture\s*\(\s*(\d+)\s*\)\s*\]\]"))
                 textures.Add(m.Groups[1].Value + "@" + m.Groups[2].Value);
-            log.AppendLine("[ShaderSpike] unique Metal samplers: " + samplers.Count + " -> " + string.Join(", ", samplers));
-            log.AppendLine("[ShaderSpike] unique Metal textures: " + textures.Count + " -> " + string.Join(", ", textures));
+            log.AppendLine("[ShaderSpike] unique Metal samplers (UNION over all programs/variants - NOT the budget): "
+                + samplers.Count + " -> " + string.Join(", ", samplers));
+            log.AppendLine("[ShaderSpike] unique Metal textures (union): " + textures.Count + " -> " + string.Join(", ", textures));
+
+            // The number that decides whether a shader can ship is per-PROGRAM, not the union: Metal's
+            // limit of 16 texture/sampler slots applies to one program at a time, and a dump holds
+            // dozens of keyword variants that never coexist. So split on the per-program headers the
+            // dump writes and report the worst single program plus the distribution.
+            PerProgramMax(text, "sampler", @"sampler\s+\w+\s*\[\[\s*sampler\s*\(\s*\d+\s*\)\s*\]\]", log);
+            PerProgramMax(text, "texture", @"texture\d\w*<[^>]*>\s+\w+\s*\[\[\s*texture\s*\(\s*\d+\s*\)\s*\]\]", log);
 
             // Fallback for non-Metal (DX/GL) dumps or a different Metal codegen style.
             var setTex = new System.Collections.Generic.SortedSet<string>();

@@ -1,5 +1,6 @@
 // MOBILE PORT - source: github.com/somestupidgirl/Distant-Terrain-of-the-World-of-Daggerfall @ d454b30af12c9f22c9ab5ef8ad5dbd9171d1cf1f
-// File DistantTerrainTilemap.shader, copied VERBATIM (body unchanged) for the Metal compile spike; Task 3 rewrites it onto texture arrays.
+// File DistantTerrainTilemap.shader. MOBILE: rewritten to sample three Texture2DArrays instead of
+// twelve 2048^2 tileset atlases (~270 MB -> ~15 MB, twelve samplers -> three). See FarTerrainCommon.cginc.
 // MIT base: Nystul-the-Magician/dfunity-mods DistantTerrain @ fc58546c3eae964babfdfeea51e97a47ba57cdce; WoD-flavour additions carry no licence; private draft only.
 //Distant Terrain Mod for Daggerfall Tools For Unity
 //http://www.reddit.com/r/dftfu
@@ -17,31 +18,23 @@ Shader "Daggerfall/DistantTerrain/DistantTerrainTilemap" {
 		[HideInInspector] _SplatTex1("Layer 1 (G)", 2D) = "white" {}
 		[HideInInspector] _SplatTex0("Layer 0 (R)", 2D) = "white" {}
 
-		_TileAtlasTexDesert ("Tileset Atlas (RGB)", 2D) = "white" {}
-		_TileAtlasTexWoodland ("Tileset Atlas (RGB)", 2D) = "white" {}
-		_TileAtlasTexMountain ("Tileset Atlas (RGB)", 2D) = "white" {}
-		_TileAtlasTexSwamp ("Tileset Atlas (RGB)", 2D) = "white" {}
-
-		// Summer ("snow-free") copies of the four biome atlases, used per-fragment for climates
-		// whose per-climate winter-snow toggle is set (see _DisableSnow in FarTerrainCommon.cginc).
-		_TileAtlasTexDesertSnowFree ("Desert Atlas Summer (RGB)", 2D) = "white" {}
-		_TileAtlasTexWoodlandSnowFree ("Woodland Atlas Summer (RGB)", 2D) = "white" {}
-		_TileAtlasTexMountainSnowFree ("Mountain Atlas Summer (RGB)", 2D) = "white" {}
-		_TileAtlasTexSwampSnowFree ("Swamp Atlas Summer (RGB)", 2D) = "white" {}
-
-		// Winter ("snow") copies of the four biome atlases, bound permanently and sampled by the
-		// proportional snow caps (applySnowCaps) so caps use the real snow tileset in every season.
-		_TileAtlasTexDesertSnow ("Desert Atlas Winter (RGB)", 2D) = "white" {}
-		_TileAtlasTexWoodlandSnow ("Woodland Atlas Winter (RGB)", 2D) = "white" {}
-		_TileAtlasTexMountainSnow ("Mountain Atlas Winter (RGB)", 2D) = "white" {}
-		_TileAtlasTexSwampSnow ("Swamp Atlas Winter (RGB)", 2D) = "white" {}
+		// MOBILE: three seasonal tile texture ARRAYS replace the twelve 2048^2 biome atlases
+		// (seasonal + permanent summer copy + permanent winter copy, x four biomes) this shader
+		// used to declare. Each array packs the four biome tilesets' 56 records as 64^2 slices:
+		//     slice = biome * _SlicesPerBiome + record
+		// biome 0 desert / 1 mountain / 2 woodland / 3 swamp; record 0 water, 1 dirt, 2 grass,
+		// 3 stone. C# binds them from TextureReader.GetTerrainTextureArray for archives
+		// 2/102/302/402 (summer), 3/103/303/403 (winter), 4/104/304/404 (rain). ~15 MB against
+		// ~270 MB, and three samplers against twelve. See FarTerrainCommon.cginc.
+		_TileArraySummer ("Tile Texture Array Summer", 2DArray) = "" {}
+		_TileArrayWinter ("Tile Texture Array Winter", 2DArray) = "" {}
+		_TileArrayRain ("Tile Texture Array Rain", 2DArray) = "" {}
+		_SlicesPerBiome ("Slices per Biome Tileset", Int) = 56
 	    _SkyTex("Sky Texture", 2D) = "white" {}
 		_FarTerrainTilemapTex("Tilemap (R)", 2D) = "red" {}
 		_FarTerrainTilesetDim("Tileset Dimension (in tiles)", Int) = 16
 		_FarTerrainTilemapDim("Tilemap Dimension (in tiles)", Int) = 1000
 		_MaxIndex("Max Tileset Index", Int) = 255
-		_AtlasSize("Atlas Size (in pixels)", Float) = 2048.0
-		_GutterSize("Gutter Size (in pixels)", Float) = 32.0
 		
 		_SeaReflectionTex("Reflection Texture Sea Reflection", 2D) = "black" {}
 		_UseSeaReflectionTex("specifies if sea reflection texture is used", Int) = 0
@@ -92,11 +85,12 @@ Shader "Daggerfall/DistantTerrain/DistantTerrainTilemap" {
 		Cull Back
 
 		CGPROGRAM
-		#pragma target 3.0		
+		// MOBILE: 3.0 -> 3.5. Texture2DArray sampling needs shader model 3.5 / GLES3; Metal has
+		// had it since day one. #pragma glsl (a no-op since Unity 5) deleted with it.
+		#pragma target 3.5
 		// Lambert (matte diffuse) instead of Standard (PBR): see matching comment on the
 		// second pass. Removes the specular sheen on the distant terrain.
 		#pragma surface surf Lambert vertex:vert noforwardadd finalcolor:fcolor alpha:fade keepalpha nolightmap
-		#pragma glsl
 		#pragma multi_compile_local __ ENABLE_WATER_REFLECTIONS
 
 		#include "FarTerrainCommon.cginc"
@@ -215,14 +209,14 @@ Shader "Daggerfall/DistantTerrain/DistantTerrainTilemap" {
 		Cull Back
 
 		CGPROGRAM
-		#pragma target 3.0				
+		// MOBILE: 3.0 -> 3.5 for the texture arrays (see the first pass).
+		#pragma target 3.5
         // Lambert (matte diffuse) instead of Standard (PBR): the distant terrain is a flat
         // LOD backdrop and the Standard model gave it an unwanted specular sheen (visible as
         // a moon/sky reflection on the far hills). Lambert has no specular term at all, so the
         // far terrain reads as a matte surface. The surf functions only write Albedo/Alpha,
         // which is exactly what SurfaceOutput (Lambert) needs.
         #pragma surface surf Lambert vertex:vert noforwardadd finalcolor:fcolor alpha:fade keepalpha nolightmap
-		#pragma glsl
 		#pragma multi_compile_local __ ENABLE_WATER_REFLECTIONS
 
 		#include "FarTerrainCommon.cginc"

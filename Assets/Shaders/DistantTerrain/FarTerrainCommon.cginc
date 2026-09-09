@@ -1,5 +1,6 @@
 // MOBILE PORT - source: github.com/somestupidgirl/Distant-Terrain-of-the-World-of-Daggerfall @ d454b30af12c9f22c9ab5ef8ad5dbd9171d1cf1f
-// File FarTerrainCommon.cginc, copied VERBATIM (body unchanged) for the Metal compile spike; Task 3 rewrites it onto texture arrays.
+// File FarTerrainCommon.cginc. MOBILE: rewritten to sample three Texture2DArrays instead of twelve
+// 2048^2 tileset atlases (~270 MB -> ~15 MB, twelve samplers -> three). Everything else is upstream.
 // MIT base: Nystul-the-Magician/dfunity-mods DistantTerrain @ fc58546c3eae964babfdfeea51e97a47ba57cdce; WoD-flavour additions carry no licence; private draft only.
 //Distant Terrain Mod for Daggerfall Tools For Unity
 //http://www.reddit.com/r/dftfu
@@ -16,7 +17,6 @@ struct Input
 {
 	float4 pos : SV_POSITION;
 	float2 uv_MainTex;
-	float2 uv_BumpMap;
 	float3 worldPos; // interpolated vertex positions used for correct coast line texturing
 	float3 worldNormal; // interpolated vertex normals used for texturing terrain based on terrain slope
 	float4 screenPos;
@@ -27,38 +27,65 @@ struct Input
 
 #define PI 3.1416f
 
-sampler2D _TileAtlasTex;
-sampler2D _TilemapTex;
-sampler2D _BumpMap;
+// MOBILE: _TileAtlasTex / _TilemapTex / _BumpMap were declared but never sampled by this shader
+// (leftovers from the near-terrain shader it was derived from) and are deleted, as are _AtlasSize
+// and _GutterSize - atlas geometry that a texture array does not have.
 int _TilesetDim;
 int _TilemapDim;
 int _MaxIndex;
-float _AtlasSize;
-float _GutterSize;
 
 float _blendWeightFarTerrainTop;
 float _blendWeightFarTerrainBottom;
 float _blendWeightFarTerrainLeft;
 float _blendWeightFarTerrainRight;
 
-sampler2D_float _CameraDepthTexture;
-float4 _CameraDepthTexture_TexelSize;
+// === Terrain tile texture ARRAYS (MOBILE: replaces the twelve 2048^2 atlases) ==============
+// Upstream declared TWELVE sampler2D atlases here - four biomes (desert/mountain/woodland/swamp)
+// x three sets (the current season, a permanent summer copy for the per-climate winter-snow
+// opt-out, and a permanent winter copy for the snow caps). DistantTerrain.cs built each one at
+// runtime with TextureReader.GetTerrainTilesetTexture: 2048x2048 ARGB32 + mips, ~22 MB apiece,
+// ~270 MB resident. That is the single reason this file was rewritten.
+//
+// The same twelve tilesets now arrive as THREE Texture2DArrays, one per SEASON, each packing the
+// four biome tilesets' 56 records as slices (4 x 56 = 224 slices of 64^2, ~5 MB per array), built
+// from DFU's own TextureReader.GetTerrainTextureArray(archive, TextureMap.Albedo) - the same call
+// the near terrain uses, so texture replacement (DET and friends) is honoured exactly as before.
+// The "summer copy" and "winter copy" sampler sets are no longer separate textures at all: they
+// are just the summer and winter ARRAYS, selected per fragment (see dtArrayForSet below).
+//
+//   slice = biome * _SlicesPerBiome + record          (_SlicesPerBiome == 56)
+//
+// with the biome and record constants below. C# side: DistantTerrain.SliceIndex(biome, record).
+// Arrays, in _TextureSetSeasonCode order, so the season code indexes them directly:
+//   _TileArraySummer  archives   2 / 102 / 302 / 402
+//   _TileArrayWinter  archives   3 / 103 / 303 / 403
+//   _TileArrayRain    archives   4 / 104 / 304 / 404
+UNITY_DECLARE_TEX2DARRAY(_TileArraySummer);
+UNITY_DECLARE_TEX2DARRAY(_TileArrayWinter);
+UNITY_DECLARE_TEX2DARRAY(_TileArrayRain);
+float4 _TileArraySummer_TexelSize; // .zw = slice width/height in texels; drives mip selection
+int _SlicesPerBiome;               // 56 - records per biome tileset, the slice-block stride
 
-sampler2D _TileAtlasTexDesert;
-sampler2D _TileAtlasTexWoodland;
-sampler2D _TileAtlasTexMountain;
-sampler2D _TileAtlasTexSwamp;
+// Array selector. Deliberately the same numbering as _TextureSetSeasonCode.
+#define DT_ARRAY_SUMMER 0
+#define DT_ARRAY_WINTER 1
+#define DT_ARRAY_RAIN   2
 
-// Summer ("snow-free") copies of the four biome atlases, bound permanently by DistantTerrain.cs
-// (they always point at the summer tilesets). In winter, fragments whose climate has its
-// per-climate DisableSnow flag set sample THESE instead of the seasonal (winter) atlas above, so
-// an individual climate can opt out of distant snow even though several climates share one atlas
-// (e.g. Rainforest/jungle staying green while true Swamp freezes). In summer/rain they are never
-// selected (the seasonal atlas already holds the summer/rain set), so they have no visual effect.
-sampler2D _TileAtlasTexDesertSnowFree;
-sampler2D _TileAtlasTexWoodlandSnowFree;
-sampler2D _TileAtlasTexMountainSnowFree;
-sampler2D _TileAtlasTexSwampSnowFree;
+// Biome -> slice block. MUST match DistantTerrain.SliceIndex's biome argument on the C# side.
+#define DT_BIOME_DESERT   0
+#define DT_BIOME_MOUNTAIN 1
+#define DT_BIOME_WOODLAND 2
+#define DT_BIOME_SWAMP    3
+
+// The four tileset records the far terrain uses. Upstream addressed these as atlas CELLS
+// 0 / 4 / 8 / 12, because GetTerrainTilesetTexture lays out four rotation/flip variants per record
+// (cell = record * 4 + variant) and the far terrain always took variant 0. GetTerrainTextureArray
+// has one slice per record, so the * 4 disappears.
+#define DT_TILE_WATER 0
+#define DT_TILE_DIRT  1
+#define DT_TILE_GRASS 2
+#define DT_TILE_STONE 3
+// ===========================================================================================
 
 sampler2D _FarTerrainTilemapTex;
 int _FarTerrainTilesetDim; // used by FarTerrainTilemap shader, but not by TransitionRingTilemap shader
@@ -153,14 +180,10 @@ float _SnowCapStartY;       // world-Y where snow begins
 float _SnowCapFullY;        // world-Y at/above which snow is solid
 float _SnowCapNoiseY;       // world-Y magnitude of the random per-pixel snow-line deviation
 
-// Winter ("snow") atlases, bound permanently by DistantTerrain.cs (they always point at the
-// winter tilesets). applySnowCaps samples the MOUNTAIN one for the snow colour in every season -
-// including summer, when the seasonal slot holds the bald summer set - so the snow matches the
-// terrain's own snow texture instead of a procedural white.
-sampler2D _TileAtlasTexDesertSnow;
-sampler2D _TileAtlasTexWoodlandSnow;
-sampler2D _TileAtlasTexMountainSnow;
-sampler2D _TileAtlasTexSwampSnow;
+// MOBILE: the four "winter atlas" samplers that used to be declared here are gone - applySnowCaps
+// now reads the MOUNTAIN block of _TileArrayWinter in every season, which is the same texture it
+// always sampled, so the snow still matches the terrain's own snow tileset rather than a
+// procedural white.
 // ===========================================================================================
 
 // === Near-terrain cutout + boundary skirt (vertex "pin-down") ============================
@@ -219,8 +242,9 @@ bool farTerrainCulled(float2 uv)
 
 void fcolor (Input IN, SurfaceOutput o, inout fixed4 color) 
 {
-    float rawZ = SAMPLE_DEPTH_TEXTURE_PROJ(_CameraDepthTexture, UNITY_PROJ_COORD(IN.screenPos));
-    float sceneZ = LinearEyeDepth(rawZ);
+    // MOBILE: upstream sampled _CameraDepthTexture into rawZ/sceneZ here and never used either
+    // value; nothing sets Camera.depthTextureMode, so on Metal that was a read of an unbound
+    // texture every fragment. Deleted with its sampler.
     float partZ = IN.eyeDepth;
     float dist = partZ;
 	float blendFacTerrain = 1.0f;
@@ -365,8 +389,15 @@ half speckDensityForClimate(int index)
 }
 // ------------------------------------------------------------------------------------------
 
-half4 getColorByTextureAtlasIndex(Input IN, uniform sampler2D textureAtlas, uint index, float2 uvTex, int texDim, int tilesetDim)
-{			
+// MOBILE: the texture-array replacement for upstream's getColorByTextureAtlasIndex. The tiling /
+// crispness maths and the mip-selection gradient are carried over unchanged; what is gone is the
+// atlas cell arithmetic - cell origin from index, gutter offset, atlas-normalised gradients and
+// the atlas-bleed clamp's reason for existing - because a slice IS the tile.
+//   arraySel  DT_ARRAY_SUMMER / _WINTER / _RAIN  (see dtArrayForSet)
+//   biome     DT_BIOME_*                          (slice block)
+//   record    DT_TILE_*                           (record within the block)
+half4 getColorFromTileArray(Input IN, int arraySel, int biome, int record, float2 uvTex, int texDim, int tilesetDim)
+{
 	// Lowered from 3.5 to 2.0: the previous value tiled the per-tile texture so finely that
 	// the repeating pattern read as "crawling" ground in motion (high-frequency tiles, too
 	// small on the mesh). A larger value enlarges each texture instance on the mesh and
@@ -378,76 +409,56 @@ half4 getColorByTextureAtlasIndex(Input IN, uniform sampler2D textureAtlas, uint
 	float dist = max(abs(IN.worldPos.x - _WorldSpaceCameraPos.x), abs(IN.worldPos.z - _WorldSpaceCameraPos.z));
 	dist = floor(dist*distanceAttenuation);
 
-	// Frequency multiplier applied to the within-tile texture coordinate. Matches the factor
-	// used in the xoffset/yoffset computation below so the mip-selection gradient (uvr) tracks
-	// the ACTUAL sampling rate of the texture.
+	// Frequency multiplier applied to the within-tile texture coordinate.
 	float crispnessFreq = textureCrispness / max(1, dist * textureCrispnessDiminishingFactor);
 
-	int xpos = index % tilesetDim;
-	int ypos = index / tilesetDim;
-	float2 uv = float2(xpos, ypos) / tilesetDim;
+	// Offset to fragment position inside tile - the tile texture repeats over the tile.
+	// Upstream wrote this as frac(...) / _GutterSize plus a _GutterSize / _AtlasSize origin shift,
+	// which placed the sample inside the 64x64 CORE of the 128-texel gutter-padded atlas cell
+	// (the middle half of the cell, in atlas UV). A slice has no gutter, so that whole mapping
+	// collapses to the frac() itself, in slice UV.
+	float2 uv = frac(uvTex * _FarTerrainTilemapDim * crispnessFreq);
 
-	// Offset to fragment position inside tile
-	float xoffset;
-	float yoffset;
-	// changed offset computation so that tile texture repeats over tile
-	xoffset = frac(uvTex.x * _FarTerrainTilemapDim * crispnessFreq) / _GutterSize;
-	yoffset = frac(uvTex.y * _FarTerrainTilemapDim * crispnessFreq) / _GutterSize;
-
-	uv += float2(xoffset, yoffset) + _GutterSize / _AtlasSize;
-
-	// Sample based on gradient and set output.
-	// NOTE: the gradient handed to tex2Dgrad is intentionally kept small (NOT scaled by the
-	// crispness/distance frequency) so the sampler stays near mip 0. This atlas packs all the
-	// terrain tiles into one texture with only a small gutter between cells, so coarse mips
-	// average across cell boundaries and bleed neighbouring tiles into each other - on the
-	// distant water that showed up as brown scalloped rings pulled in from the adjacent land
-	// tiles. Accepting a little aliasing here is the lesser evil; the repetition itself is
-	// instead tamed by the lowered textureCrispness above (larger tiles on the mesh). A proper
-	// mip-based antialias would require padding each atlas cell with its own mip chain (or a
-	// detail/"hyper" texture overlay).
-	// UPDATE: the small-gradient heuristic alone was not enough at the grazing horizon - the
-	// derivatives there still drove the mip coarse enough to bleed land into the far water.
-	// The explicit gradient clamp below ("Atlas-bleed clamp") now bounds the worst case.
-	float2 uvr = uvTex * ((float)texDim / _GutterSize);
+	// Mip selection, unchanged in effect. Upstream handed tex2Dgrad the gradient of
+	// uvTex * (texDim / _GutterSize) in ATLAS-normalised units; with a 2048 atlas of 128-texel
+	// cells holding 64-texel tiles, the _AtlasSize / _GutterSize factor of 64 is exactly the tile
+	// size, so the same mip comes out of the gradient of uvTex * texDim (map-pixel space) measured
+	// in TILE texels. Deliberately NOT scaled by crispnessFreq (upstream: keeps the sampler near
+	// mip 0 - a little aliasing traded for crisp distant ground, with the repetition tamed by
+	// textureCrispness above instead).
+	float2 uvr = uvTex * (float)texDim;
 	float2 gradX = ddx(uvr);
 	float2 gradY = ddy(uvr);
 
-	// --- Atlas-bleed clamp -------------------------------------------------------------
-	// All terrain tiles are packed into ONE atlas with only a thin gutter between cells,
-	// and the atlas mip chain averages across those cell boundaries. At a grazing angle
-	// (the water/land band right at the horizon) the screen-space derivatives of uvr blow
-	// up, tex2Dgrad selects a coarse mip, and that mip's texels pull the neighbouring
-	// grass/dirt cells into the water cell - the green (and previously brown) fringe on
-	// the distant water.
-	//
-	// The sample point is held in the middle half of its cell (the xoffset/yoffset math
-	// above keeps it within [0.25, 0.75] of the cell), so there is a quarter-cell margin
-	// to the neighbour. tex2Dgrad selects the mip from the *gradient length*, and the
-	// averaged block at the selected mip spans ~(gradLen * _AtlasSize) atlas texels.
-	// Capping the gradient so that block can never reach past the quarter-cell margin
-	// stops the cross-cell averaging while still allowing as coarse a mip as is safe (so
-	// we don't reintroduce the shimmer/"crawling" that forcing mip 0 would cause).
-	//
-	//   cellPx   = _AtlasSize / tilesetDim                       (atlas texels per cell)
-	//   marginPx = 0.25 * cellPx                                 (sample-to-neighbour gap)
-	//   maxGrad  = marginPx / _AtlasSize = 0.25 / tilesetDim     (atlas-normalised units,
-	//                                                             which is how tex2Dgrad
-	//                                                             interprets the gradient)
-	//
-	// The 0.25 factor is conservative (half the available margin). Lower it if any fringe
-	// still shows on the far water; raise it toward 0.5 if the distant terrain looks too
-	// aliased. The proper long-term fix is to pad each atlas cell with its own mip chain
-	// in C#, which would let this clamp be removed entirely.
-	float maxGrad = 0.25f / (float)tilesetDim;
-	float gx = length(gradX);
-	float gy = length(gradY);
-	if (gx > maxGrad) gradX *= maxGrad / gx;
-	if (gy > maxGrad) gradY *= maxGrad / gy;
-	// -----------------------------------------------------------------------------------
+	// Upstream's "atlas-bleed clamp", converted to these units: 0.25 / tilesetDim of an atlas UV is
+	// 0.25 * (_AtlasSize / _GutterSize) / tilesetDim = 8 / tilesetDim here. A texture array has no
+	// neighbouring cell to bleed in, so all it still does is cap the mip level (5 of 6 for a 64^2
+	// slice) - kept so the distant ground keeps exactly the sharpness it had upstream.
+	float maxGrad = 8.0f / (float)tilesetDim;
+	float gx = min(length(gradX), maxGrad);
+	float gy = min(length(gradY), maxGrad);
 
-	half4 c = tex2Dgrad(textureAtlas, uv, gradX, gradY);
-	return(c);
+	// There is no UNITY_SAMPLE_TEX2DARRAY_GRAD in HLSLSupport.cginc, and DFU's own
+	// DaggerfallTilemapTextureArray shader selects the level explicitly for the same reason (array
+	// GRAD sampling has a long-standing seam bug - Nystul's TransitionRingTilemapTextureArray says
+	// so in as many words). So turn the clamped gradient into a LOD: lod = log2(texels per pixel).
+	float sliceDim = max(_TileArraySummer_TexelSize.z, _TileArraySummer_TexelSize.w);
+	float lod = log2(max(max(gx, gy) * sliceDim, 1e-6f));
+
+	float3 uv3 = float3(uv, (float)(biome * _SlicesPerBiome + record));
+
+	// A texture array cannot be selected through a variable, so this is a three-way branch on a
+	// uniform-driven int rather than the twelve-sampler macro maze it replaces. Written as one
+	// initialised local with a single return: early returns out of a branch make the HLSL compiler
+	// emit "use of potentially uninitialized variable" for the inlined return temp.
+	half4 c = half4(0.0f, 0.0f, 0.0f, 0.0f);
+	if (arraySel == DT_ARRAY_WINTER)
+		c = UNITY_SAMPLE_TEX2DARRAY_LOD(_TileArrayWinter, uv3, lod);
+	else if (arraySel == DT_ARRAY_RAIN)
+		c = UNITY_SAMPLE_TEX2DARRAY_LOD(_TileArrayRain, uv3, lod);
+	else
+		c = UNITY_SAMPLE_TEX2DARRAY_LOD(_TileArraySummer, uv3, lod);
+	return c;
 }
 
 // True when this climate should keep its summer look despite winter (its per-climate DisableSnow
@@ -470,32 +481,27 @@ int regionTreatmentIndex(float2 uvTex)
 	return clamp(t, 0, 7);
 }
 
-// Samples a biome's tile atlas, transparently swapping the seasonal atlas for its summer
-// ("snow-free") copy when the fragment's climate has opted out of winter snow. Expands to the
-// SAME getColorByTextureAtlasIndex(...) call shape used everywhere else (the sampler is pasted in
-// directly, never stored in a variable), so it compiles exactly like the original fetches. Relies
-// on `snowFree`, `IN`, `uvTex`, `texDim` and `tilesetDim` being in scope at the call site.
-#define SAMPLE_BIOME_ATLAS(seasonalTex, summerTex, slot) \
-	(snowFree \
-		? getColorByTextureAtlasIndex(IN, summerTex, slot, uvTex, texDim, tilesetDim) \
-		: getColorByTextureAtlasIndex(IN, seasonalTex, slot, uvTex, texDim, tilesetDim))
-
-// Atlas-set selector for sampleLandBiome / SAMPLE_BIOME_3.
+// Atlas-set selector, unchanged in meaning from upstream (it named three SAMPLER sets; here it
+// names three ARRAYS).
 #define ATLAS_SEASONAL 0   // current season's set, auto-swapping to summer for snow-free climates
 #define ATLAS_SUMMER   1   // always the summer ("bald") set
 #define ATLAS_SNOW     2   // always the winter ("snow") set
 
-// Three-way atlas pick. Like SAMPLE_BIOME_ATLAS the sampler is pasted directly into each branch
-// (samplers can't be stored in variables), so it compiles to plain getColorByTextureAtlasIndex
-// fetches. Reads `atlasSet`, `snowFree`, `IN`, `uvTex`, `texDim`, `tilesetDim` from scope.
-#define SAMPLE_BIOME_3(seasonalTex, summerTex, snowTex, slot) \
-	( atlasSet == ATLAS_SNOW \
-		? getColorByTextureAtlasIndex(IN, snowTex, slot, uvTex, texDim, tilesetDim) \
-		: atlasSet == ATLAS_SUMMER \
-			? getColorByTextureAtlasIndex(IN, summerTex, slot, uvTex, texDim, tilesetDim) \
-			: (snowFree \
-				? getColorByTextureAtlasIndex(IN, summerTex, slot, uvTex, texDim, tilesetDim) \
-				: getColorByTextureAtlasIndex(IN, seasonalTex, slot, uvTex, texDim, tilesetDim)) )
+// MOBILE: replaces upstream's SAMPLE_BIOME_ATLAS / SAMPLE_BIOME_3 macros, which existed only
+// because a sampler2D cannot be stored in a variable and so had to be pasted into every branch.
+// With one array per season the choice is a plain int, so the twelve-way macro expansion becomes
+// this: which of the three seasonal arrays does this request resolve to?
+//   ATLAS_SNOW     -> winter  (upstream's permanently-bound _TileAtlasTex*Snow set)
+//   ATLAS_SUMMER   -> summer  (upstream's permanently-bound _TileAtlasTex*SnowFree set)
+//   ATLAS_SEASONAL -> the current season, or summer when this climate has opted out of winter snow
+int dtArrayForSet(int atlasSet, bool snowFree)
+{
+	int arr = clamp(_TextureSetSeasonCode, DT_ARRAY_SUMMER, DT_ARRAY_RAIN);
+	if (atlasSet == ATLAS_SNOW)      arr = DT_ARRAY_WINTER;
+	else if (atlasSet == ATLAS_SUMMER) arr = DT_ARRAY_SUMMER;
+	else if (snowFree)                 arr = DT_ARRAY_SUMMER;
+	return arr;
+}
 
 // Samples a LAND biome's three-way (grass/dirt/stone) slope blend from the chosen atlas set
 // (ATLAS_SEASONAL / ATLAS_SUMMER / ATLAS_SNOW). Pulling the per-biome switch into a function lets
@@ -505,43 +511,31 @@ int regionTreatmentIndex(float2 uvTex)
 half4 sampleLandBiome(Input IN, float2 uvTex, int texDim, int tilesetDim, int index,
                       float weightGrass, float weightDirt, float weightStone, int atlasSet)
 {
-	bool snowFree = snowFreeForClimate(index); // consumed by SAMPLE_BIOME_3 for ATLAS_SEASONAL
-	half4 c = half4(0,0,0,1);
-	half4 c_g = half4(0,0,0,0);
-	half4 c_d = half4(0,0,0,0);
-	half4 c_s = half4(0,0,0,0);
+	bool snowFree = snowFreeForClimate(index);   // only consulted for ATLAS_SEASONAL
+	int arr = dtArrayForSet(atlasSet, snowFree);
 
-	if ((index==224)||(index==225)||(index==229)) // desert
+	// MOBILE: upstream had four near-identical blocks here, one per biome, each pasting a different
+	// pair/triple of samplers into the SAMPLE_BIOME_3 macro. The biome is now just a slice-block
+	// index, so the four blocks collapse to picking that index.
+	int biome = -1;
+	if ((index==224)||(index==225)||(index==229))       biome = DT_BIOME_DESERT;   // desert
+	else if ((index==227)||(index==228))                biome = DT_BIOME_SWAMP;    // swamp
+	else if ((index==226)||(index==230))                biome = DT_BIOME_MOUNTAIN; // mountain
+	else if ((index==231)||(index==232)||(index==233))  biome = DT_BIOME_WOODLAND; // woodland
+
+	half4 c = half4(0.0f, 0.0f, 0.0f, 1.0f);   // ocean / unknown - handled by the caller
+	if (biome >= 0)
 	{
-		if (weightGrass > 0.0f) c_g = SAMPLE_BIOME_3(_TileAtlasTexDesert, _TileAtlasTexDesertSnowFree, _TileAtlasTexDesertSnow, 8);
-		if (weightDirt  > 0.0f) c_d = SAMPLE_BIOME_3(_TileAtlasTexDesert, _TileAtlasTexDesertSnowFree, _TileAtlasTexDesertSnow, 4);
-		if (weightStone > 0.0f) c_s = SAMPLE_BIOME_3(_TileAtlasTexDesert, _TileAtlasTexDesertSnowFree, _TileAtlasTexDesertSnow, 12);
+		half4 c_g = half4(0,0,0,0);
+		half4 c_d = half4(0,0,0,0);
+		half4 c_s = half4(0,0,0,0);
+
+		// Only non-zero slope channels are fetched, as before.
+		if (weightGrass > 0.0f) c_g = getColorFromTileArray(IN, arr, biome, DT_TILE_GRASS, uvTex, texDim, tilesetDim);
+		if (weightDirt  > 0.0f) c_d = getColorFromTileArray(IN, arr, biome, DT_TILE_DIRT,  uvTex, texDim, tilesetDim);
+		if (weightStone > 0.0f) c_s = getColorFromTileArray(IN, arr, biome, DT_TILE_STONE, uvTex, texDim, tilesetDim);
+
 		c = c_g * weightGrass + c_d * weightDirt + c_s * weightStone;
-	}
-	else if ((index==227)||(index==228)) // swamp
-	{
-		if (weightGrass > 0.0f) c_g = SAMPLE_BIOME_3(_TileAtlasTexSwamp, _TileAtlasTexSwampSnowFree, _TileAtlasTexSwampSnow, 8);
-		if (weightDirt  > 0.0f) c_d = SAMPLE_BIOME_3(_TileAtlasTexSwamp, _TileAtlasTexSwampSnowFree, _TileAtlasTexSwampSnow, 4);
-		if (weightStone > 0.0f) c_s = SAMPLE_BIOME_3(_TileAtlasTexSwamp, _TileAtlasTexSwampSnowFree, _TileAtlasTexSwampSnow, 12);
-		c = c_g * weightGrass + c_d * weightDirt + c_s * weightStone;
-	}
-	else if ((index==226)||(index==230)) // mountain
-	{
-		if (weightGrass > 0.0f) c_g = SAMPLE_BIOME_3(_TileAtlasTexMountain, _TileAtlasTexMountainSnowFree, _TileAtlasTexMountainSnow, 8);
-		if (weightDirt  > 0.0f) c_d = SAMPLE_BIOME_3(_TileAtlasTexMountain, _TileAtlasTexMountainSnowFree, _TileAtlasTexMountainSnow, 4);
-		if (weightStone > 0.0f) c_s = SAMPLE_BIOME_3(_TileAtlasTexMountain, _TileAtlasTexMountainSnowFree, _TileAtlasTexMountainSnow, 12);
-		c = c_g * weightGrass + c_d * weightDirt + c_s * weightStone;
-	}
-	else if ((index==231)||(index==232)||(index==233)) // woodland
-	{
-		if (weightGrass > 0.0f) c_g = SAMPLE_BIOME_3(_TileAtlasTexWoodland, _TileAtlasTexWoodlandSnowFree, _TileAtlasTexWoodlandSnow, 8);
-		if (weightDirt  > 0.0f) c_d = SAMPLE_BIOME_3(_TileAtlasTexWoodland, _TileAtlasTexWoodlandSnowFree, _TileAtlasTexWoodlandSnow, 4);
-		if (weightStone > 0.0f) c_s = SAMPLE_BIOME_3(_TileAtlasTexWoodland, _TileAtlasTexWoodlandSnowFree, _TileAtlasTexWoodlandSnow, 12);
-		c = c_g * weightGrass + c_d * weightDirt + c_s * weightStone;
-	}
-	else
-	{
-		c = half4(0.0f, 0.0f, 0.0f, 1.0f);
 	}
 
 	return c;
@@ -580,7 +574,7 @@ half3 applySnowCaps(Input IN, float2 uvTex, int texDim, int tilesetDim, int inde
 	// blend - the dirt/stone slots of the winter atlas are snowy ROCK (grey/brown) and made steep
 	// caps read brown. Always untinted, and whitened a touch so caps stay convincingly white on any
 	// region's rock (raise the 0.4 toward 1.0 for purer white, lower it to keep more snow texture).
-	half3 snowRGB = getColorByTextureAtlasIndex(IN, _TileAtlasTexMountainSnow, 8, uvTex, texDim, tilesetDim).rgb;
+	half3 snowRGB = getColorFromTileArray(IN, DT_ARRAY_WINTER, DT_BIOME_MOUNTAIN, DT_TILE_GRASS, uvTex, texDim, tilesetDim).rgb;
 	snowRGB = lerp(snowRGB, half3(1.0f, 1.0f, 1.0f), 0.4f);
 
 	// Base (rock) below the line. In WINTER the seasonal atlas is the snowy GROUND, which would make
@@ -615,8 +609,11 @@ half3 applyWoodlandDirt(Input IN, float2 uvTex, int texDim, int tilesetDim, int 
 			+ dt_valueNoise(mapPixelPos * 3.7f + 3.1f) * 0.4f;
 	float dirtMask = smoothstep(0.62f, 0.82f, n) * 0.55f; // up to 55% dirt at patch centres
 
-	// The woodland DIRT slot (4) of the seasonal atlas - the actual bare-earth colour for this biome.
-	half3 dirt = getColorByTextureAtlasIndex(IN, _TileAtlasTexWoodland, 4, uvTex, texDim, tilesetDim).rgb;
+	// The woodland DIRT record of the SEASONAL array - the actual bare-earth colour for this biome.
+	// Upstream named the raw seasonal sampler here (no snow-free swap), and this is winter-gated
+	// above anyway, so the season code selects the array directly.
+	half3 dirt = getColorFromTileArray(IN, clamp(_TextureSetSeasonCode, DT_ARRAY_SUMMER, DT_ARRAY_RAIN),
+	                                   DT_BIOME_WOODLAND, DT_TILE_DIRT, uvTex, texDim, tilesetDim).rgb;
 	return lerp(c, dirt, dirtMask);
 }
 
@@ -666,7 +663,10 @@ half4 getColorFromTerrain(Input IN, float2 uvTex, int texDim, int tilesetDim, in
 
 	if ((index==223) || (trueWorldY < _WaterHeightTransformed)) 
 	{
-		c = SAMPLE_BIOME_ATLAS(_TileAtlasTexWoodland, _TileAtlasTexWoodlandSnowFree, 0);
+		// Water is the woodland tileset's record 0 (upstream: atlas cell 0 of the woodland set),
+		// on the seasonal array with the per-climate winter-snow opt-out applied.
+		c = getColorFromTileArray(IN, dtArrayForSet(ATLAS_SEASONAL, snowFree),
+		                          DT_BIOME_WOODLAND, DT_TILE_WATER, uvTex, texDim, tilesetDim);
 		#if defined(ENABLE_WATER_REFLECTIONS)
 			if (_UseSeaReflectionTex)
 			{
