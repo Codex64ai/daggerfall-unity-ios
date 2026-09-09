@@ -18,6 +18,11 @@
 // switched on AND started, plus Daggerfall Expanded Textures - the mod its manifest depends on for
 // the textures its scenery uses - installed and switched on. Both default off.
 //
+// World of Daggerfall - Biomes is a bundle too, but a standalone one: it re-skins the terrain and
+// swaps the nature billboards by itself, so it needs neither Location Loader nor World of
+// Daggerfall - only Daggerfall Expanded Textures. Default off, and its two Inits run in that order
+// (terrain, then nature) because the nature overrider looks the terrain provider up.
+//
 // The survival mods start as soon as the bundles are loaded, at the title. Dynamic Skies cannot:
 // its Init reaches into the scene for the sun light and the camera, and on a player build neither
 // exists at the title. So the sky waits here, polling once a second, and starts when the scene has
@@ -42,6 +47,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         public const string WoDGateNote = " Needs Location Loader switched on; it was switched off because Location Loader is not.";
         public const string DETFileName = "daggerfall expanded textures";
         public const string WoDDetNote = " Needs Daggerfall Expanded Textures switched on; it was switched off because that mod is off or not installed.";
+        public const string BiomesTitle = "World of Daggerfall - Biomes";
+        public const string BiomesDetNote = " Needs Daggerfall Expanded Textures switched on; it was switched off because that mod is off or not installed.";
 
         /// <summary>Pure: which of (rr, rrItems, cc) may run. Items needs RR; C&C needs both.</summary>
         public static bool[] Gate(bool rr, bool rrItems, bool cc)
@@ -64,8 +71,18 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public static bool WodRuns(bool locationLoaderStarted, bool wodOn, bool detOn) => locationLoaderStarted && wodOn && detOn;
 
+        /// <summary>
+        /// Pure: World of Daggerfall - Biomes re-skins the terrain and swaps the nature billboards on its
+        /// own, so it needs neither Location Loader nor World of Daggerfall - only its own switch and
+        /// Daggerfall Expanded Textures, the mod its manifest depends on for the tiles it draws from.
+        /// </summary>
+        public static bool BiomesRuns(bool biomesOn, bool detOn) => biomesOn && detOn;
+
+        /// <summary>True once both Biomes Inits returned this session; Location Loader's type-5 nature swap keys on it.</summary>
+        public static bool BiomesRunning;
+
         /// <summary>Titles of the compiled-in mods, in dependency order.</summary>
-        public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle, SkyTitle, LLTitle, WoDTitle };
+        public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle, SkyTitle, LLTitle, WoDTitle, BiomesTitle };
 
         /// <summary>
         /// Called by ModManager after it found the bundles and before it applies saved settings: a
@@ -265,6 +282,28 @@ namespace DaggerfallWorkshop.Game.Mobile
                 // throwing. Nothing is left to read the locations; a runtime failure is not a user
                 // choice, so the entry keeps its setting and only the log says what happened.
                 Debug.Log("[PortedMods] World of Daggerfall not started: Location Loader failed");
+
+            // Biomes is independent of Location Loader and of WoD: it re-skins terrain and swaps
+            // nature billboards itself. Only Daggerfall Expanded Textures gates it.
+            Mod biomes = Entry(BiomesTitle);
+            bool biomesChosen = biomes != null && biomes.Enabled;
+            if (biomesChosen && !detOn)
+            {
+                biomes.Enabled = false;
+                if (!(biomes.ModInfo.ModDescription ?? "").Contains(BiomesDetNote)) biomes.ModInfo.ModDescription += BiomesDetNote;
+                ModManager.WriteModSettings();
+                Debug.Log("[PortedMods] World of Daggerfall - Biomes off: Daggerfall Expanded Textures is not enabled");
+            }
+            if (BiomesRuns(biomes != null && biomes.Enabled, detOn))
+            {
+                // Explicit order, not the manifest's: the terrain material provider must exist before
+                // the nature overrider installs itself, which is the upstream VEModEnabled race.
+                int bi = ModManager.Instance.GetModIndex(BiomesTitle);
+                bool terrainStarted = StartOne(BiomesTitle + " (terrain)", () => WorldOfDaggerfall.WODBiomes.Init(new InitParams(biomes, bi, count)));
+                bool natureStarted = terrainStarted && StartOne(BiomesTitle + " (nature)", () => WorldOfDaggerfall.NatureBatchOverriderInstaller.Init(new InitParams(biomes, bi, count)));
+                BiomesRunning = terrainStarted && natureStarted;
+                if (BiomesRunning) Debug.Log("[PortedMods] started " + BiomesTitle);
+            }
 
             return SkyRuns(sky != null, sky != null && sky.Enabled) ? sky : null;
         }

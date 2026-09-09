@@ -822,6 +822,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobilePortedMods.DETFileName == "daggerfall expanded textures", "PortedMods: the Daggerfall Expanded Textures dependency is matched on the bundle file name WoD's manifest names");
             Check(!string.IsNullOrEmpty(MobilePortedMods.WoDDetNote) && MobilePortedMods.WoDDetNote.Contains("Expanded Textures"), "PortedMods: the World of Daggerfall dependency note names Daggerfall Expanded Textures");
 
+            // World of Daggerfall - Biomes: a data bundle of its own, off by default, textured out of
+            // Daggerfall Expanded Textures. It re-skins terrain and swaps nature billboards on its own,
+            // so unlike WoD it needs neither Location Loader nor WoD - the gate is its switch and DET.
+            Check(System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.BiomesTitle) >= 0, "PortedMods: Biomes is default-off");
+            Check(MobilePortedMods.BiomesRuns(true, true) && !MobilePortedMods.BiomesRuns(true, false) && !MobilePortedMods.BiomesRuns(false, true), "PortedMods: Biomes runs only with its switch and Daggerfall Expanded Textures on");
+            Check(MobilePortedMods.BiomesDetNote.Contains("Expanded Textures"), "PortedMods: Biomes note names the missing dependency");
+
             // A mod whose Init throws must not take the mods after it - or the sky's deferred start -
             // down with it. The LogError below is this check working, not a failure.
             bool ranClean = false;
