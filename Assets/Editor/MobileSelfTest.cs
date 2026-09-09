@@ -2688,6 +2688,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// point-filtered records DFU decompresses into an ARGB32 Texture2DArray anyway, so
         /// compressing them buys nothing and risks the silent record-drop that a format
         /// mismatch causes. Keyed on the mod FOLDER name, which is the mods.json entry name.
+        ///
+        /// The second exception, LinearData, is World of Daggerfall - Terrain: five world maps a
+        /// compute shader samples as numbers. Those need sRGB off (the project is Linear, so the
+        /// default sRGB read would remap every value) and no compression, but no CPU copy.
         /// </summary>
         static void TestPackTextureRules()
         {
@@ -2702,6 +2706,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobileModPackTextureRules.NoMips("Assets/Game/Mods/WorldOfDaggerfallBiomes/Assets/Maps/climate_map.png")
                   && !MobileModPackTextureRules.NoMips("Assets/Game/Mods/WorldOfDaggerfallBiomes/Textures/Terrain/Subtropical/004_0-0.png"),
                 "PackTextureRules: only the climate map drops mips");
+            // MOBILE: the second exception class. World of Daggerfall - Terrain's five world maps are
+            // read as NUMBERS by a compute shader (heights, biome weights, port flags), never shown, so
+            // they need the opposite of the default path in two independent ways: sRGB sampling would
+            // remap every value (the project is Linear) and block compression would quantise them.
+            // Unlike RawData they stay non-readable - only the GPU reads them.
+            Check(MobileModPackTextureRules.For("Assets/Game/Mods/WorldOfDaggerfallTerrain/Assets/Maps/daggerfall_deriv_map.png") == MobileModPackTextureRules.Rule.LinearData,
+                "PackTextureRules: the Terrain world maps are linear data (sRGB off, uncompressed)");
+            Check(MobileModPackTextureRules.For("Assets/Game/Mods/WorldOfDaggerfallBiomes/Assets/Maps/climate_map.png") == MobileModPackTextureRules.Rule.RawData,
+                "PackTextureRules: Biomes stays raw data after adding the linear rule");
+            Check(MobileModPackTextureRules.LinearDataMods.Contains("WorldOfDaggerfallTerrain"), "PackTextureRules: Terrain is in the linear-data list");
             // Every check above pins the rule against the SAME literal the rule holds, so a rename or a
             // case change of the mods.json entry - which is the fetched folder name, which is what For()
             // matches - leaves this suite green while 225 textures silently revert to ASTC and the
@@ -2709,14 +2723,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // mods.json: TestBundledModManifests.)
             string modPins = "";
             try { modPins = File.ReadAllText("tools/bundled-mods/mods.json"); } catch (Exception) { }
-            string[] unpinned = MobileModPackTextureRules.RawDataMods
+            string[] pinnedRules = MobileModPackTextureRules.RawDataMods
+                .Concat(MobileModPackTextureRules.LinearDataMods).ToArray();
+            string[] unpinned = pinnedRules
                 .Where(m => !System.Text.RegularExpressions.Regex.IsMatch(
                     modPins, "\"name\"\\s*:\\s*\"" + System.Text.RegularExpressions.Regex.Escape(m) + "\""))
                 .ToArray();
-            Check(modPins.Length > 0 && MobileModPackTextureRules.RawDataMods.Count > 0 && unpinned.Length == 0,
-                "PackTextureRules: every raw-data mod name is a mods.json entry name",
+            Check(modPins.Length > 0 && pinnedRules.Length > 0 && unpinned.Length == 0,
+                "PackTextureRules: every raw-data and linear-data mod name is a mods.json entry name",
                 unpinned.Length > 0 ? "not in mods.json: " + string.Join(", ", unpinned)
-                                    : MobileModPackTextureRules.RawDataMods.Count + " names, " + modPins.Length + "B of pins");
+                                    : pinnedRules.Length + " names, " + modPins.Length + "B of pins");
         }
 
         /// <summary>

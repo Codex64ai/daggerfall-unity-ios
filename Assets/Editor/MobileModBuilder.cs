@@ -137,8 +137,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
     /// ASTC 6x6 on iOS is what the DREAM conversion settled on (~9-16x smaller than the ARGB32
     /// a loose PNG becomes); 2D art (UI, inventory, paperdoll, portraits) gets no mipmaps. Not
     /// applied to IOSPilot (its own rules below) or Converted/ (the extractor already decided).
-    /// MOBILE: one exception, in MobileModPackTextureRules - packs whose textures are read back
-    /// on the CPU or drawn as point-filtered terrain records stay readable and uncompressed.
+    /// MOBILE: two exceptions, both in MobileModPackTextureRules - RawData packs, whose textures are
+    /// read back on the CPU or drawn as point-filtered terrain records, stay readable and
+    /// uncompressed; LinearData packs, whose textures are numeric maps only a compute shader
+    /// samples, additionally get sRGB off (and stay non-readable - the GPU is the only reader).
     /// </summary>
     class MobileModPackTextureImporter : AssetPostprocessor
     {
@@ -166,6 +168,22 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 raw.format = TextureImporterFormat.RGBA32;
                 raw.maxTextureSize = 2048;
                 importer.SetPlatformTextureSettings(raw);
+                return;
+            }
+            if (MobileModPackTextureRules.For(path) == MobileModPackTextureRules.Rule.LinearData)
+            {
+                // MOBILE: data maps read as numbers by a compute shader (heights, biome weights, port flags).
+                // The project is Linear, so sRGB sampling would silently remap them; block compression
+                // would quantise them. Keep the upstream mip/filter settings.
+                importer.npotScale = TextureImporterNPOTScale.None;
+                importer.sRGBTexture = false;
+                importer.isReadable = false;
+                importer.textureCompression = TextureImporterCompression.Uncompressed;
+                var lin = importer.GetPlatformTextureSettings("iPhone");
+                lin.overridden = true;
+                lin.format = TextureImporterFormat.RGBA32;
+                lin.maxTextureSize = 2048;
+                importer.SetPlatformTextureSettings(lin);
                 return;
             }
             importer.npotScale = TextureImporterNPOTScale.None;
