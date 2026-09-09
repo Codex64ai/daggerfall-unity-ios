@@ -230,6 +230,33 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         /// <summary>
+        /// As above, for a mod whose Init reports a refusal by LOGGING and RETURNING rather than by
+        /// throwing - World of Daggerfall - Terrain declines that way on all four of its paths (no
+        /// compute support, shaders without kernels, a missing bundle asset, a failed world heightmap).
+        /// Containment is identical; what changes is the closing line, which is the line a Player.log
+        /// reader trusts to mean "this mod is running". <paramref name="installed"/> is asked once,
+        /// after a clean return; when it says no, the reader is pointed at <paramref name="hint"/> -
+        /// the log prefix whose lines carry the reason - the way the sky's deferred start already does.
+        /// Returns whether the mod is actually running, not merely whether Init returned.
+        /// </summary>
+        public static bool StartOne(string title, System.Action init, System.Func<bool> installed, string hint)
+        {
+            try { init(); }
+            catch (System.Exception ex)
+            {
+                Debug.LogError("[PortedMods] " + title + " start failed: " + ex);
+                return false;
+            }
+            if (!installed())
+            {
+                Debug.Log("[PortedMods] " + title + " did not start (see " + hint + " lines)");
+                return false;
+            }
+            Debug.Log("[PortedMods] started " + title);
+            return true;
+        }
+
+        /// <summary>
         /// Starts the survival mods now and returns the Dynamic Skies entry when it is to be started
         /// later, once the scene is ready; null when the sky is not to run at all.
         /// </summary>
@@ -331,11 +358,20 @@ namespace DaggerfallWorkshop.Game.Mobile
             Mod terrain = Entry(TerrainTitle);
             if (terrain != null && terrain.Enabled)
             {
-                // Said once per launch, not a warning: the height curve it computes is a different
-                // world to the vanilla one, so a character standing on ground that has moved is the
-                // expected outcome, not a bug report.
-                Debug.Log("[PortedMods] " + TerrainTitle + ": this changes ground height under existing saves and the travel map (by design)");
-                StartOne(TerrainTitle, () => Monobelisk.InterestingTerrains.Init(new InitParams(terrain, ModManager.Instance.GetModIndex(TerrainTitle), count)));
+                // Init declines by logging "[WoDTerrain] not available: ..." and returning normally on
+                // all four of its refusal paths, so the plain StartOne would write "started" for a
+                // device that is still on DFU's own sampler. Ask the mod itself instead.
+                if (StartOne(TerrainTitle,
+                        () => Monobelisk.InterestingTerrains.Init(new InitParams(terrain, ModManager.Instance.GetModIndex(TerrainTitle), count)),
+                        () => Monobelisk.InterestingTerrains.Installed,
+                        "[WoDTerrain]"))
+                {
+                    // Said once per launch, not a warning: the height curve it computes is a different
+                    // world to the vanilla one, so a character standing on ground that has moved is the
+                    // expected outcome, not a bug report. AFTER the install, so the player is only told
+                    // the ground moved on the launch where it actually did.
+                    Debug.Log("[PortedMods] " + TerrainTitle + ": this changes ground height under existing saves and the travel map (by design)");
+                }
             }
 
             return SkyRuns(sky != null, sky != null && sky.Enabled) ? sky : null;

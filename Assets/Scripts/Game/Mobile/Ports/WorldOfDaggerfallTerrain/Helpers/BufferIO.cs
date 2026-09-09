@@ -22,24 +22,34 @@ namespace Monobelisk
         /// Creates and inits a collection of ComputeBuffers for use with the Interesting Terrains terrain sampler.
         /// </summary>
         /// <returns></returns>
+        // MOBILE: (N1) the three allocations are made INTO the collection inside a try, and a throw
+        // MOBILE: releases whatever was already allocated before it rethrows. Upstream allocated into
+        // MOBILE: three locals and packed them into the returned struct last, so a second or third
+        // MOBILE: ComputeBuffer that failed - the exact scenario the sampler's containment exists for,
+        // MOBILE: an allocation failing under memory pressure - left the earlier ones unreachable:
+        // MOBILE: the caller's `computer` was never assigned, so its finally disposed five nulls and
+        // MOBILE: ~67 KB of native memory leaked per failed tile, every tile, for the session.
+        // MOBILE: Dispose is null-safe and idempotent, so it releases exactly what exists.
         public static HeightmapBufferCollection CreateHeightmapBuffers()
         {
-
             var heightmapRes = MapsFile.WorldMapTileDim + 1;
-            var heightmapBuffer = new ComputeBuffer(heightmapRes * heightmapRes, sizeof(float));
-
             var rawNoiseRes = heightmapRes + 1;
 
-            var rawNoise = new ComputeBuffer(rawNoiseRes * rawNoiseRes, sizeof(float));
+            var buffers = new HeightmapBufferCollection();
 
-            var tilemapData = new ComputeBuffer(heightmapRes * heightmapRes, sizeof(int));
-
-            return new HeightmapBufferCollection()
+            try
             {
-                heightmapBuffer = heightmapBuffer,
-                rawNoise = rawNoise,
-                tilemapData = tilemapData
-            };
+                buffers.heightmapBuffer = new ComputeBuffer(heightmapRes * heightmapRes, sizeof(float));
+                buffers.rawNoise = new ComputeBuffer(rawNoiseRes * rawNoiseRes, sizeof(float));
+                buffers.tilemapData = new ComputeBuffer(heightmapRes * heightmapRes, sizeof(int));
+            }
+            catch
+            {
+                buffers.Dispose();      // MOBILE: (N1) release the ones that DID allocate
+                throw;                  // MOBILE: (N1) the caller's containment still sees the failure
+            }
+
+            return buffers;
         }
 
         /// <summary>

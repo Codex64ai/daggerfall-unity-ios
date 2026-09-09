@@ -38,6 +38,17 @@ namespace Monobelisk
         // MOBILE: csParams, not even for the length of one call stack.
         private static TerrainComputerParams preparedParams;
 
+        /// <summary>
+        /// MOBILE: (T5-1) did this session's Init get all the way through the sampler swap? Every one of
+        /// Init's four refusals logs "[WoDTerrain] not available: ..." and returns NORMALLY - Init is
+        /// void and rethrows nothing - so a caller that only watches for a throw cannot tell a device
+        /// with no compute support from a working one, and MobilePortedMods would write its "started"
+        /// line either way. This is the answer to that question, and nothing else was: `instance` is an
+        /// incidental MonoBehaviour handle, not a statement about the sampler. False until Init runs;
+        /// set false at the top of every Init, true only on its last line.
+        /// </summary>
+        public static bool Installed { get; private set; }
+
         #region Invoke
         // MOBILE: the [Invoke(StateManager.StateTypes.Start, 0)] attribute is gone - this port has no
         // MOBILE: .dfmod assembly, so MobilePortedMods.StartEnabled calls Init directly (started last).
@@ -55,6 +66,7 @@ namespace Monobelisk
 
         public static void Init(InitParams initParams)
         {
+            Installed = false;      // MOBILE: (T5-1) nothing is installed until the last line says so
             Mod = initParams.Mod;
 
             // MOBILE: (g) the compute shaders ship inside the app (Assets/Resources/WoDTerrain), not in
@@ -102,6 +114,11 @@ namespace Monobelisk
             ModMessageHandler.Init();
 
             // MOBILE: ConsoleHandler.RegisterConsoleCommands() removed - dev console commands not shipped.
+
+            // MOBILE: (T5-1) last line, after AddComponent's Awake has replaced
+            // MOBILE: DaggerfallUnity.TerrainSampler and after the message handler is listening. Every
+            // MOBILE: earlier return leaves this false, which is what the launcher's log line reads.
+            Installed = true;
         }
 
         /// <summary>

@@ -70,11 +70,14 @@ namespace Monobelisk
             // MOBILE: (g)(I1) try/catch/finally around the whole GPU path, TerrainComputer.Create
             // MOBILE: INCLUDED. Create calls BufferIO.CreateHeightmapBuffers, which allocates three
             // MOBILE: ComputeBuffers - the one thing here that can realistically throw on iOS, under
-            // MOBILE: exactly the memory pressure this port adds. Left outside the try it would leak
-            // MOBILE: any buffer already allocated, skip the fallback tile and the timing line, and
-            // MOBILE: let the exception kill StreamingWorld's terrain coroutine for the rest of the
-            // MOBILE: session - strictly worse than the crash the containment replaces. default()
-            // MOBILE: leaves heightmapBuffers with five nulls, which the null-safe Dispose handles.
+            // MOBILE: exactly the memory pressure this port adds. Left outside the try it would skip
+            // MOBILE: the fallback tile and the timing line and let the exception kill StreamingWorld's
+            // MOBILE: terrain coroutine for the rest of the session - strictly worse than the crash the
+            // MOBILE: containment replaces. What this finally CANNOT do on that path is release those
+            // MOBILE: buffers - `computer` is assigned only when Create RETURNS - so (N1)
+            // MOBILE: CreateHeightmapBuffers releases whatever it had allocated before it rethrows.
+            // MOBILE: default() leaves heightmapBuffers with five nulls, which the null-safe Dispose
+            // MOBILE: handles.
             TerrainComputer computer = default(TerrainComputer);
 
             try

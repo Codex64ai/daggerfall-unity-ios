@@ -1080,7 +1080,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // all. It replaces DaggerfallUnity.TerrainSampler, so it is started LAST: an Init that threw
             // there cannot then cost the mods before it their start.
             Check(MobilePortedMods.TerrainTitle == "World of Daggerfall - Terrain" && System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.TerrainTitle) >= 0, "PortedMods: World of Daggerfall - Terrain is a default-off title");
-            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 1] == MobilePortedMods.TerrainTitle, "PortedMods: World of Daggerfall - Terrain is started last");
+            // Titles is what DefaultOff walks, so this pins the default-off coverage and the dependency
+            // ORDER OF THAT LIST - not the start order, which is the statement sequence in StartEnabled
+            // and is pinned by the block comment there.
+            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 1] == MobilePortedMods.TerrainTitle, "PortedMods: World of Daggerfall - Terrain is last in Titles, the list DefaultOff walks");
 
             // A mod whose Init throws must not take the mods after it - or the sky's deferred start -
             // down with it. The LogError below is this check working, not a failure.
@@ -1088,6 +1091,18 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             bool cleanSaidStarted = MobilePortedMods.StartOne("self test clean mod", () => ranClean = true);
             bool threwSaidStarted = MobilePortedMods.StartOne("self test throwing mod", () => { throw new InvalidOperationException("self test: deliberate Init failure"); });
             Check(cleanSaidStarted && ranClean && !threwSaidStarted, "PortedMods: a mod whose Init throws is contained and is not logged as started");
+
+            // The overload for a mod that declines by logging and returning - every WoD Terrain refusal
+            // does. "started" must follow the mod's own answer, not merely a clean return. The Log/
+            // LogError lines these three write are the checks working, not failures.
+            bool ranInstalled = false;
+            bool installedSaidStarted = MobilePortedMods.StartOne("self test installed mod", () => ranInstalled = true, () => true, "[SelfTest]");
+            bool declinedSaidStarted = MobilePortedMods.StartOne("self test declining mod", () => { }, () => false, "[SelfTest]");
+            bool overloadThrewSaidStarted = MobilePortedMods.StartOne("self test throwing mod (installed check)",
+                () => { throw new InvalidOperationException("self test: deliberate Init failure"); }, () => true, "[SelfTest]");
+            Check(installedSaidStarted && ranInstalled, "PortedMods: StartOne with an installed check runs Init and reports started when the mod installed");
+            Check(!declinedSaidStarted, "PortedMods: StartOne with an installed check reports did not start when Init declined without throwing");
+            Check(!overloadThrewSaidStarted, "PortedMods: StartOne with an installed check contains a throwing Init and reports not started");
         }
 
         class FakeJourney : IJourneyState

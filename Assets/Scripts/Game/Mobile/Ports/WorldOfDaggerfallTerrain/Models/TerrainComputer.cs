@@ -282,104 +282,134 @@ namespace Monobelisk
                 originalHeightmapBuffer[i] = original[i];
             }
 
-            var alteredHeights = new ComputeBuffer(original.Length, sizeof(float));
+            // MOBILE: (N2) the three GPU buffers this method owns - the 2 MB alteredHeights and the
+            // two small sampler dummies - are declared here and released in the finally below, so a
+            // throw anywhere in the dispatch (a Dispatch or a GetData failing, which is the failure
+            // InterestingTerrains.TryPrepareWorld's catch exists for) cannot leak them. Nothing else
+            // can reach them: RestoreWoodsFileBuffer knows about originalHeightmapBuffer,
+            // alteredHeightmapBuffer, baseHeightmap and Cleanup(), but these are locals. Leaking them
+            // would also have Unity log its own "ComputeBuffer was not released" error next to the
+            // "[WoDTerrain] not available:" line that says what actually went wrong.
+            ComputeBuffer alteredHeights = null;
+            ComputeBuffer shmDummy = null;
+            ComputeBuffer lhmDummy = null;
 
-            // MOBILE: (c) one held clone instead of a fresh Instantiate every call.
-            var cs = MainComputer();
-            var k = cs.FindKernel("CSMain");
-
-            cs.SetFloat("newHeight", Constants.TERRAIN_HEIGHT);
-            cs.SetFloat("maxTerrainHeight", 2308.5f);
-            cs.SetFloat("scaledOceanElevation", 27.2f);
-            cs.SetFloat("baseHeightScale", 8f);
-            cs.SetFloat("noiseMapScale", 4f);
-            cs.SetFloat("extraNoiseScale", 10f);
-            cs.SetVector("terrainSize", new Vector2(WoodsFile.MapWidth, WoodsFile.MapHeight));
-            cs.SetVector("terrainPosition", Vector2.zero);
-            cs.SetTexture(k, "BiomeMap", InterestingTerrains.biomeMap);
-            cs.SetTexture(k, "DerivMap", InterestingTerrains.derivMap);
-            cs.SetBuffer(k, "Result", alteredHeights);
-            csParams.ApplyToCS(cs);     // MOBILE: (M2)
-
-            // MOBILE: (M3) heightSampling.cginc's GetBiomeWeights calls SampleBaseHeight
-            // UNCONDITIONALLY (:139), and SampleBaseHeight reads the StructuredBuffers shm and lhm plus
-            // the uniforms hDim, div, sd and ld. Only the per-tile path (HandleBaseMapSampleParams) ever
-            // bound them, so this start-up dispatch read UNBOUND buffers through an undefined divisor.
-            // D3D11 hides that; on Metal an unbound or out-of-range StructuredBuffer read is undefined
-            // and is exactly the shape of a command-buffer fault at launch.
-            //
-            // The VALUES are provably dead: CSMain calls GetBaseHeight(..., detailedHeights: false),
-            // which passes detailedHeights == false down to GetBiomeWeights, and heightSampling.cginc
-            // :167-169 then overwrites w.land with loResBaseHeight (from DerivMap). SampleBaseHeight's
-            // result reaches nothing else, so zero-filled buffers change no output pixel. What has to be
-            // true is that every read is IN BOUNDS, and that is what the four uniforms buy:
-            //   sd / ld    the dummy buffers' own dimensions (4x4 = 16, 9x9 = 81) - the same shapes the
-            //              per-tile path allocates, so the shm sweep Idx(0..3, 0..3, sd) tops out at 15.
-            //   hDim       MapWidth, the stride this path's index was built with
-            //              (Idx(id.x, id.y, terrainSize), terrainSize == MapWidth here). The per-tile
-            //              path passes the sampler's HeightmapDimension because THERE terrainSize is the
-            //              tile vertex count; passing it here would decompose a 0..499,999 index into a
-            //              row of ~3,875 and drive lhm hundreds of elements out of bounds.
-            //   div        (hDim - 1) / 3f, exactly HandleBaseMapSampleParams' formula.
-            // StartupSampleMaxIndices plus its self-test check prove the resulting shm/lhm indices stay
-            // inside 16/81 for every one of the 500,000 sample indices this dispatch can produce.
-            var dummySizes = StartupDummySizes;
-            var shmDummy = new ComputeBuffer(dummySizes.shm, sizeof(float));
-            var lhmDummy = new ComputeBuffer(dummySizes.lhm, sizeof(float));
-            shmDummy.SetData(new float[dummySizes.shm]);
-            lhmDummy.SetData(new float[dummySizes.lhm]);
-            cs.SetBuffer(k, "shm", shmDummy);
-            cs.SetBuffer(k, "lhm", lhmDummy);
-            cs.SetInt("sd", StartupShmDim);
-            cs.SetInt("ld", StartupLhmDim);
-            cs.SetInt("hDim", StartupSampleDim);
-            cs.SetFloat("div", StartupSampleDiv);
-
-            // MOBILE: (a) upstream ran the whole 1000x500 map as ONE dispatch of 500,000 threads
-            // followed by one GetData - a single Metal command buffer whose execution time iOS's
-            // watchdog is free to kill, and it does not care that the work is legitimate. The same
-            // work is now submitted as StartupBands row bands with a readback between them, so no
-            // single command buffer carries more than a tenth of it.
-            //
-            // The kernel writes world row y to buffer row (MapHeight - 1 - y) - the "(499 - id.y)"
-            // in the index formula, which is deliberately left untouched so the output array layout
-            // is identical to upstream's. That flip is why the readback range below is computed from
-            // the END of the band: the rows a band dispatches land in the MIRRORED region of the
-            // buffer, and reading back band.yStart * MapWidth would hand back a region that has not
-            // been written yet (it belongs to the band at the other end of the map).
-            var floatHeights = new float[original.Length];
-            var bands = Bands(WoodsFile.MapHeight, StartupBands);
-
-            foreach (var band in bands)
+            try
             {
-                cs.SetInt("yOffset", band.yStart);
-                cs.Dispatch(k, WoodsFile.MapWidth / 10, band.rows / GroupRowsY, 1);
+                alteredHeights = new ComputeBuffer(original.Length, sizeof(float));
 
-                int offset = ReadbackStartRow(WoodsFile.MapHeight, band.yStart, band.rows) * WoodsFile.MapWidth;
-                alteredHeights.GetData(floatHeights, offset, offset, band.rows * WoodsFile.MapWidth);
+                // MOBILE: (c) one held clone instead of a fresh Instantiate every call.
+                var cs = MainComputer();
+                var k = cs.FindKernel("CSMain");
+
+                cs.SetFloat("newHeight", Constants.TERRAIN_HEIGHT);
+                cs.SetFloat("maxTerrainHeight", 2308.5f);
+                cs.SetFloat("scaledOceanElevation", 27.2f);
+                cs.SetFloat("baseHeightScale", 8f);
+                cs.SetFloat("noiseMapScale", 4f);
+                cs.SetFloat("extraNoiseScale", 10f);
+                cs.SetVector("terrainSize", new Vector2(WoodsFile.MapWidth, WoodsFile.MapHeight));
+                cs.SetVector("terrainPosition", Vector2.zero);
+                cs.SetTexture(k, "BiomeMap", InterestingTerrains.biomeMap);
+                cs.SetTexture(k, "DerivMap", InterestingTerrains.derivMap);
+                cs.SetBuffer(k, "Result", alteredHeights);
+                csParams.ApplyToCS(cs);     // MOBILE: (M2)
+
+                // MOBILE: (M3) heightSampling.cginc's GetBiomeWeights calls SampleBaseHeight
+                // UNCONDITIONALLY (:139), and SampleBaseHeight reads the StructuredBuffers shm and lhm plus
+                // the uniforms hDim, div, sd and ld. Only the per-tile path (HandleBaseMapSampleParams) ever
+                // bound them, so this start-up dispatch read UNBOUND buffers through an undefined divisor.
+                // D3D11 hides that; on Metal an unbound or out-of-range StructuredBuffer read is undefined
+                // and is exactly the shape of a command-buffer fault at launch.
+                //
+                // The VALUES are provably dead: CSMain calls GetBaseHeight(..., detailedHeights: false),
+                // which passes detailedHeights == false down to GetBiomeWeights, and heightSampling.cginc
+                // :167-169 then overwrites w.land with loResBaseHeight (from DerivMap). SampleBaseHeight's
+                // result reaches nothing else, so zero-filled buffers change no output pixel. What has to be
+                // true is that every read is IN BOUNDS, and that is what the four uniforms buy:
+                //   sd / ld    the dummy buffers' own dimensions (4x4 = 16, 9x9 = 81) - the same shapes the
+                //              per-tile path allocates, so the shm sweep Idx(0..3, 0..3, sd) tops out at 15.
+                //   hDim       MapWidth, the stride this path's index was built with
+                //              (Idx(id.x, id.y, terrainSize), terrainSize == MapWidth here). The per-tile
+                //              path passes the sampler's HeightmapDimension because THERE terrainSize is the
+                //              tile vertex count; passing it here would decompose a 0..499,999 index into a
+                //              row of ~3,875 and drive lhm hundreds of elements out of bounds.
+                //   div        (hDim - 1) / 3f, exactly HandleBaseMapSampleParams' formula.
+                // StartupSampleMaxIndices plus its self-test check prove the resulting shm/lhm indices stay
+                // inside 16/81 for every one of the 500,000 sample indices this dispatch can produce.
+                var dummySizes = StartupDummySizes;
+                shmDummy = new ComputeBuffer(dummySizes.shm, sizeof(float));
+                lhmDummy = new ComputeBuffer(dummySizes.lhm, sizeof(float));
+                shmDummy.SetData(new float[dummySizes.shm]);
+                lhmDummy.SetData(new float[dummySizes.lhm]);
+                cs.SetBuffer(k, "shm", shmDummy);
+                cs.SetBuffer(k, "lhm", lhmDummy);
+                cs.SetInt("sd", StartupShmDim);
+                cs.SetInt("ld", StartupLhmDim);
+                cs.SetInt("hDim", StartupSampleDim);
+                cs.SetFloat("div", StartupSampleDiv);
+
+                // MOBILE: (a) upstream ran the whole 1000x500 map as ONE dispatch of 500,000 threads
+                // followed by one GetData - a single Metal command buffer whose execution time iOS's
+                // watchdog is free to kill, and it does not care that the work is legitimate. The same
+                // work is now submitted as StartupBands row bands with a readback between them, so no
+                // single command buffer carries more than a tenth of it.
+                //
+                // The kernel writes world row y to buffer row (MapHeight - 1 - y) - the "(499 - id.y)"
+                // in the index formula, which is deliberately left untouched so the output array layout
+                // is identical to upstream's. That flip is why the readback range below is computed from
+                // the END of the band: the rows a band dispatches land in the MIRRORED region of the
+                // buffer, and reading back band.yStart * MapWidth would hand back a region that has not
+                // been written yet (it belongs to the band at the other end of the map).
+                var floatHeights = new float[original.Length];
+                var bands = Bands(WoodsFile.MapHeight, StartupBands);
+
+                foreach (var band in bands)
+                {
+                    cs.SetInt("yOffset", band.yStart);
+                    cs.Dispatch(k, WoodsFile.MapWidth / 10, band.rows / GroupRowsY, 1);
+
+                    int offset = ReadbackStartRow(WoodsFile.MapHeight, band.yStart, band.rows) * WoodsFile.MapWidth;
+                    alteredHeights.GetData(floatHeights, offset, offset, band.rows * WoodsFile.MapWidth);
+                }
+
+                alteredHeightmapBuffer = Utility.ToBytes(floatHeights);
+                woodsFile.Buffer = alteredHeightmapBuffer;
+
+                baseHeightmap = new Texture2D(WoodsFile.MapWidth, WoodsFile.MapHeight, TextureFormat.ARGB32, false, true);
+                baseHeightmap.SetPixels32(ToBasemap(alteredHeightmapBuffer));
+                baseHeightmap.Apply();
+
+                watch.Stop();
+                // MOBILE: (h) the one-off cost of the whole start-up pass, in Ikram's Player.log.
+                Debug.Log(string.Format("[WoDTerrain] world heightmap {0} ms ({1} bands)",
+                    watch.ElapsedMilliseconds, bands.Length));
             }
+            finally
+            {
+                // MOBILE: (N2) null-safe, so this releases exactly what was allocated before the throw.
+                // MOBILE: (M3) the two dummies are read only by the dispatches above and GetData is a
+                // blocking readback, so every band has completed by the time control reaches here.
+                ReleaseBuffer(ref alteredHeights);
+                ReleaseBuffer(ref shmDummy);
+                ReleaseBuffer(ref lhmDummy);
+            }
+        }
 
-            // MOBILE: (M3) the sampler dummies are only read by the dispatches above, and GetData is a
-            // blocking readback, so the last band is complete by the time control gets here.
-            shmDummy.Release();
-            shmDummy.Dispose();
-            lhmDummy.Release();
-            lhmDummy.Dispose();
+        /// <summary>
+        /// MOBILE: (N2) release-and-null one buffer, null-safe so a finally can call it for a buffer
+        /// whose allocation is the thing that threw. The same shape as HeightmapBufferCollection's own
+        /// private Release, which cannot be reused here because these three are plain locals, not a
+        /// collection the sampler owns.
+        /// </summary>
+        private static void ReleaseBuffer(ref ComputeBuffer buffer)
+        {
+            if (buffer == null)
+                return;
 
-            alteredHeightmapBuffer = Utility.ToBytes(floatHeights);
-            woodsFile.Buffer = alteredHeightmapBuffer;
-
-            baseHeightmap = new Texture2D(WoodsFile.MapWidth, WoodsFile.MapHeight, TextureFormat.ARGB32, false, true);
-            baseHeightmap.SetPixels32(ToBasemap(alteredHeightmapBuffer));
-            baseHeightmap.Apply();
-
-            watch.Stop();
-            // MOBILE: (h) the one-off cost of the whole start-up pass, in Ikram's Player.log.
-            Debug.Log(string.Format("[WoDTerrain] world heightmap {0} ms ({1} bands)",
-                watch.ElapsedMilliseconds, bands.Length));
-
-            alteredHeights.Release();
-            alteredHeights.Dispose();
+            buffer.Release();
+            buffer.Dispose();
+            buffer = null;
         }
 
         // MOBILE: (c)
