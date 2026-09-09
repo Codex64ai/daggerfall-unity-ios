@@ -201,13 +201,17 @@ only the folder was missing, so a player had to create it by hand.
 `MobileLog` writes a build stamp (`[Build] <product> <version> <bundle id> guid= unity= dfu=`) with
 the session banner, before any Unity message reaches the mirror; twice in one week a `Player.log`
 kept from an older build was read as the current one and sent a device test down the wrong path.
+(2026-09-09: the stamp also goes out as a `Debug.Log`. On iOS the engine writes its own player log
+to the same `Documents/Player.log` this mirror uses, from its own file offset, so it overwrote the
+banner and no `[Build]` line survived anywhere in `Documents` on the simulator run. Through
+`Debug.Log` the stamp lands in whichever of the two writers wins the file, and in the mirror too.)
 *Rebase risk: LOW.* Both engine edits are small and self-contained, and both are marked `MOBILE:`.
 
-### World of Daggerfall support (2026-09-09) — `Game/Mobile/{MobileMods.cs (+22),MobilePortedMods.cs (+95/-8)}`, `Game/Mobile/Ports/{LocationLoader,WorldOfDaggerfall}/` (new), `Ports/WorldOfDaggerfall/WODRocksMaterials.cs.meta` (GUID pin), `Assets/Editor/MobileSelfTest.cs (+19)`, `tools/bundled-mods/{fetch.py,mods.json}`
-Location Loader and World of Daggerfall compiled in (see THIRD-PARTY.md). **No upstream engine file
-is touched** — the whole feature rides the hooks the survival mods and Dynamic Skies already added
-(`MobilePortedMods.DefaultOff` from `ModManager.Awake`, `Mod.cs`'s `[fsProperty]` opt-in so the
-switches survive a relaunch), so there is nothing new to re-apply after a rebase.
+### World of Daggerfall support (2026-09-09) — `Game/Mobile/{MobileMods.cs (+22),MobilePortedMods.cs (+95/-8)}`, `Game/Mobile/Ports/{LocationLoader,WorldOfDaggerfall}/` (new), `Ports/WorldOfDaggerfall/WODRocksMaterials.cs.meta` (GUID pin), `Assets/Editor/MobileSelfTest.cs (+19)`, `Game/Addons/ModSupport/ModManager.cs (+34/-1)`, `tools/bundled-mods/{fetch.py,mods.json}`
+Location Loader and World of Daggerfall compiled in (see THIRD-PARTY.md). The feature rides the hooks
+the survival mods and Dynamic Skies already added (`MobilePortedMods.DefaultOff` from
+`ModManager.Awake`, `Mod.cs`'s `[fsProperty]` opt-in so the switches survive a relaunch); the one
+upstream engine file it touches is `ModManager.cs`, for the settings write the gates rely on (below).
 `MobileMods.Register` gains a built-in `Location Loader` entry with upstream's own GUID
 (`fc5c0fa6-...`), version and contact, `Enabled = false`. It has to be registered in code rather than
 discovered: Location Loader is pure code, its upstream manifest ships no data, so there is no bundle
@@ -236,6 +240,16 @@ the `started` line only when it did. Before that there was one try/catch around 
 `StartEnabled`, so a throw from any mod's `Init` abandoned every mod after it — and the sky, resolved
 last, lost its deferred start for the session. The Dynamic Skies entry is now resolved at the top of
 `StartEnabled`, before any `Init` runs, for the same reason.
+`ModManager.WriteModSettings` is the one upstream engine file this feature had to touch, and it is what
+makes those gates safe to act on. `ModManager.Init` unloads every mod the player had switched off out
+of `mods`, so by the time a gate runs at start-up that list holds only the enabled mods —
+serializing it shrank `Documents/Mods/GameData/Mods.json` from 10 entries to 3 on the device test, and
+a mod with no entry defaults to enabled, so every mod the player had switched off came back on at the
+next launch. `Init` now keeps what it unloaded in a `prunedMods` list and the write merges the two
+through the pure `public static MergeModSettings(current, previous)` — every current mod, plus a
+last-known `Enabled`/`LoadPriority` entry for each mod no longer in the list, a title in both taking
+its current value. `ModLoaderInterfaceWindow`'s own save path is unaffected: it edits and writes the
+mods it lists, and the merge only adds back entries it never showed.
 `WODRocksMaterials.cs.meta` pins upstream's script GUID `426f76434556e931a830bf5c83c73b54` instead of
 the fresh one Unity generates on import: 113 WoD prefabs (99 in `Rocks`, 14 in `Mountains`) bind the
 script by that GUID, and with a different one they build with a missing `MonoBehaviour` — no compile
@@ -249,8 +263,12 @@ of the manifest because Unity follows the GUIDs when it builds the bundle. UBLaM
 script is compiled in), `private_only` with a `pending:` licence (no licence declared upstream — the
 combination `fetch.py` requires), `archives_from: ["DaggerfallExpandedTextures"]`, and
 `drop_dependencies` for Location Loader (built in, so it has no `FileName` to match) and the three
-optional mods this port does not ship. `MobileSelfTest` covers the default-off titles, `WodRuns`, `DETFileName`, `WoDDetNote` and `StartOne`.
-*Rebase risk: NONE for the engine* — no upstream file changed. A DFU API change that breaks Location
+optional mods this port does not ship. `MobileSelfTest` covers the default-off titles, `WodRuns`, `DETFileName`, `WoDDetNote`, `StartOne` and
+`MergeModSettings`.
+*Rebase risk: LOW for the engine* — one upstream file changed, `ModManager.cs`: three `// MOBILE:`
+touch points (the `prunedMods` field, the `Init` prune recording into it, and `WriteModSettings`
+serializing `MergeModSettings(mods, prunedMods)`) plus the new method itself, all in hunks upstream
+rarely moves. A DFU API change that breaks Location
 Loader's code shows up as compile errors in `Ports/LocationLoader/`, and it hooks
 `DaggerfallTerrain.OnPromoteTerrainData` and `StreamingWorld.OnInitWorld/OnUpdateTerrainsEnd` and
 replaces `DaggerfallUnity.Instance.TerrainNature`, so watch those four after a rebase. The one thing

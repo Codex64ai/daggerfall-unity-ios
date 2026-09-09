@@ -31,6 +31,8 @@ namespace DaggerfallWorkshop.Game.Mobile
                 return;
             hooked = true;
             path = Path.Combine(Application.persistentDataPath, FileName);
+            string stamp = BuildStamp(Application.productName, Application.version, Application.identifier,
+                                      Application.buildGUID, Application.unityVersion, VersionInfo.DaggerfallUnityVersion);
             try
             {
                 Rotate();
@@ -38,12 +40,16 @@ namespace DaggerfallWorkshop.Game.Mobile
                 // reach the mirror: a log kept from an older build has twice now been read as if it
                 // were the current one and sent a device test down the wrong path.
                 File.AppendAllText(path, string.Format("\n===== session {0:yyyy-MM-dd HH:mm:ss} =====\n{1}\n",
-                    DateTime.Now,
-                    BuildStamp(Application.productName, Application.version, Application.identifier,
-                               Application.buildGUID, Application.unityVersion, VersionInfo.DaggerfallUnityVersion)));
+                    DateTime.Now, stamp));
             }
             catch (Exception) { }
             Application.logMessageReceivedThreaded += OnLog;
+            // And through Unity's own log as well. On iOS the engine writes its player log to this
+            // same Documents/Player.log, from its own file offset, so it overwrites the banner above
+            // and the stamp never reached the file a player hands over (the simulator run found no
+            // [Build] line anywhere in Documents). A Debug.Log lands in whichever of the two writers
+            // wins the file, and in this mirror too.
+            Debug.Log(stamp);
         }
 
         /// <summary>

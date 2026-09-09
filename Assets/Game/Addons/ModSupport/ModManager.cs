@@ -43,6 +43,9 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
 
         bool alreadyAtStartMenuState            = false;
         static bool alreadyStartedInit          = false;
+        // MOBILE: mods Init() removed from `mods` because the player had them switched off. Their
+        // settings entries are still written, see MergeModSettings.
+        readonly List<Mod> prunedMods           = new List<Mod>();
         [SerializeField]
         List<Mod> mods;
         public static readonly fsSerializer _serializer = new fsSerializer();
@@ -792,6 +795,9 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
                 if (mod == null || !mod.Enabled)
                 {
                     Debug.Log("removing mod at index: " + i);
+                    // MOBILE: keep its settings entry, see prunedMods.
+                    if (mod != null)
+                        prunedMods.Add(mod);
                     UnloadMod(mod.Title, true);
                     continue;
                 }
@@ -882,6 +888,30 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
         #region Public Helpers
 
         /// <summary>
+        /// MOBILE: the list <see cref="WriteModSettings"/> writes - every mod currently known, plus
+        /// an entry for each mod that is no longer in the list carrying its last known Enabled and
+        /// LoadPriority. A title in both lists takes its current value.
+        ///
+        /// <see cref="Init"/> drops every mod the player had switched off out of <see cref="mods"/>,
+        /// so any later write - a start-up gate switching a mod off, say - serialized the enabled
+        /// mods alone and shrank Mods.json (10 entries to 3 on the device test). A mod with no entry
+        /// defaults to enabled, so every mod the player had switched off came back on at the next
+        /// launch. Pure, so the merge itself is under the self test.
+        /// </summary>
+        public static List<Mod> MergeModSettings(IList<Mod> current, IList<Mod> previous)
+        {
+            List<Mod> merged = new List<Mod>();
+            HashSet<string> titles = new HashSet<string>();
+            for (int i = 0; current != null && i < current.Count; i++)
+                if (current[i] != null && !string.IsNullOrEmpty(current[i].Title) && titles.Add(current[i].Title))
+                    merged.Add(current[i]);
+            for (int i = 0; previous != null && i < previous.Count; i++)
+                if (previous[i] != null && !string.IsNullOrEmpty(previous[i].Title) && titles.Add(previous[i].Title))
+                    merged.Add(previous[i]);
+            return merged;
+        }
+
+        /// <summary>
         /// Writes mod settings (title, priority, enabled) to file.
         /// </summary>
         /// <returns>True if settings written successfully.</returns>
@@ -895,7 +925,10 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
                 }
 
                 fsData sdata = null;
-                var result = _serializer.TrySerialize<List<Mod>>(ModManager.Instance.mods, out sdata);
+                // MOBILE: merged with the mods Init() dropped, so a write after start-up keeps
+                // their entries instead of shrinking the file to the enabled mods.
+                var result = _serializer.TrySerialize<List<Mod>>(
+                    MergeModSettings(ModManager.Instance.mods, ModManager.Instance.prunedMods), out sdata);
 
                 if (result.Failed)
                 {

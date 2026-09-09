@@ -241,14 +241,16 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (wodChosen && !llOn)
             {
                 wod.Enabled = false;
-                if (!wod.ModInfo.ModDescription.EndsWith(WoDGateNote)) wod.ModInfo.ModDescription += WoDGateNote;
+                // Contains, not EndsWith: both notes can apply, and whichever went on first is no
+                // longer at the end - EndsWith would append it again on every later start-up.
+                if (!(wod.ModInfo.ModDescription ?? "").Contains(WoDGateNote)) wod.ModInfo.ModDescription += WoDGateNote;
                 ModManager.WriteModSettings();
                 Debug.Log("[PortedMods] World of Daggerfall switched off: Location Loader must be on");
             }
             if (wodChosen && !detOn)
             {
                 wod.Enabled = false;
-                if (!wod.ModInfo.ModDescription.EndsWith(WoDDetNote)) wod.ModInfo.ModDescription += WoDDetNote;
+                if (!(wod.ModInfo.ModDescription ?? "").Contains(WoDDetNote)) wod.ModInfo.ModDescription += WoDDetNote;
                 ModManager.WriteModSettings();
                 Debug.Log("[PortedMods] World of Daggerfall off: Daggerfall Expanded Textures is not enabled");
             }

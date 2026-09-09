@@ -870,6 +870,25 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 Check(back[0].Enabled == false, "mod settings: Enabled survives the round trip");
                 Check(back[0].LoadPriority == 7, "mod settings: LoadPriority survives the round trip", back[0].LoadPriority.ToString());
             }
+
+            // A start-up gate that switches a mod off writes the settings again - but by then
+            // ModManager.Init has dropped every mod the player had switched off out of its list, so
+            // serializing that list alone shrank Mods.json to the enabled mods (10 entries to 3 on
+            // the simulator run). A mod with no entry defaults to enabled, so every switched-off mod
+            // came back on at the next launch. The write merges the dropped entries back in.
+            Mod wasOn = new Mod(); wasOn.ModInfo.ModTitle = "A"; wasOn.Enabled = false;
+            Mod wasOff = new Mod(); wasOff.ModInfo.ModTitle = "B"; wasOff.Enabled = false;
+            Mod nowOn = new Mod(); nowOn.ModInfo.ModTitle = "A"; nowOn.Enabled = true;
+            List<Mod> merged = ModManager.MergeModSettings(new List<Mod>() { nowOn },
+                                                           new List<Mod>() { wasOn, wasOff });
+            Check(merged.Count == 2, "mod settings: a mod dropped from the list still gets an entry",
+                  merged.Count.ToString());
+            Mod mergedOff = merged.Find(m => m.Title == "B");
+            Check(mergedOff != null && !mergedOff.Enabled,
+                  "mod settings: the dropped mod keeps its switched-off setting");
+            Mod mergedBoth = merged.Find(m => m.Title == "A");
+            Check(mergedBoth != null && mergedBoth.Enabled,
+                  "mod settings: a mod in both lists takes its current value, not the older one");
         }
 
         /// <summary>
