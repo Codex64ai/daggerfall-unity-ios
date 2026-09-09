@@ -130,6 +130,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestDynamicSkiesShader();
             TestDynamicSkiesPresetTextures();
             TestDistantTerrainShader();
+            TestDistantTerrainPort();
             TestModConflictOrder();
             TestPortedModGate();
             TestPortedModOrder();
@@ -1133,6 +1134,192 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             }
             Check(File.ReadAllText("ProjectSettings/GraphicsSettings.asset").Contains(guid),
                 "DistantTerrain: ApplyIOSSettings pinned the shader into GraphicsSettings' always-included list");
+        }
+
+
+        // The Distant Terrain port itself: the C# that binds Task 3's shader contract, gates its own
+        // start, and tears the far terrain down when world entry fails. All of it is compiled into
+        // the app (Assets/Scripts/Game/Mobile/Ports/DistantTerrain), started by MobilePortedMods
+        // rather than by an [Invoke] loader, and inert until then. The checks are of two kinds: pure
+        // functions called for real (the slice contract the shader reads, the availability gate, the
+        // tileset compatibility rule, the memory arithmetic, the timing cadence), and source text for
+        // the things that only exist at world entry on a device - the log literals a Player.log
+        // reader greps for, the teardown, and the TerrainData trim.
+        static void TestDistantTerrainPort()
+        {
+            // The slice contract: slice = biome * 56 + record, biome 0 desert / 1 mountain /
+            // 2 woodland / 3 swamp. The shader computes the same expression from _SlicesPerBiome.
+            Check(global::DistantTerrain.DistantTerrain.SlicesPerBiome == 56, "DistantTerrain: 56 records per biome tileset, the shader's _SlicesPerBiome");
+            Check(global::DistantTerrain.DistantTerrain.SliceIndex(0, 0) == 0
+                  && global::DistantTerrain.DistantTerrain.SliceIndex(1, 0) == 56
+                  && global::DistantTerrain.DistantTerrain.SliceIndex(2, 3) == 115
+                  && global::DistantTerrain.DistantTerrain.SliceIndex(3, 55) == 223,
+                "DistantTerrain: SliceIndex is biome * 56 + record (3,55 -> 223)");
+            var slices = new HashSet<int>();
+            for (int biome = 0; biome < 4; biome++)
+                for (int record = 0; record < 56; record++)
+                    slices.Add(global::DistantTerrain.DistantTerrain.SliceIndex(biome, record));
+            Check(slices.Count == 224 && slices.Min() == 0 && slices.Max() == 223,
+                "DistantTerrain: the four biome tilesets fill 224 slices with no gap and no overlap",
+                slices.Count + " distinct");
+
+            // The availability gate. Nothing is created unless the shader compiled AND the bundle
+            // carries the three mountain tables AND the river/coast map.
+            bool gateOk = true;
+            for (int mask = 0; mask < 8; mask++)
+            {
+                bool shader = (mask & 1) != 0, csvs = (mask & 2) != 0, deriv = (mask & 4) != 0;
+                if (global::DistantTerrain.DistantTerrain.Available(shader, csvs, deriv) != (shader && csvs && deriv))
+                    gateOk = false;
+            }
+            Check(gateOk, "DistantTerrain: Available needs the shader, the three CSVs and the deriv map (all eight cases)");
+
+            // Inert until MobilePortedMods calls Init: nothing in this editor session has, so both
+            // flags must still be false, and the [Invoke] attribute must not have survived the port
+            // (it would make DFU's own loader start the mod behind the launcher switch's back).
+            Check(!global::DistantTerrain.DistantTerrainPort.Installed && !global::DistantTerrain.DistantTerrainPort.Running,
+                "DistantTerrain: Installed and Running are false until Init runs");
+            MethodInfo init = typeof(global::DistantTerrain.DistantTerrainPort).GetMethod("Init");
+            Check(init != null && init.IsStatic && init.GetParameters().Length == 1
+                  && init.GetParameters()[0].ParameterType == typeof(InitParams),
+                "DistantTerrain: Init(InitParams) is the entry point MobilePortedMods calls");
+            Check(init != null && Attribute.GetCustomAttributes(init, typeof(Invoke), false).Length == 0,
+                "DistantTerrain: no [Invoke] survives");
+
+            // The iOS reach preset, and the derived fade band. The shader computes
+            // fadeRange = _BlendEnd - _BlendStart + 1, so a start above the end inverts the band and
+            // fades the whole far terrain to nothing - blendStart is derived, never configured.
+            Check(global::DistantTerrain.DistantTerrainPort.DefaultBlendEnd == 60000f,
+                "DistantTerrain: blendEnd defaults to 60000 (half of upstream's reach)");
+            Check(global::DistantTerrain.DistantTerrainPort.DefaultMainCameraFarClipPlane == 15000f,
+                "DistantTerrain: mainCameraFarClipPlane defaults to 15000");
+            Check(global::DistantTerrain.DistantTerrainRenderConfig.BlendEnd == 60000f
+                  && global::DistantTerrain.DistantTerrainRenderConfig.MainCameraFarClipPlane == 15000f,
+                "DistantTerrain: the settings holder starts at those defaults, so a bundle with no Rendering section keeps them");
+            Check(global::DistantTerrain.DistantTerrainPort.BlendStartFor(60000f) == 50000f
+                  && global::DistantTerrain.DistantTerrainPort.BlendStartFor(120000f) == 100000f,
+                "DistantTerrain: blendStart is derived from blendEnd at upstream's 100000/120000 proportion");
+            Check(global::DistantTerrain.DistantTerrainPort.BlendStartFor(global::DistantTerrain.DistantTerrainPort.DefaultBlendEnd)
+                  < global::DistantTerrain.DistantTerrainPort.DefaultBlendEnd,
+                "DistantTerrain: the fade band is never inverted (blendStart < blendEnd)");
+
+            // The packing precondition: Graphics.CopyTexture needs identical size, format and mip
+            // count, and a texture-replacement pack can break that for one archive and not another.
+            string detail;
+            int[] w = { 64, 64, 64, 64 }, h = { 64, 64, 64, 64 }, f = { 5, 5, 5, 5 }, m = { 7, 7, 7, 7 };
+            Check(global::DistantTerrain.DistantTerrain.TilesetsCompatible(w, h, f, m, out detail) && detail == string.Empty,
+                "DistantTerrain: four vanilla 64x64 ARGB32 tilesets pack into one array");
+            Check(!global::DistantTerrain.DistantTerrain.TilesetsCompatible(new[] { 64, 128, 64, 64 }, h, f, m, out detail) && detail.Contains("128"),
+                "DistantTerrain: a resized tileset refuses the pack, naming the size", detail);
+            Check(!global::DistantTerrain.DistantTerrain.TilesetsCompatible(w, h, new[] { 5, 5, 10, 5 }, m, out detail) && detail.Contains("format"),
+                "DistantTerrain: a recompressed tileset refuses the pack, naming the format", detail);
+            Check(!global::DistantTerrain.DistantTerrain.TilesetsCompatible(w, h, f, new[] { 7, 7, 7, 1 }, out detail) && detail.Contains("mip"),
+                "DistantTerrain: a tileset with a different mip chain refuses the pack", detail);
+            Check(!global::DistantTerrain.DistantTerrain.TilesetsCompatible(null, h, f, m, out detail),
+                "DistantTerrain: nothing to compare is not compatible");
+
+            // The memory the port promised: three 224-slice arrays of 64^2 ARGB32 with mips, ~15 MB
+            // against the ~270 MB of twelve 2048^2 atlases the rewrite replaced.
+            long oneArray = global::DistantTerrain.DistantTerrain.ArrayBytes(64, 64, 224, 7, 4);
+            long three = 3 * oneArray;
+            Check(global::DistantTerrain.DistantTerrain.ArrayBytes(64, 64, 224, 1, 4) == 224L * 64 * 64 * 4,
+                "DistantTerrain: ArrayBytes without mips is width * height * slices * bytes");
+            Check(three / (1024 * 1024) >= 13 && three / (1024 * 1024) <= 16,
+                "DistantTerrain: the three packed arrays are ~15 MB (the line the port logs once)",
+                (three / (1024 * 1024)) + " MB");
+            Check(global::DistantTerrain.DistantTerrain.BytesPerPixel(TextureFormat.ARGB32) == 4
+                  && global::DistantTerrain.DistantTerrain.BytesPerPixel(TextureFormat.RGB24) == 3
+                  && global::DistantTerrain.DistantTerrain.BytesPerPixel(TextureFormat.R8) == 1,
+                "DistantTerrain: uncompressed bytes per texel by format");
+            Check(!global::DistantTerrain.DistantTerrain.SlicesAreOversize(64) && global::DistantTerrain.DistantTerrain.SlicesAreOversize(128),
+                "DistantTerrain: tiles larger than vanilla 64^2 are called out (a pack scales the arrays by (dim/64)^2)");
+
+            // Timing cadence: the first ten map-pixel crosses, then every twenty-fifth.
+            bool cadence = true;
+            for (int i = 1; i <= 10; i++) if (!global::DistantTerrain.DistantTerrain.ShouldLogMapPixelUpdate(i)) cadence = false;
+            for (int i = 11; i <= 24; i++) if (global::DistantTerrain.DistantTerrain.ShouldLogMapPixelUpdate(i)) cadence = false;
+            if (!global::DistantTerrain.DistantTerrain.ShouldLogMapPixelUpdate(25)) cadence = false;
+            if (global::DistantTerrain.DistantTerrain.ShouldLogMapPixelUpdate(26)) cadence = false;
+            if (!global::DistantTerrain.DistantTerrain.ShouldLogMapPixelUpdate(50)) cadence = false;
+            Check(cadence, "DistantTerrain: map-pixel timing logs the first ten crosses then every twenty-fifth");
+
+            // The shader this port binds to is the one Task 3 pinned, by the name the port holds.
+            Check(global::DistantTerrain.DistantTerrainPort.ShaderName == "Daggerfall/DistantTerrain/DistantTerrainTilemap",
+                "DistantTerrain: the port names the shader Task 3 pinned");
+            Check(Shader.Find(global::DistantTerrain.DistantTerrainPort.ShaderName) != null,
+                "DistantTerrain: that shader name resolves in this project");
+
+            // The bundle assets the gate looks for are the ones the fetched mod actually carries.
+            var csvNames = global::DistantTerrain.DistantTerrainPort.CsvFileNames;
+            Check(csvNames.Length == 3 && csvNames.Contains("Mountains.csv") && csvNames.Contains("Mountains_Small.csv")
+                  && csvNames.Contains("Mountains_Foothills.csv"),
+                "DistantTerrain: the three mountain tables are the gate's CSV list");
+            Check(global::DistantTerrain.DistantTerrainPort.DerivMapFileName == "daggerfall_deriv_map.png",
+                "DistantTerrain: the river/coast map is named as the bundle names it");
+
+            // Source text, for what only happens at world entry on a device.
+            const string portDir = "Assets/Scripts/Game/Mobile/Ports/DistantTerrain/";
+            string port = File.ReadAllText(portDir + "DistantTerrain.cs");
+            string startup = File.ReadAllText(portDir + "_startupMod.cs");
+            // Code only for the "it is gone" checks: this port's comments name the upstream symbols
+            // they replaced on purpose (that is how a reader of the diff learns what moved where),
+            // and a check a comment can fail is a check that punishes explanation.
+            string portCode = StripShaderComments(port);
+            string startupCode = StripShaderComments(startup);
+
+            // The dropped files, and everything that referenced them.
+            Check(!File.Exists(portDir + "DistantTerrainFlyMap.cs") && !File.Exists(portDir + "ThirteenthPassageEffect.cs"),
+                "DistantTerrain: the fly-map and the spell are not in the port");
+            Check(!startupCode.Contains("Wenzil.Console") && !startupCode.Contains("ConsoleCommandsDatabase")
+                  && !startupCode.Contains("RegisterEffectTemplate") && !startupCode.Contains("ThirteenthPassage")
+                  && !startupCode.Contains("KeyCode"),
+                "DistantTerrain: the console command, the spell registration and the hotkey setting are gone with them");
+            Check(!portCode.Contains("Application.Quit()"),
+                "DistantTerrain: the port never quits the app over a scene reference (Init runs at the title, where there is none)");
+
+            // The shader contract, bound from C#: three arrays and the stride, no atlas slots.
+            Check(CountOccurrences(port, "SetTexture(\"_TileArray") == 3,
+                "DistantTerrain: all three tile arrays are bound (summer, winter, rain - the shader picks per fragment)");
+            Check(port.Contains("SetInt(\"_SlicesPerBiome\", SlicesPerBiome)"),
+                "DistantTerrain: _SlicesPerBiome is pushed from the same constant SliceIndex uses");
+            Check(!portCode.Contains("_TileAtlasTex") && !portCode.Contains("GetTerrainTilesetTexture"),
+                "DistantTerrain: the twelve atlas binds and the calls that built them are gone");
+            Check(port.Contains("Graphics.CopyTexture(src[b], record, dst, SliceIndex(b, record))"),
+                "DistantTerrain: the pack is a GPU slice copy at the contract's index");
+            Check(port.Contains("dst.wrapMode = TextureWrapMode.Repeat")
+                  && port.Contains("dst.filterMode = dfUnity.MaterialReader.MainFilterMode"),
+                "DistantTerrain: the packed arrays tile (Repeat) and keep the tilesets' point filtering");
+
+            // The TerrainData trim: the far terrain paints nothing through splat/basemap/detail.
+            Check(port.Contains("terrainData.SetDetailResolution(16, 8)")
+                  && port.Contains("terrainData.alphamapResolution = 16")
+                  && port.Contains("terrainData.baseMapResolution = 16"),
+                "DistantTerrain: alphamap, basemap and detail resolutions are at their minimum");
+
+            // Failure handling: a throw at world entry is contained and undone.
+            Check(port.Contains("void TearDownFarTerrain()") && port.Contains("catch (Exception ex)")
+                  && port.Contains("Camera.main.farClipPlane = savedMainCameraFarClipPlane")
+                  && port.Contains("Camera.main.clearFlags = savedMainCameraClearFlags"),
+                "DistantTerrain: a failed build tears down and gives the main camera back its clip plane and clear flags");
+            Check(port.Contains("DistantTerrainPort.MarkInstalled();"),
+                "DistantTerrain: Installed is set from the far terrain build, not from Init");
+
+            // The log literals. These are the lines Task 8 documents, Task 9 greps for in the
+            // simulator run and the device hand-off asks for; a reworded one is a broken contract.
+            foreach (string literal in new[]
+            {
+                "[DistantTerrain] far terrain built in {0} ms (heightmap {1} ms, carve {2} ms, lifts {3} ms, tilemap {4} ms)",
+                "[DistantTerrain] map-pixel update {0} ms",
+                "[DistantTerrain] arrays {0} MB",
+                "[DistantTerrain] far terrain ready",
+                "[DistantTerrain] far terrain failed: ",
+                "[DistantTerrain] tileset arrays mismatch: ",
+            })
+                Check(port.Contains(literal), "DistantTerrain: log literal \"" + literal + "\"");
+            Check(startup.Contains("[DistantTerrain] not available: "),
+                "DistantTerrain: log literal \"[DistantTerrain] not available: \"");
+            Check(!port.Contains("[Distant Terrain]") && !startup.Contains("[Distant Terrain]"),
+                "DistantTerrain: one log prefix, so grepping [DistantTerrain] finds every line the port writes");
         }
 
 
