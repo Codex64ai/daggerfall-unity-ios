@@ -768,6 +768,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobilePortedMods.LLTitle == "Location Loader" && System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.LLTitle) >= 0, "PortedMods: Location Loader is a default-off title");
             Check(MobilePortedMods.WoDTitle == "World of Daggerfall" && System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.WoDTitle) >= 0, "PortedMods: World of Daggerfall is a default-off title");
             Check(MobilePortedMods.WodRuns(true, true) && !MobilePortedMods.WodRuns(true, false) && !MobilePortedMods.WodRuns(false, true) && !MobilePortedMods.WodRuns(false, false), "PortedMods: World of Daggerfall runs only when Location Loader is on too");
+
+            // A mod whose Init throws must not take the mods after it - or the sky's deferred start -
+            // down with it. The LogError below is this check working, not a failure.
+            bool ranClean = false;
+            bool cleanSaidStarted = MobilePortedMods.StartOne("self test clean mod", () => ranClean = true);
+            bool threwSaidStarted = MobilePortedMods.StartOne("self test throwing mod", () => { throw new InvalidOperationException("self test: deliberate Init failure"); });
+            Check(cleanSaidStarted && ranClean && !threwSaidStarted, "PortedMods: a mod whose Init throws is contained and is not logged as started");
         }
 
         class FakeJourney : IJourneyState

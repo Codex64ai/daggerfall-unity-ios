@@ -160,11 +160,31 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         /// <summary>
+        /// Runs one mod's Init and says whether it got through. Each mod is contained: a throw from
+        /// one used to abandon every mod after it AND the sky's deferred start, for the whole session.
+        /// The "started" line is only written when Init returned normally.
+        /// </summary>
+        public static bool StartOne(string title, System.Action init)
+        {
+            try { init(); }
+            catch (System.Exception ex)
+            {
+                Debug.LogError("[PortedMods] " + title + " start failed: " + ex);
+                return false;
+            }
+            Debug.Log("[PortedMods] started " + title);
+            return true;
+        }
+
+        /// <summary>
         /// Starts the survival mods now and returns the Dynamic Skies entry when it is to be started
         /// later, once the scene is ready; null when the sky is not to run at all.
         /// </summary>
         static Mod StartEnabled()
         {
+            // Resolved before any Init runs: one mod throwing must not cost the sky its deferred start.
+            Mod sky = Entry(SkyTitle);
+
             Mod rr = Entry(RRTitle), items = Entry(RRItemsTitle), cc = Entry(CCTitle);
             EnsureOrder(rr, items, cc);
             bool[] run = Gate(rr != null && rr.Enabled, items != null && items.Enabled, cc != null && cc.Enabled);
@@ -182,9 +202,9 @@ namespace DaggerfallWorkshop.Game.Mobile
                 Debug.Log("[PortedMods] RoleplayRealism-Items switched off: RoleplayRealism must be on");
             }
             int count = ModManager.Instance.LoadedModCount;
-            if (run[0]) { RoleplayRealism.RoleplayRealism.Init(new InitParams(rr, ModManager.Instance.GetModIndex(RRTitle), count)); Debug.Log("[PortedMods] started " + RRTitle); }
-            if (run[1]) { RoleplayRealism.RoleplayRealismItemsMod.Init(new InitParams(items, ModManager.Instance.GetModIndex(RRItemsTitle), count)); Debug.Log("[PortedMods] started " + RRItemsTitle); }
-            if (run[2]) { ClimatesCalories.ClimateCalories.Init(new InitParams(cc, ModManager.Instance.GetModIndex(CCTitle), count)); Debug.Log("[PortedMods] started " + CCTitle); }
+            if (run[0]) StartOne(RRTitle, () => RoleplayRealism.RoleplayRealism.Init(new InitParams(rr, ModManager.Instance.GetModIndex(RRTitle), count)));
+            if (run[1]) StartOne(RRItemsTitle, () => RoleplayRealism.RoleplayRealismItemsMod.Init(new InitParams(items, ModManager.Instance.GetModIndex(RRItemsTitle), count)));
+            if (run[2]) StartOne(CCTitle, () => ClimatesCalories.ClimateCalories.Init(new InitParams(cc, ModManager.Instance.GetModIndex(CCTitle), count)));
 
             Mod ll = Entry(LLTitle), wod = Entry(WoDTitle);
             bool llOn = ll != null && ll.Enabled;
@@ -195,10 +215,9 @@ namespace DaggerfallWorkshop.Game.Mobile
                 ModManager.WriteModSettings();
                 Debug.Log("[PortedMods] World of Daggerfall switched off: Location Loader must be on");
             }
-            if (llOn) { LocationLoader.LocationModLoader.Init(new InitParams(ll, ModManager.Instance.GetModIndex(LLTitle), count)); Debug.Log("[PortedMods] started " + LLTitle); }
-            if (WodRuns(llOn, wod != null && wod.Enabled)) { WODRocksMaterials.WODRocksMaterials.Init(new InitParams(wod, ModManager.Instance.GetModIndex(WoDTitle), count)); Debug.Log("[PortedMods] started " + WoDTitle); }
+            if (llOn) StartOne(LLTitle, () => LocationLoader.LocationModLoader.Init(new InitParams(ll, ModManager.Instance.GetModIndex(LLTitle), count)));
+            if (WodRuns(llOn, wod != null && wod.Enabled)) StartOne(WoDTitle, () => WODRocksMaterials.WODRocksMaterials.Init(new InitParams(wod, ModManager.Instance.GetModIndex(WoDTitle), count)));
 
-            Mod sky = Entry(SkyTitle);
             return SkyRuns(sky != null, sky != null && sky.Enabled) ? sky : null;
         }
 
