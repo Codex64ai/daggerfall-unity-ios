@@ -34,10 +34,26 @@ namespace DaggerfallWorkshop.Game.Mobile
             try
             {
                 Rotate();
-                File.AppendAllText(path, string.Format("\n===== session {0:yyyy-MM-dd HH:mm:ss} =====\n", DateTime.Now));
+                // The build stamp goes down with the session banner, before any Unity message can
+                // reach the mirror: a log kept from an older build has twice now been read as if it
+                // were the current one and sent a device test down the wrong path.
+                File.AppendAllText(path, string.Format("\n===== session {0:yyyy-MM-dd HH:mm:ss} =====\n{1}\n",
+                    DateTime.Now,
+                    BuildStamp(Application.productName, Application.version, Application.identifier,
+                               Application.buildGUID, Application.unityVersion, VersionInfo.DaggerfallUnityVersion)));
             }
             catch (Exception) { }
             Application.logMessageReceivedThreaded += OnLog;
+        }
+
+        /// <summary>
+        /// Pure: the one line that says which build wrote the rest of the file.
+        /// </summary>
+        public static string BuildStamp(string productName, string version, string bundleId,
+                                        string buildGuid, string unityVersion, string dfuVersion)
+        {
+            return string.Format("[Build] {0} {1} {2} guid={3} unity={4} dfu={5}",
+                                 productName, version, bundleId, buildGuid, unityVersion, dfuVersion);
         }
 
         /// <summary>Pure: does a file of this size need rotating before the next write?</summary>

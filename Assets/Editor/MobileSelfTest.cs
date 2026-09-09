@@ -134,6 +134,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestModSettingsSerialization();
             TestModLookupTolerantOfBuiltIns();
             TestFlcPathResolution();
+            TestBuildStamp();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -895,6 +896,21 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(DaggerfallWorkshop.Game.UserInterface.FLCPlayer.ResolvePath("BOETHIAH.FLC", "/m", "/a", exists)
                       == Path.Combine("/a", "BOETHIAH.FLC"),
                   "flc: anything else falls back to arena2");
+        }
+
+        /// <summary>
+        /// Player.log opens with the build it came from. Twice this week a log kept from an older
+        /// build was read as if it were the current one and sent a test down the wrong path.
+        /// </summary>
+        static void TestBuildStamp()
+        {
+            string stamp = MobileLog.BuildStamp("DFU Test", "0.1.9", "net.codex64.daggerfall.test",
+                                                "abc123", "6000.3.23f1", "1.1.1");
+            Check(stamp.StartsWith("[Build] ", StringComparison.Ordinal), "build stamp: starts with the [Build] tag", stamp);
+            Check(stamp.Contains("DFU Test") && stamp.Contains("0.1.9")
+                  && stamp.Contains("net.codex64.daggerfall.test") && stamp.Contains("abc123")
+                  && stamp.Contains("6000.3.23f1") && stamp.Contains("1.1.1"),
+                  "build stamp: names product, version, bundle id, build guid, Unity and DFU versions", stamp);
         }
 
         static void Check(bool condition, string name, string detail = "")
