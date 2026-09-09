@@ -133,6 +133,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestPortedModOrder();
             TestPortedModTitles();
             TestLocationLoaderRmbObjects();
+            TestBiomesClimateSwapGuard();
             TestTravelOptionsBridge();
             TestTavernAlcohol();
             TestModSettingsSerialization();
@@ -1100,6 +1101,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(unknown != null && unknown.obj.Count == 0,
                   "an unknown object type is still rejected",
                   unknown == null ? "prefab was null" : unknown.obj.Count.ToString());
+        }
+
+        // Location Loader's type-5 RMB blocks get WoD Biomes' subtropical nature swap, but only when
+        // the Biomes entry actually started and the climate map can be sampled on the CPU. Both halves
+        // of that gate are pure, so they can be pinned here; the swap itself needs a streamed world.
+        static void TestBiomesClimateSwapGuard()
+        {
+            Check(!global::LocationLoader.BiomesClimateSwap.ShouldSwap(false, null)
+                  && !global::LocationLoader.BiomesClimateSwap.ShouldSwap(true, null),
+                  "LL: type-5 nature swap needs Biomes running and a readable map");
         }
 
         static global::LocationLoader.LocationPrefab ParseLocationPrefabXml(string xml)

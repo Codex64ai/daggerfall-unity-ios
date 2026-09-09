@@ -490,6 +490,14 @@ namespace LocationLoader
                         rmbBlock.transform.localPosition = obj.pos;
                         rmbBlock.transform.localRotation = obj.rot;
                         rmbBlock.transform.localScale = obj.scale;
+
+                        // MOBILE: WoD Biomes' subtropical nature swap for freshly built RMB blocks
+                        // (carademono's LL rmb-object branch; the map comes from the compiled-in Biomes
+                        // port). ApplySwaps swallows its own exceptions, so it cannot cost this block
+                        // the destroy-and-skip in the catch below.
+                        if (BiomesClimateSwap.ShouldSwap(DaggerfallWorkshop.Game.Mobile.MobilePortedMods.BiomesRunning,
+                                                         WorldOfDaggerfall.NatureBatchOverriderInstaller.ClimateMap))
+                            BiomesClimateSwap.ApplySwaps(rmbBlock);
                     }
                     catch (Exception ex)
                     {
