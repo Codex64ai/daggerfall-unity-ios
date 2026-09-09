@@ -1,8 +1,9 @@
 # Third-party notices
 
 This repository is Daggerfall Unity (MIT, copyright (c) 2009-2023 Daggerfall Workshop - see
-`LICENSE`) plus an iOS touch port (MIT, same terms). Two further MIT-licensed works are compiled
-into the port rather than loaded as mods. Their original headers are preserved in the files named.
+`LICENSE`) plus an iOS touch port (MIT, same terms). Several further works are compiled into the port
+rather than loaded as mods - see each section below for its licence status, which is not MIT in every
+case and is undeclared for three of them. Their original headers are preserved in the files named.
 
 ## Basic Roads
 
@@ -172,7 +173,7 @@ that branch.
 
 | Mod | Author, licence | Source | What is NOT shipped |
 |---|---|---|---|
-| Location Loader 0.3 | KABoissonneault, a fork of Uncanny_Valley's loader; NO LICENCE DECLARED (permission being sought by Ikram; not in any public release). The type-5 backport below is carademono's, from a fork which declares no licence either | github.com/KABoissonneault/DFU-LocationLoader @ a5e7a18, plus object type 5 (RMB blocks) backported from github.com/drcarademono/DFU-LocationLoader @ 896a574 (branch `rmb-object`) | the 3 editor scripts (`Scripts/Editor/`) - authoring tools, useless on a device. The 11 runtime files are compiled in under `Ports/LocationLoader/`; upstream's manifest carries no data, so there is no bundle at all - the launcher entry is registered in code |
+| Location Loader 0.3 plus the type-5 backport | KABoissonneault, a fork of Uncanny_Valley's loader; NO LICENCE DECLARED (permission being sought by Ikram; not in any public release). The type-5 backport below is carademono's, from a fork which declares no licence either | github.com/KABoissonneault/DFU-LocationLoader @ a5e7a18, plus object type 5 (RMB blocks) backported from github.com/drcarademono/DFU-LocationLoader @ 896a574 (branch `rmb-object`) | the 3 editor scripts (`Scripts/Editor/`) - authoring tools, useless on a device. The 11 runtime files are compiled in under `Ports/LocationLoader/`; upstream's manifest carries no data, so there is no bundle at all - the launcher entry is registered in code |
 | World of Daggerfall 0.4.0 | World of Daggerfall Team (KABoissonneault, Cliffworms, Kamer, carademono); NO LICENCE DECLARED (permission being sought by Ikram; not in any public release) | github.com/drcarademono/world-of-daggerfall @ 3bf8837 | WoD Terrain and WoD Biomes (separate mods, out of scope - one needs compute shaders and synchronous readbacks), Distant Terrain, and the three optional dependencies Wilderness Overhaul, RMB Resource Pack and Beautiful Villages. Its one script, `WODRocksMaterials.cs`, is compiled in under `Ports/WorldOfDaggerfall/`; its data is the bundle |
 
 Because no licence has ever been declared upstream for either repo, this ships on the private test
@@ -182,12 +183,15 @@ inert until switched on. World of Daggerfall's data is the downloadable bundle
 `worldofdaggerfall.dfmod`, marked `private_only` in `tools/bundled-mods/mods.json` so `pack.py` keeps
 it out of the public MIT mod pack; without that file there is no `World of Daggerfall` entry and the
 compiled code never runs, and deleting it removes every byte the feature added. That entry is also off
-by default and is switched off automatically, with a note in its description, whenever Location Loader
-is off - a location mod is nothing without the loader reading it.
+by default and is switched off automatically whenever Location Loader is off - a location mod is nothing
+without the loader reading it. The switch is simply off the next time you open MODS; `Player.log` records
+why (`[PortedMods] World of Daggerfall switched off: Location Loader must be on`).
 
 WoD requires Daggerfall Expanded Textures (Ninelan; already in the pack, see above). If that mod is
-off or missing, World of Daggerfall is switched off at start-up and its description in MODS says why;
-nothing else is needed. Performance is the acknowledged unknown: WoD places roughly 200,000
+off or missing, World of Daggerfall is switched off at start-up: again the switch is simply off the next
+time you open MODS, and `Player.log` records why
+(`[PortedMods] World of Daggerfall off: Daggerfall Expanded Textures is not enabled`). Nothing else is
+needed. Performance is the acknowledged unknown: WoD places about 329,000
 instances across the world, and the cost on older iPads is unmeasured - the off-by-default switch is
 the mitigation until it is, and `TUNE > Advanced > Show diagnostics` shows the frame time. Neither mod
 was device-verified at the time of writing.

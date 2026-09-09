@@ -207,7 +207,8 @@ banner and no `[Build]` line survived anywhere in `Documents` on the simulator r
 `Debug.Log` the stamp lands in whichever of the two writers wins the file, and in the mirror too.)
 *Rebase risk: LOW.* Both engine edits are small and self-contained, and both are marked `MOBILE:`.
 
-### World of Daggerfall support (2026-09-09) — `Game/Mobile/{MobileMods.cs (+22),MobilePortedMods.cs (+95/-8)}`, `Game/Mobile/Ports/{LocationLoader,WorldOfDaggerfall}/` (new), `Ports/WorldOfDaggerfall/WODRocksMaterials.cs.meta` (GUID pin), `Assets/Editor/MobileSelfTest.cs (+19)`, `Game/Addons/ModSupport/ModManager.cs (+34/-1)`, `tools/bundled-mods/{fetch.py,mods.json}`
+### World of Daggerfall support (2026-09-09) — `Game/Mobile/{MobileMods.cs (+22),MobilePortedMods.cs (+100/-9)}`, `Game/Mobile/Ports/{LocationLoader,WorldOfDaggerfall}/` (new), `Ports/WorldOfDaggerfall/WODRocksMaterials.cs.meta` (GUID pin), `Assets/Editor/MobileSelfTest.cs (+146)`, `Game/Addons/ModSupport/ModManager.cs (+39/-3)`, `tools/bundled-mods/{fetch.py (+43/-7),mods.json (+21),test_fetch.py (+54),pack.py (+7),test_pack.py (+26)}`
+Counts are `git diff --numstat` over the whole feature range, `ed8f82766^..HEAD`.
 Location Loader and World of Daggerfall compiled in (see THIRD-PARTY.md). The feature rides the hooks
 the survival mods and Dynamic Skies already added (`MobilePortedMods.DefaultOff` from
 `ModManager.Awake`, `Mod.cs`'s `[fsProperty]` opt-in so the switches survive a relaunch); the one
@@ -222,18 +223,32 @@ titles to `Titles` (which is what `DefaultOff` walks, so both start off), the pu
 Loader off is switched off, `WoDGateNote` appended to its description once, `WriteModSettings()`, and a
 log line. World of Daggerfall's other requirement, Daggerfall Expanded Textures, is gated the same way
 by a second block: with that mod missing or switched off, World of Daggerfall is switched off at
-start-up and `WoDDetNote` says why in MODS. Both gates read the player's choice before either clears
-it, so with both dependencies absent both notes apply. DET is detected as DFU itself resolves that
+start-up. Both gates read the player's choice before either clears it, so with both dependencies absent
+both notes apply.
+The player's signal is the switch, not the note: the entry is simply off the next time MODS is opened,
+and `Player.log` carries the reason -
+`[PortedMods] World of Daggerfall switched off: Location Loader must be on` or
+`[PortedMods] World of Daggerfall off: Daggerfall Expanded Textures is not enabled`. Appending
+`WoDGateNote`/`WoDDetNote` to `ModInfo.ModDescription` is kept because it is the C&C gate's own pattern,
+but it is best-effort and the current launcher flow never shows it: the only window that renders
+`ModDescription` is `ModLoaderInterfaceWindow`, posted from the setup wizard in the Setup state - before
+`ModManager.Init` and before `StartEnabled` runs - and `ModInfo` is rebuilt from the bundle manifest
+every launch, so the note is gone again by the next launcher. Do not tell a tester to look for it.
+DET is detected as DFU itself resolves that
 manifest dependency - `CheckModDependencies` -> `GetModFromName` -> `ModManager.FileNameMatches`, an
 ordinal `Equals` against `Mod.FileName` - matching the shipped bundle `daggerfall expanded textures.dfmod`,
 never the title inside it. That comparison is ordinal, so case-SENSITIVE, because DFU's own dependency
 check is: the bundle has to be named `daggerfall expanded textures.dfmod` exactly, and a hand-installed
-copy under any other casing switches WoD off with the note while DFU logs its own "Failed to retrieve
-mod" warning - self-consistent, and the two never disagree.
+copy under any other casing switches WoD off - with the log line, not a visible note - while DFU logs
+its own "Failed to retrieve mod" warning - self-consistent, and the two never disagree.
 Then `LocationModLoader.Init` runs when the loader is on, and
 `WODRocksMaterials.Init` after it only when that `Init` actually returned and DET is on; when the loader
 was on but its `Init` threw, WoD is left unstarted with a log line and its setting untouched - a runtime
-failure is not a user choice.
+failure is not a user choice. One caveat for reading the log: the `started Location Loader` line only
+means `LocationModLoader.Init` returned. LL's real work is `LocationResourceManager.Start` ->
+`CacheGlobalInstances`, a Unity message one frame later and outside `StartOne`'s try/catch, so judge
+success by the `[LL]` lines (and the absence of a `LocationResourceManager` exception), not by
+`started`.
 Each compiled-in mod's `Init` now goes through `MobilePortedMods.StartOne(title, init)`, which holds
 its own try/catch, logs `start failed` with the exception, returns whether it got through and writes
 the `started` line only when it did. Before that there was one try/catch around the whole of
@@ -243,23 +258,38 @@ last, lost its deferred start for the session. The Dynamic Skies entry is now re
 `ModManager.WriteModSettings` is the one upstream engine file this feature had to touch, and it is what
 makes those gates safe to act on. `ModManager.Init` unloads every mod the player had switched off out
 of `mods`, so by the time a gate runs at start-up that list holds only the enabled mods —
-serializing it shrank `Documents/Mods/GameData/Mods.json` from 10 entries to 3 on the device test, and
+serializing it shrank `Documents/Mods/GameData/Mods.json` from 10 entries to 3 on the simulator run, and
 a mod with no entry defaults to enabled, so every mod the player had switched off came back on at the
 next launch. `Init` now keeps what it unloaded in a `prunedMods` list and the write merges the two
 through the pure `public static MergeModSettings(current, previous)` — every current mod, plus a
 last-known `Enabled`/`LoadPriority` entry for each mod no longer in the list, a title in both taking
 its current value. `ModLoaderInterfaceWindow`'s own save path is unaffected: it edits and writes the
-mods it lists, and the merge only adds back entries it never showed.
+mods it lists, and the merge only adds back entries it never showed. One silent difference from
+upstream's shape: `MergeModSettings` keys by `Title` and keeps the first entry per title, where upstream
+wrote one entry per `Mod` object - and the pack does contain duplicate titles (`MobileModConflicts.cs`
+documents them). Harmless, because `LoadModSettings` also applies a setting by title to the first
+matching index, so the duplicate never had an effective setting of its own; worth knowing if that
+lookup ever changes.
 `WODRocksMaterials.cs.meta` pins upstream's script GUID `426f76434556e931a830bf5c83c73b54` instead of
 the fresh one Unity generates on import: 113 WoD prefabs (99 in `Rocks`, 14 in `Mountains`) bind the
 script by that GUID, and with a different one they build with a missing `MonoBehaviour` — no compile
 error, no log line, the climate and season rock materials simply never apply.
 `tools/bundled-mods/fetch.py` gains `extra_dirs`, a per-entry list of repo folders copied wholesale
-(`copytree`, `.git` excluded) into the mod folder after the manifest's `Files`, and missing raises
-`SystemExit`. WoD's `Prefabs/*.prefab` reference `Meshes/*.fbx|.dae` by GUID and the
+(`copytree`) into the mod folder after the manifest's `Files`, and a missing folder raises `SystemExit`
+naming the entry and the folder. WoD's `Prefabs/*.prefab` reference `Meshes/*.fbx|.dae` by GUID and the
 manifest never names them, so a manifest-only copy ships prefabs with no model; the folders stay out
 of the manifest because Unity follows the GUIDs when it builds the bundle. UBLaMF's pre-existing
-`extra_roots` now routes through the same helper. The `mods.json` entry is `strip_code` (its one
+`extra_roots` now routes through the same helper.
+A wholesale copy bypasses the manifest's own `exclude_globs` and `strip_code` filters, and it lands
+under `Assets/`, where Unity compiles any `.cs` it finds into the app with no diagnostic - so the copy
+ignores `.git`, `*.cs`, `*.dll`, `*.dll.bytes`, `*.py` and `*.sh`, and, belt and braces, a `.cs`/`.dll`
+surviving under the copied tree raises `SystemExit` naming the entry, the folder and the files. WoD's
+own payload showed why: 36 of the authors' `.py`/`.sh` mesh-authoring scripts were being copied into
+`Meshes/` (harmless to the bundle - only manifest `Files` and their GUID dependencies are built - but
+not something to ship in `Assets/`; whether the already-fetched copies are deleted is the controller's
+call, the folder is gitignored). `pack.py` gained the matching second line of defence for the licence:
+any entry that WOULD be packed whose `licence` starts with `pending:` is a hard problem, so
+`private_only` is no longer the only thing keeping an unlicensed bundle out of the public zip. The `mods.json` entry is `strip_code` (its one
 script is compiled in), `private_only` with a `pending:` licence (no licence declared upstream — the
 combination `fetch.py` requires), `archives_from: ["DaggerfallExpandedTextures"]`, and
 `drop_dependencies` for Location Loader (built in, so it has no `FileName` to match) and the three

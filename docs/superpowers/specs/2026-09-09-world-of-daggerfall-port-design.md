@@ -33,15 +33,22 @@ public pack (enforced by `private_only` in the pack tooling), exactly as DREAM a
 
 1. Code compiled in, like the survival mods: `Assets/Scripts/Game/Mobile/Ports/LocationLoader/` (the 11
    runtime files; editor files excluded) and `Assets/Scripts/Game/Mobile/Ports/WorldOfDaggerfall/WODRocksMaterials.cs`.
-   Edits: `[Invoke]` removed; anything else only to compile, marked `// MOBILE`. Port header on every file
-   (source, commit, "no licence header upstream; private draft only").
+   Edits: `[Invoke]` removed; anything else only to compile, marked `// MOBILE`; plus the type-5 backport
+   of item 6 in three of LL's files. Port header on every file (source, commit, "no licence header
+   upstream; private draft only"), and a second provenance line on the three backported ones.
 2. Launcher entries. `Location Loader` is a BUILT-IN entry registered by `MobileMods.Register` (like the
    TravelOptions bridge) with LL's upstream GUID, default OFF, description saying it does nothing without a
    location mod. `World of Daggerfall` is the data bundle's own entry, default OFF (via `MobilePortedMods.Titles`),
    gated on `Location Loader` being on and on Daggerfall Expanded Textures being installed and on (pure
-   `WodRuns(locationLoaderStarted, wodOn, detOn) = locationLoaderStarted && wodOn && detOn`; auto-off +
-   description note when LL is off, and a second gate with its own note when DET is off or missing, both
-   mirroring the C&C gate). `MobilePortedMods.StartEnabled` calls `LocationModLoader.Init` at the Start
+   `WodRuns(locationLoaderStarted, wodOn, detOn) = locationLoaderStarted && wodOn && detOn`; auto-off
+   when LL is off, and a second gate when DET is off or missing, both mirroring the C&C gate). Either
+   way the switch is simply off the next time you open MODS; `Player.log` records why
+   (`[PortedMods] World of Daggerfall switched off: Location Loader must be on` /
+   `[PortedMods] World of Daggerfall off: Daggerfall Expanded Textures is not enabled`). The gates also
+   append a note to the entry's description, as the C&C gate does, but the current launcher flow never
+   shows it: `ModInfo` is rebuilt from the bundle manifest every launch and the MODS window is posted in
+   the Setup state, before `ModManager.Init` and before the gates run.
+   `MobilePortedMods.StartEnabled` calls `LocationModLoader.Init` at the Start
    state (it needs no scene objects) and `WODRocksMaterials.Init` after it only when that `Init` returned
    and both dependencies are satisfied.
 3. Data pipeline. mods.json entry `WorldOfDaggerfall`: `strip_code` (drops WODRocksMaterials.cs), `private_only`,
@@ -56,14 +63,45 @@ public pack (enforced by `private_only` in the pack tooling), exactly as DREAM a
    which holds its own try/catch, so one mod throwing costs only that mod (the Dynamic Skies entry is
    resolved before any Init runs, so it keeps its deferred start). WoD without LL is switched off with a
    note; WoD needs Daggerfall Expanded Textures, and if that mod is off or missing WoD is switched off at
-   start-up too and its description in MODS says why (DFU's own dependency check only warns, so this port
-   gates it) - both documented.
+   start-up too, the switch simply reading off the next time MODS is opened and `Player.log` carrying the
+   reason (DFU's own dependency check only warns, so this port gates it) - both documented.
 5. Verification: self-tests (gate, fetch flag, compile); simulator run with LL+WoD+DET installed (RGBA32
    rebuild of the WoD bundle for the sim; DET stays ASTC since only its presence matters) at a wilderness
    pixel near Daggerfall, expecting `[LL]` log lines and WoD instances, screenshot; then a device ipa
    (`DFU-Test-unity6-wod.ipa`) for Ikram, who reads the diagnostics frame time and looks for hitching while
-   travelling. Performance is the acknowledged unknown (~200,000 placed instances world-wide); the switch is
+   travelling. Performance is the acknowledged unknown (about 329,000 placed instances world-wide); the switch is
    the mitigation.
+6. Location Loader object type 5 (RMB blocks), backported. WoD 0.4.0 was authored against LL 0.4.x,
+   which is not upstream: object type 5 - "place a whole RMB block as a prefab object" - exists only on
+   github.com/drcarademono/DFU-LocationLoader branch `rmb-object` @ 896a574, and our pin `a5e7a18` already
+   IS the tip of `KABoissonneault/DFU-LocationLoader:main`, so a re-pin was not available. Without type 5,
+   `LocationHelper.ValidateValue` drops the object at parse time (`Invalid obj type found: 5`) and WoD's
+   24 type-5 prefab definitions - 32,600 instances, 32,218 wilderness farmsteads plus 382 docks and
+   lighthouses, 9.9 % of WoD's 329,040 - each render as a flattened, textured, empty clearing.
+   Backport the type-5 core only, into three files under `Ports/LocationLoader/`: `LocationData.cs`
+   (`groundPlane` plus the `Type*` constants), `LocationHelper.cs` (parse and write the optional
+   `<groundPlane>` element, `TypeRMB` joining types 3 and 4 in `ValidateValue`'s permissive arm with the
+   unknown-type warning still firing), and `LocationLoader.cs` (the `obj.type == TypeRMB` branch in
+   `InstantiateInstanceDynamicObjects`, building the block through `RMBLayout.CreateBaseGameObject` and
+   adding nature flats, lights and misc/exterior flats at the current climate and season), each with a
+   second provenance line in its header. Deliberately omitted, because `rmb-object` carries ~2,400
+   unreviewed lines on top: WOD-Biomes climate swapping (`BiomesClimateSwap`) and the
+   `DaggerfallStaticDoors`/`BarredDoor` fake-dungeon work (every RMB door hardcoded to
+   `dungeonRegion = 43`), so vanilla doors on an RMB block stay vanilla doors. Plus one addition beyond
+   upstream, an iOS safety net: the branch body in a try/catch that logs once per block name and
+   continues, an unknown block name skipped before the build (`GetBlockIndex == -1`), and the half-built
+   block destroyed on a throw. Known residual: `WOD_Dock_Daggerfall_01` (3 instances) still renders
+   empty - its block name `FOO.RMB` is in neither `BLOCKS.BSA` nor any `WorldData` `BlockNames` list, and
+   registering it needs `WorldDataReplacement.AssignNextIndex`, which is `private` in DFU.
+7. One upstream engine change the gates depend on: `ModManager`. `ModManager.Init` unloads every mod the
+   player had switched off out of `mods`, so at start-up that list holds only the enabled ones - and every
+   gate in item 2 calls `WriteModSettings()`, which serialized that shrunken list, so a mod with no entry
+   defaulted back to enabled and every switched-off mod returned at the next launch (10 entries to 3 on
+   the simulator run). `Init` now records what it unloaded in a `prunedMods` list and the write merges the
+   two through the pure `public static MergeModSettings(current, previous)`: every current mod, plus a
+   last-known `Enabled`/`LoadPriority` entry for each mod no longer in the list, a title in both taking
+   its current value. Without this, acting on a gate would silently re-enable everything the player had
+   turned off.
 
 ## Out of scope
 WoD Biomes (separate code mod), WoD Terrain (compute shaders + synchronous readbacks), Distant Terrain,
