@@ -305,8 +305,15 @@ body is wrapped so a failure logs once per distinct message rather than once per
 
 The fourth mod of the set and much the most invasive: it does not decorate the world, it *replaces*
 it. `Monobelisk.InterestingTerrainSampler` takes DFU's `DaggerfallUnity.TerrainSampler` slot and
-every terrain tile's 129x129 heightmap and its tilemap are computed by a Metal compute shader
-instead of by the engine. The lineage is long - monobelisk's Interesting Terrains, by way of
+every terrain tile's 129x129 heightmap is computed by a Metal compute shader instead of by the
+engine. It replaces **heights only**. Both of upstream's `TerrainTexturing` assignments are commented
+out - verbatim upstream, which expects Wilderness Overhaul to pull the tilemap through the
+`getTileData` mod message, and Wilderness Overhaul is not in scope here - so DFU's own texturing
+(`MobileRoads.cs` -> `BasicRoadsTexturing`) still assigns every tile, exactly as it does with the
+switch off. Which is also why the `LinearData` maps' road and port channels reach the ground only
+through the heightmap: nothing in this build paints with them.
+
+The lineage is long - monobelisk's Interesting Terrains, by way of
 Freak2121, carademono and Ninelan - and nowhere in it is a licence declared, so the same rule as the
 three sections above applies: the C# is compiled in under
 `Assets/Scripts/Game/Mobile/Ports/WorldOfDaggerfallTerrain/`, the data is an off-by-default entry in
@@ -314,7 +321,7 @@ the launcher's MODS window fed by a bundle, and the bundle ships only on the pri
 
 | Mod | Author, licence | Source | What is NOT shipped |
 |---|---|---|---|
-| World of Daggerfall - Terrain 1.5.0 | monobelisk, Freak2121, carademono, Ninelan (from monobelisk's Interesting Terrains); NO LICENCE DECLARED anywhere in the lineage (permission being sought by Ikram; not in any public release) | github.com/drcarademono/wod-terrain @ 9aeb1bcc5de5343ccb7a6b09062559ad871e9d40 | the repo's 212 MB of `.xcf` and `WOODS.WLD` authoring files (they are not in the manifest, and the fetch is manifest-only); the editor scripts and `Scripts/Models/Editor/`; `Helpers/ConsoleHandler.cs` (dev console commands, useless on a device) and the `ClearNoonRoutine` that existed only for its `clearnoon` command; the dead `MainHeightmapSmoother.compute`. The 20 remaining runtime files (+2,384 lines as ported) are compiled in under `Ports/WorldOfDaggerfallTerrain/`; the two live compute shaders and their four `.cginc` (6 files, +2,557 lines) are compiled into the app under `Assets/Resources/WoDTerrain/`; the five PNG world maps and the noise-parameter INI are the bundle |
+| World of Daggerfall - Terrain 1.5.0 | monobelisk, Freak2121, carademono, Ninelan (from monobelisk's Interesting Terrains); NO LICENCE DECLARED anywhere in the lineage (permission being sought by Ikram; not in any public release) | github.com/drcarademono/wod-terrain @ 9aeb1bcc5de5343ccb7a6b09062559ad871e9d40 | the repo's 212 MB of `.xcf` and `WOODS.WLD` authoring files (they are not in the manifest, and the fetch is manifest-only); the editor scripts and `Scripts/Models/Editor/`; `Helpers/ConsoleHandler.cs` (dev console commands, useless on a device) and the `ClearNoonRoutine` that existed only for its `clearnoon` command; the dead `MainHeightmapSmoother.compute`. The 20 remaining runtime files (+2,530 lines as ported) are compiled in under `Ports/WorldOfDaggerfallTerrain/`; the two live compute shaders and their four `.cginc` (6 files, +2,557 lines) are compiled into the app under `Assets/Resources/WoDTerrain/`; the five PNG world maps and the noise-parameter INI are the bundle |
 
 What it does, in two passes. At start-up `MainHeightmapComputer` is dispatched over the whole
 1000x500 world and the result replaces `ContentReader.WoodsFileReader.Buffer` - the small world
@@ -436,6 +443,17 @@ buffer copy, the ten submits, `ToBytes` over 500,000 floats and the 1000x500 `Se
 are one uninterruptible pause from the player's point of view. The number in
 `[WoDTerrain] world heightmap <ms> ms (10 bands)` is therefore the pause it names, not a fraction
 of it.
+
+**Read the per-tile number knowing that part of it is dead work.** Each tile dispatches the
+`TilemapComputer` kernel as well as `TerrainComputer`, reads its 16,641-int result back
+synchronously on the main thread (~66 KB), turns it into a `byte[16641]` and files it in
+`TileDataCache` under a string key - and then nothing reads it. The only consumer is
+`ModMessageHandler.GetTileData`, which no mod in this build calls, and `UncacheTileData` deletes each
+entry at promote. It is kept for this round because it is upstream's shape and because it is what the
+`getTileData` contract is made of; a later round may drop it. So a measurable slice of every
+`[WoDTerrain] tile <x>,<y> <ms> ms (locations <n>)` line is a second dispatch and a second blocking
+readback whose output is thrown away, and if the tile timings come back too high, that slice is the
+first thing to remove.
 
 **Road smoothing is inert in this build.** `BasicRoadsUtils` asks `ModManager` for a *mod titled*
 `"BasicRoads"` and then sends it a `getPathData` message; this port has no such mod - Basic Roads is

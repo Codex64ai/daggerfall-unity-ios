@@ -489,7 +489,7 @@ to remove came silently back. `TestMobileShadersFind` now reads
 `MobileShaders.Find(MaterialReader._DaggerfallBillboardBatch…)` call sites are there and no raw
 `Shader.Find(` is, so a rebase that takes theirs breaks the suite instead.
 
-### World of Daggerfall - Terrain support (2026-09-09) — `Game/Mobile/MobilePortedMods.cs (+27/-3)`, `Game/Mobile/Ports/WorldOfDaggerfallTerrain/` (new, 20 files, +2,384), `Assets/Resources/WoDTerrain/` (new, 6 files, +2,557), `Assets/Editor/{MobileModPackTextureRules.cs (+54/-1),MobileModBuilder.cs (+24/-2),MobileSelfTest.cs (+225/-4)}`, `tools/bundled-mods/mods.json (+11)`
+### World of Daggerfall - Terrain support (2026-09-09) — `Game/Mobile/MobilePortedMods.cs (+63/-3)`, `Game/Mobile/Ports/WorldOfDaggerfallTerrain/` (new, 20 files, +2,530), `Assets/Resources/WoDTerrain/` (new, 6 files, +2,557), `Assets/Editor/{MobileModPackTextureRules.cs (+54/-1),MobileModBuilder.cs (+24/-2),MobileSelfTest.cs (+282/-4)}`, `tools/bundled-mods/mods.json (+11)`
 Counts are `git diff --numstat a344bd899 HEAD` (the plan commit to this feature's last), excluding
 `.meta` files.
 World of Daggerfall - Terrain compiled in (see THIRD-PARTY.md). **It touches no upstream engine file
@@ -510,8 +510,25 @@ the whole condition, and the *capability* question — is there compute support,
 compile, is the bundle complete — belongs to `InterestingTerrains.Init`, which answers it before it
 touches `DaggerfallUnity.TerrainSampler` and logs `[WoDTerrain] not available: ...` when the answer
 is no. Started last of everything in `StartEnabled` for the same reason it is the most guarded: a
-sampler swap that threw at that point cannot cost any mod before it its start. One extra log line
-goes out before `StartOne`, once per launch and at `Log` rather than `LogWarning`:
+sampler swap that threw at that point cannot cost any mod before it its start.
+
+Because `Init` declines by **logging and returning normally** on all four of its refusal paths rather
+than by throwing, the plain `StartOne(title, init)` would have written `[PortedMods] started World of
+Daggerfall - Terrain` for a device still running DFU's own sampler — the one line a `Player.log`
+reader takes to mean "this mod is running". So this entry uses the four-argument overload
+`StartOne(title, init, installed, hint)`, which asks the mod itself: `installed` is
+`Monobelisk.InterestingTerrains.Installed`, set as the last statement of `Init` after the sampler has
+been replaced and the message handler is listening, so every earlier return leaves it false. On a
+clean return with `Installed` false the launcher writes
+`[PortedMods] World of Daggerfall - Terrain did not start (see [WoDTerrain] lines)` instead, where
+`"[WoDTerrain]"` is the `hint` argument — the log prefix whose lines carry the actual reason — and
+returns false. Containment is unchanged: a throw still logs `start failed` and stops there. The two
+literals are a pair, and a rename of either without the other breaks the trail a returned log is read
+along.
+
+One extra log line goes out **after** `StartOne`, and only when it returned true — that is, only on
+the launch where the sampler really was installed and the ground really did move — once per launch
+and at `Log` rather than `LogWarning`:
 `[PortedMods] World of Daggerfall - Terrain: this changes ground height under existing saves and the
 travel map (by design)` — the height curve it computes is a different world to the vanilla one, so a
 character standing on ground that has moved is the expected outcome, not a bug report.
@@ -569,4 +586,20 @@ change to any of them is a compile error in `Ports/WorldOfDaggerfallTerrain/` �
 failure mode — except for `WoodsFileReader.Buffer`, where a change in what the engine expects that
 buffer to contain would be a silent one. `DefaultTerrainSampler.MaxTerrainHeight` (1539) is read by
 nothing here, but the port's own 5000 is what makes existing saves move; if upstream changes theirs,
-the migration note in THIRD-PARTY.md and README-iOS.md needs the new number.
+the migration note in THIRD-PARTY.md and README-iOS.md needs the new number. One more silent-change
+surface belongs on that list: `DaggerfallTerrain.CompleteMapPixelDataUpdate` **rebuilds**
+`heightmapSamples` from `heightmapData` after the promote handlers have run. The port writes both —
+its `To2D(...)` assignment to `heightmapSamples` is harmlessly overwritten by that rebuild — and it
+is the rebuild that makes Basic Roads' `SmoothRoadsTerrainJob` edits survive into the mesh at all. An
+upstream change from "rebuild it" to "use whatever the sampler set" would compile cleanly and change
+the terrain, which is the bad failure mode; it is the one line in this dependency worth re-reading
+after a rebase.
+
+**The port replaces heights, not texturing.** Both `TerrainTexturing` assignments in
+`InterestingTerrains` are commented out verbatim from upstream (which expects Wilderness Overhaul to
+pull the tilemap through the `getTileData` mod message), so DFU's own texturing —
+`BasicRoadsTexturing`, installed by `MobileRoads` — still assigns every tile. The `TilemapComputer`
+dispatch and its 16,641-int blocking readback therefore run per tile and produce a `byte[16641]` that
+`UncacheTileData` deletes unread: dead work, kept this round for fidelity with upstream and for the
+`getTileData` contract, and a candidate for removal in a later round. It is a real slice of every
+`[WoDTerrain] tile … ms` number, which matters when those numbers are the thing being judged.
