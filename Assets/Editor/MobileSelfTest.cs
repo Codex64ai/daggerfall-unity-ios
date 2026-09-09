@@ -769,7 +769,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         //   Bands                upstream generates the world heightmap in one 500,000-thread dispatch,
         //                        which iOS's command-buffer execution limit can kill. Task 4 dispatches
         //                        it in row bands; this pins the split - every row covered exactly once,
-        //                        including when the band count does not divide the height.
+        //                        including when the band count does not divide the height, and a height
+        //                        that is not a whole number of thread-group rows refused outright.
+        //   ReadbackStartRow     the kernel writes world row y to buffer row (499 - y), so the per-band
+        //                        readback range is MIRRORED. This is the one line in the port where the
+        //                        plan's own formula was wrong; it cannot run in the self-test (GPU,
+        //                        DaggerfallUnity, a loaded mod), so the ranges are pinned arithmetically.
+        //   StartupSample*       heightSampling.cginc reads shm/lhm through SampleBaseHeight on the
+        //                        start-up path too. An unbound or out-of-range StructuredBuffer read is
+        //                        undefined on Metal, so the uniforms that index those buffers have to be
+        //                        proven in-bounds for every sample index the dispatch can produce.
         //   Resources.Load       the shaders ship in the app, not in the bundle, so the folder layout
         //                        Init loads through is itself the thing to verify.
         static void TestWoDTerrainPort()
@@ -791,28 +800,100 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // therefore either drops rows (integer division) or runs rows that belong to the next
             // band, and nothing downstream would say so - the world heightmap would simply be wrong
             // in horizontal stripes, on a code path that runs once at start-up.
+            // Swept over several heights, not just the shipped 500: the invariant this check NAMES is a
+            // property of Bands, and the last band - the one that takes the remainder - is exactly the
+            // place where a height the sweep never tries could still lose rows.
             bool wholeGroups = true; string groupDetail = "";
-            for (int n = 1; n <= 120 && wholeGroups; n++)
+            int[] sweptHeights = { 5, 10, 55, 100, 250, 500, 1005 };
+            foreach (int h in sweptHeights)
             {
-                var bs = Monobelisk.TerrainComputer.Bands(500, n);
-                int y = 0;
-                foreach (var b in bs)
+                for (int n = 1; n <= 120 && wholeGroups; n++)
                 {
-                    if (b.yStart != y || b.rows <= 0 || b.rows % Monobelisk.TerrainComputer.GroupRowsY != 0)
+                    var bs = Monobelisk.TerrainComputer.Bands(h, n);
+                    int y = 0;
+                    foreach (var b in bs)
+                    {
+                        if (b.yStart != y || b.rows <= 0 || b.rows % Monobelisk.TerrainComputer.GroupRowsY != 0)
+                        {
+                            wholeGroups = false;
+                            groupDetail = "Bands(" + h + ", " + n + "): band at yStart " + b.yStart + " has " + b.rows + " rows";
+                            break;
+                        }
+                        y += b.rows;
+                    }
+                    if (wholeGroups && y != h)
                     {
                         wholeGroups = false;
-                        groupDetail = "Bands(500, " + n + "): band at yStart " + b.yStart + " has " + b.rows + " rows";
-                        break;
+                        groupDetail = "Bands(" + h + ", " + n + ") covers " + y + " rows, not " + h;
                     }
-                    y += b.rows;
                 }
-                if (wholeGroups && y != 500)
+                if (!wholeGroups) break;
+            }
+            Check(wholeGroups, "WoDTerrain: for every accepted height, every band is contiguous and a whole number of 5-row thread groups", groupDetail);
+            // The height itself must be a whole number of groups, because the LAST band takes the
+            // remainder unrounded: Bands(502, 10) would end in a 52-row band that Dispatch turns into 50
+            // rows, and the two lost rows would be written by nobody - the exact failure the banding
+            // exists to prevent. MapHeight is a const 500, so this guards a future source change.
+            bool refusesOddHeight = false; string oddHeightDetail = "Bands(502, 10) returned without throwing";
+            try
+            {
+                var bad = Monobelisk.TerrainComputer.Bands(502, 10);
+                oddHeightDetail = "Bands(502, 10) returned " + bad.Length + " bands";
+            }
+            catch (System.ArgumentException) { refusesOddHeight = true; oddHeightDetail = ""; }
+            Check(refusesOddHeight, "WoDTerrain: a height that is not a whole number of thread-group rows is refused, not truncated", oddHeightDetail);
+            // The kernel writes world row y to buffer row (MapHeight - 1 - y), so a band that dispatches
+            // rows [yStart, yStart + rows) lands in the MIRRORED range [MapHeight - yStart - rows,
+            // MapHeight - yStart). Reading back yStart * MapWidth - the formula the plan carried - would
+            // copy a region the band at the other end of the map has not dispatched yet, and the result
+            // would be a stale stripe that nothing downstream can detect. Sorted, the ten ranges must
+            // tile the whole 500,000-float buffer with no gap and no overlap.
+            var ranges = new System.Collections.Generic.List<int[]>();
+            foreach (var b in Monobelisk.TerrainComputer.Bands(500, Monobelisk.TerrainComputer.StartupBands))
+                ranges.Add(new int[] { Monobelisk.TerrainComputer.ReadbackStartRow(500, b.yStart, b.rows) * 1000, b.rows * 1000 });
+            ranges.Sort((a, b) => a[0].CompareTo(b[0]));
+            bool tiles = ranges.Count == 10; string tileDetail = tiles ? "" : ranges.Count + " ranges, not 10";
+            int nextStart = 0;
+            foreach (var r in ranges)
+            {
+                if (!tiles) break;
+                if (r[0] != nextStart || r[1] <= 0)
                 {
-                    wholeGroups = false;
-                    groupDetail = "Bands(500, " + n + ") covers " + y + " rows, not 500";
+                    tiles = false;
+                    tileDetail = "range [" + r[0] + ", " + (r[0] + r[1]) + ") does not start at " + nextStart;
+                    break;
+                }
+                nextStart = r[0] + r[1];
+            }
+            if (tiles && nextStart != 500 * 1000)
+            {
+                tiles = false;
+                tileDetail = "the ranges end at " + nextStart + ", not 500000";
+            }
+            Check(tiles, "WoDTerrain: the ten mirrored readback ranges tile the 500,000-float buffer exactly once", tileDetail);
+            // GetBiomeWeights calls SampleBaseHeight unconditionally, and that function indexes shm and
+            // lhm with sd/ld/hDim/div. The start-up dispatch bound none of them until this polish round;
+            // an unbound - or, with the wrong hDim, a wildly out-of-range - StructuredBuffer read is
+            // UNDEFINED on Metal. The value SampleBaseHeight returns is dead on this path (w.land is
+            // overwritten with loResBaseHeight when detailedHeights is false), so the only thing that has
+            // to hold is that every read lands inside the two dummy buffers, for every index the kernel
+            // can build: Idx(id.x, id.y, terrainSize) over id.x 0..999, id.y 0..499.
+            var dummy = Monobelisk.TerrainComputer.StartupDummySizes;
+            bool sampleInBounds = dummy.shm == 16 && dummy.lhm == 81;
+            string sampleDetail = sampleInBounds ? "" : "dummy buffers are " + dummy.shm + "/" + dummy.lhm + ", not 16/81";
+            for (int idx = 0; sampleInBounds && idx < 1000 * 500; idx++)
+            {
+                var reach = Monobelisk.TerrainComputer.StartupSampleMaxIndices(
+                    idx, Monobelisk.TerrainComputer.StartupSampleDim, Monobelisk.TerrainComputer.StartupSampleDiv,
+                    Monobelisk.TerrainComputer.StartupShmDim, Monobelisk.TerrainComputer.StartupLhmDim);
+                if (reach.shm < 0 || reach.shm >= dummy.shm || reach.lhm < 0 || reach.lhm >= dummy.lhm)
+                {
+                    sampleInBounds = false;
+                    sampleDetail = "sample index " + idx + " reaches shm[" + reach.shm + "] lhm[" + reach.lhm
+                                 + "] of " + dummy.shm + "/" + dummy.lhm;
                 }
             }
-            Check(wholeGroups, "WoDTerrain: every band is contiguous and a whole number of 5-row thread groups", groupDetail);
+            Check(sampleInBounds, "WoDTerrain: the start-up dispatch's sampler uniforms keep every shm/lhm read inside the bound buffers", sampleDetail);
             // A .compute that fails to compile still loads as a NON-NULL asset carrying no kernels, so
             // a null check alone would pass on a broken shader. HasKernel is the compile evidence.
             ComputeShader terrainCS = Resources.Load<ComputeShader>("WoDTerrain/TerrainComputer");

@@ -73,6 +73,58 @@ namespace Monobelisk
         /// </summary>
         public const int StartupBands = 10;
 
+        /// <summary>
+        /// MOBILE: (M3) the two StructuredBuffers heightSampling.cginc reads through SampleBaseHeight
+        /// (shm/lhm) and the two dimensions that index them. The per-tile path
+        /// (HandleBaseMapSampleParams) allocates a 4x4 small height map and a 9x9 large one; the
+        /// start-up dispatch reaches the same sampler and so must bind buffers of the same shape or the
+        /// reads are unbound - silently harmless on D3D11, UNDEFINED on Metal.
+        /// </summary>
+        public const int StartupShmDim = 4;
+
+        /// <summary>MOBILE: (M3) see StartupShmDim. GetLargeHeightMapValuesRange(_, _, 3) is 3*3 = 9 per side.</summary>
+        public const int StartupLhmDim = 9;
+
+        /// <summary>MOBILE: (M3) element counts of the two dummy buffers the start-up dispatch binds.</summary>
+        public static (int shm, int lhm) StartupDummySizes
+        {
+            get { return (StartupShmDim * StartupShmDim, StartupLhmDim * StartupLhmDim); }
+        }
+
+        /// <summary>
+        /// MOBILE: (M3) the "hDim" uniform for the start-up dispatch. SampleBaseHeight splits its
+        /// flattened index back into (x, y) with "index % hDim" / "index / hDim", so hDim must be the
+        /// stride the index was BUILT with. GetBiomeWeights builds it as Idx(id.x, id.y, terrainSize),
+        /// and terrainSize is MapWidth on this path - NOT the sampler's HeightmapDimension, which is
+        /// what the per-tile path passes because there terrainSize is the tile's vertex count.
+        /// </summary>
+        public static int StartupSampleDim
+        {
+            get { return WoodsFile.MapWidth; }
+        }
+
+        /// <summary>MOBILE: (M3) the "div" uniform, exactly HandleBaseMapSampleParams' (dim - 1) / 3f.</summary>
+        public static float StartupSampleDiv
+        {
+            get { return (StartupSampleDim - 1) / 3f; }
+        }
+
+        /// <summary>
+        /// MOBILE: (M3) mirrors SampleBaseHeight's index arithmetic (heightSampling.cginc:74-99) for one
+        /// flattened sample index and returns the LARGEST shm and lhm element that call reads: shm is
+        /// swept as Idx(0..3, 0..3, sd), lhm as Idx(ix..ix+3, iy..iy+3, ld). Pure, so the self-test can
+        /// prove that the uniforms chosen above keep every read inside the two bound buffers - which is
+        /// the entire point of binding them.
+        /// </summary>
+        public static (int shm, int lhm) StartupSampleMaxIndices(int index, int hDim, float div, int sd, int ld)
+        {
+            int x = index % hDim;
+            int y = index / hDim;
+            int ix = (int)(x / div);
+            int iy = (int)(y / div);
+            return (3 + 3 * sd, (ix + 3) + (iy + 3) * ld);
+        }
+
         public static byte[] originalHeightmapBuffer;
         public static byte[] alteredHeightmapBuffer;
 
@@ -129,13 +181,28 @@ namespace Monobelisk
         /// rows / GroupRowsY to Dispatch, which counts thread GROUPS. A band of 71 rows would dispatch 14
         /// groups = 70 rows and lose the 71st; the next band would start where this one claimed to end,
         /// so the lost row would never be written by anyone and the world heightmap would carry a stripe
-        /// of whatever the buffer held. The last band absorbs the remainder, which for the only size that
-        /// matters (500, a multiple of 5) is itself always a whole number of groups.
+        /// of whatever the buffer held. The last band absorbs the remainder, so the height itself must be
+        /// a whole number of groups or that remainder is the row that gets lost - hence the throw below
+        /// rather than a silently truncated last band.
         /// </summary>
+        /// <exception cref="ArgumentException">height is not a multiple of GroupRowsY.</exception>
         public static (int yStart, int rows)[] Bands(int height, int bands)
         {
             if (height <= 0)
                 return new (int yStart, int rows)[0];
+
+            // MOBILE: (a) the last band takes the REMAINDER, so it is the one place a row can still be
+            // lost: Dispatch counts thread GROUPS, and a remainder that is not a whole multiple of
+            // GroupRowsY is truncated by the integer division with nothing downstream to say so. Refuse
+            // the height instead of quietly generating a striped world heightmap. WoodsFile.MapHeight is
+            // a const 500, so this is a guard against a future source change, not a live path.
+            if (height % GroupRowsY != 0)
+                throw new ArgumentException(string.Format(
+                    "height {0} is not a whole number of {1}-row thread groups: the last band would be "
+                    + "dispatched as {2} rows and the remaining {3} would be written by nobody. "
+                    + "WoodsFile.MapHeight is a const 500, so reaching this needs a source change.",
+                    height, GroupRowsY, height - height % GroupRowsY, height % GroupRowsY), "height");
+
             if (bands < 1)
                 bands = 1;
 
@@ -165,6 +232,20 @@ namespace Monobelisk
             return result;
         }
 
+        /// <summary>
+        /// MOBILE: (a) first buffer row of the band that dispatched world rows [yStart, yStart + rows).
+        /// The kernel writes world row y to buffer row (mapHeight - 1 - y) - the "(499 - y)" in
+        /// MainHeightmapComputer's index formula, deliberately left as upstream wrote it so the output
+        /// layout is unchanged - so a band's rows land in the MIRRORED end of the buffer. Reading back
+        /// yStart * MapWidth (the formula the plan carried) would hand back a region belonging to the
+        /// band at the other end of the map, which has not been dispatched yet. Pure, so the self-test
+        /// can pin the deviation rather than leaving it to a comment.
+        /// </summary>
+        public static int ReadbackStartRow(int mapHeight, int yStart, int rows)
+        {
+            return mapHeight - yStart - rows;
+        }
+
         public static TerrainComputer Create(MapPixelData mapPixelData, InterestingTerrainSampler sampler)
         {
             var tSize = Utility.GetTerrainVertexSize();
@@ -187,6 +268,12 @@ namespace Monobelisk
         // MOBILE: GameObject (and therefore `instance`) exists - see InterestingTerrains.TryPrepareWorld.
         public static void InitializeWoodsFileHeightmap(TerrainComputerParams csParams)
         {
+            // MOBILE: (h) the stopwatch spans the WHOLE method, not just the dispatch loop: the 500 KB
+            // buffer copy below, the ten submits, ToBytes over 500,000 floats and the 1000x500
+            // SetPixels32/Apply are all one uninterruptible start-up pause, and the log line is what
+            // Task 8 measures it by. Timing only the loop would have understated the pause it names.
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+
             var woodsFile = DaggerfallUnity.Instance.ContentReader.WoodsFileReader;
             var original = woodsFile.Buffer;
             originalHeightmapBuffer = new byte[original.Length];
@@ -214,6 +301,40 @@ namespace Monobelisk
             cs.SetBuffer(k, "Result", alteredHeights);
             csParams.ApplyToCS(cs);     // MOBILE: (M2)
 
+            // MOBILE: (M3) heightSampling.cginc's GetBiomeWeights calls SampleBaseHeight
+            // UNCONDITIONALLY (:139), and SampleBaseHeight reads the StructuredBuffers shm and lhm plus
+            // the uniforms hDim, div, sd and ld. Only the per-tile path (HandleBaseMapSampleParams) ever
+            // bound them, so this start-up dispatch read UNBOUND buffers through an undefined divisor.
+            // D3D11 hides that; on Metal an unbound or out-of-range StructuredBuffer read is undefined
+            // and is exactly the shape of a command-buffer fault at launch.
+            //
+            // The VALUES are provably dead: CSMain calls GetBaseHeight(..., detailedHeights: false),
+            // which passes detailedHeights == false down to GetBiomeWeights, and heightSampling.cginc
+            // :167-169 then overwrites w.land with loResBaseHeight (from DerivMap). SampleBaseHeight's
+            // result reaches nothing else, so zero-filled buffers change no output pixel. What has to be
+            // true is that every read is IN BOUNDS, and that is what the four uniforms buy:
+            //   sd / ld    the dummy buffers' own dimensions (4x4 = 16, 9x9 = 81) - the same shapes the
+            //              per-tile path allocates, so the shm sweep Idx(0..3, 0..3, sd) tops out at 15.
+            //   hDim       MapWidth, the stride this path's index was built with
+            //              (Idx(id.x, id.y, terrainSize), terrainSize == MapWidth here). The per-tile
+            //              path passes the sampler's HeightmapDimension because THERE terrainSize is the
+            //              tile vertex count; passing it here would decompose a 0..499,999 index into a
+            //              row of ~3,875 and drive lhm hundreds of elements out of bounds.
+            //   div        (hDim - 1) / 3f, exactly HandleBaseMapSampleParams' formula.
+            // StartupSampleMaxIndices plus its self-test check prove the resulting shm/lhm indices stay
+            // inside 16/81 for every one of the 500,000 sample indices this dispatch can produce.
+            var dummySizes = StartupDummySizes;
+            var shmDummy = new ComputeBuffer(dummySizes.shm, sizeof(float));
+            var lhmDummy = new ComputeBuffer(dummySizes.lhm, sizeof(float));
+            shmDummy.SetData(new float[dummySizes.shm]);
+            lhmDummy.SetData(new float[dummySizes.lhm]);
+            cs.SetBuffer(k, "shm", shmDummy);
+            cs.SetBuffer(k, "lhm", lhmDummy);
+            cs.SetInt("sd", StartupShmDim);
+            cs.SetInt("ld", StartupLhmDim);
+            cs.SetInt("hDim", StartupSampleDim);
+            cs.SetFloat("div", StartupSampleDiv);
+
             // MOBILE: (a) upstream ran the whole 1000x500 map as ONE dispatch of 500,000 threads
             // followed by one GetData - a single Metal command buffer whose execution time iOS's
             // watchdog is free to kill, and it does not care that the work is legitimate. The same
@@ -228,22 +349,22 @@ namespace Monobelisk
             // been written yet (it belongs to the band at the other end of the map).
             var floatHeights = new float[original.Length];
             var bands = Bands(WoodsFile.MapHeight, StartupBands);
-            var watch = System.Diagnostics.Stopwatch.StartNew();
 
             foreach (var band in bands)
             {
                 cs.SetInt("yOffset", band.yStart);
                 cs.Dispatch(k, WoodsFile.MapWidth / 10, band.rows / GroupRowsY, 1);
 
-                int flippedStart = WoodsFile.MapHeight - band.yStart - band.rows;
-                int offset = flippedStart * WoodsFile.MapWidth;
+                int offset = ReadbackStartRow(WoodsFile.MapHeight, band.yStart, band.rows) * WoodsFile.MapWidth;
                 alteredHeights.GetData(floatHeights, offset, offset, band.rows * WoodsFile.MapWidth);
             }
 
-            watch.Stop();
-            // MOBILE: (h) the one-off cost of the whole start-up pass, in Ikram's Player.log.
-            Debug.Log(string.Format("[WoDTerrain] world heightmap {0} ms ({1} bands)",
-                watch.ElapsedMilliseconds, bands.Length));
+            // MOBILE: (M3) the sampler dummies are only read by the dispatches above, and GetData is a
+            // blocking readback, so the last band is complete by the time control gets here.
+            shmDummy.Release();
+            shmDummy.Dispose();
+            lhmDummy.Release();
+            lhmDummy.Dispose();
 
             alteredHeightmapBuffer = Utility.ToBytes(floatHeights);
             woodsFile.Buffer = alteredHeightmapBuffer;
@@ -251,6 +372,11 @@ namespace Monobelisk
             baseHeightmap = new Texture2D(WoodsFile.MapWidth, WoodsFile.MapHeight, TextureFormat.ARGB32, false, true);
             baseHeightmap.SetPixels32(ToBasemap(alteredHeightmapBuffer));
             baseHeightmap.Apply();
+
+            watch.Stop();
+            // MOBILE: (h) the one-off cost of the whole start-up pass, in Ikram's Player.log.
+            Debug.Log(string.Format("[WoDTerrain] world heightmap {0} ms ({1} bands)",
+                watch.ElapsedMilliseconds, bands.Length));
 
             alteredHeights.Release();
             alteredHeights.Dispose();
