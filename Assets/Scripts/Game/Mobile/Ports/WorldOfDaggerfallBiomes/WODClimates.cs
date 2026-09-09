@@ -86,12 +86,14 @@ namespace WorldOfDaggerfall
         /// </summary>
         public const int AtlasMaxSize = 1024;
 
-        // MOBILE: batches this overrider has put on NEW_ARCHIVE. Skipping them is what keeps the
-        // per-update cost near zero: it avoids the parent-component walk, the GetPixel and above all
-        // batch.Apply(), which rebuilds the batch mesh. The batch's own archive is the real invariant
-        // (a swapped batch reports NEW_ARCHIVE, so the archive filter below also excludes it); this set
-        // is the cheap first test and the record that lets RevisedSetMaterial be called with force:false.
-        static readonly HashSet<DaggerfallBillboardBatch> swapped = new HashSet<DaggerfallBillboardBatch>();
+        // MOBILE: there is deliberately no set of already-swapped batches here. Plan Step 2 asked for one,
+        // and the first cut had it, but it could never change control flow: a swapped batch reports
+        // TextureArchive == NEW_ARCHIVE, and the `TextureArchive != NATURE_ARCHIVE` filter below already
+        // skips exactly those batches - for one int compare instead of a hash lookup plus a RemoveWhere
+        // scan per terrain update. The archive filter alone is what makes the swap once-per-batch and what
+        // lets RevisedSetMaterial be called with force:false; the engine putting a batch back on 501
+        // (StreamingWorld.UpdateTerrainNature, DaggerfallLocation.ApplyClimateSettings) is likewise handled
+        // by the filter, since such a batch simply matches again.
 
         // MOBILE: one line per distinct failure, not one per terrain update.
         static readonly HashSet<string> loggedErrors = new HashSet<string>();
@@ -117,6 +119,18 @@ namespace WorldOfDaggerfall
         public static bool MapReadable(Texture2D map)
         {
             return map != null && map.isReadable && map.width > 0;
+        }
+
+        /// <summary>
+        /// MOBILE: pure, so the self-test can pin it. True when a texture exists but cannot be sampled on
+        /// the CPU, and therefore has to go through TextureReplacement.EnsureReadable before it can be fed
+        /// to Texture2D.PackTextures. Archive 10030's records arrive from the Daggerfall Expanded Textures
+        /// bundle, whose textures the pack importer imports with isReadable = false, so this is the normal
+        /// case on device - not an edge case. See CustomBillboardHelper.Readable.
+        /// </summary>
+        public static bool NeedsReadableCopy(Texture2D tex)
+        {
+            return tex != null && !tex.isReadable;
         }
 
         void ApplyOverrides()
@@ -153,10 +167,6 @@ namespace WorldOfDaggerfall
             int mapW = map.width;
             int mapH = map.height;
 
-            // MOBILE: terrain objects are pooled and destroyed as the player travels; drop the dead ones
-            // so the set cannot grow without bound over a long session.
-            swapped.RemoveWhere(b => b == null);
-
             // MOBILE: was FindObjectsOfType<DaggerfallBillboardBatch>() - a full scene scan with an
             // allocation on every terrain update. StreamingWorld parents both kinds of nature batch under
             // StreamingTarget: a terrain's batch hangs off its terrain object (StreamingWorld.cs:1157 +
@@ -171,17 +181,11 @@ namespace WorldOfDaggerfall
             int n = 0;
             foreach (var batch in batches)
             {
-                // MOBILE: already ours - no parent walk, no GetPixel, no Apply().
-                if (batch.TextureArchive == NEW_ARCHIVE && swapped.Contains(batch))
-                    continue;
-
+                // MOBILE: the one filter that matters. It skips non-nature batches, and it skips the ones
+                // already swapped (they report NEW_ARCHIVE) before the parent walk, the GetPixel and above
+                // all batch.Apply(), which rebuilds the batch mesh.
                 if (batch.TextureArchive != NATURE_ARCHIVE)
                     continue;
-
-                // MOBILE: back on the vanilla archive, so the engine laid this terrain's or location's
-                // nature out again (StreamingWorld.UpdateTerrainNature / DaggerfallLocation) and undid
-                // our swap. Forget it, so it is swapped afresh below.
-                swapped.Remove(batch);
 
                 // 1) Try location first
                 int mx = -1, my = -1;
@@ -218,11 +222,15 @@ namespace WorldOfDaggerfall
                 {
                     // MOBILE: force:false. Upstream passed true, so the "already on this archive"
                     // early-out never fired and a new Material was built per batch per update - an
-                    // unbounded leak plus a Shader.Find each time. The material is cached per archive
-                    // in CustomBillboardHelper now, and this set stops Apply() re-running.
-                    CustomBillboardHelper.RevisedSetMaterial(batch, NEW_ARCHIVE, false);
+                    // unbounded leak plus a Shader.Find each time. The material and the atlas are cached
+                    // per archive in CustomBillboardHelper now, and the archive filter above stops
+                    // Apply() re-running.
+                    // MOBILE: and it returns false when the atlas could not be built from readable
+                    // records - then the batch keeps its vanilla nature rather than turning blank, and
+                    // n is not incremented, so the "swapped N" line cannot claim a swap that failed.
+                    if (!CustomBillboardHelper.RevisedSetMaterial(batch, NEW_ARCHIVE, false))
+                        continue;
                     batch.Apply();
-                    swapped.Add(batch);
                     n++;
                 }
             }
@@ -264,23 +272,60 @@ namespace WorldOfDaggerfall
         // needed, and every batch on that archive can share it (sharedMaterial, not material).
         static readonly Dictionary<int, Material> _materialCache = new Dictionary<int, Material>();
 
+        // MOBILE: archives whose atlas could not be built from readable records - warned about once each.
+        static readonly HashSet<int> _warnedUnreadableArchives = new HashSet<int>();
+
+        /// <summary>
+        /// MOBILE: Texture2D.PackTextures needs CPU-readable inputs, and it does not fail loudly when it
+        /// does not get them - it logs "Texture atlas needs textures to have Readable flag set!" and packs
+        /// nothing, so every billboard on the atlas renders blank. This fork already hit that (see the note
+        /// at TextureReplacement.cs:845-851) and fixed the engine's own copy of this routine at
+        /// TextureReader.cs:488. It matters here more than anywhere: archive 10030's records come from the
+        /// Daggerfall Expanded Textures *bundle*, and the pack importer's default rule imports bundle
+        /// textures with isReadable = false (MobileModBuilder.cs), so without this every record is
+        /// unreadable on device and in the simulator alike. Returns null when the texture is missing or
+        /// cannot be made readable, so the caller abandons the swap instead of packing garbage.
+        /// </summary>
+        static Texture2D Readable(Texture2D tex)
+        {
+            if (tex == null)
+                return null;
+            if (!NatureBatchOverrider.NeedsReadableCopy(tex))
+                return tex;
+            Texture2D copy = TextureReplacement.EnsureReadable(tex);
+            return (copy != null && copy.isReadable) ? copy : null;
+        }
+
+        // MOBILE: one line per archive, not one per record per batch.
+        static void WarnUnreadableRecord(int archive, int record, int frame)
+        {
+            if (_warnedUnreadableArchives.Add(archive))
+                Debug.LogError($"[Biomes] archive {archive} record {record} frame {frame} could not be made "
+                             + "CPU-readable; the atlas would pack blank, so the nature swap is skipped");
+        }
+
         /// <summary>
         /// Replacement for DaggerfallBillboardBatch.SetMaterial that supports archives > 511.
+        /// MOBILE: returns true only when the batch was actually put on the new archive. False means the
+        /// batch was left exactly as it was - either it is already on this archive, or the atlas could not
+        /// be built from readable records - so the caller must not call Apply() or count a swap.
         /// </summary>
-        public static void RevisedSetMaterial(DaggerfallBillboardBatch batch, int archive, bool force)
+        public static bool RevisedSetMaterial(DaggerfallBillboardBatch batch, int archive, bool force)
         {
             int cur  = batch.currentArchive;                    // MOBILE: was reflection
-            if (archive == cur && !force) return;
+            if (archive == cur && !force) return false;
 
             // 1) pull down all atlas data
-            RevisedGetTextureResults(
+            // MOBILE: false = the atlas could not be built (unreadable records). Leave the batch alone.
+            if (!RevisedGetTextureResults(
                 archive,
                 out Rect[]       atlasRects,
                 out RecordIndex[] atlasIndices,
                 out int[]        frameCounts,
                 out Vector2[]    recordSizes,
                 out Vector2[]    recordScales,
-                out int          key);
+                out int          key))
+                return false;
 
             // 2) build your material using the freshly‐packed albedo atlas
             // MOBILE: cached per archive - built once, then reused by every batch on that archive.
@@ -324,13 +369,15 @@ namespace WorldOfDaggerfall
             rend.shadowCastingMode = (archive == TextureReader.LightsTextureArchive)
                                      ? ShadowCastingMode.Off
                                      : ShadowCastingMode.TwoSided;
+            return true;                                        // MOBILE
         }
 
         /// <summary>
         /// Packs both vanilla and mod textures into a single atlas, and returns
         /// all the arrays you need plus an integer key.
         /// </summary>
-        public static void RevisedGetTextureResults(
+        /// MOBILE: returns false when the atlas could not be built from readable records.
+        public static bool RevisedGetTextureResults(
             int archive,
             out Rect[]       atlasRects,
             out RecordIndex[] atlasIndices,
@@ -339,6 +386,15 @@ namespace WorldOfDaggerfall
             out Vector2[]    recordScales,
             out int          key)
         {
+            // MOBILE: every out is assigned up front, so the failure returns below are legal and a caller
+            // that ignores the bool gets empty arrays rather than nulls.
+            atlasRects   = new Rect[0];
+            atlasIndices = new RecordIndex[0];
+            frameCounts  = new int[0];
+            recordSizes  = new Vector2[0];
+            recordScales = new Vector2[0];
+            key          = 0;
+
             // if we've already built this archive, replay it directly
             if (_atlasCache.TryGetValue(archive, out var ca))
             {
@@ -349,7 +405,7 @@ namespace WorldOfDaggerfall
                 recordSizes   = ca.sizes;
                 recordScales  = ca.scales;
                 key           = archive;
-                return;
+                return true;
             }
 
             // prepare settings
@@ -422,7 +478,16 @@ namespace WorldOfDaggerfall
                     {
                         settings.frame = f;
                         var r = reader.GetTexture2D(settings, SupportedAlphaTextureFormats.ARGB32, importMode);
-                        albedos.Add(r.albedoMap);
+                        // MOBILE: PackTextures needs readable inputs - see Readable(). This branch reads
+                        // Arena2, which is readable already, but a texture replacement for a vanilla
+                        // archive can still arrive from a bundle, so it goes through the same gate.
+                        Texture2D albedo = Readable(r.albedoMap);
+                        if (albedo == null)
+                        {
+                            WarnUnreadableRecord(archive, rec, f);
+                            return false;
+                        }
+                        albedos.Add(albedo);
                         if (r.normalMap  != null) { normalsList.Add(r.normalMap);   hasNormals = true; }
                         if (r.emissionMap!= null) { emissions.Add(r.emissionMap); hasEmissive= true; }
                     }
@@ -436,7 +501,10 @@ namespace WorldOfDaggerfall
             else
             {
                 // no vanilla archive → load mods
-                ProcessCustomTextures(settings, albedos, normalsList, emissions, indicesList, results);
+                // MOBILE: false = a record could not be made readable. This is the branch archive 10030
+                // takes, so it is the one that actually matters.
+                if (!ProcessCustomTextures(settings, albedos, normalsList, emissions, indicesList, results))
+                    return false;
             }
 
             // pack albedo into _lastAtlas
@@ -461,12 +529,34 @@ namespace WorldOfDaggerfall
                 recordSizes[i] *= 2f;
 
             key          = archive; // or hash all arrays for a unique key
+
+            // MOBILE: _atlasCache was declared and read but never written (upstream never wrote it
+            // either), so every batch rebuilt the whole thing: the 256-record TryImportTexture probe
+            // loop, a fresh 1024x1024 ARGB32-with-mips Texture2D (~5.3 MB) and another PackTextures -
+            // some 49 times on first entry to a subtropical region at TerrainDistance 3, with every
+            // atlas but the first orphaned on the spot and reclaimed only by the 180-second-throttled
+            // Resources.UnloadUnusedAssets. Stored after the x2 size scaling above, so the replay path
+            // (which returns before that loop) serves already-scaled sizes and cannot double-scale.
+            // This is also what finally puts the cached Material beside the atlas its rects came from,
+            // instead of relying on PackTextures being deterministic across rebuilds.
+            _atlasCache[archive] = new CachedAtlas
+            {
+                atlas       = _lastAtlas,
+                rects       = atlasRects,
+                indices     = atlasIndices,
+                frameCounts = frameCounts,
+                sizes       = recordSizes,
+                scales      = recordScales
+            };
+
+            return true;                                        // MOBILE
         }
 
         /// <summary>
         /// Your existing mod‐texture fallback logic, verbatim.
         /// </summary>
-        static void ProcessCustomTextures(
+        /// MOBILE: returns false when a record could not be made CPU-readable.
+        static bool ProcessCustomTextures(
             GetTextureSettings  settings,
             List<Texture2D>     albedoTextures,
             List<Texture2D>     normalTextures,
@@ -486,8 +576,18 @@ namespace WorldOfDaggerfall
                     if (TextureReplacement.TryImportTexture(
                         settings.archive, record, frameCount, out Texture2D modAlbedo))
                     {
-                        modFrames.Add(modAlbedo);
-                        albedoTextures.Add(modAlbedo);
+                        // MOBILE: the load-bearing fix. These come out of the Daggerfall Expanded
+                        // Textures bundle unreadable (TryImportTextureFromMods only logs "Texture
+                        // 10030_x-0 is not readable"), and PackTextures would then pack nothing while
+                        // our own log claimed the swap worked. See Readable().
+                        Texture2D readable = Readable(modAlbedo);
+                        if (readable == null)
+                        {
+                            WarnUnreadableRecord(settings.archive, record, frameCount);
+                            return false;
+                        }
+                        modFrames.Add(readable);
+                        albedoTextures.Add(readable);
                         frameCount++;
                     }
                     else break;
@@ -509,6 +609,8 @@ namespace WorldOfDaggerfall
                     results.atlasFrameCounts.Add (frameCount);
                 }
             }
+
+            return true;                                        // MOBILE
         }
     }
 }

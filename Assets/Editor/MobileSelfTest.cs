@@ -690,6 +690,24 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "Biomes: a missing climate map is not readable");
             Check(WorldOfDaggerfall.NatureBatchOverrider.AtlasMaxSize == 1024,
                 "Biomes: atlas capped at 1024 (32 records of 64x64)");
+            // A script-created texture is always readable, so the positive side of both guards is
+            // constructible headlessly - without it a stub returning false unconditionally would pass.
+            Texture2D scratch = new Texture2D(2, 2);
+            Check(WorldOfDaggerfall.NatureBatchOverrider.MapReadable(scratch),
+                "Biomes: a readable climate map is accepted");
+            // The archive-10030 records arrive from the Daggerfall Expanded Textures bundle with
+            // isReadable false, and Texture2D.PackTextures packs nothing from unreadable inputs while
+            // logging only a warning - so "does this need EnsureReadable first" is the test that stands
+            // between a green swap log and 32 blank palms.
+            Texture2D unreadable = new Texture2D(2, 2);
+            unreadable.Apply(false, true);      // makeNoLongerReadable - what isReadable:false yields at runtime
+            Check(WorldOfDaggerfall.NatureBatchOverrider.NeedsReadableCopy(unreadable),
+                "Biomes: a non-readable atlas record needs an EnsureReadable copy before packing");
+            UnityEngine.Object.DestroyImmediate(unreadable);
+            Check(!WorldOfDaggerfall.NatureBatchOverrider.NeedsReadableCopy(scratch)
+                  && !WorldOfDaggerfall.NatureBatchOverrider.NeedsReadableCopy(null),
+                "Biomes: a readable record is packed as-is and a missing one is not a copy candidate");
+            UnityEngine.Object.DestroyImmediate(scratch);
         }
 
         // The Dynamic Skies mod's procedural skybox shader ships compiled into the app with its
