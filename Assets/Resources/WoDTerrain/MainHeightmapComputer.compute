@@ -1,0 +1,31 @@
+// MOBILE PORT - github.com/drcarademono/wod-terrain @ 9aeb1bcc5de5343ccb7a6b09062559ad871e9d40, Assets/Shaders/MainHeightmapComputer.compute; compiled into the app (Resources.Load), no licence header upstream, private draft only.
+#pragma kernel CSMain
+
+float newHeight;
+float terrainSize;
+float2 terrainPosition;
+Texture2D BiomeMap;
+Texture2D DerivMap;
+SamplerState bm_linear_clamp_sampler;
+SamplerState bm_point_clamp_sampler;
+SamplerState dm_linear_clamp_sampler;
+
+#include "noises.cginc"
+#include "noiseParams.cginc"
+#include "heightSampling.cginc"
+
+RWStructuredBuffer<float> Result;
+
+[numthreads(10,5,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    int i = id.x + (499 - id.y) * 1000;
+
+    int2 uid = id.xy + int2(1, 0);
+
+    float extraHeight, bumps;
+    float baseHeight = GetBaseHeight(float2(uid), extraHeight, bumps, false);
+
+    float h = saturate(baseHeight + extraHeight);
+    Result[i] = h;
+}

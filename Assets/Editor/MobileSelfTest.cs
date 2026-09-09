@@ -126,6 +126,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestMobileShadersFind();
             TestWODBiomesPort();
             TestBiomesClimateKey();
+            TestWoDTerrainPort();
             TestDynamicSkiesShader();
             TestDynamicSkiesPresetTextures();
             TestModConflictOrder();
@@ -750,6 +751,46 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "Biomes: Daggerfall is not a Hammerfell mountain region");
             Check(!WorldOfDaggerfall.WODTerrainMaterialProvider.IsHammerfellRegion(null),
                 "Biomes: a missing region name is not a Hammerfell mountain region (no GPS, no throw)");
+        }
+
+        // World of Daggerfall - Terrain: the GPU terrain sampler, compiled in with its compute shaders
+        // in Assets/Resources/WoDTerrain. These pin the parts of the port that are pure logic or pure
+        // asset presence - the corrections that cannot be judged by eye on a screenshot.
+        //
+        //   LocationBufferSize   the shader writes locationHeightData[i] for every i < locationCount,
+        //                        and locationCount is bounded by the 33x33 = 1089 map-pixel search
+        //                        window; upstream sized the buffer 289. Out-of-range UAV writes are
+        //                        silently dropped on D3D11 and UNDEFINED on Metal, so this constant is
+        //                        what stands between the port and a command-buffer fault on device.
+        //   Available            the mod has no CPU fallback generator of any kind. Without compute
+        //                        support, or without both compute shaders loaded WITH their kernels,
+        //                        Init must leave DaggerfallUnity.TerrainSampler alone rather than
+        //                        install a sampler that can only produce garbage.
+        //   Bands                upstream generates the world heightmap in one 500,000-thread dispatch,
+        //                        which iOS's command-buffer execution limit can kill. Task 4 dispatches
+        //                        it in row bands; this pins the split - every row covered exactly once,
+        //                        including when the band count does not divide the height.
+        //   Resources.Load       the shaders ship in the app, not in the bundle, so the folder layout
+        //                        Init loads through is itself the thing to verify.
+        static void TestWoDTerrainPort()
+        {
+            Check(Monobelisk.TerrainComputer.LocationBufferSize == 1089, "WoDTerrain: location buffer matches the shader's [1089] arrays (OOB write fix)");
+            Check(Monobelisk.InterestingTerrains.Available(true, true) && !Monobelisk.InterestingTerrains.Available(false, true) && !Monobelisk.InterestingTerrains.Available(true, false),
+                "WoDTerrain: needs compute support and both compute shaders");
+            var bands = Monobelisk.TerrainComputer.Bands(500, 10);
+            int rows = 0; foreach (var b in bands) rows += b.rows;
+            Check(bands.Length == 10 && rows == 500 && bands[0].yStart == 0 && bands[9].yStart == 450, "WoDTerrain: start-up dispatch splits 500 rows into 10 bands");
+            var odd = Monobelisk.TerrainComputer.Bands(500, 7); int r2 = 0; foreach (var b in odd) r2 += b.rows;
+            Check(r2 == 500, "WoDTerrain: uneven band split still covers every row");
+            // A .compute that fails to compile still loads as a NON-NULL asset carrying no kernels, so
+            // a null check alone would pass on a broken shader. HasKernel is the compile evidence.
+            ComputeShader terrainCS = Resources.Load<ComputeShader>("WoDTerrain/TerrainComputer");
+            ComputeShader mainCS = Resources.Load<ComputeShader>("WoDTerrain/MainHeightmapComputer");
+            Check(terrainCS != null && mainCS != null
+                  && terrainCS.HasKernel("TerrainComputer") && terrainCS.HasKernel("TilemapComputer") && mainCS.HasKernel("CSMain"),
+                "WoDTerrain: compute shaders are in Resources and compiled with their three kernels");
+            Check(System.Attribute.GetCustomAttributes(typeof(Monobelisk.InterestingTerrains).GetMethod("Init"), typeof(DaggerfallWorkshop.Game.Utility.ModSupport.Invoke), false).Length == 0,
+                "WoDTerrain: no [Invoke] survives");
         }
 
         // The Dynamic Skies mod's procedural skybox shader ships compiled into the app with its
