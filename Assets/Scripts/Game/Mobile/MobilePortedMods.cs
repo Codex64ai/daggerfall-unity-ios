@@ -288,8 +288,10 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// Is Daggerfall Expanded Textures installed and switched on? WoD's manifest declares it as a
         /// dependency by the name "daggerfall expanded textures", and DFU resolves a dependency name
         /// against Mod.FileName - CheckModDependencies -> GetModFromName -> ModManager.FileNameMatches,
-        /// an ordinal Equals. This asks the same question through the same comparison, so this gate and
-        /// DFU's own dependency warning can never disagree about whether the dependency is satisfied.
+        /// an ordinal comparison in which '-' and ' ' are the same character (see there). This asks the
+        /// same question through the same comparison, so this gate and DFU's own dependency warning can
+        /// never disagree about whether the dependency is satisfied - and DET's own name has a space in
+        /// it already, so the hyphen tolerance does not change the answer here either way.
         /// DET ships as the converted bundle "daggerfall expanded textures.dfmod"; the title inside the
         /// bundle differs, so the file name is the only thing worth matching on.
         /// </summary>

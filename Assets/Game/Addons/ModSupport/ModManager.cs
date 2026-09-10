@@ -1285,11 +1285,43 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
         /// reached one, which took out dependency checking (every frame the MODS window was open)
         /// and conflict reordering. A mod with no file simply never matches a name.
         ///
+        /// MOBILE: '-' and ' ' are the SAME character here. A dependency names the file it needs
+        /// (CheckModDependencies -> GetModFromName -> here), and a mod author writes that name the way
+        /// the mod is titled while whoever packages the bundle writes it the way a file is named.
+        /// DREAM - SKY's manifest depends on `dynamic skies`; the port ships that data as
+        /// `dynamic-skies.dfmod`, so FileName is `dynamic-skies`, and an ordinal Equals made DFU's
+        /// launcher warn that the pair "might not work" for the whole of every session - while the sky
+        /// worked perfectly, because MobilePortedMods starts it directly and never asks DFU's
+        /// dependency machinery. Space and hyphen are interchangeable in every file name on both
+        /// platforms this ships to and neither carries meaning in a mod name, so treating them as
+        /// equal costs nothing and cannot collide: `dynamicskies` still does not match, because the
+        /// separator has to be PRESENT, only not spelled a particular way.
+        ///
+        /// Everything else stays ordinal - case included ("DREAMTEXTURES" is not "dreamtextures") -
+        /// and it is still null-safe both ways.
+        ///
         /// Public and static so the headless self test can exercise it; nothing else should need it.
         /// </summary>
         public static bool FileNameMatches(Mod mod, string name)
         {
-            return mod != null && mod.FileName != null && name != null && mod.FileName.Equals(name, StringComparison.Ordinal);
+            if (mod == null || mod.FileName == null || name == null)
+                return false;
+
+            string fileName = mod.FileName;
+            if (fileName.Length != name.Length)
+                return false;
+
+            for (int i = 0; i < fileName.Length; i++)
+            {
+                char a = fileName[i];
+                char b = name[i];
+                if (a == b)
+                    continue;
+                if ((a == '-' || a == ' ') && (b == '-' || b == ' '))
+                    continue;
+                return false;
+            }
+            return true;
         }
 
         internal Mod GetModFromName(string name)

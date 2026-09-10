@@ -255,7 +255,9 @@ never runs, and deleting it removes every byte the feature added.
 Its one requirement is Daggerfall Expanded Textures (Ninelan; already in the pack, see above), which
 supplies archive 10030 - the manifest declares it as a non-optional peer at 1.2.0, and it is detected
 the same way WoD's is: DFU's own ordinal, case-SENSITIVE match against the bundle file name
-`daggerfall expanded textures.dfmod`. With that mod off or missing, `World of Daggerfall - Biomes` is
+`daggerfall expanded textures.dfmod` (`ModManager.FileNameMatches`, in which '-' and ' ' are the same
+character since 2026-09-10 - see UPSTREAM-PATCHES.md - so a hyphenated copy of that name resolves too,
+and nothing else about the comparison moved). With that mod off or missing, `World of Daggerfall - Biomes` is
 switched off at start-up: the switch is simply off the next time MODS is opened and `Player.log`
 records why (`[PortedMods] World of Daggerfall - Biomes off: Daggerfall Expanded Textures is not
 enabled`). `BiomesDetNote` is appended to the entry's description as well, but that is best-effort and
@@ -547,8 +549,10 @@ game is loaded, and it is the reason the port could not simply copy the file. Th
 **three `UNITY_DECLARE_TEX2DARRAY` arrays** instead, one per season, each packed with all four biome
 tilesets' 56 records as slices (`slice = biome * 56 + record`, 224 slices of 64², built from DFU's
 own `TextureReader.GetTerrainTextureArray` so texture-replacement packs are still honoured, packed
-with 224 `Graphics.CopyTexture` slice blits at world entry, or `Graphics.ConvertTexture` blits
-when the four sources' formats differ - see below). **~15 MB** instead of ~270. The atlas
+with 224 `Graphics.CopyTexture` slice blits at world entry, or resampling blits through a render
+target when a source's size, mip chain or format is not the destination's - see below). **~15 MB**
+instead of ~270, and **~15 MB whatever the player has installed**: the destination slice size is a
+constant of the port (`TileSliceSize` 64, `TileSliceMipCount` 7), not the sources' own. The atlas
 cell origin, the 32-texel gutter offset and the atlas-normalised gradients are gone; the tiling
 maths, the slope blend, the snow caps, the woodland dirt, the tree specks, the beacons, the skirt,
 the near-terrain cutout `discard` and the `alpha:fade` transparent queue are upstream's, unchanged.
@@ -697,19 +701,47 @@ paid on every entry: the arrays are packed once and kept, so it reads a real num
 world entry of a session and 0 on every one after it. The refusal and failure lines are
 `[DistantTerrain] not available: <reason>` (the gate: shader unresolved or unsupported, a missing
 CSV, a missing deriv map, or no scene at world entry), `[DistantTerrain] far terrain failed: <ex>`
-(the build threw and was torn down) and `[DistantTerrain] tileset arrays mismatch: ...` - four
-independently-imported source arrays whose SIZE or mip count cannot share one destination, or three
-PACKED arrays whose seasons disagree in size with each other (the shader derives one mip dimension
-from the summer array and applies it to all three), vanilla being always 64x64 with matching mip
-counts, so either only bites under an asymmetric replacement pack. FORMAT is deliberately not a
-refusal: World of Daggerfall - Biomes installs a `TextureArray` terrain material provider and
-`GetTerrainTextureArray` then hands back RGBA32 for one climate variant of a season and ARGB32 for
-another, which is legitimate and which the pack converts as it copies (a GPU blit through a
-destination-format `RenderTexture`, destination RGBA32), saying so once per season with
-`[DistantTerrain] tileset arrays blitted: ARGB32 -> RGBA32 (winter, 168 slices)`. Refusing it instead
-stopped the far terrain building at all whenever Biomes was on, which is how the Task 9 simulator run
-found it. A device that reports no copy-texture support at all falls back to the strict same-format
-rule and refuses, as before.
+(the build threw and was torn down) and `[DistantTerrain] tileset arrays mismatch: ...` - a source
+array that did not decode into a usable surface at all (a zero dimension, or no mip level), or a
+device that reports **no GPU texture copy support whatsoever**, where neither pack path can land a
+slice because both end in a `CopyTexture`. Neither the SIZE nor the FORMAT of a source is a refusal
+any more.
+
+**Size stopped being a refusal on 2026-09-10, and that is a fix rather than a relaxation.** The
+twelve `GetTerrainTextureArray` results have per-archive slice sizes as soon as a texture pack
+replaces some terrain archives and not others, which is the ordinary state of a DREAM install:
+Ikram's device log has `tileset 3 is 256x256, tileset 0 is 1024x1024 (summer)` and `tileset 1 is
+1024x1024, tileset 0 is 64x64 (winter)`. The old rule refused the season, `BuildTileArrays` then
+refused the far terrain, and `TearDownFarTerrain` ran - so his Distant Terrain had quietly been doing
+nothing at all for the whole of every session. The destination is now **always** `TileSliceSize`
+(64) square with `TileSliceMipCount` (7) mip levels, and any source that is not already exactly that
+- in size, in mip count, or in format - is **resampled** into it by the same blit that converts
+formats. The far terrain is the horizon, drawn on one 1000x500 world `Terrain` whose tiles are a few
+pixels across on screen, so vanilla resolution is already more than it can show; and a fixed
+destination is what makes the ~15 MB figure a promise rather than a hope, since a 1024² pack under
+the old "adopt the sources' size" rule would have been 256 times that. One line per season says what
+happened: `[DistantTerrain] tileset arrays packed: 56 copied, 168 resampled from 1024x1024 ARGB32,
+256x256 RGBA32 (summer)`.
+
+FORMAT was already not a refusal, for the same kind of reason: World of Daggerfall - Biomes installs
+a `TextureArray` terrain material provider and `GetTerrainTextureArray` then hands back RGBA32 for
+one climate variant of a season and ARGB32 for another, which is legitimate and which the pack
+converts as it copies (a GPU blit through a destination-format `RenderTexture`, destination RGBA32).
+Refusing it instead stopped the far terrain building at all whenever Biomes was on, which is how the
+Task 9 simulator run found it. The sources' own format is still kept when all four agree - vanilla's
+ARGB32, which makes the whole pack plain slice copies - with one exception: a **compressed** agreed
+format that also has to be resampled falls back to RGBA32, because the scratch surface a resample
+goes through is a `RenderTexture` of the destination format and no driver renders into ASTC or DXT.
+That is exactly what an iOS-converted DREAM pack ships, so the alternative would be a surface that
+cannot be created and a refused season.
+
+The cross-season check remains, over the three PACKED arrays: the shader derives one mip dimension
+from the summer array and applies it to all three, so they have to agree in size and mip count with
+each other. All three are now built at the same constants, which makes it an invariant assertion
+rather than a gate - it is kept so that a later edit making the destination shape per-season is
+caught rather than shipped. `BuildTileArrays` also checks that the packed chain really is the
+64-slice chain (`tileset arrays mip chain: packed N levels, a 64x64 slice is 7`), non-fatally,
+because the uniform is pushed from the array itself and a short chain still samples inside it.
 
 **And `Graphics.ConvertTexture` does not work on array slices at all.** It returns `false` for a
 genuine ARGB32 -> RGBA32 slice conversion even while `SystemInfo.copyTextureSupport` reports
@@ -720,21 +752,32 @@ reading: **`Graphics.ConvertTexture does not support a Texture2DArray as source.
 precondition, not a driver answer, which is exactly why no `copyTextureSupport` bit predicts it and
 why the same call also returned `false` for the same-format round trip Task 9 fixed.
 `ConvertTexture` is therefore not part of this path at all. The method is chosen per source archive
-by a pure `SlicePackMethod(srcFormat, dstFormat)` - two rows, decided by **format alone**, with
-nothing learned at runtime: **Copy** when the source is already in the destination format
-(`Graphics.CopyTexture`, slice to slice), **Blit** when it is not -
+by a pure `SlicePackMethod(srcW, srcH, srcMips, srcFormat, dstW, dstH, dstMips, dstFormat)` - two
+rows, decided by **shape and format**, with nothing learned at runtime: **Copy** when the source
+slice already *is* a destination slice - same size, same mip chain, same format, which is what
+vanilla's 64² ARGB32 tilesets take, all 672 of them (`Graphics.CopyTexture`, slice to slice) -
+**Blit** for anything else -
 `Graphics.Blit(src, scratch, sourceDepthSlice, 0)` into a `RenderTexture` of the destination
-array's exact graphics format, `GenerateMips()`, then `Graphics.CopyTexture(scratch, 0, dst, slice)`.
-A blit is a *sampler fetch*, so the channel order is decoded on read and re-encoded on write and the
-driver has nothing to refuse. An earlier revision still probed `ConvertTexture` once per session and
+array's exact size and graphics format, `GenerateMips()`, then
+`Graphics.CopyTexture(scratch, 0, dst, slice)`.
+A blit is a *sampler fetch* over a fullscreen quad, which is why it does three jobs in one: the
+channel order is decoded on read and re-encoded on write (so the driver has nothing to refuse), the
+quad **rescales** whatever the source's resolution is into the destination's 64x64 viewport - with
+the sampler's own mip selection doing the box filtering, because the quad's implicit LOD is exactly
+`log2(srcDim / 64)` - and the regenerated chain gives the slice the destination's mip count, which is
+also why mip count is in the `Copy` row: `Graphics.CopyTexture` of a whole element demands the two
+agree on how many levels there are, and the destination's is now a constant. An earlier revision still probed `ConvertTexture` once per session and
 latched the answer, on the theory that a Unity which grew an array-source path should get the cheaper
 call for free; the probe could not succeed on any shipping runtime and it printed a red
 `Graphics.ConvertTexture does not support a Texture2DArray as source` in the console at the first
 world entry of every Biomes session, so it is gone and the `SlicePack` enum no longer has a `Convert`
-member to fall into. The blit path says so once per season, and that line is the one to grep for on a
-Biomes install: `[DistantTerrain] tileset arrays blitted: ARGB32 -> RGBA32 (winter, 168 slices)`. The mip
-chain is regenerated from the converted level 0 rather than carried across, which is the same image -
-the sources' own chains are Unity-generated box filters of the same pixels - and it matters because
+member to fall into. The pack says what it did once per season, and that line is the one to grep for
+on a Biomes or DREAM install: `[DistantTerrain] tileset arrays packed: 56 copied, 168 resampled from
+1024x1024 ARGB32, 256x256 RGBA32 (summer)`. The mip
+chain is regenerated from the converted level 0 rather than carried across, which for a same-size
+source is the same image - the sources' own chains are Unity-generated box filters of the same pixels
+- and for a downsampled one is the only option, since their chains are chains for the wrong
+dimension. It matters because
 the shader picks its tile mip *explicitly* (`UNITY_SAMPLE_TEX2DARRAY_LOD`; array `GRAD` sampling has
 a long-standing seam bug), and an explicit lod past an array's last level is undefined in HLSL rather
 than clamped. That is also why `_TileArrayMipCount` exists: the C# pushes the packed arrays' real mip

@@ -300,8 +300,48 @@ namespace DistantTerrain
         /// </summary>
         public const int SlicesPerBiome = 56;
 
-        /// <summary>Vanilla terrain tiles are 64x64; a replacement pack may be larger (see BuildTileArrays).</summary>
+        /// <summary>
+        /// Vanilla terrain tiles are 64x64. A replacement pack's may be any size, and is resampled
+        /// into <see cref="TileSliceSize"/> - which is this number, for the reason given there.
+        /// </summary>
         public const int VanillaSliceDim = 64;
+
+        /// <summary>
+        /// MOBILE: every slice of every packed array is THIS size, whatever the source tilesets are.
+        ///
+        /// <para>The far terrain is the horizon - the ground beyond DFU's own streamed terrain, drawn
+        /// on one 1000x500 world Terrain whose tiles are a handful of pixels across on screen - so
+        /// vanilla resolution is already more than it can show, and a fixed destination is what keeps
+        /// the promise the port made about memory: three 224-slice arrays of 64^2 with mips is ~15 MB,
+        /// and it stays ~15 MB no matter what the player installs. A 1024^2 pack would be (1024/64)^2
+        /// = 256 times that.</para>
+        ///
+        /// <para>It is also what makes a MIXED set packable at all. Ikram's device log of 2026-09-10
+        /// (DREAM texture packs) shows <c>tileset 3 is 256x256, tileset 0 is 1024x1024 (summer)</c>
+        /// and <c>tileset 1 is 1024x1024, tileset 0 is 64x64 (winter)</c>: the twelve
+        /// GetTerrainTextureArray results have per-archive slice sizes, because a pack replaces some
+        /// archives and not others. Nothing can make two resolutions share slices, so the pack no
+        /// longer tries to adopt the sources' size - it resamples every source into this one (see
+        /// <see cref="SlicePackMethod"/>), which is a Blit, which is a sampler fetch, which scales.</para>
+        /// </summary>
+        public const int TileSliceSize = VanillaSliceDim;
+
+        /// <summary>
+        /// MOBILE: the mip levels a <see cref="TileSliceSize"/> slice carries - 64, 32, 16, 8, 4, 2, 1.
+        /// The packed arrays are allocated with exactly this chain (not the sources'), so the
+        /// <c>_TileArrayMipCount</c> uniform the shader clamps its explicit lod to is a constant of
+        /// the port rather than something a replacement pack decides. <see cref="MipChainLength"/>
+        /// derives it; the self test checks the two agree rather than trusting the literal.
+        /// </summary>
+        public const int TileSliceMipCount = 7;
+
+        /// <summary>Pure: mip levels a square texture of this dimension has, down to 1x1 (64 -> 7).</summary>
+        public static int MipChainLength(int dim)
+        {
+            int levels = 1;
+            while (dim > 1) { dim >>= 1; levels++; }
+            return levels;
+        }
 
         /// <summary>
         /// The slice-index contract the rewritten shader implements (Task 3):
@@ -326,15 +366,26 @@ namespace DistantTerrain
         }
 
         /// <summary>
-        /// Pure: can these tilesets share ONE texture array at all? Size and mip count must match -
-        /// the pack copies or blits slice for slice and cannot rescale, and the shader derives
-        /// one mip LOD from one dimension. FORMAT is deliberately not part of this: the pack converts
-        /// (see PackSeason), because a mixed-format set is a real and legitimate configuration rather
-        /// than a corruption. World of Daggerfall - Biomes installs a TextureArray terrain material
-        /// provider and TextureReader.GetTerrainTextureArray then hands back RGBA32 for one climate
-        /// variant of a season and ARGB32 for another - same size, same layout, different channel
-        /// order - which refusing outright cost the whole far terrain in the Task 9 simulator run.
-        /// A different SIZE still refuses: nothing can make two resolutions share slices.
+        /// Pure: do these texture arrays share one size and one mip chain?
+        ///
+        /// <para>MOBILE: this is NO LONGER a precondition of packing a season. Sources are resampled
+        /// into <see cref="TileSliceSize"/> (see <see cref="SlicePackMethod"/>), so four archives at
+        /// four different resolutions pack perfectly well - refusing them cost Ikram the whole far
+        /// terrain for every session of a DREAM install, silently, which is what the 2026-09-10
+        /// device log caught. What still asks this question is the CROSS-SEASON check in
+        /// <see cref="BuildTileArrays"/>: the shader takes ONE dimension for all three arrays
+        /// (<c>max(_TileArraySummer_TexelSize.z, .w)</c>) and computes the mip LOD for winter and
+        /// rain from it, so the three PACKED arrays have to agree with each other. They are all
+        /// built at TileSliceSize with TileSliceMipCount, so it is an invariant assertion rather
+        /// than a gate - and it stays here so that a later edit which makes the destination size
+        /// per-season is caught rather than shipped.</para>
+        ///
+        /// <para>FORMAT is deliberately not part of it, and never was: World of Daggerfall - Biomes
+        /// installs a TextureArray terrain material provider and TextureReader.GetTerrainTextureArray
+        /// then hands back RGBA32 for one climate variant of a season and ARGB32 for another - same
+        /// size, same layout, different channel order - and the three arrays are sampled
+        /// independently, so a season packed RGBA32 beside one packed in its sources' own format is
+        /// fine. It is the DIMENSION the shader shares.</para>
         /// </summary>
         public static bool TilesetsSameSize(int[] widths, int[] heights, int[] mipCounts, out string detail)
         {
@@ -365,10 +416,49 @@ namespace DistantTerrain
         }
 
         /// <summary>
-        /// Pure: the stricter predicate Graphics.CopyTexture needs - same size, same mip count AND
-        /// the same format. Only the refusal path asks it, for a device whose driver offers no GPU
-        /// texture copy at all (SystemInfo.copyTextureSupport == None): there the converting blit has
-        /// nowhere to land, so a mixed-format set still has to refuse rather than corrupt.
+        /// MOBILE: pure - the ONLY precondition packing a season still has. Not "do the tilesets
+        /// agree" (they need not, they are resampled) but "is each of them a texture at all": four
+        /// parallel arrays of the same length, and every entry a real surface with at least one mip
+        /// level. A zero dimension or a zero-length mip chain is a source that did not decode, and
+        /// blitting from it would write nothing into the slice and leave garbage on the horizon.
+        ///
+        /// <para>This is what replaced the size-equality refusal. Everything the old rule protected
+        /// - CopyTexture's matching-size and matching-mip-count demands - is now decided per slice by
+        /// <see cref="SlicePackMethod"/>, which routes anything that does not match the destination
+        /// exactly through the resampling blit instead of refusing the season.</para>
+        /// </summary>
+        public static bool TilesetsPackable(int[] widths, int[] heights, int[] mipCounts, out string detail)
+        {
+            detail = string.Empty;
+            if (widths == null || heights == null || mipCounts == null ||
+                widths.Length == 0 || heights.Length != widths.Length || mipCounts.Length != widths.Length)
+            {
+                detail = "no tilesets to pack";
+                return false;
+            }
+
+            for (int i = 0; i < widths.Length; i++)
+            {
+                if (widths[i] < 1 || heights[i] < 1)
+                {
+                    detail = string.Format("tileset {0} is {1}x{2}", i, widths[i], heights[i]);
+                    return false;
+                }
+                if (mipCounts[i] < 1)
+                {
+                    detail = string.Format("tileset {0} has {1} mip levels", i, mipCounts[i]);
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /// <summary>
+        /// Pure: the stricter predicate a plain Graphics.CopyTexture of every slice would need - same
+        /// size, same mip count AND the same format across the four sources. Nothing gates on it any
+        /// more; it supplies the DETAIL for the one remaining refusal, a device whose driver offers no
+        /// GPU texture copy at all (SystemInfo.copyTextureSupport == None), where neither path can
+        /// land a slice: the copy path IS a CopyTexture, and the blit path ends in one.
         /// </summary>
         public static bool TilesetsCompatible(int[] widths, int[] heights, int[] formats, int[] mipCounts, out string detail)
         {
@@ -416,7 +506,8 @@ namespace DistantTerrain
         }
 
         /// <summary>
-        /// Pure: the decision every slice of the pack goes through, made by FORMAT ALONE.
+        /// Pure: the decision every slice of the pack goes through, made by SHAPE AND FORMAT - the
+        /// source's size, mip count and format against the destination's, and nothing else.
         ///
         /// <para>MOBILE: <c>Graphics.ConvertTexture(Texture2DArray, int, Texture2DArray, int)</c> is
         /// not an option here. Unity's API does not accept a <c>Texture2DArray</c> as a source at
@@ -428,26 +519,74 @@ namespace DistantTerrain
         /// session and latched the answer; the probe could never succeed and cost a red Unity error
         /// line at the first world entry of every Biomes session, so it is gone.</para>
         ///
-        /// <para>What is left is a two-row table with no runtime input. Same format as the
-        /// destination: <c>Graphics.CopyTexture</c>, a plain slice copy. Different format (Biomes'
-        /// TextureArray provider hands back RGBA32 for one climate variant of a season and ARGB32
-        /// for another, and that mixture used to cost the whole far terrain): sample the source slice
-        /// into a RenderTexture of the DESTINATION format with
-        /// <c>Graphics.Blit(src, rt, sourceDepthSlice, 0)</c> - a texture FETCH, so the channel order
-        /// is decoded by the sampler and re-encoded by the ROP - and copy that back into the slice.
-        /// Nothing refuses that path.</para>
+        /// <para>What is left is a two-row table with no runtime input. <b>Copy</b> when the source
+        /// slice already IS a destination slice - same size, same mip chain, same format:
+        /// <c>Graphics.CopyTexture(src, record, dst, slice)</c>, which is what vanilla's 64^2 ARGB32
+        /// tilesets take, all 672 of them. <b>Blit</b> for anything else: sample the source slice into
+        /// a RenderTexture of the DESTINATION size and format with
+        /// <c>Graphics.Blit(src, rt, sourceDepthSlice, 0)</c> and copy that back into the slice.
+        /// Nothing refuses that path, and it does three jobs at once - a texture FETCH decodes the
+        /// channel order and the ROP re-encodes it (Biomes' RGBA32/ARGB32 mixture), the fullscreen
+        /// quad RESAMPLES (a DREAM pack's 1024^2 or 256^2 tiles into <see cref="TileSliceSize"/>,
+        /// with the sampler's own mip selection doing the box filtering because the quad's implicit
+        /// LOD is exactly log2(srcDim/64)), and the regenerated chain gives the slice the
+        /// destination's mip count.</para>
+        ///
+        /// <para>MOBILE: mip count is in the Copy row for a hard reason, not for symmetry.
+        /// <c>Graphics.CopyTexture(src, srcElement, dst, dstElement)</c> copies a whole element and
+        /// demands the two agree on how many mip levels there are; the destination's chain is now the
+        /// port's own constant <see cref="TileSliceMipCount"/>, so a source array that shipped without
+        /// mips - or with a chain for a different size - has to take the blit, which builds the chain
+        /// it is missing.</para>
         /// </summary>
-        public static SlicePack SlicePackMethod(TextureFormat srcFormat, TextureFormat dstFormat)
+        public static SlicePack SlicePackMethod(int srcWidth, int srcHeight, int srcMipCount, TextureFormat srcFormat,
+                                                int dstWidth, int dstHeight, int dstMipCount, TextureFormat dstFormat)
         {
-            return srcFormat == dstFormat ? SlicePack.Copy : SlicePack.Blit;
+            return srcWidth == dstWidth && srcHeight == dstHeight
+                   && srcMipCount == dstMipCount && srcFormat == dstFormat
+                ? SlicePack.Copy : SlicePack.Blit;
         }
 
         /// <summary>
-        /// MOBILE: the scratch surface the blit fallback converts through - one slice of the
+        /// MOBILE: pure - can <c>Graphics.Blit</c> WRITE into an array of this format, i.e. can a
+        /// RenderTexture carry it? Only the uncompressed colour formats can. It matters because the
+        /// destination format is normally the sources' own when the four agree (see PackSeason), and
+        /// a mod that ships its tilesets as a compressed Texture2DArray - which is exactly what the
+        /// iOS DREAM conversion produces, ASTC - would then give the scratch surface a format no
+        /// driver will render to. When such a set also has to be resampled, the destination falls back
+        /// to RGBA32 rather than failing to create the surface and refusing the season.
+        /// </summary>
+        public static bool CanBlitInto(TextureFormat format)
+        {
+            switch (format)
+            {
+                case TextureFormat.RGBA32:
+                case TextureFormat.ARGB32:
+                case TextureFormat.BGRA32:
+                case TextureFormat.RGB24:
+                case TextureFormat.R8:
+                case TextureFormat.RG16:
+                case TextureFormat.RHalf:
+                case TextureFormat.RGHalf:
+                case TextureFormat.RGBAHalf:
+                case TextureFormat.RFloat:
+                case TextureFormat.RGFloat:
+                case TextureFormat.RGBAFloat:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// MOBILE: the scratch surface the blit converts through - one slice of the
         /// destination array, in the destination's exact graphics format (taken from the array
         /// itself, so gamma/linear colour space is matched rather than guessed) and with the
         /// destination's mip chain, because <c>Graphics.CopyTexture(rt, 0, dst, slice)</c> copies
         /// every mip level of an element and demands the two agree on how many there are.
+        /// Its SIZE is the destination's too - <see cref="TileSliceSize"/> - which is what makes the
+        /// blit a resample: the fullscreen quad reads the source's whole [0,1] UV range into a
+        /// 64x64 viewport whatever the source's resolution is.
         /// Null if the driver cannot create it. Public so the self-test can drive the same path.
         /// </summary>
         public static RenderTexture CreateSliceScratch(Texture2DArray dst)
@@ -480,11 +619,13 @@ namespace DistantTerrain
         }
 
         /// <summary>
-        /// MOBILE: one slice through the scratch surface - blit (converts), regenerate the mip chain
-        /// the blit only wrote level 0 of, copy the whole element into the packed array. The mips are
-        /// box-filtered from the CONVERTED level 0 rather than carried across from the source's own
-        /// chain; the sources' chains are themselves Unity-generated box filters of the same pixels
-        /// (TextureReader builds these arrays with Apply(true)), so this is the same image.
+        /// MOBILE: one slice through the scratch surface - blit (converts AND resamples), regenerate
+        /// the mip chain the blit only wrote level 0 of, copy the whole element into the packed array.
+        /// The mips are box-filtered from the CONVERTED level 0 rather than carried across from the
+        /// source's own chain; for a same-size source the sources' chains are themselves
+        /// Unity-generated box filters of the same pixels (TextureReader builds these arrays with
+        /// Apply(true)), so this is the same image, and for a DOWNSAMPLED source carrying them across
+        /// would not even be possible - they are chains for the wrong dimension.
         /// </summary>
         public static void BlitSlice(Texture2DArray src, int srcSlice, Texture2DArray dst, int dstSlice, RenderTexture scratch)
         {
@@ -557,10 +698,15 @@ namespace DistantTerrain
             }
         }
 
-        /// <summary>Pure: a replacement pack whose tiles are bigger than vanilla scales the arrays by (dim/64)^2.</summary>
-        public static bool SlicesAreOversize(int sliceDim)
+        /// <summary>
+        /// MOBILE: pure - does a source slice of this shape have to be resampled to reach the packed
+        /// array? The question the old <c>SlicesAreOversize</c> asked about the DESTINATION, moved to
+        /// where it now belongs: the destination is always <see cref="TileSliceSize"/>, so a
+        /// replacement pack no longer scales the arrays by (dim/64)^2 - it is scaled down into them.
+        /// </summary>
+        public static bool SliceNeedsResample(int srcWidth, int srcHeight)
         {
-            return sliceDim > VanillaSliceDim;
+            return srcWidth != TileSliceSize || srcHeight != TileSliceSize;
         }
 
         /// <summary>Pure: the first ten map-pixel updates are timed, then every twenty-fifth.</summary>
@@ -622,8 +768,10 @@ namespace DistantTerrain
         /// <summary>
         /// MOBILE: builds the three arrays the rewritten shader samples, replacing the twelve
         /// GetTerrainTilesetTexture atlases. Once per session - nothing about them changes between
-        /// world entries - and false, with the reason logged, when the four tilesets of any season
-        /// cannot share one array.
+        /// world entries - and false, with the reason logged, only when a season's tilesets cannot be
+        /// read at all. Their SIZES no longer decide anything: every array is
+        /// <see cref="TileSliceSize"/> square with <see cref="TileSliceMipCount"/> mip levels and the
+        /// sources are resampled into it.
         /// </summary>
         bool BuildTileArrays()
         {
@@ -649,18 +797,16 @@ namespace DistantTerrain
                 return false;
             }
 
-            // MOBILE: PackSeason only guarantees the FOUR archives within one season agree. The
-            // shader takes one dimension for all three arrays - `sliceDim = max(
+            // MOBILE: the shader takes one dimension for all three arrays - `sliceDim = max(
             // _TileArraySummer_TexelSize.z, _TileArraySummer_TexelSize.w)` in FarTerrainCommon.cginc
             // - and computes the mip LOD for winter and rain from it too, because the snow caps
-            // always sample winter and a snow-free climate always samples summer. A replacement pack
-            // that resizes one season and not another passes all three per-season checks and then
-            // mip-selects two of the three arrays by the wrong dimension: two mip levels off per
-            // doubling, i.e. visible aliasing or blur on exactly those fragments. The `dim` and the
-            // memory line below read summer alone for the same reason. So the three packed arrays
-            // are compared to each other before any of them is bound. Size and mip count only: the
-            // three arrays are sampled independently, so a season packed as RGBA32 next to one packed
-            // in its sources' own format is fine - it is the DIMENSION the shader shares.
+            // always sample winter and a snow-free climate always samples summer. Mip-selecting two
+            // of the three arrays by the wrong dimension is two mip levels off per doubling, i.e.
+            // visible aliasing or blur on exactly those fragments. All three are now built at
+            // TileSliceSize with TileSliceMipCount, so this is an INVARIANT ASSERTION rather than the
+            // gate it used to be - it can only fire if the destination shape is ever made
+            // per-season again. Size and mip count only: the three arrays are sampled independently,
+            // so a season packed as RGBA32 next to one packed in its sources' own format is fine.
             string crossDetail;
             if (!TilesetsSameSize(
                     new[] { tileArraySummer.width, tileArrayWinter.width, tileArrayRain.width },
@@ -677,7 +823,21 @@ namespace DistantTerrain
                 return false;
             }
 
-            int dim = tileArraySummer.width;
+            // MOBILE: and the uniform the shader clamps every explicit tile lod to. The arrays were
+            // allocated with TileSliceMipCount levels, which is the full chain of a TileSliceSize
+            // slice (MipChainLength(64) == 7); a driver that clamped the request would leave the
+            // shader sampling levels that are not there, so the number is checked rather than
+            // assumed. Not fatal - the uniform is pushed from the array itself in SetupGameObjects,
+            // so a short chain still samples inside it - but it is the sort of thing that must not
+            // be silent.
+            int packedMipCount = TileArrayMipCount(tileArraySummer);
+            if (packedMipCount != TileSliceMipCount)
+            {
+                Debug.LogWarning(string.Format(
+                    "[DistantTerrain] tileset arrays mip chain: packed {0} levels, a {1}x{1} slice is {2}",
+                    packedMipCount, TileSliceSize, TileSliceMipCount));
+            }
+
             long bytes = ArrayBytes(tileArraySummer.width, tileArraySummer.height, tileArraySummer.depth,
                              tileArraySummer.mipmapCount, BytesPerPixel(tileArraySummer.format))
                        + ArrayBytes(tileArrayWinter.width, tileArrayWinter.height, tileArrayWinter.depth,
@@ -686,14 +846,9 @@ namespace DistantTerrain
                              tileArrayRain.mipmapCount, BytesPerPixel(tileArrayRain.format));
             long megabytes = bytes / (1024 * 1024);
 
-            if (SlicesAreOversize(dim))
-            {
-                // A replacement pack with larger tiles scales this by (dim/64)^2 - 256x256 tiles are
-                // sixteen times the vanilla footprint, which is the difference between 15 MB and
-                // 240 MB on a phone. Worth a warning even though it is a legitimate configuration.
-                Debug.LogWarning(string.Format("[DistantTerrain] tileset arrays are {0}x{0} slices ({1} MB)", dim, megabytes));
-            }
-
+            // No oversize warning any more: the destination is a constant, so this number is a
+            // constant too (~15 MB) whatever the player has installed. That is the whole point of
+            // TileSliceSize - a 1024^2 replacement pack used to make it 256 times larger.
             if (!arraysMegabytesLogged)
             {
                 Debug.Log(string.Format("[DistantTerrain] arrays {0} MB", megabytes));
@@ -703,15 +858,28 @@ namespace DistantTerrain
         }
 
         /// <summary>
-        /// MOBILE: packs one season's four biome tilesets into a single 224-slice array,
-        /// <c>Graphics.CopyTexture(src, record, dst, biome * SlicesPerBiome + record)</c> - a GPU-side
-        /// blit that needs only CopyTextureSupport.Basic and works on non-readable textures, so this
-        /// is 224 slice copies rather than a GetPixels32 round trip. When the four archives come back
-        /// in different formats (Biomes' TextureArray provider does exactly that) the slices that
-        /// need converting are blitted through a RenderTexture of the destination format instead -
-        /// <c>Graphics.ConvertTexture</c> is not usable here, it takes no Texture2DArray source. See
-        /// <see cref="SlicePackMethod"/>. Returns null (reason logged) if an
-        /// archive does not load or the four cannot share one array.
+        /// MOBILE: packs one season's four biome tilesets into a single 224-slice array of
+        /// <see cref="TileSliceSize"/> slices, <c>Graphics.CopyTexture(src, record, dst,
+        /// biome * SlicesPerBiome + record)</c> - a GPU-side blit that needs only
+        /// CopyTextureSupport.Basic and works on non-readable textures, so this is 224 slice copies
+        /// rather than a GetPixels32 round trip.
+        ///
+        /// <para>The destination's SHAPE is a constant of the port, not something the sources decide,
+        /// and that is the fix of 2026-09-10. The twelve GetTerrainTextureArray results have MIXED
+        /// slice sizes as soon as a texture pack replaces some terrain archives and not others -
+        /// Ikram's DREAM install produced <c>tileset 3 is 256x256, tileset 0 is 1024x1024</c> for
+        /// summer and <c>tileset 1 is 1024x1024, tileset 0 is 64x64</c> for winter - and the old
+        /// same-size precondition refused the season, then <c>BuildTileArrays</c> refused the far
+        /// terrain, so his Distant Terrain had quietly been doing nothing at all. Any source that is
+        /// not already a destination slice (size, mip chain and format) is now RESAMPLED into one
+        /// through a RenderTexture of the destination shape - see <see cref="SlicePackMethod"/> and
+        /// <see cref="BlitSlice"/>. <c>Graphics.ConvertTexture</c> is not usable here at all, it takes
+        /// no Texture2DArray source.</para>
+        ///
+        /// <para>Returns null (reason logged) only if an archive does not load, if a source is not a
+        /// usable surface (<see cref="TilesetsPackable"/>), or if the device has no GPU texture copy
+        /// support whatsoever - both paths end in a CopyTexture, so there is nothing to fall back to.
+        /// </para>
         /// </summary>
         Texture2DArray PackSeason(TextureReader reader, string season, int[] archives)
         {
@@ -739,40 +907,61 @@ namespace DistantTerrain
                     mipCounts[b] = src[b].mipmapCount;
                 }
 
+                string archiveList = string.Join(", ", System.Array.ConvertAll(archives, a => a.ToString()));
+
+                // MOBILE: the ONLY precondition left. Sizes and mip chains are not compared to each
+                // other any more - they are resampled - so all this asks is that every source is a
+                // real surface. See TilesetsPackable.
                 string detail;
-                if (!TilesetsSameSize(widths, heights, mipCounts, out detail))
+                if (!TilesetsPackable(widths, heights, mipCounts, out detail))
                 {
                     Debug.LogWarning(string.Format(
                         "[DistantTerrain] tileset arrays mismatch: {0} ({1}; archives {2})",
-                        detail, season, string.Join(", ", System.Array.ConvertAll(archives, a => a.ToString()))));
+                        detail, season, archiveList));
+                    return null;
+                }
+
+                // MOBILE: both pack paths end in Graphics.CopyTexture - the copy path IS one, and the
+                // blit path copies the scratch surface into the slice - so a device with no GPU
+                // texture copy at all cannot pack a season at any size or format, and refusing is the
+                // only honest answer. This used to be conditional on the formats disagreeing, which
+                // meant an all-same-format set on such a device was copied anyway and the copies
+                // silently did nothing. TilesetsCompatible supplies the detail: what would have had
+                // to be true for plain copies to be enough.
+                if (SystemInfo.copyTextureSupport == UnityEngine.Rendering.CopyTextureSupport.None)
+                {
+                    string strictDetail;
+                    if (TilesetsCompatible(widths, heights, formats, mipCounts, out strictDetail))
+                        strictDetail = "every packed slice needs Graphics.CopyTexture";
+                    Debug.LogWarning(string.Format(
+                        "[DistantTerrain] tileset arrays mismatch: {0} ({1}; archives {2}; this device reports no GPU texture copy support at all)",
+                        strictDetail, season, archiveList));
                     return null;
                 }
 
                 // MOBILE: the four archives of a season may legitimately differ in FORMAT (Biomes'
-                // TextureArray provider - see TilesetsSameSize). A differing slice is converted by a
-                // GPU blit through a RenderTexture of the destination format - it works on
-                // non-readable textures and costs one extra surface, so a mixed set is converted into
-                // one array rather than refused. RGBA32 is the destination when the four disagree -
-                // it is the format the near terrain and the shader already expect, and converting
-                // into one of the two competing layouts would be arbitrary.
+                // TextureArray provider hands back RGBA32 for one climate variant and ARGB32 for
+                // another). The sources' own format is kept when all four agree - that is vanilla's
+                // ARGB32, and keeping it makes the whole pack plain slice copies - and RGBA32 is the
+                // destination when they disagree: it is what the near terrain and the shader already
+                // expect, and converting into one of the two competing layouts would be arbitrary.
+                //
+                // The one extra condition is a compressed agreed format that ALSO has to be
+                // resampled: the scratch surface is a RenderTexture of the destination format, and no
+                // driver renders into ASTC/DXT - which is exactly what an iOS-converted DREAM pack
+                // ships. RGBA32 then, rather than a surface that cannot be created and a refused
+                // season. A compressed set that needs NO resampling still keeps its format, because
+                // that path never touches a render target.
                 bool formatsAgree = TilesetFormatsAgree(formats);
-                if (!formatsAgree && SystemInfo.copyTextureSupport == UnityEngine.Rendering.CopyTextureSupport.None)
-                {
-                    // No GPU texture copy of any kind on this device - which takes the converting
-                    // blit AND the RenderTexture fallback with it, because the fallback still has to
-                    // CopyTexture the scratch surface back into the slice. Back to the strict rule,
-                    // which refuses.
-                    string strictDetail;
-                    TilesetsCompatible(widths, heights, formats, mipCounts, out strictDetail);
-                    Debug.LogWarning(string.Format(
-                        "[DistantTerrain] tileset arrays mismatch: {0} ({1}; archives {2}; no format-converting blit on this device)",
-                        strictDetail, season, string.Join(", ", System.Array.ConvertAll(archives, a => a.ToString()))));
-                    return null;
-                }
-                TextureFormat dstFormat = formatsAgree ? src[0].format : TextureFormat.RGBA32;
+                bool anyResample = false;
+                for (int b = 0; b < archives.Length; b++)
+                    if (SliceNeedsResample(widths[b], heights[b])) anyResample = true;
+                TextureFormat dstFormat =
+                    formatsAgree && (!anyResample || CanBlitInto(src[0].format))
+                        ? src[0].format : TextureFormat.RGBA32;
 
-                Texture2DArray dst = new Texture2DArray(widths[0], heights[0], archives.Length * SlicesPerBiome,
-                    dstFormat, mipCounts[0], false);
+                Texture2DArray dst = new Texture2DArray(TileSliceSize, TileSliceSize, archives.Length * SlicesPerBiome,
+                    dstFormat, TileSliceMipCount, false);
                 // Match what the sources and DFU's own near-terrain array carry: Point filtering (the
                 // MaterialReader setting upstream applied to all twelve atlases, FilterMode.Point by
                 // default - a new Texture2DArray would otherwise be Bilinear and blur the tiles),
@@ -783,32 +972,39 @@ namespace DistantTerrain
                 dst.wrapMode = TextureWrapMode.Repeat;
                 dst.anisoLevel = src[0].anisoLevel;
 
-                // MOBILE: copy-or-blit is decided per ARCHIVE, not per season, and the decision
-                // itself is the pure SlicePackMethod above - by format alone, with nothing learned at
-                // runtime. `formatsAgree` is false as soon as ONE of the four disagrees, and the code
-                // before Task 10 then sent all four - including the ones already in the destination's
-                // format - through Graphics.ConvertTexture, which refused the whole far terrain under
-                // Biomes with the self-contradictory line "could not convert archive 3 record 0 from
-                // RGBA32 to RGBA32". ConvertTexture is not part of this path at all any more: Unity's
-                // API does not accept a Texture2DArray as a source, so probing it could only ever
-                // print a red Unity error and fall through. A source already in the destination
-                // format is a plain slice copy; one that differs is blitted through a RenderTexture
-                // of the destination format.
+                // MOBILE: copy-or-resample is decided per ARCHIVE, not per season, and the decision
+                // itself is the pure SlicePackMethod above - the source's shape and format against
+                // the destination's, with nothing learned at runtime. An archive that already is a
+                // destination slice is a plain GPU slice copy (vanilla: all four, all 224 slices);
+                // anything else - a different channel order, a 1024^2 or 256^2 replacement, an array
+                // that shipped without mips - goes through the scratch surface, which converts and
+                // rescales in the same fetch.
+                //
+                // Neither the size nor the format of a source can refuse a season any more. Before
+                // Task 10 a mixed-FORMAT set was sent through Graphics.ConvertTexture, which refused
+                // the far terrain under Biomes with the self-contradictory line "could not convert
+                // archive 3 record 0 from RGBA32 to RGBA32"; before 2026-09-10 a mixed-SIZE set (a
+                // DREAM install) was refused outright. ConvertTexture is not part of this path at all
+                // any more: Unity's API does not accept a Texture2DArray as a source, so probing it
+                // could only ever print a red Unity error and fall through.
                 RenderTexture scratch = null;
-                List<string> blittedFrom = new List<string>();
-                int blittedSlices = 0;
+                List<string> resampledFrom = new List<string>();
+                int copiedSlices = 0;
+                int resampledSlices = 0;
                 try
                 {
                     for (int b = 0; b < archives.Length; b++)
                     {
-                        SlicePack method = SlicePackMethod(src[b].format, dstFormat);
-                        string sourceFormatName = src[b].format.ToString();
+                        SlicePack method = SlicePackMethod(src[b].width, src[b].height, src[b].mipmapCount, src[b].format,
+                                                           dst.width, dst.height, dst.mipmapCount, dstFormat);
+                        string sourceShape = string.Format("{0}x{1} {2}", src[b].width, src[b].height, src[b].format);
                         for (int record = 0; record < SlicesPerBiome; record++)
                         {
                             int slice = SliceIndex(b, record);
                             if (method == SlicePack.Copy)
                             {
                                 Graphics.CopyTexture(src[b], record, dst, slice);
+                                copiedSlices++;
                                 continue;
                             }
 
@@ -817,22 +1013,21 @@ namespace DistantTerrain
                                 scratch = CreateSliceScratch(dst);
                                 if (scratch == null)
                                 {
-                                    // Nowhere to convert THROUGH. Refuse the season rather than bind
+                                    // Nowhere to resample THROUGH. Refuse the season rather than bind
                                     // an array with holes in it - a half-packed array draws garbage.
                                     Debug.LogWarning(string.Format(
-                                        "[DistantTerrain] tileset arrays mismatch: could not convert archive {0} record {1} " +
-                                        "from {2} to {3} ({4}; archives {5}; no {6} render target for the fallback blit)",
-                                        archives[b], record, (TextureFormat)formats[b], dstFormat, season,
-                                        string.Join(", ", System.Array.ConvertAll(archives, a => a.ToString())),
-                                        dst.graphicsFormat));
+                                        "[DistantTerrain] tileset arrays mismatch: could not resample archive {0} record {1} " +
+                                        "from {2} to {3}x{3} {4} ({5}; archives {6}; no {7} render target for the blit)",
+                                        archives[b], record, sourceShape, TileSliceSize, dstFormat, season,
+                                        archiveList, dst.graphicsFormat));
                                     Destroy(dst);
                                     return null;
                                 }
                             }
 
                             BlitSlice(src[b], record, dst, slice, scratch);
-                            blittedSlices++;
-                            if (!blittedFrom.Contains(sourceFormatName)) blittedFrom.Add(sourceFormatName);
+                            resampledSlices++;
+                            if (!resampledFrom.Contains(sourceShape)) resampledFrom.Add(sourceShape);
                         }
                     }
                 }
@@ -841,11 +1036,13 @@ namespace DistantTerrain
                     DestroySliceScratch(scratch);
                 }
 
-                if (blittedSlices > 0)
-                {
-                    Debug.Log(string.Format("[DistantTerrain] tileset arrays blitted: {0} -> {1} ({2}, {3} slices)",
-                        string.Join(", ", blittedFrom.ToArray()), dstFormat, season, blittedSlices));
-                }
+                // One line per season, always - "nothing needed resampling" is as much of an answer
+                // as "168 slices did", and on a mixed install the shapes it names are the evidence
+                // that the pack the player installed is what reached the horizon.
+                Debug.Log(string.Format("[DistantTerrain] tileset arrays packed: {0} copied, {1} resampled{2} ({3})",
+                    copiedSlices, resampledSlices,
+                    resampledSlices > 0 ? " from " + string.Join(", ", resampledFrom.ToArray()) : string.Empty,
+                    season));
 
                 return dst;
             }

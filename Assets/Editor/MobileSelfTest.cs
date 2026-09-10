@@ -1301,6 +1301,74 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
             UnityEngine.Object.DestroyImmediate(src);
             UnityEngine.Object.DestroyImmediate(dst);
+
+            // ...and the same path DOWNSAMPLING, which is what the 2026-09-10 fix asks of it: the
+            // destination is always TileSliceSize, so a replacement pack's 1024^2 or 256^2 slices
+            // reach it through this blit rather than being refused. Only a driver can get this
+            // wrong - the scale, the slice indices under a scale, and whether the mip chain of the
+            // RESAMPLED level 0 is generated at all - so it is driven for real, 4x down.
+            const int bigDim = dim * 4;
+            Texture2DArray big = new Texture2DArray(bigDim, bigDim, 2, TextureFormat.ARGB32, true, false);
+            for (int slice = 0; slice < 2; slice++)
+            {
+                Color32[] px = new Color32[bigDim * bigDim];
+                for (int y = 0; y < bigDim; y++)
+                    for (int x = 0; x < bigDim; x++)
+                        // Left half / right half, told apart in RED and BLUE so a flip or a transpose
+                        // survives the scale, and flat within each half so the answer does not depend
+                        // on which mip level the sampler picks for a 4x reduction.
+                        px[y * bigDim + x] = slice == 0
+                            ? new Color32(96, 96, 96, 255)
+                            : (x < bigDim / 2 ? new Color32(96, 160, 224, 255) : new Color32(224, 160, 96, 255));
+                big.SetPixels32(px, slice, 0);
+            }
+            big.Apply(true);
+
+            Texture2DArray packed = new Texture2DArray(dim, dim, 2, TextureFormat.RGBA32, true, false);
+            // Slice 0 gets a sentinel so "the blit wrote only the slice it was given" is a check
+            // against a known value rather than against whatever an uninitialised slice holds.
+            Color32[] sentinel = new Color32[dim * dim];
+            for (int i = 0; i < sentinel.Length; i++) sentinel[i] = new Color32(128, 128, 128, 255);
+            packed.SetPixels32(sentinel, 0, 0);
+            packed.Apply(true);
+
+            RenderTexture downScratch = global::DistantTerrain.DistantTerrain.CreateSliceScratch(packed);
+            Check(downScratch != null && downScratch.width == dim && downScratch.height == dim,
+                "DistantTerrain: the scratch surface is the DESTINATION's size, not the source's - which is what makes the blit a resample",
+                downScratch == null ? "CreateSliceScratch returned null" : downScratch.width + "x" + downScratch.height);
+            if (downScratch != null)
+            {
+                // Source slice 1 (the two-tone one) into destination slice 1, 4x down.
+                global::DistantTerrain.DistantTerrain.BlitSlice(big, 1, packed, 1, downScratch);
+                global::DistantTerrain.DistantTerrain.DestroySliceScratch(downScratch);
+
+                Color32[] down = ReadArraySlice(packed, 1, 0, dim);
+                Check(down != null, "DistantTerrain: the resampled slice can be read back off the GPU");
+                if (down != null)
+                {
+                    Check(NearColor(down[0], 96, 160, 224)
+                          && NearColor(down[dim - 1], 224, 160, 96)
+                          && NearColor(down[(dim - 1) * dim], 96, 160, 224),
+                        "DistantTerrain: a 32x32 source slice resamples into an 8x8 destination slice with the right slice, orientation and channel order",
+                        down[0] + " / " + down[dim - 1] + " / " + down[(dim - 1) * dim]);
+                }
+                // The chain the shader samples at an explicit lod. A downsampled slice cannot carry
+                // the source's own mips across - they are a chain for the wrong dimension - so
+                // GenerateMips on the resampled level 0 is the only thing that fills it.
+                Color32[] downMip = ReadArraySlice(packed, 1, 1, dim / 2);
+                Check(downMip != null && NearColor(downMip[0], 96, 160, 224),
+                    "DistantTerrain: the resampled slice's mip chain is generated from the resampled level 0, not carried across",
+                    downMip == null ? "mip 1 unreadable" : downMip[0].ToString());
+                // ...and the sentinel slice is untouched: a resample that spilled across elements
+                // would be a garbage horizon, and it is the kind of thing only a driver decides.
+                Color32[] untouched = ReadArraySlice(packed, 0, 0, dim);
+                Check(untouched != null && NearColor(untouched[0], 128, 128, 128),
+                    "DistantTerrain: the resample writes only the destination slice it was given",
+                    untouched == null ? "slice 0 unreadable" : untouched[0].ToString());
+            }
+
+            UnityEngine.Object.DestroyImmediate(big);
+            UnityEngine.Object.DestroyImmediate(packed);
         }
 
         /// <summary>Reads one mip level of one Texture2DArray slice back through a RenderTexture.</summary>
@@ -1388,25 +1456,68 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   < global::DistantTerrain.DistantTerrainPort.DefaultBlendEnd,
                 "DistantTerrain: the fade band is never inverted (blendStart < blendEnd)");
 
-            // The packing precondition. Graphics.ConvertTexture blits slice for slice and cannot
-            // rescale, so size and mip count must match; FORMAT must not, because World of Daggerfall
-            // - Biomes legitimately hands back RGBA32 for one climate variant of a season and ARGB32
+            // The destination shape, which is now a CONSTANT of the port rather than something the
+            // source tilesets decide. Ikram's DREAM install (device log 2026-09-10) had per-archive
+            // slice sizes - 1024x1024 beside 256x256 beside vanilla 64x64 - and the old same-size
+            // precondition refused the season and with it the whole far terrain, silently, for every
+            // session. Every packed slice is TileSliceSize with the full mip chain of that size.
+            Check(global::DistantTerrain.DistantTerrain.TileSliceSize == 64
+                  && global::DistantTerrain.DistantTerrain.TileSliceSize == global::DistantTerrain.DistantTerrain.VanillaSliceDim,
+                "DistantTerrain: the packed slices are always 64x64 - vanilla resolution, which is all the horizon can show",
+                global::DistantTerrain.DistantTerrain.TileSliceSize.ToString());
+            Check(global::DistantTerrain.DistantTerrain.MipChainLength(64) == 7
+                  && global::DistantTerrain.DistantTerrain.MipChainLength(1) == 1
+                  && global::DistantTerrain.DistantTerrain.MipChainLength(2) == 2
+                  && global::DistantTerrain.DistantTerrain.MipChainLength(256) == 9,
+                "DistantTerrain: MipChainLength counts down to 1x1 (64 -> 7)");
+            Check(global::DistantTerrain.DistantTerrain.TileSliceMipCount
+                      == global::DistantTerrain.DistantTerrain.MipChainLength(global::DistantTerrain.DistantTerrain.TileSliceSize)
+                  && global::DistantTerrain.DistantTerrain.TileSliceMipCount == 7,
+                "DistantTerrain: _TileArrayMipCount is the 64-slice chain, 7 - the constant and the derivation agree",
+                global::DistantTerrain.DistantTerrain.TileSliceMipCount.ToString());
+            Check(global::DistantTerrain.DistantTerrain.SliceNeedsResample(1024, 1024)
+                  && global::DistantTerrain.DistantTerrain.SliceNeedsResample(256, 256)
+                  && global::DistantTerrain.DistantTerrain.SliceNeedsResample(64, 32)
+                  && !global::DistantTerrain.DistantTerrain.SliceNeedsResample(64, 64),
+                "DistantTerrain: a source that is not already 64x64 is resampled, whatever direction it is out by");
+
+            // The packing precondition - all that is left of it. Sizes and mip chains are no longer
+            // compared to each other (they are resampled); the only refusal is a source that is not a
+            // usable surface at all. FORMAT was never part of it, because World of Daggerfall -
+            // Biomes legitimately hands back RGBA32 for one climate variant of a season and ARGB32
             // for another, and refusing that cost the entire far terrain in the Task 9 simulator run.
             string detail;
             int[] w = { 64, 64, 64, 64 }, h = { 64, 64, 64, 64 }, f = { 5, 5, 5, 5 }, m = { 7, 7, 7, 7 };
-            Check(global::DistantTerrain.DistantTerrain.TilesetsSameSize(w, h, m, out detail) && detail == string.Empty,
+            Check(global::DistantTerrain.DistantTerrain.TilesetsPackable(w, h, m, out detail) && detail == string.Empty,
                 "DistantTerrain: four vanilla 64x64 tilesets pack into one array");
-            Check(!global::DistantTerrain.DistantTerrain.TilesetsSameSize(new[] { 64, 128, 64, 64 }, h, m, out detail) && detail.Contains("128"),
-                "DistantTerrain: a resized tileset refuses the pack, naming the size", detail);
+            Check(global::DistantTerrain.DistantTerrain.TilesetsPackable(
+                      new[] { 1024, 1024, 1024, 256 }, new[] { 1024, 1024, 1024, 256 }, new[] { 11, 11, 11, 9 }, out detail),
+                "DistantTerrain: Ikram's DREAM set - 1024x1024 beside 256x256 - packs, it does not refuse", detail);
+            Check(global::DistantTerrain.DistantTerrain.TilesetsPackable(
+                      new[] { 64, 1024, 64, 64 }, new[] { 64, 1024, 64, 64 }, new[] { 7, 11, 7, 7 }, out detail),
+                "DistantTerrain: the winter case (one replaced archive beside three vanilla) packs too", detail);
+            Check(global::DistantTerrain.DistantTerrain.TilesetsPackable(w, h, new[] { 7, 7, 7, 1 }, out detail),
+                "DistantTerrain: a tileset that shipped without a mip chain packs (the blit builds one)", detail);
+            Check(!global::DistantTerrain.DistantTerrain.TilesetsPackable(w, h, new[] { 7, 7, 7, 0 }, out detail)
+                  && detail.Contains("mip"),
+                "DistantTerrain: a tileset with NO mip level at all is not a surface - refused, naming it", detail);
+            Check(!global::DistantTerrain.DistantTerrain.TilesetsPackable(new[] { 64, 0, 64, 64 }, h, m, out detail)
+                  && detail.Contains("0"),
+                "DistantTerrain: a zero-dimension tileset is refused, naming the size", detail);
+            Check(!global::DistantTerrain.DistantTerrain.TilesetsPackable(null, h, m, out detail)
+                  && !global::DistantTerrain.DistantTerrain.TilesetsPackable(w, h, new[] { 7, 7 }, out detail),
+                "DistantTerrain: nothing to pack, or ragged parallel arrays, is not packable");
             Check(global::DistantTerrain.DistantTerrain.TilesetsSameSize(w, h, m, out detail)
                   && !global::DistantTerrain.DistantTerrain.TilesetFormatsAgree(new[] { 5, 5, 10, 5 }),
                 "DistantTerrain: a mixed-format set still packs (it is converted), and is recognised as mixed", detail);
+            Check(!global::DistantTerrain.DistantTerrain.TilesetsSameSize(new[] { 64, 128, 64, 64 }, h, m, out detail) && detail.Contains("128"),
+                "DistantTerrain: TilesetsSameSize still answers the cross-season question, naming the size", detail);
             Check(!global::DistantTerrain.DistantTerrain.TilesetsSameSize(w, h, new[] { 7, 7, 7, 1 }, out detail) && detail.Contains("mip"),
-                "DistantTerrain: a tileset with a different mip chain refuses the pack", detail);
+                "DistantTerrain: ...and a differing mip chain, which is the other half of that invariant", detail);
             Check(!global::DistantTerrain.DistantTerrain.TilesetsSameSize(null, h, m, out detail),
                 "DistantTerrain: nothing to compare is not compatible");
-            // The strict predicate the no-ConvertTexture fallback falls back TO: there a mixed-format
-            // set must still refuse rather than corrupt, exactly as the whole pack did before.
+            // The strict predicate the no-copy-support refusal names in its detail: what would have
+            // had to be true for plain slice copies to be enough.
             Check(global::DistantTerrain.DistantTerrain.TilesetsCompatible(w, h, f, m, out detail) && detail == string.Empty,
                 "DistantTerrain: the strict CopyTexture predicate passes four identical tilesets");
             Check(!global::DistantTerrain.DistantTerrain.TilesetsCompatible(w, h, new[] { 5, 5, 10, 5 }, m, out detail) && detail.Contains("format"),
@@ -1416,24 +1527,39 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && !global::DistantTerrain.DistantTerrain.TilesetFormatsAgree(null),
                 "DistantTerrain: TilesetFormatsAgree decides whether the pack copies or converts");
 
-            // The per-slice decision, whole truth table - now two rows decided by FORMAT ALONE, with
-            // no runtime input. Graphics.ConvertTexture takes no Texture2DArray as a source in this
+            // The per-slice decision, whole truth table - two rows decided by SHAPE AND FORMAT, with
+            // no runtime input: same size + same mip chain + same format is a Copy, ANYTHING ELSE is
+            // a Blit. Graphics.ConvertTexture takes no Texture2DArray as a source in this
             // Unity at all (the simulator console gives Unity's own reason, "Graphics.ConvertTexture
             // does not support a Texture2DArray as source"), so it is not a candidate for either row
-            // and probing it could only ever print a red Unity error: a differing format goes
-            // straight to a Blit through a RenderTexture of the destination format. A source ALREADY
-            // in the destination format is a plain copy - a same-format ConvertTexture was refused
-            // too, and that is what cost the whole far terrain under Biomes before Task 9's fix.
-            Check(global::DistantTerrain.DistantTerrain.SlicePackMethod(TextureFormat.RGBA32, TextureFormat.RGBA32)
+            // and probing it could only ever print a red Unity error. Mip count is in the Copy row
+            // for a hard reason: Graphics.CopyTexture of a whole element demands the two agree on how
+            // many levels there are, and the destination's chain is the port's own constant now.
+            const int dstDim = global::DistantTerrain.DistantTerrain.TileSliceSize;
+            const int dstMips = global::DistantTerrain.DistantTerrain.TileSliceMipCount;
+            Func<int, int, int, TextureFormat, global::DistantTerrain.DistantTerrain.SlicePack> packMethod =
+                (sw, sh, sm, sf) => global::DistantTerrain.DistantTerrain.SlicePackMethod(
+                    sw, sh, sm, sf, dstDim, dstDim, dstMips, TextureFormat.ARGB32);
+            Check(packMethod(dstDim, dstDim, dstMips, TextureFormat.ARGB32)
                       == global::DistantTerrain.DistantTerrain.SlicePack.Copy
-                  && global::DistantTerrain.DistantTerrain.SlicePackMethod(TextureFormat.ARGB32, TextureFormat.ARGB32)
-                      == global::DistantTerrain.DistantTerrain.SlicePack.Copy,
-                "DistantTerrain: a source already in the destination format is copied, whatever that format is");
-            Check(global::DistantTerrain.DistantTerrain.SlicePackMethod(TextureFormat.ARGB32, TextureFormat.RGBA32)
+                  && global::DistantTerrain.DistantTerrain.SlicePackMethod(64, 64, 7, TextureFormat.RGBA32,
+                         64, 64, 7, TextureFormat.RGBA32) == global::DistantTerrain.DistantTerrain.SlicePack.Copy,
+                "DistantTerrain: a source that already IS a destination slice - same size, same mip chain, same format - is copied (vanilla: all 224)");
+            Check(packMethod(dstDim, dstDim, dstMips, TextureFormat.RGBA32)
                       == global::DistantTerrain.DistantTerrain.SlicePack.Blit
-                  && global::DistantTerrain.DistantTerrain.SlicePackMethod(TextureFormat.RGBA32, TextureFormat.ARGB32)
-                      == global::DistantTerrain.DistantTerrain.SlicePack.Blit,
+                  && global::DistantTerrain.DistantTerrain.SlicePackMethod(64, 64, 7, TextureFormat.RGBA32,
+                         64, 64, 7, TextureFormat.ARGB32) == global::DistantTerrain.DistantTerrain.SlicePack.Blit,
                 "DistantTerrain: a differing format is blitted through a RenderTexture, in either direction and on every runtime");
+            Check(packMethod(1024, 1024, 11, TextureFormat.ARGB32)
+                      == global::DistantTerrain.DistantTerrain.SlicePack.Blit
+                  && packMethod(256, 256, 9, TextureFormat.ARGB32)
+                      == global::DistantTerrain.DistantTerrain.SlicePack.Blit
+                  && packMethod(32, 32, 6, TextureFormat.ARGB32)
+                      == global::DistantTerrain.DistantTerrain.SlicePack.Blit,
+                "DistantTerrain: a differing SIZE is resampled by the same blit - which is the DREAM case, and used to refuse the season");
+            Check(packMethod(dstDim, dstDim, 1, TextureFormat.ARGB32)
+                      == global::DistantTerrain.DistantTerrain.SlicePack.Blit,
+                "DistantTerrain: a same-size source with no mip chain is blitted too - CopyTexture would refuse the element, the blit builds the chain");
             // ...and Convert is not merely unreached, it is not expressible: the enum has exactly the
             // two members the two rows produce, so no later edit can revive the probe by accident.
             string[] slicePackNames = System.Enum.GetNames(typeof(global::DistantTerrain.DistantTerrain.SlicePack));
@@ -1454,7 +1580,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "DistantTerrain: _TileArrayMipCount is the packed arrays' mip count, never below 1");
 
             // The memory the port promised: three 224-slice arrays of 64^2 ARGB32 with mips, ~15 MB
-            // against the ~270 MB of twelve 2048^2 atlases the rewrite replaced.
+            // against the ~270 MB of twelve 2048^2 atlases the rewrite replaced - and now a promise
+            // rather than a hope, because the destination shape does not depend on what is installed.
             long oneArray = global::DistantTerrain.DistantTerrain.ArrayBytes(64, 64, 224, 7, 4);
             long three = 3 * oneArray;
             Check(global::DistantTerrain.DistantTerrain.ArrayBytes(64, 64, 224, 1, 4) == 224L * 64 * 64 * 4,
@@ -1466,8 +1593,33 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && global::DistantTerrain.DistantTerrain.BytesPerPixel(TextureFormat.RGB24) == 3
                   && global::DistantTerrain.DistantTerrain.BytesPerPixel(TextureFormat.R8) == 1,
                 "DistantTerrain: uncompressed bytes per texel by format");
-            Check(!global::DistantTerrain.DistantTerrain.SlicesAreOversize(64) && global::DistantTerrain.DistantTerrain.SlicesAreOversize(128),
-                "DistantTerrain: tiles larger than vanilla 64^2 are called out (a pack scales the arrays by (dim/64)^2)");
+            // ...which the arithmetic can state outright: a 1024^2 pack would have been 256 times the
+            // footprint under the old "adopt the sources' size" rule, and is 15 MB under this one.
+            Check(global::DistantTerrain.DistantTerrain.ArrayBytes(1024, 1024, 224, 11, 4) / oneArray >= 250,
+                "DistantTerrain: a 1024^2 destination would have been ~256x the memory - which is why the destination is fixed",
+                (global::DistantTerrain.DistantTerrain.ArrayBytes(1024, 1024, 224, 11, 4) / (1024 * 1024)) + " MB per array");
+            Check(3 * global::DistantTerrain.DistantTerrain.ArrayBytes(
+                      global::DistantTerrain.DistantTerrain.TileSliceSize,
+                      global::DistantTerrain.DistantTerrain.TileSliceSize,
+                      4 * global::DistantTerrain.DistantTerrain.SlicesPerBiome,
+                      global::DistantTerrain.DistantTerrain.TileSliceMipCount, 4) == three,
+                "DistantTerrain: the ~15 MB figure is the constants' own arithmetic, not a separate assumption");
+
+            // The render-target guard on the destination format. The format normally kept is the
+            // sources' own when the four agree - vanilla ARGB32, which makes the pack plain copies -
+            // but the scratch surface a resample goes through is a RenderTexture of that format, and
+            // no driver renders into ASTC or DXT. The iOS DREAM conversion ships exactly that, so a
+            // compressed set that also needs resampling falls back to RGBA32 rather than failing to
+            // create the surface and refusing the season.
+            Check(global::DistantTerrain.DistantTerrain.CanBlitInto(TextureFormat.ARGB32)
+                  && global::DistantTerrain.DistantTerrain.CanBlitInto(TextureFormat.RGBA32)
+                  && global::DistantTerrain.DistantTerrain.CanBlitInto(TextureFormat.RGB24),
+                "DistantTerrain: an uncompressed colour format can be the scratch surface");
+            Check(!global::DistantTerrain.DistantTerrain.CanBlitInto(TextureFormat.ASTC_6x6)
+                  && !global::DistantTerrain.DistantTerrain.CanBlitInto(TextureFormat.DXT1)
+                  && !global::DistantTerrain.DistantTerrain.CanBlitInto(TextureFormat.DXT5)
+                  && !global::DistantTerrain.DistantTerrain.CanBlitInto(TextureFormat.BC7),
+                "DistantTerrain: a compressed format cannot - which is what the iOS DREAM conversion produces");
 
             // Timing cadence: the first ten map-pixel crosses, then every twenty-fifth.
             bool cadence = true;
@@ -1609,14 +1761,37 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(portCode.Contains("BlitSlice(src[b], record, dst, slice, scratch);")
                   && portCode.Contains("SystemInfo.copyTextureSupport == UnityEngine.Rendering.CopyTextureSupport.None"),
                 "DistantTerrain: PackSeason converts formats with a GPU blit and only refuses where no GPU copy exists at all");
-            // ...and the blit is chosen per ARCHIVE. `formatsAgree` is false as soon as one of the
-            // four disagrees; sending the ones already in the destination format through
-            // Graphics.ConvertTexture is a same-format round trip that Metal answers with FALSE, and
-            // that refused the entire far terrain under Biomes ("could not convert archive 3 record 0
-            // from RGBA32 to RGBA32"). A matching source is a plain slice copy.
-            Check(portCode.Contains("SlicePack method = SlicePackMethod(src[b].format, dstFormat);")
+            // The destination shape, in the allocation itself. This is the 2026-09-10 fix: the array
+            // is built at the port's own constants, so no combination of installed packs can change
+            // its size, its mip chain or its memory. It used to be `widths[0], heights[0], ...,
+            // mipCounts[0]` - the FIRST SOURCE's shape - which is why four sources of four shapes had
+            // to be refused, and why Ikram's DREAM install had no far terrain at all.
+            Check(portCode.Contains("new Texture2DArray(TileSliceSize, TileSliceSize, archives.Length * SlicesPerBiome,")
+                  && portCode.Contains("dstFormat, TileSliceMipCount, false);")
+                  && !portCode.Contains("new Texture2DArray(widths[0], heights[0]"),
+                "DistantTerrain: the packed array is allocated at TileSliceSize/TileSliceMipCount, never at a source's shape");
+            Check(MethodBody(portCode, "Texture2DArray PackSeason(TextureReader reader, string season, int[] archives)")
+                      .Contains("TilesetsPackable(widths, heights, mipCounts, out detail)")
+                  && !MethodBody(portCode, "Texture2DArray PackSeason(TextureReader reader, string season, int[] archives)")
+                      .Contains("TilesetsSameSize("),
+                "DistantTerrain: PackSeason's only precondition is TilesetsPackable - the size-equality refusal is gone from the packing path");
+            Check(portCode.Contains("formatsAgree && (!anyResample || CanBlitInto(src[0].format))"),
+                "DistantTerrain: the destination format falls back to RGBA32 when a compressed agreed format would also have to be resampled (an iOS DREAM pack)");
+            Check(portCode.Contains("if (SliceNeedsResample(widths[b], heights[b])) anyResample = true;"),
+                "DistantTerrain: that fallback is decided from the sources' sizes against TileSliceSize, by the pure predicate");
+            // ...and the blit is chosen per ARCHIVE, from the source's whole shape against the
+            // destination's. `formatsAgree` is false as soon as one of the four disagrees; sending the
+            // ones already in the destination format through Graphics.ConvertTexture is a same-format
+            // round trip that Metal answers with FALSE, and that refused the entire far terrain under
+            // Biomes ("could not convert archive 3 record 0 from RGBA32 to RGBA32"). A matching source
+            // is a plain slice copy; a source of any other size, chain or format is resampled.
+            Check(portCode.Contains("SlicePack method = SlicePackMethod(src[b].width, src[b].height, src[b].mipmapCount, src[b].format,")
+                  && portCode.Contains("dst.width, dst.height, dst.mipmapCount, dstFormat);")
                   && portCode.Contains("if (method == SlicePack.Copy)"),
-                "DistantTerrain: copy-or-blit is decided per archive by the pure SlicePackMethod, from the two formats and nothing else, so a source already in the destination format is never sent through a converting path");
+                "DistantTerrain: copy-or-resample is decided per archive by the pure SlicePackMethod, from the two shapes and formats and nothing else, so a source that already is a destination slice is never sent through a converting path");
+            // And the assertion on the uniform the shader clamps its explicit tile lod to.
+            Check(MethodBody(portCode, "bool BuildTileArrays()").Contains("packedMipCount != TileSliceMipCount"),
+                "DistantTerrain: BuildTileArrays checks the packed chain really is the 64-slice chain rather than assuming it");
             // The converting path itself, and the scratch surface it converts through - created
             // lazily on the first slice that needs it, so an all-Copy season allocates no render
             // target at all.
@@ -1681,7 +1856,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "[DistantTerrain] far terrain ready",
                 "[DistantTerrain] far terrain failed: ",
                 "[DistantTerrain] tileset arrays mismatch: ",
-                "[DistantTerrain] tileset arrays blitted: {0} -> {1} ({2}, {3} slices)",
+                "[DistantTerrain] tileset arrays packed: {0} copied, {1} resampled{2} ({3})",
+                "[DistantTerrain] tileset arrays mip chain: packed {0} levels, a {1}x{1} slice is {2}",
                 "[DistantTerrain] far terrain: pos={0:F1},{1:F1},{2:F1} size={3:F1},{4:F1},{5:F1} heightScale={6:F1} ",
                 "layer={7} stackedCamera mask={8} near={9} far={10} depth={11} targetTexture={12} main.far={13} ",
                 "shader={14} supported={15} material={16} renderer={17} drawHeightmap={18} ",
@@ -1700,6 +1876,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && !port.Contains("Graphics.ConvertTexture will not convert array")
                   && !port.Contains("[DistantTerrain] tileset arrays converted:"),
                 "DistantTerrain: no ConvertTexture call, no warning explaining its red error line, and no `tileset arrays converted:` outcome");
+            // ...and the two that the fixed destination retired. `tileset arrays blitted:` named the
+            // format conversion alone, which is now one of three things the same blit does, and
+            // `tileset arrays are NxN slices` warned about a destination that can no longer be
+            // anything but 64x64.
+            Check(!port.Contains("[DistantTerrain] tileset arrays blitted:")
+                  && !port.Contains("[DistantTerrain] tileset arrays are {0}x{0} slices"),
+                "DistantTerrain: the two lines the fixed 64x64 destination retired are gone - one `tileset arrays packed:` per season says what happened instead");
             Check(!port.Contains("[Distant Terrain]") && !startup.Contains("[Distant Terrain]"),
                 "DistantTerrain: one log prefix, so grepping [DistantTerrain] finds every line the port writes");
             // The fifth stage is measured, not just printed: the pack runs near the end of
@@ -2114,6 +2297,41 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(ModManager.FileNameMatches(loaded, "dreamtextures"), "mod lookup: an equal file name matches");
             Check(!ModManager.FileNameMatches(loaded, "DREAMTEXTURES"), "mod lookup: the match stays ordinal, not case folded");
             Check(!ModManager.FileNameMatches(loaded, null), "mod lookup: a real mod does not match a null name");
+            Check(!ModManager.FileNameMatches(loaded, "dreamtexture") && !ModManager.FileNameMatches(loaded, "dreamtexturess"),
+                "mod lookup: a name that is merely close does not match");
+
+            // MOBILE: '-' and ' ' are the same character in a mod file name. DREAM - SKY's manifest
+            // declares `Dependencies: [{ "Name": "dynamic skies" }]` while the port ships that data as
+            // dynamic-skies.dfmod, so FileName is `dynamic-skies` and an ordinal Equals made DFU's
+            // launcher warn that the pair "might not work" for the whole of every session - while the
+            // sky worked perfectly, because MobilePortedMods starts it directly and never asks DFU's
+            // dependency machinery. Both directions, because either side can be the one with the
+            // hyphen: a dependency naming `dynamic skies` against our bundle, or a bundle named with
+            // a space against a dependency written with a hyphen.
+            Mod hyphenated = new Mod();
+            typeof(Mod).GetProperty("FileName").GetSetMethod(true).Invoke(hyphenated, new object[] { "dynamic-skies" });
+            Mod spaced = new Mod();
+            typeof(Mod).GetProperty("FileName").GetSetMethod(true).Invoke(spaced, new object[] { "dynamic skies" });
+            Check(ModManager.FileNameMatches(hyphenated, "dynamic skies"),
+                "mod lookup: dynamic-skies.dfmod satisfies DREAM - SKY's `dynamic skies` dependency");
+            Check(ModManager.FileNameMatches(spaced, "dynamic-skies"),
+                "mod lookup: ...and the other way round, so whichever spelling a bundle ships under resolves");
+            Check(ModManager.FileNameMatches(hyphenated, "dynamic-skies") && ModManager.FileNameMatches(spaced, "dynamic skies"),
+                "mod lookup: the exact spellings still match, both of them");
+            Check(!ModManager.FileNameMatches(hyphenated, "dynamicskies") && !ModManager.FileNameMatches(spaced, "dynamicskies"),
+                "mod lookup: the separator has to be PRESENT - only not spelled a particular way - so `dynamicskies` does not match");
+            Check(!ModManager.FileNameMatches(hyphenated, "dynamic_skies")
+                  && !ModManager.FileNameMatches(hyphenated, "dynamic.skies")
+                  && !ModManager.FileNameMatches(hyphenated, "Dynamic Skies"),
+                "mod lookup: no other character joins the pair, and case is still case");
+
+            // And the DET gate in MobilePortedMods asks the same question about a name that has a
+            // space in it already, so the new tolerance must not have moved that answer.
+            Mod det = new Mod();
+            typeof(Mod).GetProperty("FileName").GetSetMethod(true).Invoke(det, new object[] { "daggerfall expanded textures" });
+            Check(ModManager.FileNameMatches(det, "daggerfall expanded textures")
+                  && !ModManager.FileNameMatches(det, "daggerfall expanded texture"),
+                "mod lookup: the DET gate's own file name still matches exactly and nothing else");
         }
 
         /// <summary>

@@ -191,6 +191,17 @@ every frame the MODS window was open (`CheckDependencies`) and swallowed every c
 (`MobileModConflicts.MoveBelow`), so the player's conflict choices never applied. The comparison is
 now `ModManager.FileNameMatches`, `public static` so the self test can reach it from the editor
 assembly, and a mod with no file never matches.
+**Extended 2026-09-10 (that one method, `+33/-1`):** `'-'` and `' '` are the same character in it.
+A dependency names the file it needs, and a mod author writes that name the way the mod is titled
+while whoever packages the bundle writes it the way a file is named: DREAM - SKY's manifest depends
+on `dynamic skies` while the port ships that data as `dynamic-skies.dfmod`, so the ordinal `Equals`
+never resolved it and DFU's launcher warned that the pair "might not work" for the whole of every
+session - while the sky worked perfectly, because `MobilePortedMods` starts it directly and never
+asks DFU's dependency machinery. Space and hyphen are interchangeable in every file name on both
+platforms this ships to and neither carries meaning in a mod name, so treating them as equal costs
+nothing and cannot collide: the separator still has to be PRESENT, only not spelled a particular way
+(`dynamicskies` does not match `dynamic-skies`), and everything else stays ordinal, case included.
+The comparison is now a length check and a char walk rather than `string.Equals`.
 `FLCPlayer.Load` looked for `.FLC` files only in the Movies folder inside the app bundle before
 falling back to arena2, never consulting `MobileContentPath` the way `VideoReplacement` does — so
 DREAM's 16 HD Daedra summoning animations in `Documents/Movies` were ignored. The folder now goes
@@ -238,11 +249,13 @@ but it is best-effort and the current launcher flow never shows it: the only win
 every launch, so the note is gone again by the next launcher. Do not tell a tester to look for it.
 DET is detected as DFU itself resolves that
 manifest dependency - `CheckModDependencies` -> `GetModFromName` -> `ModManager.FileNameMatches`, an
-ordinal `Equals` against `Mod.FileName` - matching the shipped bundle `daggerfall expanded textures.dfmod`,
-never the title inside it. That comparison is ordinal, so case-SENSITIVE, because DFU's own dependency
-check is: the bundle has to be named `daggerfall expanded textures.dfmod` exactly, and a hand-installed
+ordinal comparison against `Mod.FileName` - matching the shipped bundle `daggerfall expanded textures.dfmod`,
+never the title inside it. That comparison is case-SENSITIVE, because DFU's own dependency
+check is: the bundle has to be named `daggerfall expanded textures.dfmod` exactly (up to hyphens for
+spaces, since 2026-09-10 - see above), and a hand-installed
 copy under any other casing switches WoD off - with the log line, not a visible note - while DFU logs
-its own "Failed to retrieve mod" warning - self-consistent, and the two never disagree.
+its own "Failed to retrieve mod" warning - self-consistent, and the two never disagree, since both go
+through the same `FileNameMatches`.
 Then `LocationModLoader.Init` runs when the loader is on, and
 `WODRocksMaterials.Init` after it only when that `Init` actually returned and DET is on; when the loader
 was on but its `Init` threw, WoD is left unstarted with a log line and its setting untouched - a runtime
