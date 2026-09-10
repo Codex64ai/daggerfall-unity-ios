@@ -806,6 +806,27 @@ namespace DaggerfallWorkshop.Utility
 
         #region Private Methods
 
+        // MOBILE: not upstream. Both model loops logged one error line PER RECORD for a model id
+        // Daggerfall has no mesh for, which was invisible while AddProps still threw its NRE and lost
+        // the block whole. With that fixed, one visit to a World of Daggerfall dock produced 190 red
+        // error lines: its WorldData override blocks ALCHAS00.RMB and ALCHBS01.RMB place 20 model ids
+        // from carademono's RMB Resource Pack, one of the three optional WoD dependencies this build
+        // deliberately does not ship (THIRD-PARTY.md :178), and WoD puts those blocks at many map
+        // pixels. Severity is left alone - a record really is being dropped - but the id is reported
+        // ONCE per session, naming the first block that wanted it, so the log stays readable and a
+        // genuinely new missing model is still visible in it.
+        static readonly HashSet<uint> reportedMissingModels = new HashSet<uint>();
+
+        private static void ReportMissingModel(uint modelID, string blockName)
+        {
+            if (!reportedMissingModels.Add(modelID))
+                return;
+
+            Debug.LogError($"Could not load model '{modelID}' in block '{blockName}'"
+                + " - every record using it is skipped for the rest of this session"
+                + " (a model pack this build does not ship is the usual reason)");
+        }
+
         private static void AddModels(
             DaggerfallUnity dfUnity,
             int layoutX,
@@ -852,7 +873,7 @@ namespace DaggerfallWorkshop.Utility
                     if (!(go = MeshReplacement.ImportCustomGameobject(obj.ModelIdNum, parent, modelMatrix)))
                     {
                         if (!hasModelData) {
-                            Debug.LogError($"Could not load model '{obj.ModelIdNum}' in block '{blockData.Name}'");
+                            ReportMissingModel(obj.ModelIdNum, blockData.Name);   // MOBILE: deduplicated
                             continue;
                         } else if (combiner == null || IsCityGate(obj.ModelIdNum) || IsBulletinBoard(obj.ModelIdNum) || PlayerActivate.HasCustomActivation(obj.ModelIdNum)) {
                             AddStandaloneModel(dfUnity, ref modelData, modelMatrix, parent);
@@ -945,7 +966,7 @@ namespace DaggerfallWorkshop.Utility
                 // MOBILE: not upstream - see the comment above.
                 if (!hasModelData)
                 {
-                    Debug.LogError($"Could not load model '{obj.ModelIdNum}' in block '{blockData.Name}'");
+                    ReportMissingModel(obj.ModelIdNum, blockData.Name);   // MOBILE: deduplicated
                     continue;
                 }
 

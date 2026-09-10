@@ -117,9 +117,32 @@ namespace Monobelisk
             UnityEngine.Object.DontDestroyOnLoad(go);
             instance = go.AddComponent<InterestingTerrains>();
 
-            GameManager.Instance.StreamingWorld.TerrainScale = 1f;
+            // MOBILE: (R4) everything from here on runs with the GPU sampler ALREADY LIVE - Awake
+            // replaced DaggerfallUnity.TerrainSampler and hooked OnPromoteTerrainData synchronously
+            // inside AddComponent above. So a throw in these two statements (GameManager.Instance
+            // .StreamingWorld is a getter that THROWS when it cannot find the component, and
+            // ModMessageHandler.Init is not guaranteed not to) leaves Installed false and the caller
+            // logging "did not start" over a world whose terrain this port is generating - at
+            // TerrainScale 1.5 instead of 1, and deaf to mod messages. A rollback is not attempted
+            // here: undoing Awake means putting back a sampler, unhooking an event, un-readying the
+            // mod and choosing what the far clip plane should revert to, which is a change to the
+            // install path rather than a guard on it (deferred, terrain-evidence ledger D2). What is
+            // fixed is the log lying about it: the state is named, once, before the exception carries
+            // on to the caller that reports the failed start.
+            try
+            {
+                GameManager.Instance.StreamingWorld.TerrainScale = 1f;
 
-            ModMessageHandler.Init();
+                ModMessageHandler.Init();
+            }
+            catch (System.Exception)
+            {
+                Debug.LogError("[WoDTerrain] start-up failed AFTER the GPU terrain sampler was "
+                    + "installed - the terrain in this session is this port's, but TerrainScale and "
+                    + "the mod-message handler were not set up. Restart with the entry off if the "
+                    + "terrain looks wrong.");
+                throw;
+            }
 
             // MOBILE: ConsoleHandler.RegisterConsoleCommands() removed - dev console commands not shipped.
 
