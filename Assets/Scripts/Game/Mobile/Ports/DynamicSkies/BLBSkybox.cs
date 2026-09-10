@@ -57,6 +57,15 @@ public class BLBSkybox : MonoBehaviour
     private float skyFadeEnd = -0.04f;
     private float stepSize = 0.03f;
     private Camera stackedCam;
+    // MOBILE: Init decides between the player camera and Distant Terrain's stacked camera ONCE, and
+    // its poll gives up after a bounded wait. If the far terrain then arrives late, the player-camera
+    // branch keeps forcing playerCam.clearFlags = Skybox every frame below, which clears over the
+    // stacked camera (depth 2 against main's 3) and hides the far terrain for the rest of the session
+    // with nothing in the log to say so. So LateUpdate looks again - once a second, and only while
+    // the port says it is running - and switches branch if the camera has turned up.
+    private int lateStackedProbeFrames;
+    private bool lateStackedCamLogged;
+    private const int lateStackedProbeInterval = 60;   // ~1 Hz: a GameObject.Find is not free
     //Snow settings
     public static Material SnowMaterial;
     public static float minParticleSize = 0.002f;
@@ -376,6 +385,7 @@ public void Update()
     //Force skybox flag to prevent Distant Terrain from overriding it again in it's Update function
     void LateUpdate() {
         if(playerCam == null) return;   // MOBILE: Init bailed or threw - do not log an NRE every frame
+        RebindLateStackedCamera();      // MOBILE: see the field comment - a far terrain that arrives after Init
         if(!GameManager.Instance.PlayerEnterExit.IsPlayerInside) {
             if(playerCam.clearFlags != UnityEngine.CameraClearFlags.Skybox && stackedCam == null) {
                 playerCam.clearFlags = UnityEngine.CameraClearFlags.Skybox;
@@ -389,6 +399,33 @@ public void Update()
             } else if(stackedCam != null) {
                 stackedCam.clearFlags = UnityEngine.CameraClearFlags.Skybox;
             }
+        }
+    }
+
+    /// <summary>
+    /// MOBILE: the belt-and-braces half of the stacked-camera decision Init makes once. Init polls for
+    /// "stackedCamera" for a bounded number of passes and, if it never appears, takes the player-camera
+    /// branch permanently: cameraClearExterior = Skybox and a per-frame playerCam.clearFlags = Skybox.
+    /// A far terrain built after that point is then invisible for the session, silently - the far
+    /// terrain's own log still says it is ready. Both conditions here are cheap and the Find is
+    /// throttled to ~1 Hz, so the cost while Distant Terrain is off (Running false) is one bool test.
+    /// </summary>
+    private void RebindLateStackedCamera() {
+        if(stackedCam != null || !DistantTerrain.DistantTerrainPort.Running) return;
+        if(++lateStackedProbeFrames < lateStackedProbeInterval) return;
+        lateStackedProbeFrames = 0;
+        GameObject goCam = GameObject.Find("stackedCamera");
+        if(goCam == null) return;
+        stackedCam = goCam.GetComponent<Camera>();
+        if(stackedCam == null) return;
+        // Put back what the player-camera branch changed: CameraClearManager's exterior value is Depth
+        // by default and Distant Terrain's SetUpCameras writes Depth on the main camera, so the two
+        // agree again once the stacked branch owns the sky.
+        CameraClearManager ccm = playerCam.GetComponent<CameraClearManager>();
+        if(ccm != null) ccm.cameraClearExterior = CameraClearFlags.Depth;
+        if(!lateStackedCamLogged) {
+            lateStackedCamLogged = true;
+            Debug.Log("[DynamicSkies] clear flags on: stackedCamera (late)");
         }
     }
 

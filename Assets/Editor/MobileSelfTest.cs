@@ -1230,20 +1230,33 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   < global::DistantTerrain.DistantTerrainPort.DefaultBlendEnd,
                 "DistantTerrain: the fade band is never inverted (blendStart < blendEnd)");
 
-            // The packing precondition: Graphics.CopyTexture needs identical size, format and mip
-            // count, and a texture-replacement pack can break that for one archive and not another.
+            // The packing precondition. Graphics.ConvertTexture blits slice for slice and cannot
+            // rescale, so size and mip count must match; FORMAT must not, because World of Daggerfall
+            // - Biomes legitimately hands back RGBA32 for one climate variant of a season and ARGB32
+            // for another, and refusing that cost the entire far terrain in the Task 9 simulator run.
             string detail;
             int[] w = { 64, 64, 64, 64 }, h = { 64, 64, 64, 64 }, f = { 5, 5, 5, 5 }, m = { 7, 7, 7, 7 };
-            Check(global::DistantTerrain.DistantTerrain.TilesetsCompatible(w, h, f, m, out detail) && detail == string.Empty,
-                "DistantTerrain: four vanilla 64x64 ARGB32 tilesets pack into one array");
-            Check(!global::DistantTerrain.DistantTerrain.TilesetsCompatible(new[] { 64, 128, 64, 64 }, h, f, m, out detail) && detail.Contains("128"),
+            Check(global::DistantTerrain.DistantTerrain.TilesetsSameSize(w, h, m, out detail) && detail == string.Empty,
+                "DistantTerrain: four vanilla 64x64 tilesets pack into one array");
+            Check(!global::DistantTerrain.DistantTerrain.TilesetsSameSize(new[] { 64, 128, 64, 64 }, h, m, out detail) && detail.Contains("128"),
                 "DistantTerrain: a resized tileset refuses the pack, naming the size", detail);
-            Check(!global::DistantTerrain.DistantTerrain.TilesetsCompatible(w, h, new[] { 5, 5, 10, 5 }, m, out detail) && detail.Contains("format"),
-                "DistantTerrain: a recompressed tileset refuses the pack, naming the format", detail);
-            Check(!global::DistantTerrain.DistantTerrain.TilesetsCompatible(w, h, f, new[] { 7, 7, 7, 1 }, out detail) && detail.Contains("mip"),
+            Check(global::DistantTerrain.DistantTerrain.TilesetsSameSize(w, h, m, out detail)
+                  && !global::DistantTerrain.DistantTerrain.TilesetFormatsAgree(new[] { 5, 5, 10, 5 }),
+                "DistantTerrain: a mixed-format set still packs (it is converted), and is recognised as mixed", detail);
+            Check(!global::DistantTerrain.DistantTerrain.TilesetsSameSize(w, h, new[] { 7, 7, 7, 1 }, out detail) && detail.Contains("mip"),
                 "DistantTerrain: a tileset with a different mip chain refuses the pack", detail);
-            Check(!global::DistantTerrain.DistantTerrain.TilesetsCompatible(null, h, f, m, out detail),
+            Check(!global::DistantTerrain.DistantTerrain.TilesetsSameSize(null, h, m, out detail),
                 "DistantTerrain: nothing to compare is not compatible");
+            // The strict predicate the no-ConvertTexture fallback falls back TO: there a mixed-format
+            // set must still refuse rather than corrupt, exactly as the whole pack did before.
+            Check(global::DistantTerrain.DistantTerrain.TilesetsCompatible(w, h, f, m, out detail) && detail == string.Empty,
+                "DistantTerrain: the strict CopyTexture predicate passes four identical tilesets");
+            Check(!global::DistantTerrain.DistantTerrain.TilesetsCompatible(w, h, new[] { 5, 5, 10, 5 }, m, out detail) && detail.Contains("format"),
+                "DistantTerrain: the strict CopyTexture predicate refuses a recompressed tileset, naming the format", detail);
+            Check(global::DistantTerrain.DistantTerrain.TilesetFormatsAgree(f)
+                  && !global::DistantTerrain.DistantTerrain.TilesetFormatsAgree(new[] { 5, 4 })
+                  && !global::DistantTerrain.DistantTerrain.TilesetFormatsAgree(null),
+                "DistantTerrain: TilesetFormatsAgree decides whether the pack copies or converts");
 
             // The memory the port promised: three 224-slice arrays of 64^2 ARGB32 with mips, ~15 MB
             // against the ~270 MB of twelve 2048^2 atlases the rewrite replaced.
@@ -1311,7 +1324,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "DistantTerrain: _SlicesPerBiome is pushed from the same constant SliceIndex uses");
             Check(!portCode.Contains("_TileAtlasTex") && !portCode.Contains("GetTerrainTilesetTexture"),
                 "DistantTerrain: the twelve atlas binds and the calls that built them are gone");
-            Check(port.Contains("Graphics.CopyTexture(src[b], record, dst, SliceIndex(b, record))"),
+            Check(port.Contains("int slice = SliceIndex(b, record);")
+                  && port.Contains("Graphics.CopyTexture(src[b], record, dst, slice)"),
                 "DistantTerrain: the pack is a GPU slice copy at the contract's index");
             Check(port.Contains("dst.wrapMode = TextureWrapMode.Repeat")
                   && port.Contains("dst.filterMode = dfUnity.MaterialReader.MainFilterMode"),
@@ -1377,21 +1391,27 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // and rain from it, because snow caps always sample winter and snow-free climates always
             // sample summer. Fake dimensions, three "seasons", so the rule is exercised without a GPU.
             string seasonDetail;
-            Check(global::DistantTerrain.DistantTerrain.TilesetsCompatible(
-                      new[] { 64, 64, 64 }, new[] { 64, 64, 64 }, new[] { 5, 5, 5 }, new[] { 7, 7, 7 }, out seasonDetail),
+            Check(global::DistantTerrain.DistantTerrain.TilesetsSameSize(
+                      new[] { 64, 64, 64 }, new[] { 64, 64, 64 }, new[] { 7, 7, 7 }, out seasonDetail),
                 "DistantTerrain: three identical packed arrays pass the cross-season check");
-            Check(!global::DistantTerrain.DistantTerrain.TilesetsCompatible(
-                      new[] { 64, 128, 64 }, new[] { 64, 128, 64 }, new[] { 5, 5, 5 }, new[] { 7, 8, 7 }, out seasonDetail)
+            Check(!global::DistantTerrain.DistantTerrain.TilesetsSameSize(
+                      new[] { 64, 128, 64 }, new[] { 64, 128, 64 }, new[] { 7, 8, 7 }, out seasonDetail)
                   && seasonDetail.Contains("128"),
                 "DistantTerrain: a winter array packed at 128 while summer is 64 is refused, and the detail names the size",
                 seasonDetail);
-            Check(!global::DistantTerrain.DistantTerrain.TilesetsCompatible(
-                      new[] { 64, 64, 64 }, new[] { 64, 64, 64 }, new[] { 5, 5, 5 }, new[] { 7, 7, 1 }, out seasonDetail)
+            Check(!global::DistantTerrain.DistantTerrain.TilesetsSameSize(
+                      new[] { 64, 64, 64 }, new[] { 64, 64, 64 }, new[] { 7, 7, 1 }, out seasonDetail)
                   && seasonDetail.Contains("mip"),
                 "DistantTerrain: a rain array with no mip chain while summer has seven is refused",
                 seasonDetail);
             Check(portCode.Contains("tileArraySummer.width, tileArrayWinter.width, tileArrayRain.width"),
                 "DistantTerrain: BuildTileArrays runs that check across the three PACKED arrays, not only within each season");
+            // ...and only across the three DIMENSIONS. The seasons are sampled from independent
+            // arrays, so one packed RGBA32 beside one packed in its sources' own format is fine;
+            // making format part of the cross-season rule would refuse a legitimate Biomes set twice.
+            Check(portCode.Contains("Graphics.ConvertTexture(src[b], record, dst, slice)")
+                  && portCode.Contains("SystemInfo.copyTextureSupport == UnityEngine.Rendering.CopyTextureSupport.None"),
+                "DistantTerrain: PackSeason converts formats with a GPU blit and only refuses where no blit exists");
 
             // The beacons. Upstream shipped HighlightLocations true with RuntimeVisible false (baked
             // but hidden behind the End key); this port drops the hotkey, so the master switch is the
@@ -1406,17 +1426,43 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && global::DistantTerrain.DistantTerrainPort.HighlightLocationsFrom(true, true)
                   && !global::DistantTerrain.DistantTerrainPort.HighlightLocationsFrom(true, false),
                 "DistantTerrain: only a settings file the player has on disk can turn the beacons on (all four cases)");
+            // MOBILE: and the ordering that makes that gate mean anything. ModSettingsData.LoadLocalValues
+            // creates the directory and Save()s a modsettings.json when the player has none, so the FIRST
+            // mod.GetSettings() in Init brings the file into existence - probe after it and the answer is
+            // always true and the beacons are always on. Init makes nine GetSettings() calls; the probe
+            // has to precede all of them, which is a statement about the ORDER of two lines and nothing a
+            // runtime check can see. So: source text, over the body of Init alone.
+            int initAt = startupCode.IndexOf("public static void Init(InitParams initParams)", StringComparison.Ordinal);
+            int initEnd = initAt >= 0 ? startupCode.IndexOf("\n        }", initAt, StringComparison.Ordinal) : -1;
+            string initBody = initAt >= 0 && initEnd > initAt ? startupCode.Substring(initAt, initEnd - initAt) : "";
+            int probeAt = initBody.IndexOf("UserSettingsFilePresent()", StringComparison.Ordinal);
+            // Init does not call GetSettings( itself - it calls the nine Load*Settings() helpers that
+            // do - so the first settings READ in Init is whichever comes first of the two forms.
+            var firstReadMatch = System.Text.RegularExpressions.Regex.Match(
+                initBody, @"GetSettings\(|Load[A-Za-z]*Settings\(");
+            int firstSettingsReadAt = firstReadMatch.Success ? firstReadMatch.Index : -1;
+            Check(initBody.Length > 0 && probeAt >= 0 && firstSettingsReadAt >= 0
+                  && probeAt < firstSettingsReadAt,
+                "DistantTerrain: Init probes for the player's settings file BEFORE the first settings read (which would create the file)",
+                initBody.Length == 0 ? "could not isolate the Init body"
+                    : "probe at " + probeAt + ", first settings read ("
+                      + (firstReadMatch.Success ? firstReadMatch.Value : "none") + ") at " + firstSettingsReadAt
+                      + " (body " + initBody.Length + " chars)");
 
             // The log literals. These are the lines Task 8 documents, Task 9 greps for in the
             // simulator run and the device hand-off asks for; a reworded one is a broken contract.
             foreach (string literal in new[]
             {
-                "[DistantTerrain] far terrain built in {0} ms (heightmap {1} ms, carve {2} ms, lifts {3} ms, tilemap {4} ms, arrays {5} ms)",
+                "[DistantTerrain] far terrain built in {0} ms (heightmap {1} ms, carve {2} ms, lifts {3} ms, tilemap {4} ms, arrays {5} ms, other {6} ms)",
                 "[DistantTerrain] map-pixel update {0} ms",
                 "[DistantTerrain] arrays {0} MB",
                 "[DistantTerrain] far terrain ready",
                 "[DistantTerrain] far terrain failed: ",
                 "[DistantTerrain] tileset arrays mismatch: ",
+                "[DistantTerrain] tileset arrays converted: {0} -> {1} ({2})",
+                "[DistantTerrain] far terrain: pos={0:F1},{1:F1},{2:F1} size={3:F1},{4:F1},{5:F1} heightScale={6:F1} ",
+                "layer={7} stackedCamera mask={8} near={9} far={10} depth={11} targetTexture={12} main.far={13} ",
+                "shader={14} supported={15} material={16} renderer={17} drawHeightmap={18}",
             })
                 Check(port.Contains(literal), "DistantTerrain: log literal \"" + literal + "\"");
             Check(startup.Contains("[DistantTerrain] not available: "),
@@ -1430,6 +1476,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(portCode.Contains("lastArraysMs = arraysWatch.Elapsed.TotalMilliseconds")
                   && portCode.Contains("bool arraysBuilt = BuildTileArrays();"),
                 "DistantTerrain: the arrays stage is timed around BuildTileArrays, not inferred");
+            // And the sixth field is the residue, not a sixth stopwatch: total minus the five, so an
+            // unmeasured cost (the TerrainData allocation, the reparent, the camera setup, or
+            // whatever a later edit adds without a stage) shows up instead of vanishing into a total
+            // that no longer adds up. Clamped, so five roundings cannot print a negative.
+            Check(portCode.Contains("if (otherMs < 0) otherMs = 0;")
+                  && portCode.Contains("long otherMs = totalMs - ("),
+                "DistantTerrain: the `other` field is the total minus the five stages, clamped at zero");
         }
 
 
@@ -1641,6 +1694,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(skyboxSrc.Contains("[DynamicSkies] clear flags on: player camera")
                   && skyboxSrc.Contains("[DynamicSkies] clear flags on: stackedCamera"),
                 "DynamicSkies: the branch says which camera the sky's clear flags landed on");
+            // MOBILE: and the third branch, for a far terrain that turns up after Init's bounded poll
+            // gave up. Without it the player-camera branch keeps forcing playerCam.clearFlags = Skybox
+            // every frame, which clears over the stacked camera and hides the far terrain for the rest
+            // of the session with nothing in the log to say so - the failure this line makes visible.
+            Check(skyboxSrc.Contains("[DynamicSkies] clear flags on: stackedCamera (late)")
+                  && skyboxSrc.Contains("DistantTerrain.DistantTerrainPort.Running")
+                  && skyboxSrc.Contains("RebindLateStackedCamera();"),
+                "DynamicSkies: LateUpdate re-binds a stacked camera that arrived after Init gave up, and says so once");
 
             // Start order, from the source: Distant Terrain's Init runs after the Terrain port's and
             // before StartEnabled hands the sky back for its deferred start. Comments are stripped so

@@ -155,6 +155,9 @@ namespace DistantTerrain
         // MOBILE: the memory line is one per session, not one per world entry.
         static bool arraysMegabytesLogged = false;
 
+        // MOBILE: so is the one-shot geometry/camera/material dump beside "far terrain ready".
+        static bool farTerrainDiagnosticLogged = false;
+
         // MOBILE: timing, reported by InitFarTerrain as one line (see the log literals in the port's
         // README section). Written by GenerateWorldTerrain, read immediately afterwards.
         double lastHeightmapMs = 0;
@@ -323,20 +326,21 @@ namespace DistantTerrain
         }
 
         /// <summary>
-        /// Pure: can these four biome tilesets be packed into ONE texture array? Graphics.CopyTexture
-        /// requires identical size, format and mip count, and that is not guaranteed - a texture
-        /// replacement pack (DET and friends) can hand back a different size or a compressed format
-        /// for one archive and not another, through either TextureReplacement.TryImportTextureArray
-        /// or the per-record TryImportTexture fallback. Vanilla is always 64x64 ARGB32 with the same
-        /// mip count, so this only bites under an asymmetric pack - which is exactly the case that
-        /// must refuse rather than corrupt.
+        /// Pure: can these tilesets share ONE texture array at all? Size and mip count must match -
+        /// Graphics.ConvertTexture blits slice for slice and cannot rescale, and the shader derives
+        /// one mip LOD from one dimension. FORMAT is deliberately not part of this: the pack converts
+        /// (see PackSeason), because a mixed-format set is a real and legitimate configuration rather
+        /// than a corruption. World of Daggerfall - Biomes installs a TextureArray terrain material
+        /// provider and TextureReader.GetTerrainTextureArray then hands back RGBA32 for one climate
+        /// variant of a season and ARGB32 for another - same size, same layout, different channel
+        /// order - which refusing outright cost the whole far terrain in the Task 9 simulator run.
+        /// A different SIZE still refuses: nothing can make two resolutions share slices.
         /// </summary>
-        public static bool TilesetsCompatible(int[] widths, int[] heights, int[] formats, int[] mipCounts, out string detail)
+        public static bool TilesetsSameSize(int[] widths, int[] heights, int[] mipCounts, out string detail)
         {
             detail = string.Empty;
-            if (widths == null || heights == null || formats == null || mipCounts == null ||
-                widths.Length == 0 || heights.Length != widths.Length ||
-                formats.Length != widths.Length || mipCounts.Length != widths.Length)
+            if (widths == null || heights == null || mipCounts == null ||
+                widths.Length == 0 || heights.Length != widths.Length || mipCounts.Length != widths.Length)
             {
                 detail = "no tilesets to compare";
                 return false;
@@ -350,12 +354,6 @@ namespace DistantTerrain
                         i, widths[i], heights[i], widths[0], heights[0]);
                     return false;
                 }
-                if (formats[i] != formats[0])
-                {
-                    detail = string.Format("tileset {0} is format {1}, tileset 0 is format {2}",
-                        i, (TextureFormat)formats[i], (TextureFormat)formats[0]);
-                    return false;
-                }
                 if (mipCounts[i] != mipCounts[0])
                 {
                     detail = string.Format("tileset {0} has {1} mip levels, tileset 0 has {2}",
@@ -363,6 +361,42 @@ namespace DistantTerrain
                     return false;
                 }
             }
+            return true;
+        }
+
+        /// <summary>
+        /// Pure: the stricter predicate Graphics.CopyTexture needs - same size, same mip count AND
+        /// the same format. Only the fallback path asks it, for a device whose driver offers no
+        /// format-converting blit (SystemInfo.copyTextureSupport == None): there, a mixed-format set
+        /// still has to refuse rather than corrupt, exactly as it did before ConvertTexture landed.
+        /// </summary>
+        public static bool TilesetsCompatible(int[] widths, int[] heights, int[] formats, int[] mipCounts, out string detail)
+        {
+            if (!TilesetsSameSize(widths, heights, mipCounts, out detail))
+                return false;
+            if (formats == null || formats.Length != widths.Length)
+            {
+                detail = "no tilesets to compare";
+                return false;
+            }
+            for (int i = 1; i < formats.Length; i++)
+            {
+                if (formats[i] != formats[0])
+                {
+                    detail = string.Format("tileset {0} is format {1}, tileset 0 is format {2}",
+                        i, (TextureFormat)formats[i], (TextureFormat)formats[0]);
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /// <summary>Pure: do all these tilesets already carry one format (so no conversion is needed)?</summary>
+        public static bool TilesetFormatsAgree(int[] formats)
+        {
+            if (formats == null || formats.Length == 0) return false;
+            for (int i = 1; i < formats.Length; i++)
+                if (formats[i] != formats[0]) return false;
             return true;
         }
 
@@ -501,12 +535,13 @@ namespace DistantTerrain
             // mip-selects two of the three arrays by the wrong dimension: two mip levels off per
             // doubling, i.e. visible aliasing or blur on exactly those fragments. The `dim` and the
             // memory line below read summer alone for the same reason. So the three packed arrays
-            // are compared to each other before any of them is bound.
+            // are compared to each other before any of them is bound. Size and mip count only: the
+            // three arrays are sampled independently, so a season packed as RGBA32 next to one packed
+            // in its sources' own format is fine - it is the DIMENSION the shader shares.
             string crossDetail;
-            if (!TilesetsCompatible(
+            if (!TilesetsSameSize(
                     new[] { tileArraySummer.width, tileArrayWinter.width, tileArrayRain.width },
                     new[] { tileArraySummer.height, tileArrayWinter.height, tileArrayRain.height },
-                    new[] { (int)tileArraySummer.format, (int)tileArrayWinter.format, (int)tileArrayRain.format },
                     new[] { tileArraySummer.mipmapCount, tileArrayWinter.mipmapCount, tileArrayRain.mipmapCount },
                     out crossDetail))
             {
@@ -548,8 +583,10 @@ namespace DistantTerrain
         /// MOBILE: packs one season's four biome tilesets into a single 224-slice array,
         /// <c>Graphics.CopyTexture(src, record, dst, biome * SlicesPerBiome + record)</c> - a GPU-side
         /// blit that needs only CopyTextureSupport.Basic and works on non-readable textures, so this
-        /// is 224 slice copies rather than a GetPixels32 round trip. Returns null (reason logged) if
-        /// an archive does not load or the four cannot share one array.
+        /// is 224 slice copies rather than a GetPixels32 round trip. When the four archives come back
+        /// in different formats (Biomes' TextureArray provider does exactly that) the same 224 blits
+        /// go through <c>Graphics.ConvertTexture</c> instead, which converts as it copies. Returns
+        /// null (reason logged) if an archive does not load or the four cannot share one array.
         /// </summary>
         Texture2DArray PackSeason(TextureReader reader, string season, int[] archives)
         {
@@ -578,7 +615,7 @@ namespace DistantTerrain
                 }
 
                 string detail;
-                if (!TilesetsCompatible(widths, heights, formats, mipCounts, out detail))
+                if (!TilesetsSameSize(widths, heights, mipCounts, out detail))
                 {
                     Debug.LogWarning(string.Format(
                         "[DistantTerrain] tileset arrays mismatch: {0} ({1}; archives {2})",
@@ -586,8 +623,28 @@ namespace DistantTerrain
                     return null;
                 }
 
+                // MOBILE: the four archives of a season may legitimately differ in FORMAT (Biomes'
+                // TextureArray provider - see TilesetsSameSize). Graphics.ConvertTexture is a
+                // format-converting GPU blit with the same slice-to-slice signature as CopyTexture,
+                // works on non-readable textures, and costs the same 224 blits; so a mixed set is
+                // converted into one array rather than refused. RGBA32 is the destination when the
+                // four disagree - it is the format the near terrain and the shader already expect,
+                // and converting into one of the two competing layouts would be arbitrary.
+                bool formatsAgree = TilesetFormatsAgree(formats);
+                if (!formatsAgree && SystemInfo.copyTextureSupport == UnityEngine.Rendering.CopyTextureSupport.None)
+                {
+                    // No converting blit on this device: back to the strict rule, which refuses.
+                    string strictDetail;
+                    TilesetsCompatible(widths, heights, formats, mipCounts, out strictDetail);
+                    Debug.LogWarning(string.Format(
+                        "[DistantTerrain] tileset arrays mismatch: {0} ({1}; archives {2}; no format-converting blit on this device)",
+                        strictDetail, season, string.Join(", ", System.Array.ConvertAll(archives, a => a.ToString()))));
+                    return null;
+                }
+                TextureFormat dstFormat = formatsAgree ? src[0].format : TextureFormat.RGBA32;
+
                 Texture2DArray dst = new Texture2DArray(widths[0], heights[0], archives.Length * SlicesPerBiome,
-                    src[0].format, mipCounts[0], false);
+                    dstFormat, mipCounts[0], false);
                 // Match what the sources and DFU's own near-terrain array carry: Point filtering (the
                 // MaterialReader setting upstream applied to all twelve atlases, FilterMode.Point by
                 // default - a new Texture2DArray would otherwise be Bilinear and blur the tiles),
@@ -599,8 +656,40 @@ namespace DistantTerrain
                 dst.anisoLevel = src[0].anisoLevel;
 
                 for (int b = 0; b < archives.Length; b++)
+                {
                     for (int record = 0; record < SlicesPerBiome; record++)
-                        Graphics.CopyTexture(src[b], record, dst, SliceIndex(b, record));
+                    {
+                        int slice = SliceIndex(b, record);
+                        if (formatsAgree)
+                        {
+                            Graphics.CopyTexture(src[b], record, dst, slice);
+                        }
+                        else if (!Graphics.ConvertTexture(src[b], record, dst, slice))
+                        {
+                            // The driver refused this pair after all. Refuse the season rather than
+                            // bind an array with holes in it - a half-converted array draws garbage.
+                            Debug.LogWarning(string.Format(
+                                "[DistantTerrain] tileset arrays mismatch: could not convert archive {0} record {1} " +
+                                "from {2} to {3} ({4}; archives {5})",
+                                archives[b], record, (TextureFormat)formats[b], dstFormat, season,
+                                string.Join(", ", System.Array.ConvertAll(archives, a => a.ToString()))));
+                            Destroy(dst);
+                            return null;
+                        }
+                    }
+                }
+
+                if (!formatsAgree)
+                {
+                    var distinct = new System.Collections.Generic.List<string>();
+                    for (int b = 0; b < formats.Length; b++)
+                    {
+                        string name = ((TextureFormat)formats[b]).ToString();
+                        if (!distinct.Contains(name)) distinct.Add(name);
+                    }
+                    Debug.Log(string.Format("[DistantTerrain] tileset arrays converted: {0} -> {1} ({2})",
+                        string.Join(", ", distinct.ToArray()), dstFormat, season));
+                }
 
                 return dst;
             }
@@ -871,7 +960,13 @@ namespace DistantTerrain
 
             // Promote tileMap
             textureTerrainInfoTileMap.SetPixels32(terrainInfoTileMap);
-            textureTerrainInfoTileMap.Apply(false);
+            // MOBILE: Apply(updateMipmaps: false, makeNoLongerReadable: TRUE), and drop the staging
+            // array with it. Nothing reads either copy back: terrainInfoTileMap is written here and
+            // never sampled again, and the texture is a shader input only. Upstream's Apply(false)
+            // keeps the 4.2 MB CPU-side copy of a 1024^2 RGBA32 texture alive for the session on top
+            // of the 4.2 MB Color32[] - 8.4 MB, in the one file whose whole argument is memory.
+            textureTerrainInfoTileMap.Apply(false, true);
+            terrainInfoTileMap = null;
 
             terrainMaterial.SetTexture("_MainTex", textureTerrainInfoTileMap);
             terrainMaterial.SetTexture("_FarTerrainTilemapTex", textureTerrainInfoTileMap);
@@ -902,20 +997,82 @@ namespace DistantTerrain
             // world entries of a session - they are packed once and kept.
             tilemapWatch.Stop();
             total.Stop();
+            // MOBILE: `other` is the total minus the five named stages - the TerrainData allocation,
+            // the reparent, the camera and material setup, and anything a future edit adds without
+            // a stage of its own. Without it the five figures can add up to well under the total and
+            // there is no way to tell an unmeasured cost from a rounding artefact. Clamped at zero:
+            // the stages are five independent stopwatches and their sum can round a millisecond past
+            // the total, which would otherwise print a negative and read as a bug in the timing.
+            long totalMs = (long)total.Elapsed.TotalMilliseconds;
+            long tilemapMs = (long)tilemapWatch.Elapsed.TotalMilliseconds;
+            long otherMs = totalMs - ((long)lastHeightmapMs + (long)lastCarveMs + (long)lastLiftsMs
+                                      + tilemapMs + (long)lastArraysMs);
+            if (otherMs < 0) otherMs = 0;
             Debug.Log(string.Format(
-                "[DistantTerrain] far terrain built in {0} ms (heightmap {1} ms, carve {2} ms, lifts {3} ms, tilemap {4} ms, arrays {5} ms)",
-                (long)total.Elapsed.TotalMilliseconds,
+                "[DistantTerrain] far terrain built in {0} ms (heightmap {1} ms, carve {2} ms, lifts {3} ms, tilemap {4} ms, arrays {5} ms, other {6} ms)",
+                totalMs,
                 (long)lastHeightmapMs,
                 (long)lastCarveMs,
                 (long)lastLiftsMs,
-                (long)tilemapWatch.Elapsed.TotalMilliseconds,
-                (long)lastArraysMs));
+                tilemapMs,
+                (long)lastArraysMs,
+                otherMs));
 
             // MOBILE: the far terrain is on screen. This is the only place Installed becomes true,
             // and it is the last line of the build - a throw or a refusal above never reaches it.
             DistantTerrainPort.MarkInstalled();
             Debug.Log("[DistantTerrain] far terrain ready");
+            LogFarTerrainDiagnostic();
             return true;
+        }
+
+        /// <summary>
+        /// MOBILE: one shot, right after "far terrain ready", and the answer to Task 9's Finding 1 -
+        /// the far terrain built on every launch and nothing of it reached the screen, and every
+        /// log line the port already emitted said the build was fine. The four candidates that
+        /// survived that investigation are all read here: the stacked camera's near clip (a value
+        /// that clips the whole ring), the terrain's position and vertical scale (a mesh sitting
+        /// below sea level), its layer against the camera's culling mask, and the camera's
+        /// targetTexture (rendering somewhere the frame buffer never shows). The material and the
+        /// shader are named too, because "the shader compiles" is not "the shader shades".
+        /// Everything is a field read; nothing here allocates or costs a frame.
+        /// </summary>
+        void LogFarTerrainDiagnostic()
+        {
+            if (farTerrainDiagnosticLogged) return;
+            farTerrainDiagnosticLogged = true;
+            try
+            {
+                Vector3 pos = worldTerrainGameObject != null ? worldTerrainGameObject.transform.position : Vector3.zero;
+                TerrainData data = terrain != null ? terrain.terrainData : null;
+                Vector3 size = data != null ? data.size : Vector3.zero;
+                RenderTexture target = stackedCamera != null ? stackedCamera.targetTexture : null;
+                Camera main = Camera.main;
+                Debug.Log(string.Format(
+                    "[DistantTerrain] far terrain: pos={0:F1},{1:F1},{2:F1} size={3:F1},{4:F1},{5:F1} heightScale={6:F1} " +
+                    "layer={7} stackedCamera mask={8} near={9} far={10} depth={11} targetTexture={12} main.far={13} " +
+                    "shader={14} supported={15} material={16} renderer={17} drawHeightmap={18}",
+                    pos.x, pos.y, pos.z,
+                    size.x, size.y, size.z,
+                    size.y,
+                    worldTerrainGameObject != null ? LayerMask.LayerToName(worldTerrainGameObject.layer) : "null",
+                    stackedCamera != null ? stackedCamera.cullingMask : 0,
+                    stackedCamera != null ? stackedCamera.nearClipPlane : 0f,
+                    stackedCamera != null ? stackedCamera.farClipPlane : 0f,
+                    stackedCamera != null ? stackedCamera.depth : 0f,
+                    target != null ? target.name : "null",
+                    main != null ? main.farClipPlane : 0f,
+                    shaderDistantTerrainTilemap != null ? shaderDistantTerrainTilemap.name : "null",
+                    shaderDistantTerrainTilemap != null && shaderDistantTerrainTilemap.isSupported,
+                    terrainMaterial != null ? terrainMaterial.name : "null",
+                    terrain != null && terrain.enabled,
+                    terrain != null && terrain.drawHeightmap));
+            }
+            catch (Exception ex)
+            {
+                // A diagnostic must never be the thing that breaks the build it is describing.
+                Debug.LogWarning("[DistantTerrain] far terrain: diagnostic unavailable (" + ex.Message + ")");
+            }
         }
 
         /// <summary>
@@ -939,7 +1096,10 @@ namespace DistantTerrain
             if (textureTerrainInfoTileMap != null)
                 Destroy(textureTerrainInfoTileMap);
             textureTerrainInfoTileMap = null;
-            terrainInfoTileMap = null;      // 4.2 MB of managed Color32, held alive by nothing else
+            // 4.2 MB of managed Color32, held alive by nothing else. A completed build already
+            // dropped it at the upload; this covers a build that threw between the allocation and
+            // the upload, which is the case the teardown exists for.
+            terrainInfoTileMap = null;
 
             if (worldTerrainGameObject != null)
             {

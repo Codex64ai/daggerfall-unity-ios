@@ -399,6 +399,15 @@ namespace DistantTerrain
             Running = false;
             mod = initParams.Mod;
 
+            // MOBILE: probe for the player's own settings file FIRST, before anything reads settings.
+            // ModSettingsData.LoadLocalValues creates the directory and Save()s a fresh
+            // modsettings.json when none exists, so the very first mod.GetSettings() in this method
+            // brings the file into being - after which "does the player have a settings file?" is
+            // always true and the beacons come out ON regardless of the port's code default. The
+            // answer has to be captured before the first GetSettings() anywhere in Init, not merely
+            // before the one in LoadLocationHighlightSettings. See HighlightLocationsFrom.
+            bool userSettingsPresent = UserSettingsFilePresent();
+
             // Load camera stacking depths BEFORE creating the DistantTerrain component,
             // so the values are populated by the time DistantTerrain's Awake/Start runs.
             LoadCameraStackingSettings();
@@ -416,7 +425,7 @@ namespace DistantTerrain
             // DistantTerrain.InitFarTerrain() reads DistantTerrainLocationConfig directly when
             // building the terrain info tilemap; that path runs once on world entry, so the
             // setting needs to be populated by then.
-            LoadLocationHighlightSettings();
+            LoadLocationHighlightSettings(userSettingsPresent);
 
             // Load the "basic mode" toggle BEFORE the component runs. DistantTerrain reads
             // DistantTerrainBasicModeConfig directly while building the LOD heightmap (world
@@ -596,7 +605,10 @@ namespace DistantTerrain
         /// section) silently falls back to the default of enabled.
         /// MOBILE: the ToggleKey read is gone with the hotkey (see DistantTerrainLocationConfig).
         /// </summary>
-        private static void LoadLocationHighlightSettings()
+        /// <param name="userSettingsFilePresent">Captured at the top of Init, before any
+        /// mod.GetSettings() call had a chance to create the file. Passing it in rather than probing
+        /// here is the whole point: by the time this method runs, the file always exists.</param>
+        private static void LoadLocationHighlightSettings(bool userSettingsFilePresent)
         {
             // MOBILE: the SETTING still defaults to enabled - that is what the bundle ships and what
             // the catch below falls back to. What changed is that the setting alone no longer
@@ -618,7 +630,7 @@ namespace DistantTerrain
             }
 
             DistantTerrainLocationConfig.HighlightLocations =
-                HighlightLocationsFrom(UserSettingsFilePresent(), settingValue);
+                HighlightLocationsFrom(userSettingsFilePresent, settingValue);
 
             Debug.Log("[DistantTerrain] HighlightDistantLocations enabled: " +
                       DistantTerrainLocationConfig.HighlightLocations);

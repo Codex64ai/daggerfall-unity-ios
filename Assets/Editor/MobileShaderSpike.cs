@@ -33,6 +33,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// <summary>
         /// Compiles one shader for Metal and logs the verdict: compiled or not, every message
         /// verbatim, the number of generated Metal programs, and the unique sampler count.
+        /// Exits non-zero in batch mode unless the compile was clean - at least one fragment
+        /// program in the dump, no compile-failure markers, no error-severity messages and
+        /// ShaderHasError false. A run that measured nothing must not look like a comfortable pass.
         /// </summary>
         public static void CompileForMetal()
         {
@@ -55,7 +58,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             log.AppendLine("[ShaderSpike] Shader.name: " + shader.name);
             log.AppendLine("[ShaderSpike] isSupported (editor graphics device): " + shader.isSupported);
             log.AppendLine("[ShaderSpike] ShaderUtil.ShaderHasError: " + ShaderUtil.ShaderHasError(shader));
-            DumpMessages(shader, "after import", log);
+            int errorMessages = DumpMessages(shader, "after import", log);
 
             // Clear any stale dump so the glob below can only find this run's output.
             foreach (string stale in SafeGlob("Temp", "Compiled-*.shader")) File.Delete(stale);
@@ -103,7 +106,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 return;
             }
 
-            DumpMessages(shader, "after Metal compile", log);
+            // The post-compile message list supersedes the import one (Unity reports both through the
+            // same store), so the verdict takes the larger of the two rather than their sum.
+            errorMessages = Math.Max(errorMessages, DumpMessages(shader, "after Metal compile", log));
 
             string dump = SafeGlob("Temp", "Compiled-*.shader").FirstOrDefault();
             if (dump == null)
@@ -112,20 +117,39 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                      "this run could report would be zero rather than a pass.", log);
                 return;
             }
-            else
+
+            string text = File.ReadAllText(dump);
+            log.AppendLine("[ShaderSpike] dump: " + dump + " (" + text.Length + " bytes)");
+            int failureMarkers, fragmentPrograms, programs;
+            Report(text, log, out failureMarkers, out fragmentPrograms, out programs);
+            try
             {
-                string text = File.ReadAllText(dump);
-                log.AppendLine("[ShaderSpike] dump: " + dump + " (" + text.Length + " bytes)");
-                Report(text, log);
-                try
-                {
-                    Directory.CreateDirectory(outDir);
-                    string copy = Path.Combine(outDir, Path.GetFileName(dump));
-                    if (Path.GetFullPath(copy) != Path.GetFullPath(dump)) File.Copy(dump, copy, true);
-                    log.AppendLine("[ShaderSpike] copied to: " + copy);
-                }
-                catch (Exception ex) { log.AppendLine("[ShaderSpike] copy failed: " + ex.Message); }
+                Directory.CreateDirectory(outDir);
+                string copy = Path.Combine(outDir, Path.GetFileName(dump));
+                if (Path.GetFullPath(copy) != Path.GetFullPath(dump)) File.Copy(dump, copy, true);
+                log.AppendLine("[ShaderSpike] copied to: " + copy);
             }
+            catch (Exception ex) { log.AppendLine("[ShaderSpike] copy failed: " + ex.Message); }
+
+            // MOBILE: the verdict, and the whole reason this tool exists. Everything above only
+            // GATHERS - and until this block landed, a Metal compile failure produced a green run
+            // with a plausible sampler count, because the failure markers and the error messages went
+            // into the same StringBuilder as the good news and out through Debug.Log. This is the
+            // gate the device build is meant to trust, so a run passes only when the Metal compiler
+            // actually produced at least one fragment program and said nothing wrong about it.
+            var problems = new System.Collections.Generic.List<string>();
+            if (ShaderUtil.ShaderHasError(shader)) problems.Add("ShaderUtil.ShaderHasError is true");
+            if (errorMessages > 0) problems.Add(errorMessages + " error-severity shader message(s) - see the messages above");
+            if (failureMarkers > 0) problems.Add(failureMarkers + " compile-failure marker(s) in the dump - see the FAIL LINEs above");
+            if (programs == 0) problems.Add("the dump holds no program headers at all (their wording may have changed - the counts above would all read 0)");
+            else if (fragmentPrograms == 0) problems.Add("no FRAGMENT program in the dump (" + programs + " program header(s) of other stages)");
+            if (problems.Count > 0)
+            {
+                Fail("the shader did not compile clean for Metal: " + string.Join("; ", problems), log);
+                return;
+            }
+            log.AppendLine("[ShaderSpike] PASS: " + fragmentPrograms + " fragment program(s) of " + programs +
+                           ", no compile-failure markers, no error-severity messages, ShaderHasError false.");
             Debug.Log(log.ToString());
         }
 
@@ -184,20 +208,26 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             catch (Exception) { return new string[0]; }
         }
 
-        static void DumpMessages(Shader shader, string when, StringBuilder log)
+        /// <summary>Logs every shader message and returns how many carry Error severity.</summary>
+        static int DumpMessages(Shader shader, string when, StringBuilder log)
         {
             var msgs = ShaderUtil.GetShaderMessages(shader);
-            log.AppendLine("[ShaderSpike] messages " + when + ": " + msgs.Length);
+            int errors = msgs.Count(m => m.severity == UnityEditor.Rendering.ShaderCompilerMessageSeverity.Error);
+            log.AppendLine("[ShaderSpike] messages " + when + ": " + msgs.Length + " (" + errors + " error-severity)");
             foreach (var m in msgs)
                 log.AppendLine("[ShaderSpike]   " + m.severity + " | " + m.platform + " | " + m.file + ":" + m.line +
                                " | " + m.message + (string.IsNullOrEmpty(m.messageDetails) ? "" : " | " + m.messageDetails.Replace("\n", " ")));
+            return errors;
         }
 
         /// <summary>
         /// Per-program binding counts: the max over all Metal programs in the dump (the figure that
         /// must stay under Metal's 16 per-stage limit) and the histogram of counts across programs.
         /// </summary>
-        static void PerProgramMax(string text, string what, string pattern, StringBuilder log)
+        /// <remarks>Returns the number of programs the dump holds. Zero means the header wording
+        /// changed under this tool: every count it printed would then read 0, which is exactly the
+        /// shape of a comfortable pass - so the caller fails on it.</remarks>
+        static int PerProgramMax(string text, string what, string pattern, StringBuilder log)
         {
             // Programs are separated by the "-- Vertex/Fragment shader for ..." headers Unity writes.
             string[] chunks = Regex.Split(text, @"(?m)^\s*(?://\s*)?(?:-- )?(?:Vertex|Fragment|Hull|Domain|Geometry) shader for ");
@@ -212,16 +242,25 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             log.AppendLine("[ShaderSpike] MAX " + what + "s in any single program: " + max
                 + "  (programs: " + (chunks.Length - 1) + ", histogram count->programs: "
                 + string.Join(", ", histogram.Select(kv => kv.Key + "->" + kv.Value)) + ")");
+            return chunks.Length - 1;
         }
 
-        /// <summary>Counts Metal programs and unique sampler/texture bindings in a compiled dump.</summary>
-        static void Report(string text, StringBuilder log)
+        /// <summary>
+        /// Counts Metal programs and unique sampler/texture bindings in a compiled dump.
+        /// Out: how many compile-failure markers the dump carries, how many FRAGMENT programs it
+        /// holds, and how many programs of any stage - the three figures the verdict is made of.
+        /// </summary>
+        static void Report(string text, StringBuilder log, out int failureMarkers, out int fragmentPrograms, out int programs)
         {
+            fragmentPrograms = 0;
             foreach (Match m in Regex.Matches(text, @"^\s*(//\s*)?(-- )?(Vertex|Fragment|Hull|Domain|Geometry) shader for \""?(\w+)\""?.*$", RegexOptions.Multiline))
+            {
+                if (m.Groups[3].Value == "Fragment") fragmentPrograms++;
                 log.AppendLine("[ShaderSpike]   program: " + m.Value.Trim());
+            }
             log.AppendLine("[ShaderSpike] 'metal' mentions: " + Regex.Matches(text, "metal").Count);
-            log.AppendLine("[ShaderSpike] compile-failure markers: " +
-                Regex.Matches(text, "(?i)(compilation failed|error:|<compile failed)").Count);
+            failureMarkers = Regex.Matches(text, "(?i)(compilation failed|error:|<compile failed)").Count;
+            log.AppendLine("[ShaderSpike] compile-failure markers: " + failureMarkers);
             foreach (Match m in Regex.Matches(text, @"(?im)^.*(compilation failed|error:|<compile failed).*$"))
                 log.AppendLine("[ShaderSpike]   FAIL LINE: " + m.Value.Trim());
 
@@ -239,7 +278,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // limit of 16 texture/sampler slots applies to one program at a time, and a dump holds
             // dozens of keyword variants that never coexist. So split on the per-program headers the
             // dump writes and report the worst single program plus the distribution.
-            PerProgramMax(text, "sampler", @"sampler\s+\w+\s*\[\[\s*sampler\s*\(\s*\d+\s*\)\s*\]\]", log);
+            programs = PerProgramMax(text, "sampler", @"sampler\s+\w+\s*\[\[\s*sampler\s*\(\s*\d+\s*\)\s*\]\]", log);
             PerProgramMax(text, "texture", @"texture\d\w*<[^>]*>\s+\w+\s*\[\[\s*texture\s*\(\s*\d+\s*\)\s*\]\]", log);
 
             // Fallback for non-Metal (DX/GL) dumps or a different Metal codegen style.
