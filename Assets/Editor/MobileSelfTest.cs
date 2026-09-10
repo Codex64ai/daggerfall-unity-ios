@@ -125,6 +125,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestEnsureReadable();
             TestMobileShadersFind();
             TestMobileCRT();
+            TestMobileCRTRender();
+            TestMobileCRTSettingsEndToEnd();
             TestWODBiomesPort();
             TestBiomesClimateKey();
             TestWoDTerrainPort();
@@ -1367,6 +1369,31 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobileCrt.ScanlineCount(0) == 200, "MobileCRT: retro off still reports a usable scanline count",
                 MobileCrt.ScanlineCount(0).ToString());
 
+            // The count must come from the SOURCE raster's own height, not from the retro mode:
+            // with LargeHUD + LargeHUDDocked, RetroRenderer.UpdateRenderTarget points the camera at
+            // RetroTexture320x200_HUD (320x154) or RetroTexture640x400_HUD (640x308) and blits that
+            // into the 640x400 presentation texture, stretched. Drawing 200 lines over a 154-line
+            // raster beats against it at |200-154| = 46 cycles down the screen - the exact moire the
+            // shader exists to avoid. ScanlineCountFor is the pure form; a raster height of 0 (no
+            // renderer yet, headless) falls back to the mode's nominal count.
+            Check(MobileCrt.ScanlineCountFor(154, 1) == 154,
+                "MobileCRT: a docked large HUD's 320x154 raster draws 154 scanlines",
+                MobileCrt.ScanlineCountFor(154, 1).ToString());
+            Check(MobileCrt.ScanlineCountFor(308, 2) == 308,
+                "MobileCRT: a docked large HUD's 640x308 raster draws 308 scanlines",
+                MobileCrt.ScanlineCountFor(308, 2).ToString());
+            Check(MobileCrt.ScanlineCountFor(200, 1) == 200 && MobileCrt.ScanlineCountFor(400, 2) == 400,
+                "MobileCRT: an undocked raster draws its own 200 / 400 lines");
+            Check(MobileCrt.ScanlineCountFor(0, 1) == 200 && MobileCrt.ScanlineCountFor(0, 2) == 400
+                  && MobileCrt.ScanlineCountFor(-1, 2) == 400,
+                "MobileCRT: no live raster falls back to the retro mode's nominal count",
+                MobileCrt.ScanlineCountFor(0, 1) + " / " + MobileCrt.ScanlineCountFor(0, 2));
+            // The editor has no GameManager, so the live path is the fallback here - what matters is
+            // that it does not throw and does not answer zero.
+            Check(MobileCrt.LiveRasterHeight == 0,
+                "MobileCRT: LiveRasterHeight is 0 with no running game (headless-safe)",
+                MobileCrt.LiveRasterHeight.ToString());
+
             foreach (int mode in new[] { 0, 1, 2 })
                 foreach (bool enabled in new[] { false, true })
                     foreach (bool materialOk in new[] { false, true })
@@ -1406,6 +1433,30 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     "MobileCRT: the halation tier is one multi_compile with an off-by-default default");
                 foreach (string uniform in new[] { "_MainTex", "_Curvature", "_Scanlines", "_ScanlineCount", "_Mask", "_Vignette" })
                     Check(src.Contains(uniform), "MobileCRT: the shader declares " + uniform);
+
+                // The three defects the Task 1 review found, pinned as source text as well as by
+                // the rendered check below.
+                //
+                // The vignette factor must be saturated. r2 = dot(centred, centred) reaches ~1.58
+                // while still INSIDE the curved screen, so an unsaturated 1 - _Vignette * r2 goes
+                // negative for any _Vignette above ~0.63 - and the slider's range is 0..1.
+                Check(src.Contains("saturate(1.0 - _Vignette * r2)"),
+                    "MobileCRT: the vignette factor is saturated (a negative factor would invert lit pixels)");
+                // Scanline phase: raster = uv.y * _ScanlineCount, so an INTEGER raster is the seam
+                // between two source rows and a half-integer is a row's centre. A CRT is brightest
+                // along the centre of each line, so the darkening must peak on the integer - which
+                // is 0.5 + 0.5 * cos(2*pi*raster), not 0.5 - 0.5 * cos.
+                Check(CountOccurrences(src, "0.5 + 0.5 * cos(") == 3,
+                    "MobileCRT: all three scanline evaluations are 0.5 + 0.5 * cos (dark on the seam)",
+                    CountOccurrences(src, "0.5 + 0.5 * cos(") + " of 3");
+                Check(!src.Contains("0.5 - 0.5 * cos("),
+                    "MobileCRT: no inverted scanline phase survives (0.5 - 0.5 * cos would darken row centres)");
+                // No gamma round trip: the project is Linear and the presentation render texture is
+                // not sRGB, so tex2D already hands back linear light. Squaring the sample and taking
+                // the square root at the end is an identity on the picture that applies every
+                // modulation as sqrt(m) - about half the authored depth.
+                Check(!src.Contains("sqrt(") && !src.Contains("col *= col"),
+                    "MobileCRT: no fake gamma round trip (the project is Linear; modulations apply directly)");
                 // The cost contract, and the whole reason this shader can ship on a 5.6 MP iPad:
                 // the cheap tier is ONE dependent-read-free fetch, and the only extra fetches are
                 // the two halation taps behind the keyword.
@@ -1588,6 +1639,223 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     }
                 }
             }
+        }
+
+        // F5 of the Task 1 review: the shader's OUTPUT, not its source text. A solid mid-grey
+        // source blitted through the real material, read back, and three pixels examined. This is
+        // the check that would have caught both the unsaturated vignette and the inverted scanline
+        // phase, and it pins "outside the curved screen is black" as behaviour rather than as a
+        // comment. Curvature 0.3 (the clamp's maximum) so the corner is unambiguously off-texture;
+        // scanlines 1 so the modulation is at full depth; mask and vignette 0 so nothing else
+        // moves a pixel. _ScanlineCount is 9 - an ODD count puts the exact centre of the image on
+        // a row CENTRE (raster 4.5) rather than on a seam, which is what makes "the centre pixel
+        // is not black" a meaningful assertion.
+        static void TestMobileCRTRender()
+        {
+            const int dim = 256;
+            const float curvature = 0.3f;
+            const int count = 9;
+
+            Shader shader = MobileShaders.Find(MobileCrt.ShaderName);
+            Check(shader != null, "MobileCRT render: the shader resolves for the rendered check");
+            if (shader == null)
+                return;
+
+            Material mat = new Material(shader);
+            mat.SetFloat("_Curvature", curvature);
+            mat.SetFloat("_Scanlines", 1f);
+            mat.SetFloat("_ScanlineCount", count);
+            mat.SetFloat("_Mask", 0f);
+            mat.SetFloat("_Vignette", 0f);
+
+            // Mid-grey, Point-filtered, linear (the presentation render texture is not sRGB either).
+            Texture2D source = new Texture2D(8, 8, TextureFormat.RGBA32, false, true);
+            Color32 grey = new Color32(128, 128, 128, 255);
+            Color32[] fill = new Color32[8 * 8];
+            for (int i = 0; i < fill.Length; i++)
+                fill[i] = grey;
+            source.SetPixels32(fill);
+            source.Apply(false);
+            source.filterMode = FilterMode.Point;
+            source.wrapMode = TextureWrapMode.Clamp;
+
+            RenderTexture rt = new RenderTexture(dim, dim, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+            Color32[] px = null;
+            if (rt.Create())
+            {
+                Graphics.Blit(source, rt, mat);
+                RenderTexture wasActive = RenderTexture.active;
+                RenderTexture.active = rt;
+                Texture2D readback = new Texture2D(dim, dim, TextureFormat.RGBA32, false, true);
+                readback.ReadPixels(new Rect(0, 0, dim, dim), 0, 0);
+                readback.Apply(false);
+                RenderTexture.active = wasActive;
+                px = readback.GetPixels32();
+                UnityEngine.Object.DestroyImmediate(readback);
+            }
+            rt.Release();
+            UnityEngine.Object.DestroyImmediate(rt);
+            UnityEngine.Object.DestroyImmediate(source);
+            UnityEngine.Object.DestroyImmediate(mat);
+
+            Check(px != null && px.Length == dim * dim, "MobileCRT render: the CRT material blits and reads back");
+            if (px == null || px.Length != dim * dim)
+                return;
+
+            // The centre column, so the barrel warp's x term is ~0 and uv.y is a function of the
+            // row alone. Rows are searched for the two phases rather than hardcoded: the warp moves
+            // uv.y away from the destination v, so which row lands on a seam is not (row / dim).
+            //
+            // Orientation does not matter here, and that is not luck: uv.y(1 - v) = 1 - uv.y(v)
+            // under this warp, and cos(2*pi*(count - x)) == cos(2*pi*x) for an integer count, so a
+            // vertically flipped blit gives the SAME scanline value for the same readback row.
+            const int col = dim / 2;
+            int seamRow = -1, centreRow = -1;
+            float seamBest = 1f, centreBest = 1f;
+            for (int row = dim / 2 - 32; row <= dim / 2 + 32; row++)
+            {
+                float phase = ScanlinePhase(row, col, dim, curvature, count);
+                float toSeam = Mathf.Min(phase, 1f - phase);          // distance to an integer raster
+                float toCentre = Mathf.Abs(phase - 0.5f);             // distance to a half-integer
+                if (toSeam < seamBest) { seamBest = toSeam; seamRow = row; }
+                if (toCentre < centreBest) { centreBest = toCentre; centreRow = row; }
+            }
+
+            int corner = px[0].r;
+            int centreOfImage = px[(dim / 2) * dim + dim / 2].r;
+            int seam = px[seamRow * dim + col].r;
+            int rowCentre = px[centreRow * dim + col].r;
+            log.AppendLine(string.Format(
+                "  note  MobileCRT render: grey 128 in, curvature {0} / scanlines 1 / mask 0 / vignette 0, {1} lines over {2} rows -> corner(0,0)={3}, centre({4},{4})={5}, seam(row {6}, phase {7:0.000})={8}, row centre(row {9}, phase {10:0.000})={11}",
+                curvature, count, dim, corner, dim / 2, centreOfImage,
+                seamRow, ScanlinePhase(seamRow, col, dim, curvature, count), seam,
+                centreRow, ScanlinePhase(centreRow, col, dim, curvature, count), rowCentre));
+
+            // 1. Outside the curved screen there is no tube. At curvature 0.3 the corner samples
+            //    uv.y ~ -0.29, so `inside` is 0 and the pixel is black - not dim, black.
+            Check(corner <= 2, "MobileCRT render: the corner pixel is black (outside the curved screen)",
+                "got " + corner);
+            // 2. The middle of the picture is lit. With an odd scanline count the image centre sits
+            //    on a row centre, where a CRT is at full brightness.
+            Check(centreOfImage >= 64, "MobileCRT render: the centre pixel is lit (not black)",
+                "got " + centreOfImage + " of 128");
+            // 3. And the phase is the right way round: dark on the seam between two source rows,
+            //    bright along the centre of a row. Inverted (0.5 - 0.5*cos) this comparison flips.
+            Check(seam < rowCentre, "MobileCRT render: a scanline seam is darker than a row centre",
+                "seam " + seam + " vs row centre " + rowCentre);
+            Check(seam <= 16 && rowCentre >= 96,
+                "MobileCRT render: at full depth the seam goes to black and the row centre keeps its value",
+                "seam " + seam + " vs row centre " + rowCentre);
+        }
+
+        /// <summary>
+        /// The shader's scanline phase for one destination pixel, in fractions of a scanline period:
+        /// 0 is the seam between two source rows, 0.5 is a row's centre. Mirrors MobileCRT.shader's
+        /// barrel warp exactly (uv = centred * (1 + k * r2) * 0.5 + 0.5, raster = uv.y * count).
+        /// </summary>
+        static float ScanlinePhase(int row, int col, int dim, float curvature, int count)
+        {
+            float u = (col + 0.5f) / dim;
+            float v = (row + 0.5f) / dim;
+            float cx = u * 2f - 1f;
+            float cy = v * 2f - 1f;
+            float r2 = cx * cx + cy * cy;
+            float uvY = cy * (1f + curvature * r2) * 0.5f + 0.5f;
+            float raster = uvY * count;
+            return raster - Mathf.Floor(raster);
+        }
+
+        // F4 of the Task 1 review: one clamp checked END TO END through the real load path. The
+        // nine checks in TestMobileCRT feed SettingsManager's own GetInt/GetFloat(min, max) - i.e.
+        // they exercise Mathf.Clamp, and they passed before the clamps were added to LoadSettings.
+        // This one writes a rogue value into the editor's own settings.ini, constructs a
+        // SettingsManager (whose constructor is LoadSettings), reads the public property, and puts
+        // the file back byte for byte - and then checks that it did.
+        static void TestMobileCRTSettingsEndToEnd()
+        {
+            SettingsManager live = null;
+            try { live = DaggerfallUnity.Settings; }
+            catch (Exception ex) { log.AppendLine("  note  MobileCRT ini: live SettingsManager threw: " + ex.Message); }
+            if (live == null)
+                return;
+
+            const BindingFlags priv = BindingFlags.Instance | BindingFlags.NonPublic;
+            var settingsName = typeof(SettingsManager).GetMethod("SettingsName", priv);
+            Check(settingsName != null, "MobileCRT ini: SettingsManager.SettingsName is reachable");
+            if (settingsName == null)
+                return;
+
+            string dir = live.PersistentDataPath;
+            string iniPath = Path.Combine(dir, (string)settingsName.Invoke(live, new object[] { false }));
+            string bakPath = Path.Combine(dir, (string)settingsName.Invoke(live, new object[] { true }));
+            Check(File.Exists(iniPath), "MobileCRT ini: the editor's settings.ini exists to test against", iniPath);
+            if (!File.Exists(iniPath))
+                return;
+
+            string originalIni = File.ReadAllText(iniPath);
+            string originalBak = File.Exists(bakPath) ? File.ReadAllText(bakPath) : null;
+            try
+            {
+                // Rogue values a hand-edited ini can carry. PalettizationLUTShift=0 is the one that
+                // matters: RetroRenderer would build a (256)^3 RGBA32 Texture3D - 64 MB and ~7 s on
+                // the main thread by the engine's own comment table.
+                string rogue = SetIniValue(originalIni, "PalettizationLUTShift", "0");
+                rogue = SetIniValue(rogue, "PostProcessingInRetroMode", "-1");
+                rogue = SetIniValue(rogue, "CRTCurvature", "9");
+                rogue = SetIniValue(rogue, "CRTVignette", "-3");
+                Check(rogue.Contains("PalettizationLUTShift = 0") && rogue.Contains("PostProcessingInRetroMode = -1")
+                      && rogue.Contains("CRTCurvature = 9") && rogue.Contains("CRTVignette = -3"),
+                    "MobileCRT ini: all four rogue values went into the ini text (a missed key would make the clamp checks vacuous)");
+                File.WriteAllText(iniPath, rogue);
+
+                SettingsManager loaded = new SettingsManager();
+                Check(loaded.PalettizationLUTShift == 1,
+                    "MobileCRT ini: a settings.ini PalettizationLUTShift=0 reaches the app as 1, through LoadSettings",
+                    "got " + loaded.PalettizationLUTShift);
+                Check(loaded.PostProcessingInRetroMode == 0,
+                    "MobileCRT ini: a settings.ini PostProcessingInRetroMode=-1 reaches the app as 0, through LoadSettings",
+                    "got " + loaded.PostProcessingInRetroMode);
+                Check(Mathf.Abs(loaded.CRTCurvature - 0.3f) < 1e-6f,
+                    "MobileCRT ini: a settings.ini CRTCurvature=9 reaches the app as 0.3, through LoadSettings",
+                    "got " + loaded.CRTCurvature);
+                Check(loaded.CRTVignette == 0f,
+                    "MobileCRT ini: a settings.ini CRTVignette=-3 reaches the app as 0, through LoadSettings",
+                    "got " + loaded.CRTVignette);
+            }
+            finally
+            {
+                // The load path rewrites both files (a .bak of what it read, then SyncIniData's
+                // write-back), so both are restored, and the restore is itself a check.
+                File.WriteAllText(iniPath, originalIni);
+                if (originalBak != null)
+                    File.WriteAllText(bakPath, originalBak);
+                else if (File.Exists(bakPath))
+                    File.Delete(bakPath);
+            }
+
+            Check(File.ReadAllText(iniPath) == originalIni,
+                "MobileCRT ini: the editor's settings.ini is left exactly as it was found");
+            Check(originalBak == null ? !File.Exists(bakPath) : File.ReadAllText(bakPath) == originalBak,
+                "MobileCRT ini: the settings backup is left exactly as it was found");
+        }
+
+        /// <summary>Replaces one `key = value` line in an ini's text, leaving everything else alone.</summary>
+        static string SetIniValue(string ini, string key, string value)
+        {
+            string[] lines = ini.Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string trimmed = lines[i].TrimStart();
+                if (!trimmed.StartsWith(key, StringComparison.Ordinal))
+                    continue;
+                string rest = trimmed.Substring(key.Length).TrimStart();
+                if (rest.Length == 0 || rest[0] != '=')
+                    continue;
+                bool cr = lines[i].EndsWith("\r", StringComparison.Ordinal);
+                lines[i] = key + " = " + value + (cr ? "\r" : "");
+                return string.Join("\n", lines);
+            }
+            return ini;
         }
 
         // Distant Terrain's far-terrain shader is compiled into the app, and its whole reason for

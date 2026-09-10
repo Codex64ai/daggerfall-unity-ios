@@ -846,11 +846,31 @@ that had no bounds at all**:
 `CRTCurvature=0.08`, `CRTScanlines=0.35`, `CRTMask=0.25`, `CRTVignette=0.25`.
 
 Everything else the filter needs is ours and outside upstream's tree:
-`Assets/Shaders/Mobile/MobileCRT.shader` (new, 160 lines, MIT, written from the formulas —
+`Assets/Shaders/Mobile/MobileCRT.shader` (new, 181 lines, MIT, written from the formulas —
 see `THIRD-PARTY.md`), `Assets/Scripts/Game/Mobile/MobileCrt.cs` (new, the pure rules),
 `MobileShaders.cs (+4)` (name registration), `Assets/Editor/MobileBuildSetup.cs (+4)` and
 `ProjectSettings/GraphicsSettings.asset (+1)` (Always-Included pin),
 `RequiredShaderVariants.shadervariants (+7)` (the `CRT_HALATION` pair).
+
+**Review fixes (same day, commit 2 of the feature).** Three defects the Task 1 review found,
+all in our own files, none of them in an upstream one: the vignette factor is now
+`saturate(1 - _Vignette*r2)` (`r2` reaches ~1.58 inside the curved screen, so the unsaturated
+form went negative above `_Vignette` ~0.63 — and the slider's range is 0..1); the scanline
+phase is `0.5 + 0.5*cos`, so the darkening peaks on the seam between two source rows rather
+than on their centres; and `_ScanlineCount` now comes from `RetroRenderer.RetroTexture.height`
+(`MobileCrt.ScanlineCount` → `ScanlineCountFor`) rather than from `RetroRenderingMode`, because
+a docked large HUD renders into a 320×154 or 640×308 raster. The fake gamma (`c*c` in, `sqrt`
+out) was **dropped**: this project is Linear and the presentation render texture is not sRGB,
+so the pair was an identity on the picture that applied every modulation at `sqrt` depth.
+
+A note on the clamp evidence, since this entry is the record: the nine `GetInt/GetFloat(min,
+max)` checks are a `Mathf.Clamp` exercise and passed before the clamps were added to
+`LoadSettings` — they are a source-text guarantee, not a behavioural one. The behavioural
+guarantee is `MobileSelfTest.TestMobileCRTSettingsEndToEnd`, which writes
+`PalettizationLUTShift=0`, `PostProcessingInRetroMode=-1`, `CRTCurvature=9` and
+`CRTVignette=-3` into the Editor's own `settings.ini`, constructs a `SettingsManager` (whose
+constructor *is* `LoadSettings`), reads 1 / 0 / 0.3 / 0 back off the public properties, and
+restores both `settings.ini` and its `.bak` byte for byte — and then checks that it did.
 
 *Rebase risk: MEDIUM for `RetroPresentation.cs`, LOW for `SettingsManager.cs`.* Taking theirs
 on the 31-line presenter deletes the filter wholesale and still compiles — the `MobileCrt`

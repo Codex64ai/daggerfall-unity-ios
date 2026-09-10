@@ -10,8 +10,7 @@
 //
 // PROVENANCE. Every technique here is textbook and was written from the formula, not adapted
 // from an existing shader: a barrel UV warp, a raised-cosine scanline, an RGB stripe taken
-// from the destination pixel column, and a radial vignette, with a fake gamma (c*c in,
-// sqrt out) so the multiplications happen in something closer to linear light. No code from
+// from the destination pixel column, and a radial vignette. No code from
 // crt-pi, crt-geom, crt-easymode, crt-royale, crt-lottes, zfast_crt or any other CRT shader
 // is present here, and none was copied while writing it. The port's MIT licence therefore
 // covers this file outright.
@@ -24,10 +23,22 @@
 // bandwidth. CRT_HALATION adds two horizontal taps and is off by default; both variants are
 // pinned in RequiredShaderVariants so a later quality tier can turn it on without a rebuild.
 //
-// MOIRE. _ScanlineCount is the SOURCE raster's line count - 200 for RetroRenderingMode 1,
-// 400 for mode 2 (MobileCrt.ScanlineCount) - never a device-pixel figure. Lines placed on
-// device pixels beat against the panel's grid and shimmer as the view moves; lines placed on
-// the 320x200 raster are the raster, and hold still.
+// MOIRE. _ScanlineCount is the SOURCE raster's own line count, taken from the height of the
+// texture the main camera is actually rendering into (MobileCrt.ScanlineCount ->
+// RetroRenderer.RetroTexture.height): 200 or 400 normally, 154 or 308 when the large HUD is
+// docked, because DFU points the camera at a shortened raster and stretches it into the
+// 640x400 presentation texture. Never a device-pixel figure, and never the retro mode's
+// nominal count when the live raster disagrees: 200 lines drawn over a 154-line raster beat
+// against it at 46 cycles down the screen. Lines placed on the raster ARE the raster, and
+// hold still.
+//
+// LINEAR LIGHT. There is no gamma round trip here, and there must not be one. The project is
+// Linear (ProjectSettings m_ActiveColorSpace: 1) and Assets/Resources/RetroPresentation.
+// renderTexture is not sRGB (m_SRGB: 0), so what tex2D hands back is already linear light.
+// The first cut squared the sample on the way in and took its square root on the way out,
+// which is an identity on the picture but applies every modulation as sqrt(m) - the
+// scanlines, grille and vignette all landed about half as deep as the numbers ask for. The
+// modulations are applied directly instead: correct for this project, and two ALU cheaper.
 //
 // The retro presentation source is a Point-filtered render texture on purpose (crisp pixels),
 // and it is sampled as-is: the softness of a CRT comes from the scanline and grille
@@ -115,15 +126,14 @@ Shader "Daggerfall/Mobile/CRT"
                 half inside = all(abs(uv - 0.5) <= 0.5) ? 1.0 : 0.0;
 
                 half3 col = tex2D(_MainTex, uv).rgb;
-                col *= col;                                  // fake gamma in: c^2 for c^2.2
 
 #ifdef CRT_HALATION
                 // Phosphor bleed: one source texel either side, added back weakly. The only part
-                // of this shader that costs bandwidth, hence the keyword. Squared like col so the
-                // addition happens in the same space.
+                // of this shader that costs bandwidth, hence the keyword. Linear light, so the
+                // taps add straight in.
                 half3 left  = tex2D(_MainTex, float2(uv.x - _MainTex_TexelSize.x, uv.y)).rgb;
                 half3 right = tex2D(_MainTex, float2(uv.x + _MainTex_TexelSize.x, uv.y)).rgb;
-                col += 0.075 * (left * left + right * right);
+                col += 0.075 * (left + right);
 #endif
 
                 // Raised-cosine scanlines on the source raster. Three evaluations spread across the
@@ -133,12 +143,20 @@ Shader "Daggerfall/Mobile/CRT"
                 // sum to exactly zero, which would erase the scanlines altogether.
                 // frac() keeps the cosine's argument inside one turn, so a 400-line raster does not
                 // spend float mantissa on the integer part.
+                //
+                // PHASE. raster counts source rows, so an INTEGER raster is the seam between two
+                // rows and a half-integer is a row's own centre. A CRT is brightest along the
+                // centre of each line and dark in the gap between lines, so the darkening has to
+                // peak on the integer: 0.5 + 0.5*cos, which is 1 there and 0 at the row centre.
+                // The other way round (0.5 - 0.5*cos) dims the middle of every source row and
+                // leaves the seam at full brightness - each row reads as a bright-edged donut and
+                // the bright line straddles two differently coloured rows.
                 float raster = uv.y * _ScanlineCount;
                 float spread = footprint * _ScanlineCount * 0.33333333;
                 const float tau = 6.2831853;
-                half wave = (0.5 - 0.5 * cos(frac(raster - spread) * tau))
-                          + (0.5 - 0.5 * cos(frac(raster        ) * tau))
-                          + (0.5 - 0.5 * cos(frac(raster + spread) * tau));
+                half wave = (0.5 + 0.5 * cos(frac(raster - spread) * tau))
+                          + (0.5 + 0.5 * cos(frac(raster        ) * tau))
+                          + (0.5 + 0.5 * cos(frac(raster + spread) * tau));
                 col *= 1.0 - _Scanlines * (wave * 0.33333333);
 
                 // Aperture grille: every third destination pixel column keeps one primary and has
@@ -148,10 +166,13 @@ Shader "Daggerfall/Mobile/CRT"
                             : (band < 0.66666667 ? half3(1.0, 0.0, 1.0) : half3(1.0, 1.0, 0.0));
                 col *= 1.0 - _Mask * notch;
 
-                // Radial falloff of the tube's brightness.
-                col *= 1.0 - _Vignette * r2;
+                // Radial falloff of the tube's brightness. Saturated, and not decoratively: r2 is
+                // dot(centred, centred), which reaches ~1.58 along the diagonal while still INSIDE
+                // the curved screen, so an unsaturated factor goes negative in a lens-shaped band
+                // along the edges for any _Vignette above ~0.63 - and the slider's range is 0..1.
+                col *= saturate(1.0 - _Vignette * r2);
 
-                return half4(sqrt(col) * inside, 1.0);       // fake gamma out
+                return half4(col * inside, 1.0);
             }
             ENDCG
         }
