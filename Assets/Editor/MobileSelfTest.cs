@@ -127,6 +127,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestMobileCRT();
             TestMobileCRTRender();
             TestMobileCRTSettingsEndToEnd();
+            TestMobileCRTUI();
             TestWODBiomesPort();
             TestBiomesClimateKey();
             TestWoDTerrainPort();
@@ -1856,6 +1857,90 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 return string.Join("\n", lines);
             }
             return ini;
+        }
+
+        // The CRT filter's two front ends. There is no way to click either of them from a headless
+        // editor, so this is the shape of them: the page type exists, implements DFU's config-page
+        // interface, is registered with GameEffectsConfigWindow next to Retro Mode, and carries the
+        // four sliders at the clamp ranges the settings loader enforces; and MobileSettingsPanel
+        // carries the three thumb-reachable rows, writing DaggerfallUnity.Settings rather than the
+        // panel's own PlayerPrefs (DFU owns these values and persists them in settings.ini).
+        static void TestMobileCRTUI()
+        {
+            Type pageType = typeof(DaggerfallWorkshop.Game.UserInterfaceWindows.GameEffectsConfigWindow)
+                .Assembly.GetType("DaggerfallWorkshop.Game.UserInterfaceWindows.CRTConfigPage");
+            Check(pageType != null, "MobileCRT UI: CRTConfigPage exists in the UserInterfaceWindows namespace");
+            if (pageType != null)
+            {
+                Check(typeof(DaggerfallWorkshop.Game.UserInterfaceWindows.IGameEffectConfigPage).IsAssignableFrom(pageType),
+                    "MobileCRT UI: CRTConfigPage implements IGameEffectConfigPage");
+                Check(pageType.BaseType == typeof(DaggerfallWorkshop.Game.UserInterfaceWindows.GameEffectConfigPage),
+                    "MobileCRT UI: CRTConfigPage derives from GameEffectConfigPage (it gets the tip/slider helpers)",
+                    pageType.BaseType == null ? "no base type" : pageType.BaseType.Name);
+                // Key is what the window files the page under and what the effect list selects on,
+                // so a duplicate or a missing one is a dictionary exception at Setup time.
+                object instance = null;
+                try { instance = Activator.CreateInstance(pageType); }
+                catch (Exception ex) { log.AppendLine("  note  MobileCRT UI: CRTConfigPage would not construct: " + ex.Message); }
+                var keyProp = pageType.GetProperty("Key");
+                string key = (instance != null && keyProp != null) ? keyProp.GetValue(instance, null) as string : null;
+                Check(key == "crtFilter", "MobileCRT UI: CRTConfigPage.Key is crtFilter", key ?? "null");
+            }
+
+            const string windowPath = "Assets/Scripts/Game/UserInterfaceWindows/GameEffectsConfigWindow.cs";
+            Check(File.Exists(windowPath), "MobileCRT UI: " + windowPath + " exists");
+            if (File.Exists(windowPath))
+            {
+                string window = StripShaderComments(File.ReadAllText(windowPath));
+                Check(window.Contains("AddConfigPage(new CRTConfigPage());"),
+                    "MobileCRT UI: GameEffectsConfigWindow registers the CRT page");
+                int retro = window.IndexOf("AddConfigPage(new RetroModeConfigPage());", StringComparison.Ordinal);
+                int crt = window.IndexOf("AddConfigPage(new CRTConfigPage());", StringComparison.Ordinal);
+                Check(retro >= 0 && crt == window.IndexOf("AddConfigPage(new CRTConfigPage());", retro, StringComparison.Ordinal)
+                      && crt > retro && crt - retro < 120,
+                    "MobileCRT UI: the CRT page sits next to Retro Mode, where a player will look for it",
+                    "retro at " + retro + ", crt at " + crt);
+            }
+
+            const string pagePath = "Assets/Scripts/Game/UserInterfaceWindows/CRTConfigPage.cs";
+            Check(File.Exists(pagePath), "MobileCRT UI: " + pagePath + " exists");
+            if (File.Exists(pagePath))
+            {
+                string raw = File.ReadAllText(pagePath);
+                Check(raw.Contains("License:         MIT License"), "MobileCRT UI: the page carries the port's MIT header");
+                string page = StripShaderComments(raw);
+                // One toggle and four sliders, and the sliders' ranges must be the loader's clamps -
+                // a slider that can write 5.0 into CRTMask makes the clamp the only thing standing
+                // between the ini and a black screen.
+                foreach (string setting in new[] { "CRTFilter", "CRTCurvature", "CRTScanlines", "CRTMask", "CRTVignette" })
+                    Check(page.Contains("DaggerfallUnity.Settings." + setting),
+                        "MobileCRT UI: the page drives DaggerfallUnity.Settings." + setting);
+                Check(page.Contains("SetIndicator(0f, MobileCrt.MaxCurvature,"),
+                    "MobileCRT UI: the curvature slider's range is MobileCrt.MaxCurvature (0.3), the loader's clamp");
+                Check(CountOccurrences(page, "SetIndicator(0f, 1f,") == 3,
+                    "MobileCRT UI: the three amplitude sliders run 0..1, the loader's clamp",
+                    CountOccurrences(page, "SetIndicator(0f, 1f,") + " of 3");
+                // Two things a player cannot discover by looking, so the tip has to say them.
+                Check(page.Contains("HUD stays sharp"), "MobileCRT UI: the tip text says the HUD stays sharp on purpose");
+                Check(page.Contains("crops the edges"), "MobileCRT UI: the tip text says curvature crops the edges");
+                Check(page.Contains("Needs retro mode"), "MobileCRT UI: the tip text says retro mode is required");
+            }
+
+            const string panelPath = "Assets/Scripts/Game/Mobile/MobileSettingsPanel.cs";
+            string panel = StripShaderComments(File.ReadAllText(panelPath));
+            Check(panel.Contains("\"Retro mode\""), "MobileCRT UI: the settings panel has a Retro mode row");
+            Check(panel.Contains("\"Aspect\""), "MobileCRT UI: the settings panel has an Aspect row");
+            Check(panel.Contains("\"CRT filter\""), "MobileCRT UI: the settings panel has a CRT filter row");
+            foreach (string setting in new[] { "RetroRenderingMode", "RetroModeAspectCorrection", "CRTFilter" })
+                Check(panel.Contains("DaggerfallUnity.Settings." + setting),
+                    "MobileCRT UI: the settings panel row writes DaggerfallUnity.Settings." + setting);
+            // Retro mode owns render targets and the aspect viewport, so a change has to be deployed
+            // (RetroModeConfigPage does the same) - and DFU persists these in settings.ini, not in
+            // the panel's PlayerPrefs.
+            Check(panel.Contains("DeployCoreGameEffectSettings(CoreGameEffectSettingsGroups.RetroMode)"),
+                "MobileCRT UI: changing retro mode from the panel deploys the retro-mode effect group");
+            Check(panel.Contains("DaggerfallUnity.Settings.SaveSettings()"),
+                "MobileCRT UI: the panel's DFU rows persist through SaveSettings, not PlayerPrefs");
         }
 
         // Distant Terrain's far-terrain shader is compiled into the app, and its whole reason for

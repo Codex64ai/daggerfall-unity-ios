@@ -104,6 +104,7 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
         protected void AddCorePages()
         {
             AddConfigPage(new RetroModeConfigPage());
+            AddConfigPage(new CRTConfigPage());          // MOBILE: next to Retro Mode - it needs retro mode on to do anything
             AddConfigPage(new ColorBoostConfigPage());
             AddConfigPage(new AntialiasingConfigPage());
             AddConfigPage(new AmbientOcclusionConfigPage());

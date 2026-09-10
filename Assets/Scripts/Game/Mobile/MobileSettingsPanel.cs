@@ -446,7 +446,57 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             AddButton(c, ref y, rowW, rowH, "Edit layout (drag / resize / hide)", EnterLayoutEditor);
 
+            // MOBILE 2026-09-10: the retro picture and the CRT filter, so they are reachable by
+            // thumb without going through the classic UI. These three belong to DFU, not to the
+            // touch layer: they live in settings.ini and are read by RetroRenderer /
+            // RetroPresentation, so they must NOT go through this panel's PlayerPrefs. AddChoice
+            // leaves persistence to the caller by design, and AddToggle does the same when its key
+            // is null - which is why those are the two helpers used here.
+            AddNote(c, ref y, rowW,
+                "Picture. Retro mode renders the world at 320x200 or 640x400 with the VGA palette; " +
+                "the CRT filter needs it on. Its four sliders are in pause > options > Game Effects > CRT Filter.");
+
+            AddChoice(c, ref y, rowW, rowH, "Retro mode",
+                new[] { "Off", "320x200", "640x400" },
+                () => DaggerfallUnity.Settings.RetroRenderingMode,
+                v => { DaggerfallUnity.Settings.RetroRenderingMode = v; DeployRetroMode(); });
+
+            AddChoice(c, ref y, rowW, rowH, "Aspect",
+                new[] { "Off", "4:3", "16:10" },
+                () => DaggerfallUnity.Settings.RetroModeAspectCorrection,
+                v => { DaggerfallUnity.Settings.RetroModeAspectCorrection = v; DeployRetroMode(); });
+
+            // Null key: the value is DaggerfallUnity.Settings.CRTFilter, and AddToggle calls its
+            // setter once while building, so the guard keeps that from writing settings.ini for a
+            // value that did not change.
+            AddToggle(c, ref y, rowW, rowH, "CRT filter",
+                () => DaggerfallUnity.Settings.CRTFilter,
+                v =>
+                {
+                    if (DaggerfallUnity.Settings.CRTFilter == v)
+                        return;
+                    DaggerfallUnity.Settings.CRTFilter = v;
+                    DaggerfallUnity.Settings.SaveSettings();
+                },
+                null);
+
+            AddNote(c, ref y, rowW,
+                "Curvature crops the edges of the view, and the HUD stays sharp on purpose.");
+
             FinishSection(c, y);
+        }
+
+        /// <summary>
+        /// Retro mode owns the main camera's render target and the aspect viewport, so a change has
+        /// to be deployed rather than merely stored - RetroModeConfigPage does exactly this. The
+        /// value itself belongs to settings.ini, so it is saved here and not in PlayerPrefs.
+        /// </summary>
+        static void DeployRetroMode()
+        {
+            DaggerfallUnity.Settings.SaveSettings();
+
+            if (GameManager.HasInstance && GameManager.Instance.StartGameBehaviour != null)
+                GameManager.Instance.StartGameBehaviour.DeployCoreGameEffectSettings(CoreGameEffectSettingsGroups.RetroMode);
         }
 
         // The Mods section (Roads & tracks, Real travel, Summer start) was removed on 2026-09-07:

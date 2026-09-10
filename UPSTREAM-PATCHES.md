@@ -795,7 +795,7 @@ harmless (louder, not wrong).
 
 ---
 
-### Mobile CRT filter (2026-09-10) — `Assets/Scripts/Utility/RetroPresentation.cs (+58/-1)`, `Assets/Scripts/SettingsManager.cs (+28/-2)`, `Assets/Resources/defaults.ini.txt (+6/-1)`
+### Mobile CRT filter (2026-09-10) — `Assets/Scripts/Utility/RetroPresentation.cs (+58/-1)`, `Assets/Scripts/SettingsManager.cs (+28/-2)`, `Assets/Resources/defaults.ini.txt (+6/-1)`, `Assets/Scripts/Game/UserInterfaceWindows/GameEffectsConfigWindow.cs (+1)`
 
 Two engine files, and both patches are small because the retro path hands out an ideal
 insertion point.
@@ -871,6 +871,27 @@ guarantee is `MobileSelfTest.TestMobileCRTSettingsEndToEnd`, which writes
 `CRTVignette=-3` into the Editor's own `settings.ini`, constructs a `SettingsManager` (whose
 constructor *is* `LoadSettings`), reads 1 / 0 / 0.3 / 0 back off the public properties, and
 restores both `settings.ini` and its `.bak` byte for byte — and then checks that it did.
+
+**`GameEffectsConfigWindow.cs`** gains exactly one line, in `AddCorePages`:
+`AddConfigPage(new CRTConfigPage());`, placed immediately after `RetroModeConfigPage` because the
+filter does nothing while retro mode is off. The page itself,
+`Assets/Scripts/Game/UserInterfaceWindows/CRTConfigPage.cs`, is ours (MIT header) and lives in
+that folder only because the window constructs its pages by name out of this namespace — nothing
+discovers them. The page writes `DaggerfallUnity.Settings` directly and implements
+`DeploySettings` as a no-op: the filter is not a PPv2 effect and has no
+`CoreGameEffectSettingsGroups` entry, and `RetroPresentation` re-reads the five settings on every
+frame it presents. *Rebase risk: LOW.* Taking theirs deletes the registration line and the page
+becomes unreachable while still compiling — `MobileSelfTest.TestMobileCRTUI` checks for the line
+and for its position next to Retro Mode, so the tripwire fires in the Editor.
+
+Two notes on the page, since neither is obvious from the diff. Its sliders' ranges **are** the
+loader's clamps (`0..MobileCrt.MaxCurvature`, and `0..1` three times), so the UI cannot ask for a
+value the next launch would refuse; and it guards its own `OnScroll` handlers while
+`ReadSettings` and `Setup` run, because `HorizontalSlider.SetIndicator` raises `OnScroll` as it
+positions the thumb and the other config pages consequently write their rounded slider values
+back over the settings they were built from (curvature 0.08 would become 0.1 the first time the
+window opened). DFU's float slider indicator carries one decimal digit, so curvature is a
+four-step control; the 0.08 default is reachable through "set page defaults".
 
 *Rebase risk: MEDIUM for `RetroPresentation.cs`, LOW for `SettingsManager.cs`.* Taking theirs
 on the 31-line presenter deletes the filter wholesale and still compiles — the `MobileCrt`
