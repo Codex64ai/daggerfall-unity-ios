@@ -121,7 +121,12 @@ namespace DaggerfallWorkshop.Game.Mobile
             // starts it, and the location mods that need it, at the title.
             Mod ll = new Mod();
             ll.ModInfo.ModTitle = MobilePortedMods.LLTitle;
-            ll.ModInfo.ModVersion = "0.3";
+            // MOBILE: "0.3" is KABoissonneault's own version at pin a5e7a18; the "+type5" says the
+            // build also carries carademono's object-type-5 backport from the rmb-object fork, which
+            // is what makes WoD's 24 farm/dock prefabs (32,600 instances) render as anything but
+            // empty clearings. THIRD-PARTY.md :177 describes the port the same way, and this string
+            // is what the launcher's MODS page shows the player.
+            ll.ModInfo.ModVersion = "0.3+type5";
             ll.ModInfo.ModAuthor = "KABoissonneault (fork of Uncanny_Valley), ported by Codex64ai";
             ll.ModInfo.ContactInfo = "github.com/KABoissonneault/DFU-LocationLoader";
             ll.ModInfo.DFUnity_Version = VersionInfo.DaggerfallUnityVersion;

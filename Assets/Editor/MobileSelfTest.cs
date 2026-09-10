@@ -2117,6 +2117,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobilePortedMods.Gate(true, true, true).Length == 3, "PortedMods: survival gate unchanged by the sky entry");
             Check(MobilePortedMods.SkySceneReady(true, true) && !MobilePortedMods.SkySceneReady(true, false) && !MobilePortedMods.SkySceneReady(false, true) && !MobilePortedMods.SkySceneReady(false, false), "PortedMods: the sky starts only when both the sun light and the camera are in the scene");
             Check(MobilePortedMods.LLTitle == "Location Loader" && System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.LLTitle) >= 0, "PortedMods: Location Loader is a default-off title");
+            // MOBILE: the version the launcher's MODS page shows for the built-in Location Loader
+            // entry. "0.3" is KABoissonneault's own at pin a5e7a18; the suffix says this build also
+            // carries carademono's object-type-5 backport, which is the difference between WoD's 24
+            // farm/dock prefabs rendering and rendering as empty clearings. THIRD-PARTY.md describes
+            // the port that way, so the string the player sees must too.
+            Check(System.IO.File.ReadAllText("Assets/Scripts/Game/Mobile/MobileMods.cs")
+                      .Contains("ll.ModInfo.ModVersion = \"0.3+type5\";"),
+                  "PortedMods: the built-in Location Loader entry is versioned 0.3+type5, as the docs say");
             Check(MobilePortedMods.WoDTitle == "World of Daggerfall" && System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.WoDTitle) >= 0, "PortedMods: World of Daggerfall is a default-off title");
             Check(MobilePortedMods.WodRuns(true, true, true), "PortedMods: World of Daggerfall runs when Location Loader started and Daggerfall Expanded Textures is on");
             Check(!MobilePortedMods.WodRuns(true, false, true) && !MobilePortedMods.WodRuns(false, false, false), "PortedMods: World of Daggerfall does not run when its own entry is off");
