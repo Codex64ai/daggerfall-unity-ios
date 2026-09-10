@@ -792,3 +792,71 @@ through a private `ReportMissingModel(modelID, blockName)` that keeps the severi
 the message but reports each id **once per session**, naming the first block that wanted
 it (190 → 20, 199 → 16). Do not offer this one upstream; on a rebase, taking theirs is
 harmless (louder, not wrong).
+
+---
+
+### Mobile CRT filter (2026-09-10) — `Assets/Scripts/Utility/RetroPresentation.cs (+58/-1)`, `Assets/Scripts/SettingsManager.cs (+28/-2)`, `Assets/Resources/defaults.ini.txt (+6/-1)`
+
+Two engine files, and both patches are small because the retro path hands out an ideal
+insertion point.
+
+**`RetroPresentation.cs`** is 31 lines upstream and holds the *single* `Graphics.Blit` that
+puts the retro picture on the backbuffer — the one `OnRenderImage` in the whole of
+`Assets/Scripts`. The patch gives that blit a material argument:
+
+- `:13` — `using DaggerfallWorkshop.Game.Mobile;`
+- `:24-63` — a lazily-resolved `static Material crtMaterial` (built once from
+  `MobileShaders.Find(MobileCrt.ShaderName)`, warns once and stays null if the shader was
+  stripped) plus five cached `Shader.PropertyToID` ids.
+- `:69-82` — inside the existing `if`, when `MobileCrt.Active(CRTFilter, RetroRenderingMode,
+  material != null)`: push the five uniforms and
+  `Graphics.Blit(RetroPresentationSource, null as RenderTexture, crt)`, then return.
+- `:85` — the upstream plain blit is untouched and is still the path taken whenever the
+  filter is off, retro mode is 0, or the material did not resolve.
+
+Why here and nowhere else: this blit runs at **native backbuffer resolution**, which is what
+scanlines and a phosphor grille need (the same effect inside the 640×400 intermediate would
+be upscaled into mush); it respects `camera.rect`, so aspect correction and the docked large
+HUD keep working; and it sits downstream of every camera target, so nothing that re-points
+`Camera.main.targetTexture` — `RetroRenderer.UpdateRenderTarget`, Distant Terrain's stacked
+camera — can interact with it. The PPv2 route was rejected for the opposite reason: a
+`PostProcessEffectRenderer` runs on `Camera.main`, i.e. *inside* the 320×200 texture.
+
+The world is filtered and the UI is not. `DaggerfallUI` draws in `OnGUI` after every camera,
+so the HUD, menus and paper doll stay pin-sharp and flat over a curved world. That is a
+decision, not an oversight: filtering the whole screen needs a second pass after the UI and
+would curve the touch controls away from where fingers land.
+
+**`SettingsManager.cs`** gains the five `CRT*` keys (`:167-171` properties, `:429-433` load,
+`:634-638` save) and — the part that is worth having upstream — **clamps the two retro keys
+that had no bounds at all**:
+
+- `:421` `PostProcessingInRetroMode = GetInt(sectionVideo, "PostProcessingInRetroMode", 0, 4)`
+  (was unclamped). It is the colour-crush selector, not an on/off; a value outside 0..4 falls
+  through `UpdateDepthProcessMaterial`'s switch leaving `postprocessMaterial` null, and the
+  next line sets `retroMode = 0` — so a typo in the ini silently turns retro mode off.
+- `:428` `PalettizationLUTShift = GetInt(sectionVideo, "PalettizationLUTShift", 1, 3)`
+  (was unclamped). `RetroRenderer.GetPalettizationMaterial` builds a `Texture3D` of
+  `(256 >> shift)^3` RGBA32 on the main thread; the code's own comment table puts shift 0 at
+  **64 MB and ~7 s**. On an A-series that is not a slow load, it is a crash. The iOS default
+  in `defaults.ini.txt` moves 1 → **2** (1 MB, "slightly less crisp"); the LUT build stays
+  exactly where DFU does it.
+
+`defaults.ini.txt` `[Video]` therefore reads `PalettizationLUTShift=2`, `CRTFilter=False`,
+`CRTCurvature=0.08`, `CRTScanlines=0.35`, `CRTMask=0.25`, `CRTVignette=0.25`.
+
+Everything else the filter needs is ours and outside upstream's tree:
+`Assets/Shaders/Mobile/MobileCRT.shader` (new, 160 lines, MIT, written from the formulas —
+see `THIRD-PARTY.md`), `Assets/Scripts/Game/Mobile/MobileCrt.cs` (new, the pure rules),
+`MobileShaders.cs (+4)` (name registration), `Assets/Editor/MobileBuildSetup.cs (+4)` and
+`ProjectSettings/GraphicsSettings.asset (+1)` (Always-Included pin),
+`RequiredShaderVariants.shadervariants (+7)` (the `CRT_HALATION` pair).
+
+*Rebase risk: MEDIUM for `RetroPresentation.cs`, LOW for `SettingsManager.cs`.* Taking theirs
+on the 31-line presenter deletes the filter wholesale and still compiles — the `MobileCrt`
+call and the material overload both vanish with the file. `MobileSelfTest.TestMobileCRT`
+reads the presenter as comment-stripped text and requires the material overload, the
+`MobileCrt.Active(` gate, the `MobileShaders.Find(MobileCrt.ShaderName)` lookup and the
+surviving plain blit, so the tripwire fires in the Editor. Taking theirs on
+`SettingsManager.cs` drops the five keys (compile error at the presenter, so it cannot pass
+unnoticed) and re-opens the two clamps (source-text checks catch that too).

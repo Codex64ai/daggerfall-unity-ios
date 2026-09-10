@@ -155,3 +155,10 @@ ShaderVariantCollection:
         passType: 4
       - keywords: ENABLE_WATER_REFLECTIONS
         passType: 4
+  - first: {fileID: 4800000, guid: fb5c39d043d54d58b937de086b938db5, type: 3}
+    second:
+      variants:
+      - keywords: 
+        passType: 0
+      - keywords: CRT_HALATION
+        passType: 0

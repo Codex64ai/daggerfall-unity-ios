@@ -29,6 +29,10 @@ namespace DaggerfallWorkshop.Game.Mobile
             // batch overrider needs the same shaders for the archive it swaps in.
             MaterialReader._DaggerfallBillboardBatchShaderName,
             MaterialReader._DaggerfallBillboardBatchNoShadowsShaderName,
+            // The retro CRT filter's shader. RetroPresentation builds its material on first use,
+            // by which time mod bundles have loaded - and a bundle that embeds a shader of the
+            // same name would otherwise be free to hand back its own stripped copy.
+            MobileCrt.ShaderName,
         };
 
         /// <summary>The shader names captured at startup, for verification.</summary>

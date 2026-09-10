@@ -161,6 +161,14 @@ namespace DaggerfallWorkshop
         public bool UseMipMapsInRetroMode { get; set; }
         public int RetroModeAspectCorrection { get; set; }
         public int PalettizationLUTShift { get; set; }
+        // MOBILE: the retro-mode CRT filter (Assets/Shaders/Mobile/MobileCRT.shader, applied at
+        // the presentation blit). Off by default; the amplitudes are 0..1 and the barrel term
+        // 0..MobileCrt.MaxCurvature, clamped on load and again where the uniforms are pushed.
+        public bool CRTFilter { get; set; }
+        public float CRTCurvature { get; set; }
+        public float CRTScanlines { get; set; }
+        public float CRTMask { get; set; }
+        public float CRTVignette { get; set; }
         public bool VSync { get; set; }
         public int TargetFrameRate { get; set; }
         public bool Fullscreen { get; set; }
@@ -406,10 +414,23 @@ namespace DaggerfallWorkshop
             ResolutionWidth = GetInt(sectionVideo, "ResolutionWidth");
             ResolutionHeight = GetInt(sectionVideo, "ResolutionHeight");
             RetroRenderingMode = GetInt(sectionVideo, "RetroRenderingMode", 0, 2);
-            PostProcessingInRetroMode = GetInt(sectionVideo, "PostProcessingInRetroMode");
+            // MOBILE: both of these used to take whatever integer the ini carried.
+            // PostProcessingInRetroMode selects the colour-crush shader (0 pass-through,
+            // 1/2 posterize, 3/4 palettize); anything outside 0..4 leaves RetroRenderer's
+            // postprocessMaterial null, which silently switches retro mode off altogether.
+            PostProcessingInRetroMode = GetInt(sectionVideo, "PostProcessingInRetroMode", 0, 4);
             UseMipMapsInRetroMode = GetBool(sectionVideo, "UseMipMapsInRetroMode");
             RetroModeAspectCorrection = GetInt(sectionVideo, "RetroModeAspectCorrection", 0, 2);
-            PalettizationLUTShift = GetInt(sectionVideo, "PalettizationLUTShift");
+            // MOBILE: the palettization LUT is a Texture3D of (256 >> shift)^3 RGBA32, built on
+            // the main thread. Shift 0 is 64 MB and seconds of stall (RetroRenderer's own comment
+            // table says ~7 s), shift 1 is 8 MB and ~850 ms on a desktop; the iOS default is 2,
+            // which is 1 MB and only slightly less crisp. 0 must never reach the app.
+            PalettizationLUTShift = GetInt(sectionVideo, "PalettizationLUTShift", 1, 3);
+            CRTFilter = GetBool(sectionVideo, "CRTFilter");
+            CRTCurvature = GetFloat(sectionVideo, "CRTCurvature", 0f, 0.3f);
+            CRTScanlines = GetFloat(sectionVideo, "CRTScanlines", 0f, 1f);
+            CRTMask = GetFloat(sectionVideo, "CRTMask", 0f, 1f);
+            CRTVignette = GetFloat(sectionVideo, "CRTVignette", 0f, 1f);
             VSync = GetBool(sectionVideo, "VSync");
             TargetFrameRate = GetInt(sectionVideo, "TargetFrameRate", 0, 300);
             Fullscreen = GetBool(sectionVideo, "Fullscreen");
@@ -610,6 +631,11 @@ namespace DaggerfallWorkshop
             SetBool(sectionVideo, "UseMipMapsInRetroMode", UseMipMapsInRetroMode);
             SetInt(sectionVideo, "RetroModeAspectCorrection", RetroModeAspectCorrection);
             SetInt(sectionVideo, "PalettizationLUTShift", PalettizationLUTShift);
+            SetBool(sectionVideo, "CRTFilter", CRTFilter);
+            SetFloat(sectionVideo, "CRTCurvature", CRTCurvature);
+            SetFloat(sectionVideo, "CRTScanlines", CRTScanlines);
+            SetFloat(sectionVideo, "CRTMask", CRTMask);
+            SetFloat(sectionVideo, "CRTVignette", CRTVignette);
             SetBool(sectionVideo, "VSync", VSync);
             SetInt(sectionVideo, "TargetFrameRate", TargetFrameRate);
             SetBool(sectionVideo, "Fullscreen", Fullscreen);

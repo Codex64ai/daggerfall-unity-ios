@@ -252,6 +252,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 // referenced by no material in any scene, so the build pipeline would strip it and
                 // the far terrain would render pink (or not at all) on device.
                 "Daggerfall/DistantTerrain/DistantTerrainTilemap",
+                // The retro CRT filter: RetroPresentation resolves it by name through
+                // MobileShaders.Find and no material in any scene references it, so without the
+                // pin the build strips it and the filter silently never turns on.
+                "Daggerfall/Mobile/CRT",
             };
 
             var settings = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/GraphicsSettings.asset");

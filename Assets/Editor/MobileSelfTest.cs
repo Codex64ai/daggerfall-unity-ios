@@ -124,6 +124,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestCastStateTearsDownOnFailure();
             TestEnsureReadable();
             TestMobileShadersFind();
+            TestMobileCRT();
             TestWODBiomesPort();
             TestBiomesClimateKey();
             TestWoDTerrainPort();
@@ -1305,6 +1306,288 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         }
 
 
+
+        /// <summary>
+        /// Reads one section of an ini file into a dictionary. Enough of an ini parser for a
+        /// defaults table: `[Section]` headers and `key=value` lines, `;`/`#` comments dropped.
+        /// </summary>
+        static Dictionary<string, string> ReadIniSection(string path, string section)
+        {
+            var values = new Dictionary<string, string>();
+            bool inSection = false;
+            foreach (string raw in File.ReadAllLines(path))
+            {
+                string line = raw.Trim();
+                if (line.Length == 0 || line[0] == ';' || line[0] == '#')
+                    continue;
+                if (line[0] == '[')
+                {
+                    inSection = line.Trim('[', ']') == section;
+                    continue;
+                }
+                if (!inSection)
+                    continue;
+                int eq = line.IndexOf('=');
+                if (eq > 0)
+                    values[line.Substring(0, eq).Trim()] = line.Substring(eq + 1).Trim();
+            }
+            return values;
+        }
+
+        // The CRT presentation filter: our own single-pass shader (Daggerfall/Mobile/CRT) used as
+        // the material argument of the one Graphics.Blit in RetroPresentation.OnRenderImage.
+        // Three kinds of check, because the failure modes are of three kinds.
+        //
+        // 1. The pure rules (MobileCrt), called for real. The scanline count is the one that
+        //    matters visually: it must come from the SOURCE raster (200 or 400 lines, from
+        //    RetroRenderingMode) and never from device pixels, or a high-DPI panel moires.
+        // 2. The shader as an asset: present, compiles, ONE texture fetch in the cheap tier, and
+        //    pinned three ways (Always-Included list, the preloaded variant collection, the
+        //    resulting GraphicsSettings entry) because it is resolved by name at runtime and
+        //    referenced by no material in any scene - exactly the shape the build pipeline strips.
+        // 3. The settings table. The research found two UNCLAMPED retro keys: a settings.ini
+        //    carrying PalettizationLUTShift=0 makes RetroRenderer build a 64 MB Texture3D and
+        //    stall for seconds (the code's own comment table says so), and
+        //    PostProcessingInRetroMode outside 0..4 leaves postprocessMaterial null, which
+        //    silently turns retro mode off. So the clamps are checked as source text AND
+        //    behaviourally, by feeding the live SettingsManager a rogue ini value.
+        static void TestMobileCRT()
+        {
+            // ---- 1. the pure rules ----
+            Check(MobileCrt.Clamp01(-1f) == 0f && MobileCrt.Clamp01(0.5f) == 0.5f && MobileCrt.Clamp01(2f) == 1f,
+                "MobileCRT: Clamp01 clamps both ends and passes the middle through",
+                MobileCrt.Clamp01(-1f) + " / " + MobileCrt.Clamp01(0.5f) + " / " + MobileCrt.Clamp01(2f));
+            Check(MobileCrt.ScanlineCount(1) == 200, "MobileCRT: 320x200 retro mode draws 200 scanlines",
+                MobileCrt.ScanlineCount(1).ToString());
+            Check(MobileCrt.ScanlineCount(2) == 400, "MobileCRT: 640x400 retro mode draws 400 scanlines",
+                MobileCrt.ScanlineCount(2).ToString());
+            // Mode 0 never reaches the shader (Active is false there), but the count must still be
+            // a usable raster rather than 0: a zero would collapse the scanline phase to a constant.
+            Check(MobileCrt.ScanlineCount(0) == 200, "MobileCRT: retro off still reports a usable scanline count",
+                MobileCrt.ScanlineCount(0).ToString());
+
+            foreach (int mode in new[] { 0, 1, 2 })
+                foreach (bool enabled in new[] { false, true })
+                    foreach (bool materialOk in new[] { false, true })
+                    {
+                        bool expected = enabled && mode != 0 && materialOk;
+                        Check(MobileCrt.Active(enabled, mode, materialOk) == expected,
+                            string.Format("MobileCRT: Active(enabled={0}, retroMode={1}, materialOk={2}) is {3}",
+                                enabled, mode, materialOk, expected));
+                    }
+
+            // ---- 2. the shader ----
+            const string shaderName = "Daggerfall/Mobile/CRT";
+            Check(MobileCrt.ShaderName == shaderName, "MobileCRT: MobileCrt.ShaderName is the shader's name", MobileCrt.ShaderName);
+            Shader crt = Shader.Find(shaderName);
+            Check(crt != null, "MobileCRT: the CRT shader is in the project");
+            Check(MobileShaders.Names.Contains(shaderName),
+                "MobileCRT: the shader name is captured by MobileShaders (a mod bundle cannot shadow it)");
+            Shader viaMobile = MobileShaders.Find(shaderName);
+            Check(viaMobile != null && viaMobile.name == shaderName,
+                "MobileCRT: MobileShaders.Find resolves the CRT shader");
+            if (crt != null)
+                Check(crt.isSupported, "MobileCRT: the CRT shader compiles for this editor's graphics API");
+
+            const string shaderPath = "Assets/Shaders/Mobile/MobileCRT.shader";
+            Check(File.Exists(shaderPath), "MobileCRT: " + shaderPath + " exists");
+            if (File.Exists(shaderPath))
+            {
+                string raw = File.ReadAllText(shaderPath);
+                Check(raw.Contains("License:         MIT License"), "MobileCRT: the shader carries the port's MIT header");
+                // Comment-stripped from here on: the header names the GPL CRT shaders on purpose
+                // (to say no code came from them), and an "it is not there" check that a comment
+                // can satisfy is worthless.
+                string src = StripShaderComments(raw);
+                Check(src.Contains("Shader \"" + shaderName + "\""), "MobileCRT: the shader declares that name");
+                Check(src.Contains("#pragma target 3.0"), "MobileCRT: shader target is 3.0");
+                Check(src.Contains("#pragma multi_compile __ CRT_HALATION"),
+                    "MobileCRT: the halation tier is one multi_compile with an off-by-default default");
+                foreach (string uniform in new[] { "_MainTex", "_Curvature", "_Scanlines", "_ScanlineCount", "_Mask", "_Vignette" })
+                    Check(src.Contains(uniform), "MobileCRT: the shader declares " + uniform);
+                // The cost contract, and the whole reason this shader can ship on a 5.6 MP iPad:
+                // the cheap tier is ONE dependent-read-free fetch, and the only extra fetches are
+                // the two halation taps behind the keyword.
+                int halationStart = src.IndexOf("#ifdef CRT_HALATION", StringComparison.Ordinal);
+                Check(halationStart >= 0, "MobileCRT: the halation taps sit behind #ifdef CRT_HALATION");
+                int fetches = CountOccurrences(src, "tex2D(");
+                if (halationStart >= 0)
+                {
+                    int halationEnd = src.IndexOf("#endif", halationStart, StringComparison.Ordinal);
+                    string halation = halationEnd > halationStart ? src.Substring(halationStart, halationEnd - halationStart) : "";
+                    Check(CountOccurrences(halation, "tex2D(") == 2,
+                        "MobileCRT: the halation tier adds exactly two taps",
+                        CountOccurrences(halation, "tex2D(") + " taps");
+                    Check(fetches - CountOccurrences(halation, "tex2D(") == 1,
+                        "MobileCRT: the cheap tier is exactly one texture fetch",
+                        fetches + " fetches in the file");
+                }
+                // Not a licence audit - a tripwire. No code from any of these was used or read;
+                // if a name ever turns up in the CODE, someone pasted something in.
+                foreach (string gpl in new[] { "crt-pi", "crt-geom", "crt-easymode", "crt-royale", "crt-lottes", "zfast" })
+                    Check(!src.Contains(gpl), "MobileCRT: no " + gpl + " provenance in the shader code");
+            }
+
+            // Pinned three ways, because each alone is silently survivable until the filter turns
+            // up as a null material (or a pink screen) on device.
+            string guid = AssetDatabase.AssetPathToGUID(shaderPath);
+            Check(!string.IsNullOrEmpty(guid), "MobileCRT: the shader asset has a GUID (it imported)");
+            Check(File.ReadAllText("Assets/Editor/MobileBuildSetup.cs").Contains(shaderName),
+                "MobileCRT: shader is in MobileBuildSetup's EnsureAlwaysIncludedShaders list");
+            Check(!string.IsNullOrEmpty(guid) && File.ReadAllText("Assets/Shaders/RequiredShaderVariants.shadervariants").Contains(guid),
+                "MobileCRT: shader has an entry in RequiredShaderVariants (variants survive stripping)");
+            Check(!string.IsNullOrEmpty(guid) && File.ReadAllText("ProjectSettings/GraphicsSettings.asset").Contains(guid),
+                "MobileCRT: ApplyIOSSettings pinned the shader into GraphicsSettings' always-included list");
+            var collection = AssetDatabase.LoadAssetAtPath<ShaderVariantCollection>("Assets/Shaders/RequiredShaderVariants.shadervariants");
+            Check(collection != null, "MobileCRT: the required-variants collection loads");
+            if (collection != null && crt != null)
+            {
+                foreach (string[] keywords in new[] { new string[0], new[] { "CRT_HALATION" } })
+                {
+                    string label = keywords.Length == 0 ? "<no keywords>" : keywords[0];
+                    try
+                    {
+                        Check(collection.Contains(new ShaderVariantCollection.ShaderVariant(crt, UnityEngine.Rendering.PassType.Normal, keywords)),
+                            "MobileCRT: variant " + label + " is in the required-variants collection");
+                    }
+                    catch (ArgumentException ex)
+                    {
+                        Check(false, "MobileCRT: variant " + label + " is in the required-variants collection", ex.Message);
+                    }
+                }
+            }
+
+            // ---- the hook ----
+            // RetroPresentation.cs is an upstream file of 31 lines, so an upstream merge that takes
+            // theirs quietly removes the whole filter. Source text is the only guard: OnRenderImage
+            // is a MonoBehaviour callback the editor never invokes.
+            string presenter = StripShaderComments(File.ReadAllText("Assets/Scripts/Utility/RetroPresentation.cs"));
+            Check(presenter.Contains("Graphics.Blit(RetroPresentationSource, null as RenderTexture, "),
+                "MobileCRT hook: the presentation blit has a material overload");
+            Check(presenter.Contains("Graphics.Blit(RetroPresentationSource, null as RenderTexture);"),
+                "MobileCRT hook: the plain blit survives as the off path");
+            Check(presenter.Contains("MobileCrt.Active("),
+                "MobileCRT hook: the material path is gated by MobileCrt.Active");
+            Check(presenter.Contains("MobileShaders.Find(MobileCrt.ShaderName)"),
+                "MobileCRT hook: the material is built from MobileShaders.Find, not a raw Shader.Find");
+            // "Shader.Find(" is not a substring of "MobileShaders.Find(" - the plural puts
+            // "Shaders." before ".Find" - so this really does catch a raw lookup.
+            Check(!presenter.Contains("Shader.Find("),
+                "MobileCRT hook: no raw Shader.Find survives");
+
+            // ---- 3. the settings table ----
+            string settingsSrc = File.ReadAllText("Assets/Scripts/SettingsManager.cs");
+            string[] loadLines =
+            {
+                "PostProcessingInRetroMode = GetInt(sectionVideo, \"PostProcessingInRetroMode\", 0, 4);",
+                "PalettizationLUTShift = GetInt(sectionVideo, \"PalettizationLUTShift\", 1, 3);",
+                "CRTFilter = GetBool(sectionVideo, \"CRTFilter\");",
+                "CRTCurvature = GetFloat(sectionVideo, \"CRTCurvature\", 0f, 0.3f);",
+                "CRTScanlines = GetFloat(sectionVideo, \"CRTScanlines\", 0f, 1f);",
+                "CRTMask = GetFloat(sectionVideo, \"CRTMask\", 0f, 1f);",
+                "CRTVignette = GetFloat(sectionVideo, \"CRTVignette\", 0f, 1f);",
+            };
+            foreach (string line in loadLines)
+                Check(settingsSrc.Contains(line), "MobileCRT settings: LoadSettings reads `" + line.Trim() + "`");
+            string[] saveLines =
+            {
+                "SetBool(sectionVideo, \"CRTFilter\", CRTFilter);",
+                "SetFloat(sectionVideo, \"CRTCurvature\", CRTCurvature);",
+                "SetFloat(sectionVideo, \"CRTScanlines\", CRTScanlines);",
+                "SetFloat(sectionVideo, \"CRTMask\", CRTMask);",
+                "SetFloat(sectionVideo, \"CRTVignette\", CRTVignette);",
+            };
+            foreach (string line in saveLines)
+                Check(settingsSrc.Contains(line), "MobileCRT settings: SaveSettings writes `" + line.Trim() + "`");
+
+            var defaults = ReadIniSection("Assets/Resources/defaults.ini.txt", "Video");
+            string[][] expectedDefaults =
+            {
+                new[] { "CRTFilter", "False" },
+                new[] { "CRTCurvature", "0.08" },
+                new[] { "CRTScanlines", "0.35" },
+                new[] { "CRTMask", "0.25" },
+                new[] { "CRTVignette", "0.25" },
+                // The iOS default the research asked for: shift 1 is an 8 MB LUT and ~850 ms to
+                // build on a desktop; shift 2 is 1 MB and "slightly less crisp".
+                new[] { "PalettizationLUTShift", "2" },
+            };
+            foreach (string[] pair in expectedDefaults)
+            {
+                string got;
+                Check(defaults.TryGetValue(pair[0], out got) && got == pair[1],
+                    "MobileCRT settings: defaults.ini [Video] " + pair[0] + "=" + pair[1],
+                    defaults.TryGetValue(pair[0], out got) ? "found " + got : "key missing");
+            }
+
+            SettingsManager live = null;
+            try { live = DaggerfallUnity.Settings; }
+            catch (Exception ex) { log.AppendLine("  note  MobileCRT settings: live SettingsManager threw: " + ex.Message); }
+            Check(live != null, "MobileCRT settings: the live SettingsManager loads");
+            if (live != null)
+            {
+                foreach (string name in new[] { "CRTFilter", "CRTCurvature", "CRTScanlines", "CRTMask", "CRTVignette" })
+                {
+                    var prop = typeof(SettingsManager).GetProperty(name);
+                    Type want = name == "CRTFilter" ? typeof(bool) : typeof(float);
+                    Check(prop != null && prop.PropertyType == want,
+                        "MobileCRT settings: SettingsManager exposes " + name + " as " + want.Name,
+                        prop == null ? "property missing" : "is " + prop.PropertyType.Name);
+                }
+
+                // Behavioural clamping. The private helpers are what LoadSettings' right-hand sides
+                // are, and SetData is how a rogue settings.ini value gets in front of them; nothing
+                // is saved, so the editor's own settings.ini is untouched.
+                const BindingFlags priv = BindingFlags.Instance | BindingFlags.NonPublic;
+                var setData = typeof(SettingsManager).GetMethod("SetData", priv);
+                var getData = typeof(SettingsManager).GetMethod("GetData", priv);
+                var getInt = typeof(SettingsManager).GetMethod("GetInt", priv, null, new[] { typeof(string), typeof(string), typeof(int), typeof(int) }, null);
+                var getFloat = typeof(SettingsManager).GetMethod("GetFloat", priv, null, new[] { typeof(string), typeof(string), typeof(float), typeof(float) }, null);
+                Check(setData != null && getData != null && getInt != null && getFloat != null,
+                    "MobileCRT settings: the SettingsManager ini helpers are reachable for the clamp check");
+                if (setData != null && getData != null && getInt != null && getFloat != null)
+                {
+                    // key, rogue value, expected clamp result, min, max
+                    var intCases = new[]
+                    {
+                        new object[] { "PalettizationLUTShift", "0", 1, 1, 3 },
+                        new object[] { "PalettizationLUTShift", "9", 3, 1, 3 },
+                        new object[] { "PostProcessingInRetroMode", "-1", 0, 0, 4 },
+                        new object[] { "PostProcessingInRetroMode", "7", 4, 0, 4 },
+                    };
+                    foreach (object[] c in intCases)
+                    {
+                        string key = (string)c[0];
+                        string original = (string)getData.Invoke(live, new object[] { "Video", key });
+                        setData.Invoke(live, new object[] { "Video", key, (string)c[1] });
+                        int got = (int)getInt.Invoke(live, new object[] { "Video", key, c[3], c[4] });
+                        setData.Invoke(live, new object[] { "Video", key, original });
+                        Check(got == (int)c[2],
+                            "MobileCRT settings: a settings.ini " + key + "=" + c[1] + " reaches the app as " + c[2],
+                            "got " + got);
+                    }
+                    var floatCases = new[]
+                    {
+                        new object[] { "CRTCurvature", "9", 0.3f, 0f, 0.3f },
+                        new object[] { "CRTCurvature", "-1", 0f, 0f, 0.3f },
+                        new object[] { "CRTScanlines", "-1", 0f, 0f, 1f },
+                        new object[] { "CRTMask", "5", 1f, 0f, 1f },
+                        new object[] { "CRTVignette", "5", 1f, 0f, 1f },
+                    };
+                    foreach (object[] c in floatCases)
+                    {
+                        string key = (string)c[0];
+                        string original = (string)getData.Invoke(live, new object[] { "Video", key });
+                        setData.Invoke(live, new object[] { "Video", key, (string)c[1] });
+                        float got = (float)getFloat.Invoke(live, new object[] { "Video", key, c[3], c[4] });
+                        setData.Invoke(live, new object[] { "Video", key, original });
+                        Check(Mathf.Abs(got - (float)c[2]) < 1e-6f,
+                            "MobileCRT settings: a settings.ini " + key + "=" + c[1] + " reaches the app as " + c[2],
+                            "got " + got);
+                    }
+                }
+            }
+        }
 
         // Distant Terrain's far-terrain shader is compiled into the app, and its whole reason for
         // being rewritten is memory: upstream sampled twelve 2048^2 tileset ATLASES that
