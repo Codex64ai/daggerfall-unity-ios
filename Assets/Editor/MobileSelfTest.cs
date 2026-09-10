@@ -1444,6 +1444,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(portCode.Contains("Graphics.ConvertTexture(src[b], record, dst, slice)")
                   && portCode.Contains("SystemInfo.copyTextureSupport == UnityEngine.Rendering.CopyTextureSupport.None"),
                 "DistantTerrain: PackSeason converts formats with a GPU blit and only refuses where no blit exists");
+            // ...and the blit is chosen per ARCHIVE. `formatsAgree` is false as soon as one of the
+            // four disagrees; sending the ones already in the destination format through
+            // Graphics.ConvertTexture is a same-format round trip that Metal answers with FALSE, and
+            // that refused the entire far terrain under Biomes ("could not convert archive 3 record 0
+            // from RGBA32 to RGBA32"). A matching source is a plain slice copy.
+            Check(portCode.Contains("bool convertThisArchive = src[b].format != dstFormat;")
+                  && portCode.Contains("if (!convertThisArchive)"),
+                "DistantTerrain: copy-or-convert is decided per archive, so a source already in the destination format is never sent through a same-format ConvertTexture");
 
             // The beacons. Upstream shipped HighlightLocations true with RuntimeVisible false (baked
             // but hidden behind the End key); this port drops the hotkey, so the master switch is the
@@ -1494,7 +1502,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "[DistantTerrain] tileset arrays converted: {0} -> {1} ({2})",
                 "[DistantTerrain] far terrain: pos={0:F1},{1:F1},{2:F1} size={3:F1},{4:F1},{5:F1} heightScale={6:F1} ",
                 "layer={7} stackedCamera mask={8} near={9} far={10} depth={11} targetTexture={12} main.far={13} ",
-                "shader={14} supported={15} material={16} renderer={17} drawHeightmap={18}",
+                "shader={14} supported={15} material={16} renderer={17} drawHeightmap={18} ",
+                "activeInHierarchy={19} parent={20}",
             })
                 Check(port.Contains(literal), "DistantTerrain: log literal \"" + literal + "\"");
             Check(startup.Contains("[DistantTerrain] not available: "),

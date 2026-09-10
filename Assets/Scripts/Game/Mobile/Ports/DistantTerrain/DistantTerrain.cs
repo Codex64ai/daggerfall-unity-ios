@@ -657,10 +657,20 @@ namespace DistantTerrain
 
                 for (int b = 0; b < archives.Length; b++)
                 {
+                    // MOBILE: copy-or-convert is decided per ARCHIVE, not per season. `formatsAgree`
+                    // is false as soon as ONE of the four disagrees, and the previous code then sent
+                    // all four - including the ones already in the destination's format - through
+                    // Graphics.ConvertTexture. On Metal (and the iOS simulator in particular) a
+                    // same-format ConvertTexture returns FALSE, so a Biomes install refused the
+                    // whole far terrain with the self-contradictory line "could not convert archive 3
+                    // record 0 from RGBA32 to RGBA32". A source already in the destination format is
+                    // a plain slice copy and must stay one; only a genuinely different format needs
+                    // the converting blit.
+                    bool convertThisArchive = src[b].format != dstFormat;
                     for (int record = 0; record < SlicesPerBiome; record++)
                     {
                         int slice = SliceIndex(b, record);
-                        if (formatsAgree)
+                        if (!convertThisArchive)
                         {
                             Graphics.CopyTexture(src[b], record, dst, slice);
                         }
@@ -1048,10 +1058,17 @@ namespace DistantTerrain
                 Vector3 size = data != null ? data.size : Vector3.zero;
                 RenderTexture target = stackedCamera != null ? stackedCamera.targetTexture : null;
                 Camera main = Camera.main;
+                // MOBILE: activeInHierarchy and the parent's name, because "the Terrain component is
+                // enabled" is not "the object renders": the far terrain is reparented under
+                // /Exterior, and an inactive parent - or no reparent at all - draws nothing while
+                // every other field on this line still reads healthy. They are the two fields the
+                // Task 9 / diag round wanted first and had to add by hand.
+                Transform parent = worldTerrainGameObject != null ? worldTerrainGameObject.transform.parent : null;
                 Debug.Log(string.Format(
                     "[DistantTerrain] far terrain: pos={0:F1},{1:F1},{2:F1} size={3:F1},{4:F1},{5:F1} heightScale={6:F1} " +
                     "layer={7} stackedCamera mask={8} near={9} far={10} depth={11} targetTexture={12} main.far={13} " +
-                    "shader={14} supported={15} material={16} renderer={17} drawHeightmap={18}",
+                    "shader={14} supported={15} material={16} renderer={17} drawHeightmap={18} " +
+                    "activeInHierarchy={19} parent={20}",
                     pos.x, pos.y, pos.z,
                     size.x, size.y, size.z,
                     size.y,
@@ -1066,7 +1083,9 @@ namespace DistantTerrain
                     shaderDistantTerrainTilemap != null && shaderDistantTerrainTilemap.isSupported,
                     terrainMaterial != null ? terrainMaterial.name : "null",
                     terrain != null && terrain.enabled,
-                    terrain != null && terrain.drawHeightmap));
+                    terrain != null && terrain.drawHeightmap,
+                    worldTerrainGameObject != null && worldTerrainGameObject.activeInHierarchy,
+                    parent != null ? parent.name : "none"));
             }
             catch (Exception ex)
             {
