@@ -146,58 +146,57 @@ float2 NearestEdgePoint(float2 pos, float2 locPos, float2 locSize) {
     bool insideY = pos.y > min.y && pos.y < max.y;
     bool insideX = pos.x > min.x && pos.x < max.x;
 
-    if (insideX && insideY) {
-        return pos;
-    }
+    // MOBILE: initialised - Metal does not zero registers
+    float2 result = pos;
 
-    if (insideY) {
+    if (insideX && insideY) {
+        result = pos;
+    }
+    else if (insideY) {
         float2 left = float2(min.x, pos.y);
         float2 right = float2(max.x, pos.y);
 
-        return distance(pos, left) < distance(pos, right)
+        result = distance(pos, left) < distance(pos, right)
             ? left
             : right;
     }
-
-    if (insideX) {
+    else if (insideX) {
         float2 bottom = float2(pos.x, min.y);
         float2 top = float2(pos.x, max.y);
 
-        return distance(pos, bottom) < distance(pos, top)
+        result = distance(pos, bottom) < distance(pos, top)
             ? bottom
             : top;
     }
+    else {
+        float2 c1 = float2(min.x, min.y);
+        float2 c2 = float2(max.x, min.y);
+        float2 c3 = float2(min.x, max.y);
+        float2 c4 = float2(max.x, max.y);
 
-    float2 c1 = float2(min.x, min.y);
-    float2 c2 = float2(max.x, min.y);
-    float2 c3 = float2(min.x, max.y);
-    float2 c4 = float2(max.x, max.y);
+        float d1 = distance(pos, c1);
+        float d2 = distance(pos, c2);
+        float d3 = distance(pos, c3);
+        float d4 = distance(pos, c4);
 
-    float d1 = distance(pos, c1);
-    float d2 = distance(pos, c2);
-    float d3 = distance(pos, c3);
-    float d4 = distance(pos, c4);
-
-    if (d1 < d2 && d1 < d3 && d1 < d4) {
-        return c1;
+        // Same priority as the original if/return chain: c1, then c2, then c3, else c4.
+        result = c4;
+        if (d3 < d4) { result = c3; }
+        if (d2 < d3 && d2 < d4) { result = c2; }
+        if (d1 < d2 && d1 < d3 && d1 < d4) { result = c1; }
     }
 
-    if (d2 < d3 && d2 < d4) {
-        return c2;
-    }
-
-    if (d3 < d4) {
-        return c3;
-    }
-
-    return c4;
+    return result;
 }
 
 float2 NearestRadialEdgePoint(float2 pos, float2 locPos, float2 locSize, out float2 nearestEdgeNarrow) {
     float2 locCenter = locPos + locSize * 0.5;
     float dist = distance(locCenter, pos);
     float edgeDist = distance(locCenter, locPos);
-    float2 dir = normalize(pos - locCenter);
+    // MOBILE: initialised - Metal does not zero registers
+    // normalize(0) is NaN for a sample exactly at a location's centre; use a defined direction.
+    float2 delta = pos - locCenter;
+    float2 dir = dist > 1e-5 ? (delta / dist) : float2(1.0, 0.0);
 
     float2 nep = NearestEdgePoint(pos, locPos, locSize);
     nearestEdgeNarrow = nep;
@@ -210,11 +209,14 @@ float2 NearestRadialEdgePoint(float2 pos, float2 locPos, float2 locSize, out flo
 
     edgeDist += 7.5 * noise;
 
+    // MOBILE: initialised - Metal does not zero registers
+    float2 result = locCenter + dir * edgeDist;
+
     if (dist < edgeDist) {
-        return pos;
+        result = pos;
     }
 
-    return locCenter + dir * edgeDist;
+    return result;
 }
 
 float2 NearestRectangularEdgePoint(float2 pos, float2 locPos, float2 locSize, out float2 nearestEdgeNarrow) {
@@ -586,11 +588,14 @@ void TerrainComputer (uint3 uid : SV_DispatchThreadID)
 #define GRASS 2
 #define STONE 3
 int TilemapSample(int2 id, float noise) {
+    // MOBILE: initialised - Metal does not zero registers
+    int result = DIRT;
+
     if (pow(noise, 2) < 0.9) {
-        return GRASS;
+        result = GRASS;
     }
 
-    return DIRT;
+    return result;
 }
 
 [numthreads(10, 10, 1)]
