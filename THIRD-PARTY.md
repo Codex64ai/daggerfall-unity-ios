@@ -3,7 +3,8 @@
 This repository is Daggerfall Unity (MIT, copyright (c) 2009-2023 Daggerfall Workshop - see
 `LICENSE`) plus an iOS touch port (MIT, same terms). Several further works are compiled into the port
 rather than loaded as mods - see each section below for its licence status, which is not MIT in every
-case and is undeclared for three of them. Their original headers are preserved in the files named.
+case and is undeclared for three of them - and for half of a fourth, whose base is MIT and whose
+modifications are not. Their original headers are preserved in the files named.
 
 ## Basic Roads
 
@@ -497,3 +498,180 @@ where upstream had CRLF - `InterestingTerrains.cs`, `Models/TerrainComputer.cs`,
 `Models/HeightmapBufferCollection.cs`, `Helpers/BufferIO.cs` and `Helpers/TileDataCache.cs`, which
 are exactly the five CRLF files that carry substantive `MOBILE` edits. A plain diff shows every line
 of them as changed; `diff <(tr -d '\r' < upstream/file) ported/file` shows what actually changed.
+
+## Distant Terrain of the World of Daggerfall (compiled in, private draft only)
+
+The fifth of the set, and the only one you look *at* rather than walk on. It draws a second, coarse
+Unity `Terrain` covering the whole province on a camera stacked behind the main one, so the horizon
+has hills and coastline on it instead of fog - the World of Daggerfall flavour of it lifts 32,928
+mountains out of that far ground at the map pixels where WoD's own mountain prefabs stand, so what
+you see in the distance is the world you would arrive in.
+
+Its lineage forks: **the base is MIT and the additions are not**. Nystul-the-Magician published
+Distant Terrain in 2017 under the MIT licence and that copyright header is preserved in every file.
+MaoDeVaca's World of Daggerfall-flavour modifications - the mountain lifts, the river and coast
+carve, the location beacons, the per-region treatment - declare no licence anywhere, and the only
+versioned copy of them in existence is a vendored drop inside somestupidgirl's build-script repo.
+So the same rule as the three sections above applies to the whole of it: the C# is compiled in under
+`Assets/Scripts/Game/Mobile/Ports/DistantTerrain/`, the rewritten shader under
+`Assets/Shaders/DistantTerrain/`, the data is an off-by-default entry in the launcher's MODS window
+fed by a bundle, and the bundle ships only on the private test draft.
+
+| Mod | Author, licence | Source | What is NOT shipped |
+|---|---|---|---|
+| Distant Terrain of the World of Daggerfall | Base: Nystul-the-Magician, **MIT, 2017** (header preserved). WoD-flavour additions: MaoDeVaca (Nexus 1284), **NO LICENCE DECLARED** (permission being sought by Ikram; not in any public release) | Additions: github.com/somestupidgirl/Distant-Terrain-of-the-World-of-Daggerfall @ `d454b30af12c9f22c9ab5ef8ad5dbd9171d1cf1f` - the **only** versioned copy, and it is a vendored drop of upstream `a722b337935dd8a57a913eb413c918c351e68e67`; her own commits add build scripts, which are not used. MIT base: github.com/Nystul-the-Magician/dfunity-mods `DistantTerrain/` @ `fc58546c3eae964babfdfeea51e97a47ba57cdce` | `DistantTerrainFlyMap.cs` (930 lines - a keyboard/mouse/IMGUI free-camera teleporter, and a phone has neither) and `ThirteenthPassageEffect.cs` (144 lines - the "13th Passage" Mysticism teleport spell and its `passage` console command), with the spell registration, the console registration, the fly-map creation and the `KeyCode` settings that drove them. Excluded from the fetch as well: `*.shader`, `*.cginc` (the shader is compiled into the app, rewritten - see below), `*.prefab`, `*.png~`, `DaggerfallBillboardBatchFaded.shader`, and the three `*.bin.txt` blobs (`mapLocationRangeX`, `mapLocationRangeY`, `mapTreeCoverage`) nothing in the runtime reads. The five remaining runtime files (+3,558 lines as ported) are compiled in; the two shader files (+1,081) are compiled into the app; the three `Mountains*.csv` and `daggerfall_deriv_map.png` are the bundle |
+
+The manifest is `distantterrain.dfmod.json`, so the bundle builds as `distantterrain.dfmod`, and the
+launcher entry keys on the manifest `ModTitle`, which is the full
+**`Distant Terrain of the World of Daggerfall`** - not the bare `Distant Terrain` the research
+predicted. Its GUID is `9632a2ad-2ea0-46b6-b9b1-a4dafcca8a9a`, **the same GUID as Nystul's original**,
+which makes the two mutually exclusive by construction; Nystul's is not in this pack, so nothing
+collides here, but it is why a future MIT-only fallback would be a replacement rather than a
+companion.
+
+What it does, once the world exists. At `StreamingWorld.OnReady` it builds a 1025² `TerrainData`
+from the small world heightmap (`WoodsFileReader`, 1000x500), carves rivers and coastline into it
+from a hand-painted greyscale mask, lifts the WoD mountains out of it from three CSVs (un-lifted
+inside the near-terrain footprint, so the seam stays continuous), bakes a 1024² RGBA32 "terrain
+info" tilemap (climate, per-region treatment, location beacon) and hangs the whole thing on a
+stacked camera whose far clip plane is `blendEnd`, with the main camera forced to 15,000 and clear
+flags `Depth`. A third camera renders the skybox only into a 256² render texture, which is where the
+fog colour and the world-edge fade come from. Every map-pixel crossing re-lifts the mountains and
+pushes a `SetHeights` dirty rect.
+
+**The one piece of real engineering here is the shader.** Upstream's `FarTerrainCommon.cginc`
+sampled **twelve 2048² ARGB32 tileset atlases** - four biomes (desert, mountain, woodland, swamp) by
+three seasons (summer, winter, rain) - which the C# built at runtime, and which this build's terrain
+path never builds at all. That is roughly **270 MB of texture memory** before anything else in the
+game is loaded, and it is the reason the port could not simply copy the file. The rewrite samples
+**three `UNITY_DECLARE_TEX2DARRAY` arrays** instead, one per season, each packed with all four biome
+tilesets' 56 records as slices (`slice = biome * 56 + record`, 224 slices of 64², built from DFU's
+own `TextureReader.GetTerrainTextureArray` so texture-replacement packs are still honoured, packed
+with 224 `Graphics.CopyTexture` slice blits at world entry). **~15 MB** instead of ~270. The atlas
+cell origin, the 32-texel gutter offset and the atlas-normalised gradients are gone; the tiling
+maths, the slope blend, the snow caps, the woodland dirt, the tree specks, the beacons, the skirt,
+the near-terrain cutout `discard` and the `alpha:fade` transparent queue are upstream's, unchanged.
+The mip selection is algebraically identical to upstream's `tex2Dgrad` - a 2048 atlas of 16x16 cells
+holds a 64-texel tile core, so `_AtlasSize / _GutterSize` is 64 and divides straight out - and it is
+computed with an explicit `_LOD` sample because `HLSLSupport.cginc` has no
+`UNITY_SAMPLE_TEX2DARRAY_GRAD` and both DFU's own array terrain shader and Nystul's own
+`TransitionRingTilemapTextureArray` select the level by hand for the same reason. Also deleted: the
+never-read `_CameraDepthTexture` sampler pair, three legacy samplers (`_TileAtlasTex`, `_TilemapTex`,
+`_BumpMap`) and with them the orphaned `uv_BumpMap` interpolator, and `#pragma glsl`. `#pragma target`
+goes 3.0 -> 3.5 on the two surface programs (a `Texture2DArray` needs SM3.5); the depth-only pass
+samples nothing and stays at 3.0.
+
+**The sampler count was never the problem, and it is worth recording that we checked rather than
+assumed.** A spike compiled the *original* atlas shader for Metal/iOS before a line of it was
+rewritten (`Assets/Editor/MobileShaderSpike.cs`, kept for reuse): it compiled, all three passes, 102
+Metal programs, `ShaderHasError` false, **zero messages** - no errors and no warnings, including
+none about the `float4 pos : SV_POSITION` in the surface `Input` struct or the long-dead
+`#pragma glsl` that the design had flagged as risks. The worst single fragment program bound **12 of
+Metal's 16 sampler slots**, with four to spare. So the original could have shipped as far as the
+compiler is concerned; it could not ship because of *what* those twelve bindings were. After the
+rewrite the same tool measures **6 samplers in the worst program** (`_TileArraySummer/Winter/Rain`,
+`_FarTerrainTilemapTex`, `_SkyTex`, `_SeaReflectionTex`), ten slots spare, still zero messages, and
+the same 102 programs. The useful corollary the spike bought: any Metal complaint that appears from
+here on belongs to the rewrite, not to an inherited incompatibility.
+
+**The river/coast mask imports at 2048x1024 R8, and that is a deliberate 25x memory decision.**
+`daggerfall_deriv_map.png` is a 5,000x2,500 8-bit greyscale water mask (139 distinct values - it is
+antialiased, not binary), read once on the CPU with `GetPixels32` and never sampled by any shader.
+The design said to keep it at full resolution; reading `ApplyDerivativeHeightmap` showed that wrong:
+the carve scales the image onto the 1000x500 world grid by the texture's **own** `width`/`height` and
+takes the darkest pixel of each cell's block, hard-coding no resolution at all. So it goes through
+the pack's `RawData` rule at Unity's ordinary `maxTextureSize` 2048 - Unity clamps proportionally,
+giving 2048x1024, still twice the grid it is sampled onto - readable, uncompressed, **no mips**, and
+single-channel `R8` (a new `SingleChannel(path)` hook, because the carve reads `.r` only and the
+other three channels would be duplicate bytes paid for twice, once on the GPU and once in the
+readable copy). **4 MB instead of 100.** The cost was measured offline against a full-resolution
+carve rather than argued: of 186,942 water cells, 2048x1024 loses 565 (0.30%) and gains 3,038 - a
+handful of thin river cells move by one cell - where a 1250x625 import would have lost 1.03%. That
+`GetPixels32` returns sensible bytes from an `R8` texture is a self-test check with a real round
+trip, not an assumption, though it is an *Editor* check; if the far terrain ever comes back
+all-ocean on a device, that is the first thing to look at. As with the Biomes and Terrain rules,
+**the rule keys on mod folder + file name, never the bare name**: `WorldOfDaggerfallTerrain` ships a
+*different* `daggerfall_deriv_map.png` (RGBA, under the `LinearData` rule, read by a compute shader),
+and a bare-name match would have taken three channels and the mip chain off that one.
+
+**The reach dials, and why one of them is derived rather than configured.** `blendEnd` is both the
+stacked camera's far clip plane and the distance at which the far terrain has faded to nothing;
+upstream ships 120,000 and this port defaults to **60,000**, half the reach, because half the world
+is a lot to draw on a phone. `mainCameraFarClipPlane` is **15,000**, upstream's own value, exposed as
+a dial rather than changed. The trap is `blendStart`: the shader computes
+`fadeRange = _BlendEnd - _BlendStart + 1`, so halving `blendEnd` alone would leave upstream's
+`blendStart` of 100,000 *above* it, invert the band and fade every far-terrain fragment to alpha
+zero - an invisible far terrain produced by a setting that looks entirely reasonable. So `blendStart`
+is not a setting at all: `DistantTerrainPort.BlendStartFor(blendEnd)` keeps upstream's 5:6
+proportion (50,000 at the default) and a self-test pins it. Both are read from a `Rendering` section
+in `modsettings.json` if one is present and clamped (main far clip 1,000-30,000; `blendEnd` from the
+main far clip to 145,000), and **the iOS preset lives in the code defaults, not in
+`modsettings.json`** - that file is fetched data this port does not patch. The two feature dials do
+still come from the bundle's own settings: `EnableTreesAndDirt` (the procedural distant tree specks
+and woodland dirt) is already **off** in upstream's shipped settings, and
+`HighlightDistantLocations` (the colour-coded location beacons) is **on** there. The beacons are the
+one preset item still at upstream's value; if the device says they cost, the code default is the
+one-line change. Upstream's second, *live* beacon gate (`RuntimeVisible`, flipped in game by an End
+key that only the deleted fly-map polled) now starts **true**, because with the hotkey gone leaving
+it false would mean the beacons could never appear at all; the master switch decides alone.
+
+Two behavioural differences from upstream are worth naming because they are the largest ones.
+Upstream's `Awake` called `Application.Quit()` when `StreamingWorld`, `PlayerGPS` or `WeatherManager`
+was missing - reasonable in a mod that starts inside a running game, fatal here, where `Init` runs at
+the **title screen** and would have closed the app on every launch with the entry on. Those lookups
+moved into a retry that reports only at world entry, `SetupGameObjects` declines until the world
+exists, and the consequence is that **the stacked camera comes into existence at world entry, not at
+start-up** - which is exactly what makes the sky's wait for it meaningful (below). And
+`InitFarTerrain` is now a try/catch wrapper around the build: upstream let a throw escape into
+`StreamingWorld.OnReady`'s invocation list, where it stops every later subscriber for the session.
+On a throw the port logs `[DistantTerrain] far terrain failed: <ex>` and tears down - the far terrain
+object, the stacked camera, the skybox camera and its render texture, the heightmap arrays, the tile
+arrays - and puts the main camera's saved `farClipPlane` and `clearFlags` back. Smaller ones in the
+same spirit: the `TerrainData` alphamap and basemap resolutions drop from 1,000 to 16 and the detail
+resolution to 16/8, because the far terrain paints nothing through splat, basemap or detail maps and
+upstream sized all three at world resolution; the driver object is `DontDestroyOnLoad`; source tile
+arrays are destroyed after the pack **only if they are nameless**, so a replacement pack's own
+`Texture2DArray` asset is left to its owner rather than corrupted for the session; and all nine
+upstream log lines were re-prefixed to a single `[DistantTerrain]` so one grep finds everything the
+port writes.
+
+**Start order with Dynamic Skies.** The launcher starts Distant Terrain *before* the sky's deferred
+start, and the sky's 1 Hz readiness poll additionally waits for `GameObject.Find("stackedCamera")`
+while Distant Terrain is running, so `BLBSkybox.Init` takes its stacked-camera branch
+deterministically instead of racing for it. Because the stacked camera now only exists from world
+entry, the practical consequence is that **with Distant Terrain on, the sky starts at world entry
+rather than at the title screen** - accepted, since the title screen needs no sky. Fog is the loose
+end: Distant Terrain's `Start()` overwrites five `WeatherManager` fog settings, which is upstream's
+behaviour and is kept, but it means this mod owns those values rather than the weather system or
+Dynamic Skies. It is now null-safe, idempotent and logged once
+(`[DistantTerrain] fog settings overwritten -- sunny ..., overcast ..., rainy ..., snowy ...,
+heavy ...`) so a log reader can see who wrote them, and reconciling the two visually is a **device
+tuning item for a later round, not a code item in this one**.
+
+Not device-verified at the time of writing - and unlike the other four, **nothing here has been
+rendered at all yet**: the far terrain is only ever built inside a running player, so the array pack,
+the timing lines, the teardown and the title-screen behaviour are all first exercised in the
+simulator run. The port carries its own measurement for when it is:
+
+```
+[DistantTerrain] far terrain built in N ms (heightmap A ms, carve B ms, lifts C ms, tilemap D ms)
+[DistantTerrain] map-pixel update N ms
+[DistantTerrain] arrays N MB
+[DistantTerrain] far terrain ready
+```
+
+once per world entry, then per map-pixel crossing for the first ten and every twenty-fifth after,
+plus the array total once per session (analytic, from slice geometry rather than from the profiler,
+and it deliberately over-reports a compressed replacement set). The refusal and failure lines are
+`[DistantTerrain] not available: <reason>` (the gate: shader unresolved or unsupported, a missing
+CSV, a missing deriv map, or no scene at world entry), `[DistantTerrain] far terrain failed: <ex>`
+(the build threw and was torn down) and `[DistantTerrain] tileset arrays mismatch: ...` (four
+independently-imported source arrays that cannot share one destination - vanilla is always
+64x64 ARGB32 with matching mip counts, so this only bites under an asymmetric replacement pack).
+
+Memory, added up: the three tile arrays ~15 MB, the 1024² RGBA32 terrain-info tilemap 4 MB on the GPU
+and 4 more in the CPU copy it keeps, the deriv map 2 + 2, the 256² skybox render texture and its
+depth buffer under half a megabyte - about **27 MB of texture memory**, plus the far terrain's own
+1025² heightmap in managed floats and a 3.5 MB CSV string parse that happens once at world entry.
+Against the ~270 MB the twelve atlases alone would have cost, which is the whole argument for the
+rewrite.

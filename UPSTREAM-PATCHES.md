@@ -603,3 +603,126 @@ dispatch and its 16,641-int blocking readback therefore run per tile and produce
 `UncacheTileData` deletes unread: dead work, kept this round for fidelity with upstream and for the
 `getTileData` contract, and a candidate for removal in a later round. It is a real slice of every
 `[WoDTerrain] tile … ms` number, which matters when those numbers are the thing being judged.
+
+### Distant Terrain (World of Daggerfall flavour) support (2026-09-09) — `Game/Mobile/Ports/DistantTerrain/` (new, 5 files, +3,558), `Assets/Shaders/DistantTerrain/` (new, 2 files, +1,081), `Game/Mobile/MobilePortedMods.cs` (+86/-8), `Assets/Editor/{MobileShaderSpike.cs (new, +203),MobileSelfTest.cs (+447/-3),MobileModPackTextureRules.cs (+35/-2),MobileModBuilder.cs (+12/-1),MobileBuildSetup.cs (+11/-1)}`, `Assets/Shaders/RequiredShaderVariants.shadervariants (+7)`, `ProjectSettings/GraphicsSettings.asset (+1)`, `tools/bundled-mods/mods.json (+10)`
+Counts are `git diff --numstat 21eeff67f HEAD` (the commit before this feature's first to its last),
+excluding `.meta` files.
+Distant Terrain of the World of Daggerfall compiled in (see THIRD-PARTY.md). **It touches no upstream
+engine *source* file** — not one. Every C# file in the heading is one upstream does not have:
+`MobilePortedMods.cs`, `MobileShaderSpike.cs`, `MobileSelfTest.cs`, `MobileModPackTextureRules.cs`,
+`MobileModBuilder.cs` and `MobileBuildSetup.cs` are all this port's own, and
+`Ports/DistantTerrain/` and `Assets/Shaders/DistantTerrain/` are new trees. Everything the feature
+needed at the engine seam was already there and already patched for the four features before it: the
+ported-mods start-up hook, `MobileShaders.Find` in place of `mod.GetAsset<Shader>`, the pack
+importer, `Mod.LoadAllAssetsFromBundle`, and `StreamingWorld.OnReady` as a public event. **Nothing
+here adds to the file and line totals at the top of this document.**
+
+**Three engine *touch points* nonetheless, and all three are the shader pin.** They are worth naming
+because they are the only part of this feature that lives outside `Mobile/` and `Ports/`, and because
+two of them are generated project state that a careless rebase resolves by taking either side
+wholesale. **(1)** `EnsureAlwaysIncludedShaders` in `Assets/Editor/MobileBuildSetup.cs` gains
+`"Daggerfall/DistantTerrain/DistantTerrainTilemap"` as its sixth entry — the same treatment the
+classic UI shaders and the BLB skybox get, and for the same reason: nothing in *project* content
+references this shader by name (the C# resolves it through `MobileShaders.Find` at runtime), so
+without the pin the build stripper cuts it and the far terrain has no material on a device while
+compiling perfectly in the Editor. **(2)** `Assets/Shaders/RequiredShaderVariants.shadervariants`
+gains an entry for guid `39d0ec48bfce941e599b735cbd64b761` with both `passType: 4` (ForwardBase)
+variants — `<no keywords>` and `ENABLE_WATER_REFLECTIONS` — so the pair is warmed at player start
+rather than compiled at the moment the horizon first appears. (Note against the plan, which said to
+copy the shape of the BLB skybox entries: the BLB skybox has no entry in that file at all, it is
+pinned through `EnsureAlwaysIncludedShaders` only, and every other project-shader entry in the file
+is `variants: []`. This one names the keyword pair, and the self-test constructs a real
+`ShaderVariantCollection.ShaderVariant` for each — a constructor that *throws* on a pass type or
+keyword set the shader does not have, which is exactly the mistake a hand-written entry makes and
+which would otherwise surface only as a player-log warning much later.) **(3)**
+`ProjectSettings/GraphicsSettings.asset` gains
+`- {fileID: 4800000, guid: 39d0ec48bfce941e599b735cbd64b761, type: 3}` in `m_AlwaysIncludedShaders`,
+which is `ApplyIOSSettings` writing out what (1) declares. That file is upstream-tracked project
+state rather than code — the same one-line-per-pinned-shader change Dynamic Skies committed, and the
+precedent for committing it. If a rebase drops that line the symptom is a shader that is present in
+the project, passes every Editor check, and is absent from the player.
+
+The launcher block follows the shape the four features before it established: `DistantTitle` is the
+manifest's real `ModTitle`, the full `"Distant Terrain of the World of Daggerfall"`, added to
+`Titles` (which `DefaultOff` walks, so the entry starts off), with no dependency gate at all — the
+mod's own `BasicMode` setting covers a no-World-of-Daggerfall setup, so its own switch is the whole
+condition and the *capability* question belongs to `DistantTerrainPort.Init`, which answers it
+(shader resolved and `isSupported`, three CSVs present, deriv map present) and logs
+`[DistantTerrain] not available: <reason>` when the answer is no. Because that gate declines by
+logging and returning normally rather than by throwing, the plain `StartOne(title, init)` would have
+written `[PortedMods] started Distant Terrain of the World of Daggerfall` for a session with no far
+terrain in it, so the entry uses the four-argument overload
+`StartOne(title, init, installed, hint)` with hint `"[DistantTerrain]"`, giving
+`[PortedMods] Distant Terrain of the World of Daggerfall did not start (see [DistantTerrain] lines)`
+on a clean refusal. **The flag it asks is `Running`, not `Installed`, and the distinction is
+load-bearing**: `Installed` becomes true only when a far terrain has actually been built, which
+happens at `StreamingWorld.OnReady`, long after `Init` has returned — so a launcher that asked
+`Installed` would report every enabled launch as a failure. `Running` is set on the last line of
+`Init` when the gate passed and the hooks are subscribed, which is precisely what the launcher line
+means; `[DistantTerrain] far terrain ready` from the build itself is the later half of the story,
+and the two together are how a log reader tells "the mod started" from "the horizon actually got
+built".
+
+**The start order with Dynamic Skies is a contract, not a coincidence.** The Distant Terrain block
+sits **before** the sky's deferred start, and `SkySceneReady` grew from two arguments to four —
+`SkySceneReady(sunLight, mainCamera, distantRunning, stackedCamera) => sunLight && mainCamera &&
+(!distantRunning || stackedCamera)`, with the old two-argument form kept as
+`=> SkySceneReady(a, b, false, false)` so nothing else had to change — so that the sky's 1 Hz poll
+additionally waits for `GameObject.Find("stackedCamera")` whenever `DistantTerrainPort.Running`.
+`BLBSkybox.Init` already looks for `"DistantTerrain"` and `"stackedCamera"` and takes a different
+branch when it finds them; without the wait, which branch it took depended on the order two
+coroutines happened to tick. The poll asks both flags every pass rather than capturing them once —
+`Running` is settled before the coroutine starts (`StartEnabled` is synchronous) but the stacked
+camera is a scene object that can come and go with a reload — and it gained one log line, said once
+and only when the scene is up and that camera is the sole thing still missing:
+`[PortedMods] Dynamic Skies waiting for Distant Terrain's stacked camera`. The existing
+`waiting for the scene (SunLight, MainCamera)` line is unchanged, and the two are deliberately
+distinguishable: the first says the title screen has not finished, the second says this feature is
+the reason. The consequence to know about is that **the stacked camera only exists
+from world entry** — this port's `SetupGameObjects` declines until StreamingWorld, the player and
+WeatherManager exist, because upstream's `Awake` would have called `Application.Quit()` at the title
+screen — so with Distant Terrain on, the sky now starts at world entry rather than at the title. That
+is accepted (the title screen needs no sky) and it is the single most visible difference the start
+order makes.
+
+The importer side reuses the `RawData` rule Biomes introduced rather than adding a third rule kind:
+`MobileModPackTextureRules` adds `DistantTerrainWoD` to `rawDataMods`, extends `NoMips` to the deriv
+map, and adds a new per-file `SingleChannel(string assetPath)` hook that `MobileModBuilder` reads to
+pick `TextureImporterFormat.R8` instead of `RGBA32` on the iPhone override. **Both new rules key on
+mod folder *plus* file name, never the bare file name**, and that is not fastidiousness:
+`WorldOfDaggerfallTerrain` ships a different `daggerfall_deriv_map.png` under the `LinearData` rule,
+and a bare-name match would have taken three channels and the mip chain off a map a compute shader
+reads. `MobileBuildSetup.ReimportPacks`' single-asset path also now logs the imported size and
+format, because `maxTextureSize` is the one setting a `.meta` file cannot prove — the meta says
+`2048`, and only the log says the 5,000x2,500 source actually landed at 2048x1024 rather than at the
+1250x625 a power-of-two halving would have given.
+
+`MobileSelfTest` covers what is pure and what is textual: the slice contract (`SlicesPerBiome`,
+`SliceIndex(3,55) == 223`, 224 distinct slices with no gap), the `Available` gate's full eight-case
+truth table, `Installed`/`Running` false before `Init` and no surviving `[Invoke]`, the reach preset
+(60,000 / 15,000, `BlendStartFor` at upstream's 5:6 proportion, and `blendStart < blendEnd`),
+`TilesetsCompatible` accepting four vanilla tilesets and refusing a resized, recompressed or
+differently-mipped one with a detail string that names the difference, the array byte arithmetic and
+the ~15 MB total, the map-pixel logging cadence, every one of the port's log literals and its single
+`[DistantTerrain]` prefix, the importer rule table including an `R8` `GetPixels32` round trip, and
+all three pin locations plus the constructed shader variants. Source-text checks — that the atlas
+machinery is gone, that the fly-map, the spell, the console command and the hotkey are gone, that
+`Application.Quit` is gone — run on a **comment-stripped** copy of the sources, because the port's
+comments deliberately name the upstream symbols they replaced and an "it is gone" check that a
+comment can satisfy is worthless. The rest — the `Graphics.CopyTexture` pack, the timings, the
+teardown, the fog, what the horizon actually looks like — needs a streamed world and a GPU, and
+belongs to the simulator and device runs.
+*Rebase risk: LOW, and concentrated in one line.* No upstream engine source file is touched, so
+there is nothing here for a rebase to conflict with in code. The exposure is the shader pin: a
+rebase that resolves `ProjectSettings/GraphicsSettings.asset` by taking theirs silently drops the
+`m_AlwaysIncludedShaders` entry, and the failure mode is a far terrain that works in the Editor and
+is missing in the player with nothing in any log to say why — re-run `MobileBuildSetup.ApplyIOSSettings`
+after any rebase that touches that file and check the guid is back. Beyond that the exposure is
+indirect and worth naming: `TextureReader.GetTerrainTextureArray`, `TextureMap.Albedo`,
+`TextureReplacement.TryImportTextureArray`, `StreamingWorld.OnReady`, `PlayerGPS`, `WeatherManager`'s
+five fog fields and `MaterialReader.MainFilterMode` are all engine API this port calls into, and an
+upstream change to any of them is a compile error in `Ports/DistantTerrain/`, which is the good
+failure mode. The two silent ones are `GetTerrainTextureArray`'s *shape* — 56 slices per archive at
+64x64 ARGB32 is what the pack and the `slice = biome * 56 + record` arithmetic assume, and a change
+to slice count or layout would produce a wrongly-textured horizon rather than an error — and
+`WeatherManager`'s fog fields, which this mod overwrites at `Start` by upstream's design.
