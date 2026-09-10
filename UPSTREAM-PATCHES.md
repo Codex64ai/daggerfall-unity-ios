@@ -751,3 +751,31 @@ failure mode. The two silent ones are `GetTerrainTextureArray`'s *shape* — 56 
 64x64 ARGB32 is what the pack and the `slice = biome * 56 + record` arithmetic assume, and a change
 to slice count or layout would produce a wrongly-textured horizon rather than an error — and
 `WeatherManager`'s fog fields, which this mod overwrites at `Start` by upstream's design.
+
+### Follow-ups after the WoD family (2026-09-10) — `Assets/Scripts/Utility/RMBLayout.cs (+4/-1)`
+
+One engine file, one guard, four lines. `RMBLayout.AddProps` discarded
+`MeshReader.GetModelData`'s return value. On `false` that method still assigns
+`modelData = new ModelData()` — a default struct whose `SubMeshes`, `Indices`, `Vertices`
+and `Normals` are all null — and `ModelCombiner.Add`'s first statement is
+`foreach (var sm in modelData.SubMeshes)`. So a `Misc3dObjectRecord` naming a model id
+`ARCH3D.BSA` has no record for threw `NullReferenceException` out of `AddProps`, out of
+`CreateBaseGameObject`, and the caller lost the **entire block** over one missing prop.
+
+The patch reads the return value and skips that record with the same `Debug.LogError`
+message `AddModels` (`:843`, eighty lines above in the same file) has always used — the
+guard already existed in the sibling loop and simply was not in this one. It sits after
+`MeshReplacement.ImportCustomGameobject`, matching `AddModels`' ordering, so a custom
+replacement model still wins where Daggerfall has no mesh.
+
+Found through Location Loader's type-5 objects, which build World of Daggerfall's
+`WorldData` override blocks: `ALCHAS00.RMB` and `ALCHBS01.RMB` rendered as empty
+clearings and all the game reported was an unattributed NRE. It is not a mobile-only
+bug — the same block from the same mod fails the same way on desktop — so this is a
+candidate to send upstream rather than carry.
+
+*Rebase risk: LOW.* A merge that takes theirs restores the discarded return and compiles
+cleanly, with the dock blocks silently vanishing again. `MobileSelfTest` reads
+`RMBLayout.cs` as comment-stripped text and requires exactly two `GetModelData(` call
+sites, both assigned to `hasModelData` and both followed by an `if (!hasModelData)`
+skip — so the tripwire fires in the Editor, not on a device.

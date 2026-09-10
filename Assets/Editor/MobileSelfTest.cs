@@ -2576,6 +2576,22 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(unknown != null && unknown.obj.Count == 0,
                   "an unknown object type is still rejected",
                   unknown == null ? "prefab was null" : unknown.obj.Count.ToString());
+
+            // Rebase tripwire for the AddProps guard. RMBLayout.cs is an upstream file and the fix is
+            // four lines; an upstream merge that takes theirs restores the discarded GetModelData
+            // return, and the symptom is not a compile error but WoD's two dock blocks silently
+            // vanishing again behind an unattributed NullReferenceException. Both call sites must read
+            // the return value (AddModels' own, which was always there, and AddProps'), and neither may
+            // discard it. Comments are stripped so the comment explaining the patch cannot satisfy it.
+            string rmbSrc = StripShaderComments(
+                System.IO.File.ReadAllText("Assets/Scripts/Utility/RMBLayout.cs"));
+            Check(CountOccurrences(rmbSrc, "GetModelData(") == 2
+                  && CountOccurrences(rmbSrc, "hasModelData = dfUnity.MeshReader.GetModelData(") == 2
+                  && CountOccurrences(rmbSrc, "if (!hasModelData)") == 2,
+                  "RMBLayout: both AddModels and AddProps skip a model id ARCH3D.BSA has no record for",
+                  CountOccurrences(rmbSrc, "GetModelData(") + " call sites, "
+                  + CountOccurrences(rmbSrc, "hasModelData = dfUnity.MeshReader.GetModelData(") + " read, "
+                  + CountOccurrences(rmbSrc, "if (!hasModelData)") + " guarded");
         }
 
         // Location Loader's type-5 RMB blocks get WoD Biomes' subtropical nature swap, but only when

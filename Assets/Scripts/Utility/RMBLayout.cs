@@ -920,7 +920,19 @@ namespace DaggerfallWorkshop.Utility
 
                 // Get model data
                 ModelData modelData;
-                dfUnity.MeshReader.GetModelData(obj.ModelIdNum, out modelData);
+                // MOBILE: not upstream. GetModelData's return value was discarded here, and on false
+                // it leaves `modelData` a DEFAULT struct - SubMeshes, Indices, Vertices and Normals
+                // all null. ModelCombiner.Add's first statement is `foreach (var sm in
+                // modelData.SubMeshes)`, so an unknown model id throws NullReferenceException out of
+                // AddProps, out of CreateBaseGameObject, and the caller loses the ENTIRE block over
+                // one missing prop. AddModels (:843, eighty lines above, same file) already reads the
+                // return value and skips the record with exactly the message below; this is the same
+                // guard in the sibling loop, in the same place relative to the custom-model import
+                // (a MeshReplacement GameObject must still win when Daggerfall has no mesh).
+                // Found by World of Daggerfall's WorldData override blocks ALCHAS00.RMB and
+                // ALCHBS01.RMB, which Location Loader's type-5 objects build: both docks rendered as
+                // empty clearings, and all the game said was an unattributed NRE.
+                bool hasModelData = dfUnity.MeshReader.GetModelData(obj.ModelIdNum, out modelData);
 
                 // Does this model have doors?
                 if (modelData.Doors != null)
@@ -929,6 +941,13 @@ namespace DaggerfallWorkshop.Utility
                 // Import custom GameObject
                 if (MeshReplacement.ImportCustomGameobject(obj.ModelIdNum, parent, modelMatrix) != null)
                     continue;
+
+                // MOBILE: not upstream - see the comment above.
+                if (!hasModelData)
+                {
+                    Debug.LogError($"Could not load model '{obj.ModelIdNum}' in block '{blockData.Name}'");
+                    continue;
+                }
 
                 // Use Daggerfall Model
                 // Add or combine
