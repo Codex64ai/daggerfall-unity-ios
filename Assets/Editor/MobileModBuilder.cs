@@ -230,9 +230,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         //
         // MobileModTextureImporter below has carried the same one-liner from the start; this is the
         // sibling that was missing it. Bump the number whenever OnPreprocessTexture above changes
-        // behaviour. Going from the implicit 0 to 1 costs ONE reimport of the textures these
-        // postprocessors apply to, on the next Editor run.
-        public override uint GetVersion() { return 1; }
+        // behaviour - INCLUDING when the rule tables it reads change, because from Unity's side the
+        // rules and this method are one function. Going from the implicit 0 to 1 costs ONE reimport
+        // of the textures these postprocessors apply to, on the next Editor run.
+        // 1 -> 2: RealGrass joined rawDataMods (its two detail-prototype billboards must import
+        // readable and uncompressed - the terrain detail atlas is built from their CPU pixels).
+        public override uint GetVersion() { return 2; }
     }
 
     /// <summary>

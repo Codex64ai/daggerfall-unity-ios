@@ -75,7 +75,14 @@ def inspect(path):
             w, h = getattr(d, "m_Width", 0), getattr(d, "m_Height", 0)
             fmt = getattr(d, "m_TextureFormat", None)
             fmt = fmtname(fmt)
-            tex.append((getattr(d, "m_Name", "?"), w, h, fmt))
+            # Read/Write enabled, i.e. does the shipped texture carry a CPU copy. Unity builds a
+            # runtime TerrainData's detail atlas from the prototype textures' CPU pixels, so for a
+            # detail-billboard bundle (RealGrass) an "unreadable" here is the whole bug: the atlas
+            # is packed from nothing and the grass draws as nothing, reported only by a native
+            # error that never reaches Player.log. Bundles that are only sampled by the GPU are
+            # correctly unreadable - this column is a fact, not a verdict.
+            readable = getattr(d, "m_IsReadable", None)
+            tex.append((getattr(d, "m_Name", "?"), w, h, fmt, readable))
         elif t == "AudioClip":
             audio.append((getattr(d, "m_Name", "?"), getattr(d, "m_Size", 0)))
         elif t == "MonoScript":
@@ -111,9 +118,9 @@ def main():
             print(f"  could not read as a Unity bundle: {e}");  continue
 
         all_tex += tex;  all_code += code
-        raw = sum(argb32(w, h) for _, w, h, _ in tex)
-        a6  = sum(astc6(w, h)  for _, w, h, _ in tex)
-        a8  = sum(astc8(w, h)  for _, w, h, _ in tex)
+        raw = sum(argb32(w, h) for _, w, h, _, _ in tex)
+        a6  = sum(astc6(w, h)  for _, w, h, _, _ in tex)
+        a8  = sum(astc8(w, h)  for _, w, h, _, _ in tex)
         grand["raw"] += raw;  grand["a6"] += a6;  grand["a8"] += a8
         grand["tex"] += len(tex);  grand["audio"] += len(audio);  grand["code"] += len(code)
 
@@ -125,7 +132,7 @@ def main():
             print(f"    ARGB32 (loose-file path)   {mb(raw):9.1f} MB")
             print(f"    ASTC 6x6 (bundle path)     {mb(a6):9.1f} MB   {raw / max(a6,1):.1f}x smaller")
             print(f"    ASTC 8x8 (bundle path)     {mb(a8):9.1f} MB   {raw / max(a8,1):.1f}x smaller")
-        dtop = collections.Counter(f for _, _, _, f in tex if f in DESKTOP_ONLY)
+        dtop = collections.Counter(f for _, _, _, f, _ in tex if f in DESKTOP_ONLY)
         if dtop:
             print(f"\n  desktop-only texture formats (unusable on iOS, must be re-encoded):")
             for f, n in dtop.most_common():
@@ -151,9 +158,10 @@ def main():
 
     if all_tex:
         print(f"\n  largest {a.top} textures (the ones that decide the budget)")
-        for name, w, h, fmt in sorted(all_tex, key=lambda t: -t[1] * t[2])[:a.top]:
-            print(f"    {w:>5}x{h:<5} {mb(argb32(w,h)):7.1f} MB raw  {fmt:<12} {name[:40]}")
-        big = sum(1 for _, w, h, _ in all_tex if w * h >= 2048 * 2048)
+        for name, w, h, fmt, readable in sorted(all_tex, key=lambda t: -t[1] * t[2])[:a.top]:
+            rw = "" if readable is None else ("  readable" if readable else "  unreadable")
+            print(f"    {w:>5}x{h:<5} {mb(argb32(w,h)):7.1f} MB raw  {fmt:<12} {name[:40]}{rw}")
+        big = sum(1 for _, w, h, _, _ in all_tex if w * h >= 2048 * 2048)
         if big:
             print(f"\n  {big} textures are 2048x2048 or larger - these are the downscale candidates")
 

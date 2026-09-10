@@ -2,8 +2,16 @@
 // License:         MIT License
 //
 // MOBILE: which fetched mods' textures must stay raw. Colour-key maps (read back with GetPixel and
-// compared exactly) and point-filtered terrain tiles (DFU decompresses them into an ARGB32
-// Texture2DArray anyway) gain nothing from ASTC and break under it.
+// compared exactly), point-filtered terrain tiles (DFU decompresses them into an ARGB32
+// Texture2DArray anyway) and Unity terrain DETAIL PROTOTYPE textures gain nothing from ASTC and
+// break under it. The last class is the least obvious: Unity does not sample
+// DetailPrototype.prototypeTexture directly for a non-instanced prototype - DetailDatabase packs
+// every non-instanced prototype into one "Terrain Detail Atlas", and a TerrainData built at
+// RUNTIME (DaggerfallTerrain.PromoteTerrainData does exactly that) has no serialized atlas, so the
+// engine builds it from the prototypes' CPU pixels. Unreadable inputs give an empty atlas, no
+// managed exception and only native "Texture of width N and height N is not accessible." errors
+// that never reach Player.log. In the Editor the CPU read succeeds through the importer, so this
+// is invisible until the player build.
 //
 // A second exception class: LinearData, for maps only a compute shader ever reads. Those need
 // sRGB sampling off as well as no compression, but not a CPU copy (isReadable stays false).
@@ -24,8 +32,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // deriv map and NOT the identically named file in WorldOfDaggerfallTerrain.
         public const string DistantTerrainMod = "DistantTerrainWoD";
 
+        // MOBILE: Real Grass. Named as a constant for the same reason as DistantTerrainMod - the
+        // raw-data list and the self-test's import assertions both key off it, and the folder name
+        // is the only thing tying either to the fetched pack.
+        public const string RealGrassMod = "RealGrass";
+
         // Mod folder names under Assets/Game/Mods/ (the mods.json entry name).
-        static readonly string[] rawDataMods = { "WorldOfDaggerfallBiomes", DistantTerrainMod };
+        static readonly string[] rawDataMods = { "WorldOfDaggerfallBiomes", DistantTerrainMod, RealGrassMod };
 
         // MOBILE: mods whose textures are numeric data sampled only by a compute shader.
         static readonly string[] linearDataMods = { "WorldOfDaggerfallTerrain" };
@@ -94,7 +107,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             return Rule.Default;
         }
 
-        /// <summary>Colour-key maps are sampled by pixel; a mip chain would only waste memory.</summary>
+        /// <summary>
+        /// Colour-key maps are sampled by pixel; a mip chain would only waste memory.
+        /// MOBILE: this is per-FILE, not per-mod, precisely so the raw-data class can hold textures
+        /// that ARE drawn. Real Grass's two 256x256 billboards are drawn at every distance out to
+        /// detailObjectDistance, so they keep their mip chain (about 85 KB each on top of the
+        /// 256 KB level 0); only the CPU-read-once maps below drop theirs.
+        /// </summary>
         public static bool NoMips(string assetPath)
         {
             string p = (assetPath ?? "").Replace('\\', '/');

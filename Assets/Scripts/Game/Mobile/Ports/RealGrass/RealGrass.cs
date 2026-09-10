@@ -492,6 +492,61 @@ namespace RealGrass
         }
 
         /// <summary>
+        /// MOBILE: one prototype texture, described the way the device question needs it -
+        /// "'GreenGrass_tex' 256x256 RGBA32 readable=True cpuRead=OK opaque=41127/65536
+        /// atlasSource=OK". <c>cpuRead</c> is the try/catch around a CPU pixel read; it is the fact
+        /// the native error hides. <c>atlasSource</c> is the verdict Unity's DetailDatabase will
+        /// reach when it packs this texture into the Terrain Detail Atlas: UNUSABLE (no CPU copy -
+        /// the atlas gets nothing), EMPTY (readable but fully transparent - the atlas is built and
+        /// alpha-tested away, which looks identical to grass being off) or OK.
+        ///
+        /// When the raw bundle texture cannot be read, the line also reports what
+        /// TextureReplacement.EnsureReadable makes of it, because that is the fallback
+        /// DetailPrototypesManager.LoadPrototypeTexture actually hands to the prototype - so the
+        /// same line distinguishes "the import rule is wrong" from "the blit fallback is wrong".
+        /// </summary>
+        static string DescribePrototypeTexture(Texture2D tex)
+        {
+            if (tex == null)
+                return "MISSING";
+            string s = "'" + tex.name + "' " + tex.width + "x" + tex.height + " " + tex.format
+                + " readable=" + tex.isReadable + DescribeCpuRead(tex);
+            if (tex.isReadable)
+                return s;
+            // MOBILE: fully qualified - this file already has four Daggerfall usings and the
+            // AssetInjection namespace is not one of them.
+            Texture2D copy = DaggerfallWorkshop.Utility.AssetInjection.TextureReplacement.EnsureReadable(tex);
+            if (copy == null || copy == tex)
+                return s;
+            return s + " -> readable copy " + copy.width + "x" + copy.height + " " + copy.format
+                + " readable=" + copy.isReadable + DescribeCpuRead(copy);
+        }
+
+        /// <summary>
+        /// MOBILE: the CPU read itself, collapsed to words. GetPixel first because that is the
+        /// smallest read that can throw the "not accessible" error; GetPixels32 after it because
+        /// cpuRead=OK on an all-transparent texture is still an empty atlas, and telling those two
+        /// apart is the whole point of shipping this line.
+        /// </summary>
+        static string DescribeCpuRead(Texture2D tex)
+        {
+            try
+            {
+                tex.GetPixel(0, 0);
+                Color32[] pixels = tex.GetPixels32();
+                int opaque = 0;
+                foreach (Color32 c in pixels)
+                    if (c.a > 8) opaque++;
+                return " cpuRead=OK opaque=" + opaque + "/" + pixels.Length
+                    + " atlasSource=" + (opaque > 0 ? "OK" : "EMPTY");
+            }
+            catch (Exception ex)
+            {
+                return " cpuRead=FAILED(" + ex.GetType().Name + ") atlasSource=UNUSABLE";
+            }
+        }
+
+        /// <summary>
         /// MOBILE: rename of upstream's <c>RealGrass.Init</c>, with the [Invoke] attribute removed
         /// and an availability gate in front of everything. Upstream created the component
         /// unconditionally and let a stripped shader or a missing texture surface as grass that
@@ -532,6 +587,18 @@ namespace RealGrass
                 Debug.Log("[RealGrass] not available: " + reason);
                 return;
             }
+
+            // MOBILE: the one line that settles a device round. The way this port fails on hardware -
+            // an unreadable prototype texture, so Unity's terrain detail atlas is built from nothing -
+            // reports itself only as a NATIVE "Texture of width 256 and height 256 is not accessible."
+            // from Texture2D.cpp, which reaches the on-screen console and never reaches
+            // Documents/Player.log. Grepping this literal answers "did the CPU read work" from a log
+            // file. Unconditional and at Debug.Log, not behind a define: it is two lines per session
+            // and it is the only thing in the app that can see that error class.
+            foreach (string name in GrassTextureNames)
+                LogOnce("[RealGrass] prototype " + DescribePrototypeTexture(mod.GetAsset<Texture2D>(name))
+                    + " mode=" + (ForcedBillboard ? "GrassBillboard" : "Grass")
+                    + " gfx=" + SystemInfo.graphicsDeviceType);
 
             GameObject go = new GameObject(mod != null && !string.IsNullOrEmpty(mod.Title) ? mod.Title : "Real Grass");
             RealGrass component = go.AddComponent<RealGrass>();
@@ -789,6 +856,17 @@ namespace RealGrass
 
             // Assign detail prototypes to the terrain
             terrainData.detailPrototypes = detailPrototypesManager.DetailPrototypes;
+            // MOBILE: assigning the array is not enough in a player. Unity's DetailDatabase packs
+            // every non-instanced prototype - which is every GrassBillboard, i.e. all of this port -
+            // into one "Terrain Detail Atlas", and a TerrainData built at RUNTIME (DaggerfallTerrain
+            // .PromoteTerrainData's `new TerrainData()`) has no serialized atlas to start from.
+            // RefreshPrototypes is the documented "reload the prototype assets" call and the trigger
+            // that rebuilds the atlas for the prototypes just assigned; without it the terrain can
+            // keep drawing from the atlas built for the PREVIOUS prototype set, which after a season
+            // or climate change is the wrong texture and on first promotion is no texture at all.
+            // DFU does exactly this pair after every runtime prototype change of its own -
+            // MeshReplacement.ClearNatureGameObjects (MeshReplacement.cs:257-260) and :391.
+            terrainData.RefreshPrototypes();
 
             // MOBILE: the mean billboard width of the grass prototype as this promotion's climate
             // pass left it - the other term of the count -> coverage conversion. Read after
@@ -822,6 +900,11 @@ namespace RealGrass
                 terrainData.SetDetailLayer(0, 0, detailPrototypesManager.WaterPlants, densityManager.WaterPlants.Cells);
             if (options.TerrainStones)
                 terrainData.SetDetailLayer(0, 0, detailPrototypesManager.Rocks, densityManager.Rocks.Cells);
+
+            // MOBILE: the other half of the pair above. Flush pushes the changed detail data (and
+            // the refreshed prototypes) into the live Terrain rather than waiting for whatever
+            // would otherwise happen to invalidate it. Same precedent: MeshReplacement.cs:257-260.
+            terrain.Flush();
 
             // MOBILE: the two lines a Player.log is read for.
             promotions++;

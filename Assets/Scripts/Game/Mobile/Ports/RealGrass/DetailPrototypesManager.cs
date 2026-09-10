@@ -2,13 +2,17 @@
 // File RealGrass/Scripts/DetailPrototypesManager.cs, copied for iOS except lines marked MOBILE.
 // Upstream licence (RealGrass/LICENSE): MIT, Copyright (c) 2016-2019 Uncanny_Valley, TheLacus.
 //
-// MOBILE: two behaviour edits, both forced by what the iOS bundle contains. The Desert climate is
-// pointed at BrownGrass_tex (upstream asks for a DesertGrass_tex that does not exist in the repo,
+// MOBILE: three behaviour edits. Two are forced by what the iOS bundle contains: the Desert climate
+// is pointed at BrownGrass_tex (upstream asks for a DesertGrass_tex that does not exist in the repo,
 // in any style - see UpdateClimateDesert), and the water-plants colour reset is put behind its own
 // option (with water plants off it was resetting the GRASS prototype's colours - see
-// UpdateClimateSummer). Everything the Mixed and Full styles reach - the VMblast GrassDetails_*
-// and Grass_tex textures, the FBX prototypes, the stones and the plants - is unreachable in this
-// port's configuration and none of it is in the bundle.
+// UpdateClimateSummer). The third is forced by the player build: every texture on its way to a
+// DetailPrototype goes through LoadPrototypeTexture, because Unity builds the terrain detail atlas
+// from those textures' CPU pixels and an unreadable one fails natively and silently.
+//
+// Everything the Mixed and Full styles reach - the VMblast GrassDetails_* and Grass_tex textures,
+// the FBX prototypes, the stones and the plants - is unreachable in this port's configuration and
+// none of it is in the bundle.
 
 // Project:         Real Grass for Daggerfall Unity
 // Web Site:        http://forums.dfworkshop.net/viewtopic.php?f=14&t=17
@@ -569,14 +573,16 @@ namespace RealGrass
             string assetName = (options.GrassStyle & GrassStyle.Full) == GrassStyle.Full ? realistic : classic;
 
             if (!useGrassShader)
-                DetailPrototypes[Grass].prototypeTexture = LoadTexture(assetName + "_tex");
+                DetailPrototypes[Grass].prototypeTexture = LoadPrototypeTexture(assetName + "_tex");
             else
                 DetailPrototypes[Grass].prototype = LoadGameObject(assetName);
         }
 
         private void SetGrassDetail(int layer, GrassDetail grassDetail, ref GameObject prefab)
         {
-            Texture2D tex = LoadTexture(grassDetail.Name);
+            // MOBILE: the billboard branch needs CPU pixels (see LoadPrototypeTexture); the mesh
+            // branch only puts the texture on a material, where the GPU copy is all that is read.
+            Texture2D tex = useGrassShader ? LoadTexture(grassDetail.Name) : LoadPrototypeTexture(grassDetail.Name);
 
             if (!useGrassShader)
             {
@@ -594,6 +600,45 @@ namespace RealGrass
                 go.GetComponent<Renderer>().material.mainTexture = tex;
                 DetailPrototypes[layer].prototype = go;
             }
+        }
+
+        /// <summary>
+        /// MOBILE: a texture on its way to <c>DetailPrototype.prototypeTexture</c>, guaranteed
+        /// CPU-readable or null.
+        ///
+        /// Unity does not sample a non-instanced prototype's texture directly. DetailDatabase packs
+        /// every non-instanced prototype (which is every GrassBillboard and Grass prototype, i.e.
+        /// all of this port) into one "Terrain Detail Atlas", and a TerrainData built at RUNTIME -
+        /// DaggerfallTerrain.PromoteTerrainData's <c>new TerrainData()</c> - carries no serialized
+        /// atlas, so the engine builds it on the CPU from the prototype textures' pixels. An
+        /// unreadable input contributes nothing and reports nothing a managed log can see: the
+        /// failure is a native "Texture of width 256 and height 256 is not accessible." from
+        /// Texture2D.cpp that never reaches Documents/Player.log, and the grass draws as an empty
+        /// atlas (nothing, or sub-pixel untextured hairlines).
+        ///
+        /// The pack importer now imports these two textures readable and uncompressed
+        /// (MobileModPackTextureRules.RealGrassMod), which is the real fix. This is the second
+        /// belt: a loose-file override, a rebuilt bundle that missed the rule, or a future texture
+        /// from somewhere else would otherwise put the silent failure straight back. EnsureReadable
+        /// costs one 256 KB blit per source texture per session and returns readable inputs
+        /// untouched, so on a correctly built bundle this is free.
+        /// </summary>
+        /// <param name="name">Name of texture.</param>
+        /// <returns>A readable texture, or null if no readable copy could be made.</returns>
+        private Texture2D LoadPrototypeTexture(string name)
+        {
+            Texture2D tex = TextureReplacement.EnsureReadable(LoadTexture(name));
+            if (tex != null && !tex.isReadable)
+            {
+                // MOBILE: refuse rather than hand Unity a texture it will silently drop. Same
+                // "[RealGrass] not available:" literal the Init gate uses, so one grep finds every
+                // way this mod declines to draw.
+                RealGrassPort.LogOnce("[RealGrass] not available: prototype texture not readable ('"
+                    + name + "' " + tex.width + "x" + tex.height + " " + tex.format
+                    + ") - the terrain detail atlas is built from CPU pixels and would be empty");
+                return null;
+            }
+            return tex;
         }
 
         /// <summary>

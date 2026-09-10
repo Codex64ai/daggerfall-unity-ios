@@ -5674,6 +5674,15 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // fetch.py --check refuses any fetched mod that still holds one.
         const string DistantDerivMap = "Assets/Game/Mods/DistantTerrainWoD/ModResources/daggerfall_deriv_map.png";
 
+        // MOBILE: Real Grass's two Classic billboards - the only two textures in that bundle, and the
+        // two that reach DetailPrototype.prototypeTexture. See TestPackTextureRules for why they are
+        // raw data and why the import is asserted against the assets rather than only against the rule.
+        static readonly string[] RealGrassBillboards =
+        {
+            "Assets/Game/Mods/RealGrass/Textures/GreenGrass_tex.png",
+            "Assets/Game/Mods/RealGrass/Textures/BrownGrass_tex.png",
+        };
+
         static void TestPackTextureRules()
         {
             Check(MobileModPackTextureRules.For("Assets/Game/Mods/WorldOfDaggerfallBiomes/Assets/Maps/climate_map.png") == MobileModPackTextureRules.Rule.RawData,
@@ -5738,6 +5747,31 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && !MobileModPackTextureRules.NoMips(terrainDerivMap)
                   && MobileModPackTextureRules.For(terrainDerivMap) == MobileModPackTextureRules.Rule.LinearData,
                 "PackTextureRules: the Terrain mod's same-named deriv map is untouched by the Distant Terrain rules");
+            // MOBILE: Real Grass. Its two 256x256 billboards are assigned to
+            // DetailPrototype.prototypeTexture, and Unity does NOT sample those directly: for a
+            // non-instanced prototype - which every GrassBillboard and Grass prototype is, i.e. all
+            // of this port - DetailDatabase packs the prototype textures into one "Terrain Detail
+            // Atlas" and draws every grass layer of a patch from that. A TerrainData authored in the
+            // Editor ships the atlas serialized; a TerrainData built at RUNTIME, which is exactly
+            // what DaggerfallTerrain.PromoteTerrainData does, has none, so the engine builds it on
+            // the CPU from the prototype textures' pixels. Under the default pack rule (isReadable
+            // false + ASTC_6x6) that read fails, the atlas is empty and the grass draws as nothing -
+            // and it fails SILENTLY as far as a log file is concerned, because the only complaint is
+            // a native "Texture of width 256 and height 256 is not accessible." from Texture2D.cpp
+            // that reaches the on-screen console and never Documents/Player.log. In the Editor the
+            // same read succeeds through the importer, so this is invisible until the player build.
+            foreach (string grassTex in RealGrassBillboards)
+                Check(MobileModPackTextureRules.For(grassTex) == MobileModPackTextureRules.Rule.RawData,
+                    "PackTextureRules: the Real Grass billboard " + Path.GetFileName(grassTex) + " is raw data");
+            Check(MobileModPackTextureRules.RawDataMods.Contains(MobileModPackTextureRules.RealGrassMod),
+                "PackTextureRules: Real Grass is in the raw-data list");
+            // Unlike the other two raw-data reasons, these textures are DRAWN - at every distance out
+            // to detailObjectDistance - so they keep their mip chain (about 85 KB each on top of a
+            // 256 KB level 0). NoMips is per-file precisely so the class can hold both kinds.
+            foreach (string grassTex in RealGrassBillboards)
+                Check(!MobileModPackTextureRules.NoMips(grassTex) && !MobileModPackTextureRules.SingleChannel(grassTex),
+                    "PackTextureRules: the Real Grass billboard " + Path.GetFileName(grassTex)
+                    + " keeps its mip chain and all four channels (it is drawn, not CPU-read-once)");
             // MOBILE: the assumption the R8 override rests on. Texture2D.GetPixels32 documents a
             // limited format list; if R8 did not survive it, the carve would read zeros and every
             // far-terrain cell would become ocean. Cheaper to pin here than to find out on a device.
@@ -5804,6 +5838,46 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     iosSettings == null ? "no TextureImporter at " + DistantDerivMap
                         : "format " + iosSettings.format + " (" + (int)iosSettings.format + "), maxTextureSize "
                           + iosSettings.maxTextureSize + ", overridden " + iosSettings.overridden);
+            }
+            // MOBILE: and the same question asked of the Real Grass billboards, against the assets on
+            // disk rather than against the rule. This is the half that would have caught the bug: the
+            // rule table said nothing about RealGrass, the two textures imported unreadable + ASTC,
+            // and every managed log in the project stayed clean while the device drew no grass at all.
+            // Fetched content, so a clone that has not run fetch.py skips by name.
+            foreach (string grassTex in RealGrassBillboards)
+            {
+                var grassTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(grassTex);
+                if (grassTexture == null)
+                {
+                    log.AppendLine("  SKIP  " + Path.GetFileName(grassTex)
+                        + "'s import guarantees (readable / RGBA32 / mipped / iOS RGBA32-overridden)"
+                        + " - not fetched, run tools/bundled-mods/fetch.py --only RealGrass");
+                    continue;
+                }
+                // The whole fix in one assertion: Unity builds the terrain detail atlas from these
+                // pixels on the CPU, so without a CPU copy the atlas is built from nothing.
+                Check(grassTexture.isReadable,
+                    "PackTextureRules: " + Path.GetFileName(grassTex)
+                    + " is readable (Unity builds the terrain detail atlas from its CPU pixels)");
+                // And uncompressed: on the device the default rule also made it ASTC_6x6, which no
+                // CPU read can decode back, so readable alone would not have been enough.
+                Check(grassTexture.format == TextureFormat.RGBA32,
+                    "PackTextureRules: " + Path.GetFileName(grassTex) + " is RGBA32 (block compression cannot be CPU-read)",
+                    grassTexture.format.ToString());
+                // Drawn at distance, unlike the CPU-read-once maps above.
+                Check(grassTexture.mipmapCount > 1,
+                    "PackTextureRules: " + Path.GetFileName(grassTex) + " keeps its mip chain (it is a drawn billboard)",
+                    grassTexture.mipmapCount + " mip levels");
+                // And the half the editor's own imported texture cannot show: what actually ships.
+                var grassImporter = AssetImporter.GetAtPath(grassTex) as TextureImporter;
+                TextureImporterPlatformSettings grassIos =
+                    grassImporter != null ? grassImporter.GetPlatformTextureSettings("iPhone") : null;
+                Check(grassIos != null && grassIos.overridden && grassIos.format == TextureImporterFormat.RGBA32,
+                    "PackTextureRules: " + Path.GetFileName(grassTex) + "'s iOS override is RGBA32 and is overridden",
+                    grassIos == null ? "no TextureImporter at " + grassTex
+                        : "format " + grassIos.format + " (" + (int)grassIos.format + "), overridden " + grassIos.overridden);
+                Check(grassImporter != null && grassImporter.isReadable,
+                    "PackTextureRules: " + Path.GetFileName(grassTex) + "'s importer keeps Read/Write on (the bundled copy is the one that matters)");
             }
             // MOBILE: and the reason the literal above says ModResources/. Unity packs the contents of
             // every folder named `Resources` under Assets/ into every player build - no reference
