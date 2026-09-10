@@ -2859,9 +2859,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobilePortedMods.TerrainTitle == "World of Daggerfall - Terrain" && System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.TerrainTitle) >= 0, "PortedMods: World of Daggerfall - Terrain is a default-off title");
             // Titles is what DefaultOff walks, so this pins the default-off coverage and the dependency
             // ORDER OF THAT LIST - not the start order, which is the statement sequence in StartEnabled
-            // and is pinned by the block comment there. Distant Terrain was appended after it, so the
-            // Terrain entry is now next to last.
-            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 2] == MobilePortedMods.TerrainTitle, "PortedMods: World of Daggerfall - Terrain is next to last in Titles, the list DefaultOff walks");
+            // and is pinned by the block comment there. Distant Terrain and then Real Grass were
+            // appended after it, so the Terrain entry is now third from last.
+            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 3] == MobilePortedMods.TerrainTitle, "PortedMods: World of Daggerfall - Terrain is third from last in Titles, the list DefaultOff walks");
 
             // MOBILE: Distant Terrain (World of Daggerfall flavour). Gated by nothing but its own
             // switch, like the Terrain port, and started after it - last of the immediate Inits,
@@ -2884,8 +2884,56 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             else log.AppendLine("  SKIP  DistantTitle against the fetched manifest (not fetched - run tools/bundled-mods/fetch.py --only DistantTerrainWoD)");
             Check(System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.DistantTitle) >= 0,
                 "PortedMods: Distant Terrain is a default-off title");
-            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 1] == MobilePortedMods.DistantTitle,
-                "PortedMods: Distant Terrain is last in Titles, after World of Daggerfall - Terrain");
+            // Real Grass was appended after it (same move the Terrain entry made when Distant
+            // Terrain arrived), so Distant Terrain is now next to last.
+            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 2] == MobilePortedMods.DistantTitle,
+                "PortedMods: Distant Terrain is next to last in Titles, after World of Daggerfall - Terrain");
+
+            // MOBILE: Real Grass. The only compiled-in mod that uses Unity's terrain DETAIL
+            // renderer, so it takes none of DFU's four terrain slots and is gated by nothing but
+            // its own switch - it stacks with WoD Terrain, Distant Terrain, Biomes and Basic Roads
+            // rather than competing with them. Started last of the immediate Inits, after Distant
+            // Terrain, because its promotion hook only ever fires on terrains promoted afterwards
+            // and it must not sit between the Terrain sampler swap and the sky's deferred start.
+            // Its Init declines by logging "[RealGrass] not available: ..." and returning (no
+            // detail shaders, or no grass texture in the bundle), never by throwing, so it wants
+            // the four-argument StartOne with Installed as the flag.
+            Check(MobilePortedMods.GrassTitle == "Real Grass",
+                "PortedMods: the Real Grass title is the ModTitle its bundle declares",
+                MobilePortedMods.GrassTitle);
+            // ...and that literal is checked against the fetched manifest itself where it is
+            // present. The fetched folder is gitignored, so a clone that has not run fetch.py skips it.
+            string grassManifest = "Assets/Game/Mods/RealGrass/RealGrass.dfmod.json";
+            if (File.Exists(grassManifest))
+            {
+                var grassMatch = System.Text.RegularExpressions.Regex.Match(File.ReadAllText(grassManifest), "\"ModTitle\"\\s*:\\s*\"([^\"]*)\"");
+                Check(grassMatch.Success && grassMatch.Groups[1].Value == MobilePortedMods.GrassTitle,
+                    "PortedMods: GrassTitle is the ModTitle in RealGrass.dfmod.json",
+                    grassMatch.Success ? grassMatch.Groups[1].Value : "no ModTitle in " + grassManifest);
+            }
+            else log.AppendLine("  SKIP  GrassTitle against the fetched manifest (not fetched - run tools/bundled-mods/fetch.py --only RealGrass)");
+            Check(System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.GrassTitle) >= 0,
+                "PortedMods: Real Grass is a default-off title");
+            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 1] == MobilePortedMods.GrassTitle,
+                "PortedMods: Real Grass is last in Titles, after Distant Terrain");
+            // The launcher block itself: the four-argument StartOne, the Installed flag and the
+            // [RealGrass] hint, placed after the Distant Terrain block and before the sky is
+            // handed back. Asked of the source text because there is no scene to start it in.
+            string portedSrc = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobilePortedMods.cs"));
+            Check(portedSrc.Contains("StartOne(GrassTitle,")
+                  && portedSrc.Contains("RealGrass.RealGrassPort.Init(new InitParams(")
+                  && portedSrc.Contains("() => RealGrass.RealGrassPort.Installed")
+                  && portedSrc.Contains("\"[RealGrass]\""),
+                "PortedMods: Real Grass is started by the four-argument StartOne with Installed and the [RealGrass] hint");
+            int distantAt = portedSrc.IndexOf("StartOne(DistantTitle,", StringComparison.Ordinal);
+            int grassAt = portedSrc.IndexOf("StartOne(GrassTitle,", StringComparison.Ordinal);
+            int returnAt = portedSrc.IndexOf("return SkyRuns(", StringComparison.Ordinal);
+            Check(distantAt >= 0 && grassAt > distantAt && returnAt > grassAt,
+                "PortedMods: the Real Grass block sits after Distant Terrain's and before the sky is handed back",
+                distantAt + " < " + grassAt + " < " + returnAt);
+            Check(portedSrc.Contains("Mod grass = Entry(GrassTitle);")
+                  && portedSrc.Contains("if (grass != null && grass.Enabled)"),
+                "PortedMods: Real Grass runs only when its launcher entry exists and is on - off by default");
 
             // The sky's scene poll, now four-argument. Dynamic Skies' Init picks its stacked-camera
             // branch from what is in the scene at the moment it runs, so when Distant Terrain is

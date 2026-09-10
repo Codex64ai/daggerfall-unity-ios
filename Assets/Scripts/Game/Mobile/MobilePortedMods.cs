@@ -77,6 +77,11 @@ namespace DaggerfallWorkshop.Game.Mobile
         // MOBILE: the ModTitle declared in distantterrain.dfmod.json, verbatim. The launcher resolves
         // the entry by title, so a wrong literal here does not fail - the mod is simply never there.
         public const string DistantTitle = "Distant Terrain of the World of Daggerfall";
+        // MOBILE: the ModTitle declared in realgrass.dfmod.json, verbatim - and in the fetched
+        // manifest Assets/Game/Mods/RealGrass/RealGrass.dfmod.json, which the self test compares
+        // this literal against. Same rule as the two above: a wrong literal here does not fail, the
+        // mod is simply never found and the switch does nothing.
+        public const string GrassTitle = "Real Grass";
         // MOBILE: composed from SkyTitle so the two lines the sky writes while it waits can never
         // disagree about its name. Reads "[PortedMods] Dynamic Skies waiting for Distant Terrain's
         // stacked camera".
@@ -150,7 +155,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         public static bool BiomesRunning;
 
         /// <summary>Titles of the compiled-in mods, in dependency order.</summary>
-        public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle, SkyTitle, LLTitle, WoDTitle, BiomesTitle, TerrainTitle, DistantTitle };
+        public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle, SkyTitle, LLTitle, WoDTitle, BiomesTitle, TerrainTitle, DistantTitle, GrassTitle };
 
         /// <summary>
         /// Called by ModManager after it found the bundles and before it applies saved settings: a
@@ -491,6 +496,30 @@ namespace DaggerfallWorkshop.Game.Mobile
                     () => DistantTerrain.DistantTerrainPort.Init(new InitParams(distant, ModManager.Instance.GetModIndex(DistantTitle), count)),
                     () => DistantTerrain.DistantTerrainPort.Running,
                     "[DistantTerrain]");
+
+            // MOBILE: Real Grass. The only compiled-in mod that draws through Unity's terrain
+            // DETAIL renderer rather than replacing terrain data, so it takes none of DFU's four
+            // terrain slots and is gated by nothing but its own switch: it stacks with WoD Terrain,
+            // Distant Terrain, Biomes, Location Loader and Basic Roads instead of competing with
+            // them. Started last of the immediate Inits - after the Terrain sampler swap and after
+            // Distant Terrain, so an Init that threw here cannot cost either of them their start,
+            // and before the sky is handed back so the sky's deferred start still sees a settled
+            // scene.
+            //
+            // Four-argument StartOne, for the same reason the two terrain ports need it: Init
+            // declines by LOGGING "[RealGrass] not available: ..." and returning - Unity's three
+            // Hidden/TerrainEngine/Details shaders missing from the build, or the bundle without
+            // its Classic grass texture - never by throwing, so the plain StartOne would write
+            // "started Real Grass" for a mod that did nothing. The flag is Installed: true once
+            // DaggerfallTerrain.OnPromoteTerrainData is subscribed, which is the whole of what this
+            // mod does. Grass then appears on terrains promoted AFTER the switch went on, not on
+            // the one the player is standing on.
+            Mod grass = Entry(GrassTitle);
+            if (grass != null && grass.Enabled)
+                StartOne(GrassTitle,
+                    () => RealGrass.RealGrassPort.Init(new InitParams(grass, ModManager.Instance.GetModIndex(GrassTitle), count)),
+                    () => RealGrass.RealGrassPort.Installed,
+                    "[RealGrass]");
 
             return SkyRuns(sky != null, sky != null && sky.Enabled) ? sky : null;
         }
