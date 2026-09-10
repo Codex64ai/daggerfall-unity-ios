@@ -177,6 +177,67 @@ class ExtraDirs(unittest.TestCase):
         self.assertIn("WorldOfDaggerfall", str(caught.exception))
 
 
+class RenameDirs(unittest.TestCase):
+    """rename_dirs: a fetched payload folder literally named `Resources` is baked into every player
+    build by Unity, pending licence and all, so it is renamed on the way in."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.src = os.path.join(self.tmp, "repo")
+        self.dest = os.path.join(self.tmp, "Assets", "Game", "Mods", "X")
+        for rel in ("Resources/map.png", "Resources/map.png.meta", "Resources/modsettings.json",
+                    "Textures/Resources/nested.png", "ResourcesExtra/keep.txt"):
+            path = os.path.join(self.src, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write("")
+        os.makedirs(self.dest)
+
+    MAPPING = {"Resources": "ModResources"}
+
+    def files(self, *rels):
+        return ["Assets/Game/Mods/AuthorsName/" + r for r in rels]
+
+    def test_manifest_paths_are_rewritten(self):
+        m = manifest("X", self.files("Resources/map.png", "Resources/modsettings.json"))
+        fixed = fetch.rename_dirs(fetch.normalize_paths(m, "X"), "X", self.MAPPING)
+        self.assertEqual(fixed["Files"], ["Assets/Game/Mods/X/ModResources/map.png",
+                                          "Assets/Game/Mods/X/ModResources/modsettings.json"])
+
+    def test_a_path_not_starting_with_the_key_is_untouched(self):
+        m = manifest("X", self.files("Textures/Resources/nested.png", "ResourcesExtra/keep.txt",
+                                     "Resources"))
+        fixed = fetch.rename_dirs(fetch.normalize_paths(m, "X"), "X", self.MAPPING)
+        self.assertEqual(fixed["Files"], ["Assets/Game/Mods/X/Textures/Resources/nested.png",
+                                          "Assets/Game/Mods/X/ResourcesExtra/keep.txt",
+                                          "Assets/Game/Mods/X/Resources"])
+
+    def test_no_mapping_is_a_no_op(self):
+        m = fetch.normalize_paths(manifest("X", self.files("Resources/map.png")), "X")
+        self.assertEqual(fetch.rename_dirs(m, "X", {})["Files"], m["Files"])
+
+    def test_on_disk_layout_moves_with_the_manifest_metas_included(self):
+        raw = self.files("Resources/map.png", "Resources/modsettings.json",
+                         "Textures/Resources/nested.png")
+        fetch.copy_manifest_files(self.src, self.dest, raw, "X", self.MAPPING)
+        self.assertTrue(os.path.exists(os.path.join(self.dest, "ModResources", "map.png")))
+        self.assertTrue(os.path.exists(os.path.join(self.dest, "ModResources", "map.png.meta")))
+        self.assertTrue(os.path.exists(os.path.join(self.dest, "ModResources", "modsettings.json")))
+        self.assertFalse(os.path.isdir(os.path.join(self.dest, "Resources")))
+        # not the first segment: left where the author put it
+        self.assertTrue(os.path.exists(os.path.join(self.dest, "Textures", "Resources", "nested.png")))
+
+    def test_check_reports_a_unity_resources_directory_with_its_path(self):
+        os.makedirs(os.path.join(self.dest, "Resources"))
+        probs = fetch.unity_resources_problems(self.dest, self.tmp)
+        self.assertEqual(probs, ["mod folder contains a Unity Resources/ directory: "
+                                 "Assets/Game/Mods/X/Resources"])
+
+    def test_check_is_silent_once_the_folder_is_renamed(self):
+        os.makedirs(os.path.join(self.dest, "ModResources"))
+        self.assertEqual(fetch.unity_resources_problems(self.dest, self.tmp), [])
+
+
 class Licence(unittest.TestCase):
     def test_mit_first_line_required(self):
         self.assertEqual(fetch.licence_problems("MIT License\n\nCopyright (c) 2025 Cliffworms\n"), [])

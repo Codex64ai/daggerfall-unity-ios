@@ -62,6 +62,50 @@ def normalize_paths(manifest, name):
     return fixed
 
 
+def renamed_rel(rel, mapping):
+    """'Resources/x.png' -> 'ModResources/x.png' under {"Resources": "ModResources"}.
+
+    Only the FIRST path segment is considered, and only when it is a folder (a path of one segment
+    is a file at the mod root, not a folder to rename). Anything else comes back untouched."""
+    if not mapping:
+        return rel
+    parts = rel.replace("\\", "/").split("/")
+    if len(parts) > 1 and parts[0] in mapping:
+        parts[0] = mapping[parts[0]]
+    return "/".join(parts)
+
+
+def rename_dirs(manifest, name, mapping):
+    """Rewrite every Files path whose first payload folder is a rename_dirs key.
+
+    Why this exists: Unity bakes the contents of EVERY folder literally named `Resources` anywhere
+    under Assets/ into every player build, unconditionally - no reference needed, no launcher switch
+    consulted, and no way to exclude it. A fetched mod that happens to use upstream's `Resources/`
+    folder therefore ships its data inside every IPA, outside every private_only guard. Renaming the
+    folder on the way in is the only thing that stops it; nothing resolves these assets by path (the
+    engine and the port both ask the bundle for a bare file name), so the rename is free."""
+    if not mapping:
+        return manifest
+    fixed = dict(manifest)
+    fixed["Files"] = ["Assets/Game/Mods/%s/%s" % (name, renamed_rel(_rel(f), mapping))
+                      for f in manifest.get("Files", [])]
+    return fixed
+
+
+def unity_resources_problems(mod_dir, display_root=None):
+    """A folder literally named `Resources` under a fetched mod is baked into every player build
+    (see rename_dirs). Reported by --check so the rename can never be dropped silently."""
+    problems = []
+    for dirpath, dirnames, _ in os.walk(mod_dir):
+        for d in sorted(dirnames):
+            if d == "Resources":
+                full = os.path.join(dirpath, d)
+                shown = os.path.relpath(full, display_root) if display_root else full
+                problems.append("mod folder contains a Unity Resources/ directory: " +
+                                shown.replace(os.sep, "/"))
+    return problems
+
+
 def validate_manifest(manifest, mod_dir):
     problems = []
     files = manifest.get("Files") or []
@@ -259,6 +303,28 @@ def read_manifest(cfg, entry):
 EXTRA_DIR_IGNORE = (".git", "*.cs", "*.dll", "*.dll.bytes", "*.py", "*.sh")
 
 
+def copy_manifest_files(src_root, dest, raw_files, name, dir_renames=None):
+    """Copy exactly the listed files, each with its .meta beside it: prefabs, materials and Unity
+    .asset files reference each other and their textures by the GUID in the .meta, so stripping
+    metas (as the first Cliffworms packs did, harmlessly - JSON and quest text have no links)
+    silently breaks a model or material pack. Copying only what is listed also keeps a
+    6,900-texture repo like Vanilla Enhanced down to its 1,268 used files.
+
+    dir_renames moves the destination folder (see rename_dirs); the source is always read at the
+    path the author's manifest names."""
+    dir_renames = dir_renames or {}
+    for f in raw_files:
+        rel = _rel(f)
+        src = os.path.join(src_root, rel)
+        if not os.path.exists(src):
+            raise SystemExit("%s: manifest lists %s but the repo has no such file" % (name, rel))
+        dst = os.path.join(dest, renamed_rel(rel, dir_renames))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copyfile(src, dst)
+        if os.path.exists(src + ".meta"):
+            shutil.copyfile(src + ".meta", dst + ".meta")
+
+
 def copy_extra_dirs(src_root, dest, dirs, name):
     """Copy whole repo folders (files and their .meta) into the mod folder, in addition to the
     manifest's Files. Some manifests list only the assets the author authored and not the ones
@@ -365,21 +431,15 @@ def fetch_one(cfg, entry):
             if drops and manifest.get("Dependencies"):
                 manifest["Dependencies"] = [d for d in manifest["Dependencies"] if d.get("Name", "").lower() not in drops]
             manifest = normalize_paths(manifest, entry["name"])
-            # Copy exactly the listed files, each with its .meta beside it: prefabs, materials and
-            # Unity .asset files reference each other and their textures by the GUID in the .meta,
-            # so stripping metas (as the first Cliffworms packs did, harmlessly - JSON and quest text
-            # have no links) silently breaks a model or material pack. Copying only what is listed
-            # also keeps a 6,900-texture repo like Vanilla Enhanced down to its 1,268 used files.
-            for f in raw_files:
-                rel = _rel(f)
-                src = os.path.join(src_root, rel)
-                if not os.path.exists(src):
-                    raise SystemExit("%s: manifest lists %s but the repo has no such file" % (entry["name"], rel))
-                dst = os.path.join(dest, rel)
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.copyfile(src, dst)
-                if os.path.exists(src + ".meta"):
-                    shutil.copyfile(src + ".meta", dst + ".meta")
+            # rename_dirs: move a payload folder off a name Unity treats as magic. `Resources` is the
+            # one that matters - Unity packs every folder of that name under Assets/ into every player
+            # build, so Distant Terrain's 3.5 MB of pending-licence data would ship in a public IPA
+            # outside every private_only guard. The manifest paths and the on-disk copy move together.
+            dir_renames = entry.get("rename_dirs") or {}
+            if dir_renames:
+                manifest = rename_dirs(manifest, entry["name"], dir_renames)
+                print("  renamed folders %s" % ", ".join("%s -> %s" % kv for kv in sorted(dir_renames.items())))
+            copy_manifest_files(src_root, dest, raw_files, entry["name"], dir_renames)
             # extra_roots / extra_dirs: folders the listed assets depend on by GUID but do not
             # list (UBLaMF's prefabs -> Models/*.obj + Materials/*.mat; WoD's -> Meshes/*.fbx).
             # Unity pulls them into the bundle itself; they stay out of the manifest.
@@ -417,6 +477,7 @@ def check_all(cfg, entries):
         manifest["_stem"] = entry["manifest"].replace(".dfmod.json", "")   # what the engine calls it
         manifests.append(manifest)
         problems += [entry["name"] + ": " + p for p in validate_manifest(manifest, dest)]
+        problems += [entry["name"] + ": " + p for p in unity_resources_problems(dest, REPO_ROOT)]
         providers = entry.get("archives_from") or []
         names = set(m["name"] for m in cfg["mods"])
         for prov in providers:

@@ -526,6 +526,7 @@
       "manifest": "distantterrain.dfmod.json",
       "strip_code": true,
       "private_only": true,
+      "rename_dirs": {"Resources": "ModResources"},
       "exclude_globs": ["*.shader", "*.cginc", "*.prefab", "*.png~", "mapLocationRangeX.bin.txt", "mapLocationRangeY.bin.txt", "mapTreeCoverage.bin.txt", "DaggerfallBillboardBatchFaded.shader"],
       "licence": "pending:Base is Nystul-the-Magician's Distant Terrain (MIT, 2017). The World of Daggerfall-flavour additions (MaoDeVaca, Nexus 1284; only versioned copy github.com/somestupidgirl/Distant-Terrain-of-the-World-of-Daggerfall) declare no licence. Permission is being sought; until then this bundle is shipped only on the private test draft, never in the public mod pack. Its C# is compiled into the app under Assets/Scripts/Game/Mobile/Ports/DistantTerrain and its shader (rewritten onto texture arrays) under Assets/Shaders/DistantTerrain (see THIRD-PARTY.md)."
     },

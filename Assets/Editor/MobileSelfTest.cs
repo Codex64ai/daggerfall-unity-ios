@@ -3472,7 +3472,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// compute shader samples as numbers. Those need sRGB off (the project is Linear, so the
         /// default sRGB read would remap every value) and no compression, but no CPU copy.
         /// </summary>
-        const string DistantDerivMap = "Assets/Game/Mods/DistantTerrainWoD/Resources/daggerfall_deriv_map.png";
+        // MOBILE: ModResources/, not upstream's Resources/. A folder literally named Resources under
+        // Assets/ is packed into every player build by Unity, unconditionally - which would put this
+        // pending-licence mod's 3.5 MB of data in a public IPA outside every private_only guard - so
+        // tools/bundled-mods/fetch.py renames it on the way in (mods.json "rename_dirs"), and
+        // fetch.py --check refuses any fetched mod that still holds one.
+        const string DistantDerivMap = "Assets/Game/Mods/DistantTerrainWoD/ModResources/daggerfall_deriv_map.png";
 
         static void TestPackTextureRules()
         {
@@ -3605,6 +3610,18 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                         : "format " + iosSettings.format + " (" + (int)iosSettings.format + "), maxTextureSize "
                           + iosSettings.maxTextureSize + ", overridden " + iosSettings.overridden);
             }
+            // MOBILE: and the reason the literal above says ModResources/. Unity packs the contents of
+            // every folder named `Resources` under Assets/ into every player build - no reference
+            // needed, no launcher switch consulted, no way to exclude it - so a fetched mod that kept
+            // upstream's Resources/ would ship its data inside every IPA, outside the private_only
+            // guard that keeps a pending-licence mod out of the public pack. fetch.py renames it; this
+            // is the editor-side half of that guard (fetch.py --check is the other).
+            string[] fetchedResourceDirs = Directory.Exists("Assets/Game/Mods")
+                ? Directory.GetDirectories("Assets/Game/Mods", "Resources", SearchOption.AllDirectories)
+                : new string[0];
+            Check(fetchedResourceDirs.Length == 0,
+                "PackTextureRules: no fetched mod holds a Unity Resources/ folder (it would ship in every IPA)",
+                fetchedResourceDirs.Length > 0 ? string.Join(", ", fetchedResourceDirs) : "none under Assets/Game/Mods");
             // Every check above pins the rule against the SAME literal the rule holds, so a rename or a
             // case change of the mods.json entry - which is the fetched folder name, which is what For()
             // matches - leaves this suite green while 225 textures silently revert to ASTC and the
