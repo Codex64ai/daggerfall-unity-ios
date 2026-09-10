@@ -531,6 +531,18 @@
       "licence": "pending:Base is Nystul-the-Magician's Distant Terrain (MIT, 2017). The World of Daggerfall-flavour additions (MaoDeVaca, Nexus 1284; only versioned copy github.com/somestupidgirl/Distant-Terrain-of-the-World-of-Daggerfall) declare no licence. Permission is being sought; until then this bundle is shipped only on the private test draft, never in the public mod pack. Its C# is compiled into the app under Assets/Scripts/Game/Mobile/Ports/DistantTerrain and its shader (rewritten onto texture arrays) under Assets/Shaders/DistantTerrain (see THIRD-PARTY.md)."
     },
     {
+      "name": "RealGrass",
+      "repo": "https://github.com/TheLacus/daggerfall-unity-mods.git",
+      "commit": "556ef6e1dd0f2da95aa34275a30861daf58fee86",
+      "subdir": "RealGrassAssets",
+      "manifest": "RealGrass.dfmod.json",
+      "manifest_override": "manifests/RealGrass.dfmod.json",
+      "strip_code": true,
+      "private_only": true,
+      "exclude_globs": ["*.psd", "*.fbx", "*.prefab", "*.mat", "Rock*.png", "Plants*.png", "Fireflies*", "*.cs"],
+      "licence": "pending:Real Grass 2.11 by Uncanny_Valley and TheLacus (github.com/TheLacus/daggerfall-unity-mods, archived 2025-11-22). The CODE is MIT - RealGrass/LICENSE reads 'MIT License / Copyright (c) 2016-2019 Uncanny_Valley, TheLacus', permission granted free of charge to any person obtaining a copy to deal in the Software without restriction subject to the MIT conditions - and is compiled into the app under Assets/Scripts/Game/Mobile/Ports/RealGrass. The ART is explicitly NOT MIT: README.md says 'Graphical assets in the RealGrassAssets folder have different licenses. See credits.txt', and credits.txt states only two things positively - VMblast authored 'Grass_tex.psd' and all 'GrassDetails_*.psd' ('DesertGrass.psd' is an edited version) with 'use of these textures authorized for this project only', and 'some meshes and/or textures' come from three CC0 packs (rubberduck's 60 CC0 Vegetation textures, yughues' plants) without saying which files. This bundle ships only BrownGrass_tex.png and GreenGrass_tex.png, the two textures the forced Classic+Billboard path can load: neither is in VMblast's list, both predate his contribution (added 2017-04-13 'Add mod files', last touched 2018-04-21 'Graphical improvements'; VMblast's textures arrived in 2.3 and 2.11), and changelog 1.03 has the original author's own 'Improved the green grass texture' - but their permissive status is inferred from the absence of a VMblast claim, not stated. So permission is being sought from TheLacus; until then this bundle is shipped only on the private test draft, never in the public mod pack. Not shipped: every VMblast texture, all FBX/prefab/material prototypes, the terrain stones (Rock.png, RockWinter.png) and the fireflies (see THIRD-PARTY.md)."
+    },
+    {
       "name": "RoleplayRealism",
       "repo": "https://github.com/ajrb/dfunity-mods.git",
       "commit": "0af2ec99b5ad7e6722ddc9ce284987d4d6fa262d",

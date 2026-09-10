@@ -1,0 +1,13 @@
+{
+  "ModTitle": "Real Grass",
+  "ModVersion": "2.11",
+  "ModAuthor": "Uncanny_Valley, TheLacus",
+  "ContactInfo": "https://www.nexusmods.com/daggerfallunity/mods/20",
+  "DFUnity_Version": "1.1.1",
+  "ModDescription": "Groundcover with grass. iOS textures-only bundle: the two Classic-style billboard textures the port's forced configuration loads, and nothing else. The mod's C# is compiled into the app (Assets/Scripts/Game/Mobile/Ports/RealGrass), so this manifest ships no scripts, no meshes, no materials and none of the project-scoped VMblast textures. Upstream declared DFUnity_Version 0.15.3; this bundle is built for and verified against 1.1.1.",
+  "GUID": "2185b00e-bc5d-4758-81f5-7540817e2cbc",
+  "Files": [
+    "Assets/Game/Mods/RealGrass/Textures/BrownGrass_tex.png",
+    "Assets/Game/Mods/RealGrass/Textures/GreenGrass_tex.png"
+  ]
+}
