@@ -132,7 +132,15 @@ namespace RealGrass
         /// <summary>MOBILE: 40 m, not upstream's 120. The detail draw radius, in metres.</summary>
         public const float DefaultDetailDistance = 40f;
 
-        /// <summary>MOBILE: 0.6, not upstream's 1.0.</summary>
+        /// <summary>
+        /// MOBILE: 0.6, not upstream's 1.0. This is also THE CALIBRATION LEVER for absolute grass
+        /// density, and it is named here so the device round has one to reach for: it becomes
+        /// Terrain.detailObjectDensity (see Init), a global multiplier Unity applies to the
+        /// instance count it derives from a detail cell, so it moves density without touching the
+        /// fold or any write site - and it works the same whatever the scatter mode denominates.
+        /// If Task 6's screenshot is thinner or thicker than an upstream reference shot, this is
+        /// the number to move first.
+        /// </summary>
         public const float DefaultDetailDensity = 0.6f;
 
         /// <summary>
@@ -237,11 +245,24 @@ namespace RealGrass
         /// was not survivable.
         ///
         /// CoverageMode: a cell holds 0..255, "how much of this sample's area the detail covers".
-        /// The value is area-normalised, so it carries upstream's per-square-metre intent through
-        /// the drop from upstream's 256-square detail map to this port's 128-square one unchanged
-        /// - which is exactly what <see cref="FoldDetailValue"/> relies on.
-        /// InstanceCountMode: a cell holds an instance count with a ceiling of 16, BELOW upstream's
-        /// own thick density (6..20), so the mod's authored values could not be represented at all.
+        /// The value is area-normalised, so it carries a per-square-metre quantity through the drop
+        /// from upstream's 256-square detail map to this port's 128-square one unchanged - which is
+        /// exactly what <see cref="FoldDetailValue"/> relies on. It is resolution-independent, it
+        /// has no clamp at Classic densities, and it is an explicit choice rather than an inherited
+        /// engine default. Those are the reasons, and they stand on their own.
+        /// InstanceCountMode: a cell holds an instance count, the legacy meaning, with the legacy
+        /// per-cell ceiling of 16. Upstream ran on it and its authored thick range (6..20) was
+        /// therefore effectively (6..16) for every player it ever had.
+        ///
+        /// WHAT IS AND IS NOT PROVEN, because the two are easy to run together. The fold is parity
+        /// ACROSS THE RESOLUTION CHANGE: the mean of four sub-cells puts the same coverage on the
+        /// same ground as upstream's four cells did, and that is arithmetic (see FoldDetailValue).
+        /// The mode itself is a RE-DENOMINATION and is not proven here: upstream authored those
+        /// numbers as counts ("Number of grass patches per terrain tile"), and under CoverageMode a
+        /// thick sub-cell of 12 means 12/255 of the cell's ground covered, which Unity converts to
+        /// billboards natively. Whether that lands on roughly upstream's number of blades is
+        /// settled on the device, not by reading - and <see cref="DetailDensity"/> is the dial to
+        /// move it with when it is.
         ///
         /// Set before the first SetDetailLayer of a promotion: switching to InstanceCountMode
         /// erases existing detail placements.
@@ -282,7 +303,14 @@ namespace RealGrass
         /// ground the detail covers - so it is already area-normalised, and a cell that covers four
         /// times the ground must carry the MEAN of the four upstream sub-cells it replaces, not
         /// their sum. Summing would have multiplied grass per square metre by four against
-        /// upstream; the mean is parity with upstream, which is what this port is for.
+        /// upstream; the mean is parity ACROSS THE RESOLUTION CHANGE, which is the claim this
+        /// method makes and the only one it can make. The absolute density that a coverage value
+        /// then produces is the scatter mode's business, not the fold's - see ForcedScatterMode.
+        ///
+        /// One thing the mean cannot preserve: upstream draws RandomThick() four times per tile,
+        /// independently, so the four sub-cells varied inside one tile. The mean is right in
+        /// expectation but carries a quarter of that variance, so the grass reads smoother and
+        /// clumps less. Inherent to the resolution drop, not to this arithmetic.
         ///
         /// Sub-cells upstream never wrote count as zero, and that is the point: a tile whose grass
         /// upstream put in one corner covers a quarter of the folded cell, and the mean says so.

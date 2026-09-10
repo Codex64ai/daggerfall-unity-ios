@@ -873,6 +873,18 @@ a docked large HUD renders into a 320×154 or 640×308 raster. The fake gamma (`
 out) was **dropped**: this project is Linear and the presentation render texture is not sRGB,
 so the pair was an identity on the picture that applied every modulation at `sqrt` depth.
 
+A note on the rendered evidence, since this entry is the record. `MobileSelfTest.TestMobileCRTRender`
+blits the real material and reads pixels back, but its first pass targets `ARGB32`, where a negative
+colour clamps to 0 — so it proves the scanline phase and the off-screen mask and, on that format,
+*nothing* about the vignette: with the `sqrt` gone the saturated and unsaturated forms are
+pixel-identical there. The `saturate` therefore gets a second pass on an `ARGBHalf` target at
+`_Vignette = 1`, `_Curvature = 0.3`, scanlines and mask 0, asserting that no channel anywhere is
+below zero. `r2` still reaches ~1.12 while the warped uv is inside the screen at that curvature, so
+the unsaturated form writes about −0.057 over ~348 of the 65,536 pixels. Measured both ways: with
+the `saturate` removed the readback's lowest channel is −0.0569 and the check fails; with it, it is
+0.0000 and the check passes. Two probes on the centre column (0.5020 at the middle, 0.3228 at 60%
+out) keep that from being vacuous if the vignette ever stopped being applied at all.
+
 A note on the clamp evidence, since this entry is the record: the nine `GetInt/GetFloat(min,
 max)` checks are a `Mathf.Clamp` exercise and passed before the clamps were added to
 `LoadSettings` — they are a source-text guarantee, not a behavioural one. The behavioural

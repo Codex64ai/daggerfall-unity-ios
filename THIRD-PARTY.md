@@ -865,15 +865,20 @@ textures drawn from three CC0 packs, without mapping any file to any pack.
 |---|---|---|---|
 | Real Grass 2.11 | Uncanny_Valley & TheLacus. Code: **MIT** (`RealGrass/LICENSE`, header preserved on all four ported files). Art: **NO LICENCE DECLARED for the two textures shipped** - they are outside VMblast's named list, but nothing states positively whose they are (permission being sought by Ikram) | github.com/TheLacus/daggerfall-unity-mods @ `556ef6e1dd0f2da95aa34275a30861daf58fee86` ("Bump version", 2023-08-25); manifest `RealGrass.dfmod.json`, GUID `2185b00e-bc5d-4758-81f5-7540817e2cbc` | Every VMblast `.psd` (`Grass_tex`, all `GrassDetails_*`, `DesertGrass`); every `.fbx`, `.prefab` and `.mat` - the Classic billboard path wants textures and nothing else; the stone, water-plant and firefly art with the features that read it; `External/RealGrassConsoleCommands.cs` (a desktop console this port has no way to reach); `modsettings.json` and `modpresets.json`, which live in the code root and are unreachable from the asset root the fetch reads |
 
-**What ships is two 128² PNGs**: `BrownGrass_tex.png` (25,073 bytes) and `GreenGrass_tex.png`
-(40,306 bytes), the Classic set. Neither appears in VMblast's list, and the history says they predate
+**What ships is two 256² PNGs**: `BrownGrass_tex.png` (25,073 bytes) and `GreenGrass_tex.png`
+(40,306 bytes), the Classic set. Their `.meta` carries a default-platform `maxTextureSize` of 128,
+which is upstream's own setting and is easy to misread as the shipped size - but the iOS entry is
+`overridden: 1` (ASTC 6x6, `maxTextureSize` 4096), written by `MobileModPackTextureImporter`
+(`Assets/Editor/MobileModBuilder.cs`), and **a platform override wins over the default rule**. So on
+the only platform this project builds they import at their full **256²**; the 128 would apply only to
+a desktop player, which is not shipped. Neither appears in VMblast's list, and the history says they predate
 his contribution - both were added in 2017 and last touched in 2018, where the changelog dates
 VMblast's textures to 2.3 and 2.11, and the green one has a changelog line in the original author's
 own voice ("Improved the green grass texture (I'm no artist but I try)"). That is a strong lead and
 it is not a licence, so the same rule as the WoD family applies: `private_only: true` with a
 `pending:` record in `tools/bundled-mods/mods.json`, the bundle rides the private test draft only,
 and `pack.py` keeps `realgrass.dfmod` out of the public MIT mod pack. One line from TheLacus or
-Uncanny_Valley would flip it; so would replacing the two textures with our own, which at 128² is
+Uncanny_Valley would flip it; so would replacing the two textures with our own, which at 256² is
 cheap. The evidence is in the `licence` string so a future reader need not redo the archaeology.
 
 The MIT text below is the one that matters even on a build with no bundle at all, because **the code
@@ -924,16 +929,27 @@ Folding a 256-space mod onto a 128-space store is the one place where the port's
 from upstream's rather than merely being cheaper, and it is why the scatter mode is now **set
 explicitly**. Unity has two: `CoverageMode`, where a sample is how much ground the detail covers
 (ceiling 255, resolution-independent), and the legacy `InstanceCountMode`, where it is an instance
-count (ceiling 16, which is *below* Classic's own thick density of 6..20). DFU builds its terrain
+count with the legacy per-cell ceiling of 16 - the ceiling upstream itself ran under, so its authored
+thick range of 6..20 was effectively 6..16 for every player it ever had. DFU builds its terrain
 data with a bare `new TerrainData()` and never sets the mode, so it was whatever the engine
-defaulted to - and the two modes are 16x apart. The port calls
+defaulted to - and the two modes are 16x apart in what a value MEANS. `CoverageMode` is chosen
+because it is resolution-independent, because nothing at Classic densities gets near its ceiling,
+and because an explicit mode beats an inherited default; the port calls
 `SetDetailScatterMode(CoverageMode)` once per `TerrainData`, before any `SetDetailLayer`, and
 **averages** the four upstream sub-cell writes into the one cell they now share - rounded to nearest
 rather than floored, so a thin single write does not vanish. Under coverage semantics a value is how
-much of the cell's ground the grass covers, so the mean is parity with upstream's grass per square
-metre; summing them, which an earlier revision did, would have been four times upstream's density on
-the platform whose whole reason for this port is cost. The mode and the ceiling are named in the memory line, so a log settles it rather
-than a document.
+much of the cell's ground the grass covers, so the mean is parity **across the resolution change**:
+the same coverage on the same ground as upstream's four cells put there. Summing them, which an
+earlier revision did, would have been four times that on the platform whose whole reason for this
+port is cost.
+
+What the fold does *not* settle is absolute density, and the two are easy to run together. Upstream
+authored those numbers as counts ("number of grass patches per terrain tile") and they now reach
+Unity as coverage fractions of 255, which Unity converts to billboards natively - a re-denomination
+no amount of reading can verify. It is a device question, and the dial for it is `DetailDensity`
+(0.6, which becomes Unity's `detailObjectDensity`), one constant that moves density without touching
+the fold or any write site. The mode and the ceiling are named in the memory line, so a log settles
+that half rather than a document.
 
 Two upstream bugs are fixed in passing, both forced by what the bundle holds. `UpdateClimateDesert`
 asked for a `DesertGrass_tex` asset that **does not exist in any version of the mod** (the desert art

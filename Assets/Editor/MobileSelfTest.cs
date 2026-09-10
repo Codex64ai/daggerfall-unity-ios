@@ -1643,10 +1643,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         }
 
         // F5 of the Task 1 review: the shader's OUTPUT, not its source text. A solid mid-grey
-        // source blitted through the real material, read back, and three pixels examined. This is
-        // the check that would have caught both the unsaturated vignette and the inverted scanline
-        // phase, and it pins "outside the curved screen is black" as behaviour rather than as a
-        // comment. Curvature 0.3 (the clamp's maximum) so the corner is unambiguously off-texture;
+        // source blitted through the real material, read back, and three pixels examined. This
+        // first pass is the check that would have caught the inverted scanline phase (F2), and it
+        // pins "outside the curved screen is black" as behaviour rather than as a comment. The
+        // vignette (F1) needs a float target to be visible at all and gets its own pass at the end
+        // of this method - see F14 of the Task 2 review there.
+        // Curvature 0.3 (the clamp's maximum) so the corner is unambiguously off-texture;
         // scanlines 1 so the modulation is at full depth; mask and vignette 0 so nothing else
         // moves a pixel. _ScanlineCount is 9 - an ODD count puts the exact centre of the image on
         // a row CENTRE (raster 4.5) rather than on a seam, which is what makes "the centre pixel
@@ -1747,6 +1749,106 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(seam <= 16 && rowCentre >= 96,
                 "MobileCRT render: at full depth the seam goes to black and the row centre keeps its value",
                 "seam " + seam + " vs row centre " + rowCentre);
+
+            // F14 of the Task 2 review. Everything above runs at _Vignette = 0, and on the ARGB32
+            // target it could not have caught F1 even at _Vignette = 1: now that the fake gamma's
+            // sqrt is gone, an unsaturated `1 - _Vignette * r2 < 0` multiplied into the colour
+            // writes a negative that a unorm target clamps to 0 - pixel-identical to the saturated
+            // form. A FLOAT target is the only readback that tells the two shaders apart, so the
+            // vignette gets its own pass here rather than a claim it cannot support.
+            //
+            // Why there is a negative to find. r2 is dot(centred, centred) on the UNDISTORTED
+            // coordinate while `inside` is a mask on the WARPED uv, so the largest r2 still inside
+            // the screen is set by m * (1 + _Curvature * 2m^2) <= 1 along the diagonal: m ~ 0.748
+            // at curvature 0.3, i.e. r2 ~ 1.12, and the unsaturated factor there is about -0.12.
+            // Against a 0.502 source that is about -0.057 over ~348 of the 65,536 pixels, in a
+            // lens-shaped band along the edges. Scanlines and mask are 0, so the vignette is the
+            // only term that can drive a channel below zero.
+            if (!SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.ARGBHalf))
+            {
+                log.AppendLine("  SKIP  MobileCRT render: ARGBHalf is unsupported on this editor's graphics API, so the negative-channel check cannot run");
+                return;
+            }
+
+            Material vmat = new Material(shader);
+            vmat.SetFloat("_Curvature", curvature);
+            vmat.SetFloat("_Scanlines", 0f);
+            vmat.SetFloat("_ScanlineCount", count);
+            vmat.SetFloat("_Mask", 0f);
+            vmat.SetFloat("_Vignette", 1f);
+
+            Texture2D vsource = new Texture2D(8, 8, TextureFormat.RGBA32, false, true);
+            vsource.SetPixels32(fill);
+            vsource.Apply(false);
+            vsource.filterMode = FilterMode.Point;
+            vsource.wrapMode = TextureWrapMode.Clamp;
+
+            RenderTexture vrt = new RenderTexture(dim, dim, 0, RenderTextureFormat.ARGBHalf, RenderTextureReadWrite.Linear);
+            Color[] vpx = null;
+            if (vrt.Create())
+            {
+                Graphics.Blit(vsource, vrt, vmat);
+                RenderTexture wasActive = RenderTexture.active;
+                RenderTexture.active = vrt;
+                // RGBAHalf, and GetPixels rather than GetPixels32: a Color32 conversion would clamp
+                // the very negative this pass exists to see.
+                Texture2D readback = new Texture2D(dim, dim, TextureFormat.RGBAHalf, false, true);
+                readback.ReadPixels(new Rect(0, 0, dim, dim), 0, 0);
+                readback.Apply(false);
+                RenderTexture.active = wasActive;
+                vpx = readback.GetPixels();
+                UnityEngine.Object.DestroyImmediate(readback);
+            }
+            vrt.Release();
+            UnityEngine.Object.DestroyImmediate(vrt);
+            UnityEngine.Object.DestroyImmediate(vsource);
+            UnityEngine.Object.DestroyImmediate(vmat);
+
+            Check(vpx != null && vpx.Length == dim * dim,
+                "MobileCRT render: the CRT material blits and reads back on a float target");
+            if (vpx == null || vpx.Length != dim * dim)
+                return;
+
+            float worst = 0f;
+            int worstIndex = -1;
+            for (int i = 0; i < vpx.Length; i++)
+            {
+                float lo = Mathf.Min(vpx[i].r, Mathf.Min(vpx[i].g, vpx[i].b));
+                if (lo < worst) { worst = lo; worstIndex = i; }
+            }
+
+            // Two probes on the centre column keep the negative check from being vacuous: the image
+            // centre (r2 ~ 0, so the vignette leaves it alone) and a point 60% of the way out
+            // (r2 ~ 0.36, so it keeps ~64% of its value). If the vignette ever stopped being
+            // applied at all, "nothing is negative" would still pass and these two would not.
+            float vCorner = vpx[0].r;
+            float vCentre = vpx[(dim / 2) * dim + dim / 2].r;
+            int edgeRow = Mathf.RoundToInt(0.8f * dim) - 1;      // v = 0.8, i.e. centred.y = 0.6
+            float vEdge = vpx[edgeRow * dim + col].r;
+            log.AppendLine(string.Format(
+                "  note  MobileCRT render (ARGBHalf): grey 128 in, curvature {0} / vignette 1 / scanlines 0 / mask 0 -> lowest channel {1:0.0000}{2}, corner(0,0)={3:0.0000}, centre={4:0.0000}, 60% out (row {5})={6:0.0000}",
+                curvature, worst,
+                worstIndex < 0 ? "" : string.Format(" at ({0},{1})", worstIndex % dim, worstIndex / dim),
+                vCorner, vCentre, edgeRow, vEdge));
+
+            // 1. THE check. saturate() is the whole of F1's fix, and this is the only assertion in
+            //    the project that can see it fail: drop the saturate and this band reads ~-0.057.
+            Check(worst >= -0.0005f,
+                "MobileCRT render: no colour channel goes negative at vignette 1 (the vignette is saturated)",
+                "lowest channel " + worst.ToString("0.0000"));
+            // 2. Outside the curved screen is black on the float target too, and not negative
+            //    either - `inside` multiplies the whole colour away before the write.
+            Check(Mathf.Abs(vCorner) <= 0.002f,
+                "MobileCRT render: the corner pixel is black on the float target",
+                "got " + vCorner.ToString("0.0000"));
+            // 3. The vignette is running: the centre keeps the source's 0.502 and the 60% probe
+            //    keeps about 0.32 of it.
+            Check(vCentre > 0.45f && vCentre < 0.56f,
+                "MobileCRT render: vignette 1 leaves the centre of the tube at full brightness",
+                "got " + vCentre.ToString("0.0000"));
+            Check(vEdge > 0.15f && vEdge < vCentre * 0.85f,
+                "MobileCRT render: vignette 1 dims the picture towards the edge",
+                "60% out " + vEdge.ToString("0.0000") + " vs centre " + vCentre.ToString("0.0000"));
         }
 
         /// <summary>
@@ -1941,6 +2043,15 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "MobileCRT UI: changing retro mode from the panel deploys the retro-mode effect group");
             Check(panel.Contains("DaggerfallUnity.Settings.SaveSettings()"),
                 "MobileCRT UI: the panel's DFU rows persist through SaveSettings, not PlayerPrefs");
+            // F13 of the Task 2 review. AddToggle's caller-owns-persistence case (key == null)
+            // caches the row's state in a closure local, and the panel is built once per session -
+            // so without a refreshDynamic hook the CRT filter row shows a stale ON/OFF after the
+            // value is changed in the Game Effects window, and the next tap flips the stale cache
+            // into a write the row's own equality guard then swallows. Source text, because the
+            // row is UGUI built at runtime and there is no seam to call from the editor.
+            Check(panel.Contains("if (key == null)")
+                  && panel.Contains("refreshDynamic += () => { current = get(); paint(); };"),
+                "MobileCRT UI: a caller-owned AddToggle row re-reads its value when the panel reopens");
         }
 
         // Distant Terrain's far-terrain shader is compiled into the app, and its whole reason for
@@ -3579,13 +3690,18 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             densityManager.InitDetailsLayers();
             Check(densityManager.Grass.Cells[2, 3] == 0,
                 "RealGrass: the next promotion starts from a cleared layer");
-            // Parity with upstream, end to end: all four sub-cells of a tile written with the same
-            // thick density come back as that density - not 4x it, which the summing fold gave.
+            // Parity ACROSS THE RESOLUTION CHANGE, end to end: all four sub-cells of a tile written
+            // with the same thick density come back as that density - not 4x it, which the summing
+            // fold gave. It models upstream as writing one value four times, which upstream does
+            // not do (it draws RandomThick() four times, independently) - that is deliberate: this
+            // pins the FOLD, and the mean of four equal draws is the only case where the fold's
+            // output is a fixed number. What it does not pin, and cannot, is what a coverage value
+            // of 19 puts on the ground - see RealGrassPort.ForcedScatterMode.
             densityManager.Grass[8, 10] = 19; densityManager.Grass[8, 11] = 19;
             densityManager.Grass[9, 10] = 19; densityManager.Grass[9, 11] = 19;
             densityManager.FoldDetailLayers();
             Check(densityManager.Grass.Cells[4, 5] == 19,
-                "RealGrass: four sub-cells at upstream's thick density fold to that same density - parity, not 4x",
+                "RealGrass: four sub-cells at upstream's thick density fold to that same density - resolution parity, not 4x",
                 densityManager.Grass.Cells[4, 5].ToString());
             densityManager.InitDetailsLayers();
             Check(ReferenceEquals(empty0, global::RealGrass.DensityManager.Empty),

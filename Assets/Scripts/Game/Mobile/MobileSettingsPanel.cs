@@ -762,6 +762,16 @@ namespace DaggerfallWorkshop.Game.Mobile
             };
             paint();
 
+            // A caller-owned value (key == null) has a second front end by definition - CRTFilter
+            // is also the Game Effects window's - and this panel is built once and kept for the
+            // session (OpenFrom -> if (!built) Build()), so `current` would still be whatever it
+            // was when the row was built. Refresh it from the getter every time the panel opens,
+            // exactly as AddChoice's paint does. Gated on key == null on purpose: a keyed row's
+            // getter is typically `() => controller != null && controller.pointerFlipY`, which
+            // answers false when the component is absent and would repaint a real ON row as OFF.
+            if (key == null)
+                refreshDynamic += () => { current = get(); paint(); };
+
             btn.onClick.AddListener(() =>
             {
                 current = !current;
