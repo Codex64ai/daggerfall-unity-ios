@@ -81,6 +81,17 @@ namespace DaggerfallWorkshop.Game.Mobile
         // disagree about its name. Reads "[PortedMods] Dynamic Skies waiting for Distant Terrain's
         // stacked camera".
         public const string SkyStackedCameraWait = "[PortedMods] " + SkyTitle + " waiting for Distant Terrain's stacked camera";
+        // MOBILE: and the line that ends that wait. Composed the same way, for the same reason.
+        // Reads "[PortedMods] Dynamic Skies starting without Distant Terrain's stacked camera".
+        public const string SkyStackedCameraGiveUp = "[PortedMods] " + SkyTitle + " starting without Distant Terrain's stacked camera";
+
+        /// <summary>
+        /// How many 1 Hz passes the sky waits for Distant Terrain's stacked camera once the rest of
+        /// the scene is up. The far terrain is built synchronously inside StreamingWorld.OnReady, so
+        /// the camera either appears on the pass after world entry or it is not coming - fifteen
+        /// seconds is generous for a slow device and short enough that a player never notices.
+        /// </summary>
+        public const int SkyStackedCameraWaitPasses = 15;
 
         /// <summary>Pure: which of (rr, rrItems, cc) may run. Items needs RR; C&C needs both.</summary>
         public static bool[] Gate(bool rr, bool rrItems, bool cc)
@@ -108,6 +119,17 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// means - not "the stacked camera is already up".
         /// </summary>
         public static bool SkySceneReady(bool sunLightPresent, bool mainCameraPresent) => SkySceneReady(sunLightPresent, mainCameraPresent, false, false);
+
+        /// <summary>
+        /// Pure: should the poll stop waiting for Distant Terrain's stacked camera and start the sky
+        /// anyway? Only the passes spent with the rest of the scene already up and that one camera
+        /// still missing count - waiting on the title screen is not waiting on Distant Terrain. The
+        /// give-up is a policy of the poll, not of SkySceneReady, which stays the plain contract.
+        /// Without a bound, any reason for an absent stacked camera strands Dynamic Skies for the
+        /// whole session; with it, the worst case is a sky that starts fifteen seconds late on the
+        /// normal branch (see BLBSkybox, which keys that branch on the camera).
+        /// </summary>
+        public static bool GiveUpOnStackedCamera(int stackedWaitPasses) => stackedWaitPasses >= SkyStackedCameraWaitPasses;
 
         /// <summary>
         /// Pure: World of Daggerfall is a location mod - it is nothing without Location Loader reading it,
@@ -206,6 +228,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             bool logged = false;
             bool stackedLogged = false;
+            // MOBILE: passes spent with the scene up and only Distant Terrain's camera missing.
+            int stackedWaitPasses = 0;
             while (true)
             {
                 bool sunLight = GameObject.Find("SunLight") != null;
@@ -228,10 +252,24 @@ namespace DaggerfallWorkshop.Game.Mobile
                 // MOBILE: the scene is up and the only thing still missing is Distant Terrain's
                 // camera. Said once, and only in that case, so a reader who sees it knows the wait
                 // is this mod's and not the title screen's.
-                else if (!stackedLogged)
+                else
                 {
-                    Debug.Log(SkyStackedCameraWait);
-                    stackedLogged = true;
+                    if (!stackedLogged)
+                    {
+                        Debug.Log(SkyStackedCameraWait);
+                        stackedLogged = true;
+                    }
+                    // MOBILE: and it is bounded. A far terrain that threw or refused tears its
+                    // camera down and clears Running, which releases this poll on the next pass -
+                    // but any other reason for an absent stacked camera would otherwise strand the
+                    // sky for the whole session on one log line. After fifteen passes the sky starts
+                    // anyway; BLBSkybox keys its stacked-camera branch on the camera rather than on
+                    // Distant Terrain, so a start without it takes the normal branch intact.
+                    if (GiveUpOnStackedCamera(++stackedWaitPasses))
+                    {
+                        Debug.Log(SkyStackedCameraGiveUp);
+                        break;
+                    }
                 }
                 yield return new WaitForSecondsRealtime(1f);
             }

@@ -91,10 +91,17 @@ namespace DistantTerrain
     /// fly-map - a phone has no End key - so RuntimeVisible now starts TRUE and the master switch
     /// alone decides. Left in place rather than deleted because DistantTerrain pushes
     /// (HighlightLocations &amp;&amp; RuntimeVisible) as the shader's _HighlightLocations uniform.
+    ///
+    /// MOBILE: and because RuntimeVisible no longer hides them, the master switch is the whole
+    /// gate - so its default is the iOS preset, which is OFF. Upstream shipped the pair as
+    /// true/false (baked but hidden until the player pressed End); this port ships false/true
+    /// (not baked at all unless asked for). The bundle's modsettings.json still says true, which
+    /// is fetched content this port does not patch: DistantTerrainPort.HighlightLocationsFrom
+    /// treats that as unset. Only a settings file the player has on disk can turn beacons on.
     /// </summary>
     public static class DistantTerrainLocationConfig
     {
-        public static bool HighlightLocations = true;
+        public static bool HighlightLocations = false;
 
         // MOBILE: true, not false - with the hotkey gone nothing would ever reveal the markers.
         public static bool RuntimeVisible = true;
@@ -355,6 +362,31 @@ namespace DistantTerrain
         }
 
         /// <summary>
+        /// MOBILE: the symmetric counterpart, called from DistantTerrain.TearDownFarTerrain - which
+        /// runs both when the build throws and when it refuses. Without it a torn-down far terrain
+        /// leaves Running true with no stacked camera in the scene, and the sky's poll (which waits
+        /// for that camera whenever Running is true) never releases; Installed likewise kept
+        /// claiming a far terrain that had just removed itself.
+        /// </summary>
+        internal static void MarkStopped()
+        {
+            Installed = false;
+            Running = false;
+        }
+
+        /// <summary>
+        /// MOBILE pure: the beacons' effective state. The bundle's own modsettings.json ships
+        /// HighlightDistantLocations TRUE, and DFU merges the player's settings file on top of that
+        /// with no API to ask which of the two a value came from - so the bundle default is treated
+        /// as UNSET and only a settings file the player actually has on disk can turn the beacons
+        /// on. Everything else lands on the code default, which is the iOS preset: off.
+        /// </summary>
+        public static bool HighlightLocationsFrom(bool userSettingsFilePresent, bool settingValue)
+        {
+            return userSettingsFilePresent && settingValue;
+        }
+
+        /// <summary>
         /// MOBILE: rename of upstream's `InitStart`, with `[Invoke(StateManager.StateTypes.Start, 0)]`
         /// removed - MobilePortedMods calls this directly. Everything that follows the settings loads
         /// is new: upstream created the component unconditionally and let a missing shader or a
@@ -566,20 +598,49 @@ namespace DistantTerrain
         /// </summary>
         private static void LoadLocationHighlightSettings()
         {
+            // MOBILE: the SETTING still defaults to enabled - that is what the bundle ships and what
+            // the catch below falls back to. What changed is that the setting alone no longer
+            // decides: DFU merges the player's settings file over the bundle's own modsettings.json
+            // and offers no way to ask which file a value came from, so the bundle's `true` is
+            // treated as unset and the beacons stay at the port's code default (off) unless the
+            // player actually has a settings file on disk. See HighlightLocationsFrom.
+            bool settingValue;
             try
             {
                 ModSettings settings = mod.GetSettings();
-                DistantTerrainLocationConfig.HighlightLocations =
-                    settings.GetValue<bool>("LocationHighlight", "HighlightDistantLocations");
-
-                Debug.Log("[DistantTerrain] HighlightDistantLocations enabled: " +
-                          DistantTerrainLocationConfig.HighlightLocations);
+                settingValue = settings.GetValue<bool>("LocationHighlight", "HighlightDistantLocations");
             }
             catch (System.Exception ex)
             {
                 Debug.LogWarning("[DistantTerrain] Could not load location-highlight settings, " +
                                  "defaulting to enabled. Reason: " + ex.Message);
-                DistantTerrainLocationConfig.HighlightLocations = true;
+                settingValue = true;
+            }
+
+            DistantTerrainLocationConfig.HighlightLocations =
+                HighlightLocationsFrom(UserSettingsFilePresent(), settingValue);
+
+            Debug.Log("[DistantTerrain] HighlightDistantLocations enabled: " +
+                      DistantTerrainLocationConfig.HighlightLocations);
+        }
+
+        /// <summary>
+        /// MOBILE: does the player have a settings file of their own for this mod? DFU writes one to
+        /// Mod.ConfigurationDirectory/modsettings.json the first time settings are changed or a
+        /// preset is applied, and reads it over the bundle's copy; the merged ModSettings object
+        /// carries no provenance, so the file's existence is the only thing that separates "the
+        /// player asked for this" from "the bundle shipped it".
+        /// </summary>
+        private static bool UserSettingsFilePresent()
+        {
+            try
+            {
+                return mod != null &&
+                       System.IO.File.Exists(System.IO.Path.Combine(mod.ConfigurationDirectory, "modsettings.json"));
+            }
+            catch (System.Exception)
+            {
+                return false;
             }
         }
 

@@ -49,7 +49,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Shader shader = AssetDatabase.LoadAssetAtPath<Shader>(path);
             if (shader == null)
             {
-                Debug.LogError("[ShaderSpike] shader asset did not load: " + path);
+                Fail("shader asset did not load: " + path, log);
                 return;
             }
             log.AppendLine("[ShaderSpike] Shader.name: " + shader.name);
@@ -60,10 +60,15 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // Clear any stale dump so the glob below can only find this run's output.
             foreach (string stale in SafeGlob("Temp", "Compiled-*.shader")) File.Delete(stale);
 
-            // ShaderUtil.OpenCompiledShader(shader, mode, customPlatformsMask, includeAllVariants).
-            // mode 3 = "Custom" (use the mask); the mask is 1 << (int)ShaderCompilerPlatform.Metal.
+            // ShaderUtil.OpenCompiledShader(Shader shader, int mode, int externPlatformsMask,
+            //   bool includeAllVariants, bool preprocessOnly, bool stripLineDirectives) - six
+            // parameters on this editor (6000.3); earlier versions carried the first four. mode 3 =
+            // "Custom" (use the mask); the mask is 1 << (int)ShaderCompilerPlatform.Metal.
             // Internal API, hence reflection - it is what the Shader inspector calls, and it is the
             // only way to make the editor run the Metal compiler for a chosen target in batch mode.
+            // BuildArgs fills it positionally, so the shape below is asserted rather than assumed:
+            // an inserted or reordered parameter would otherwise compile for the wrong platform, or
+            // for all of them, and still print a plausible-looking sampler count.
             int metalBit = (int)Enum.Parse(typeof(UnityEditor.Rendering.ShaderCompilerPlatform), "Metal");
             int mask = 1 << metalBit;
             log.AppendLine("[ShaderSpike] ShaderCompilerPlatform.Metal = " + metalBit + ", mask = " + mask);
@@ -72,14 +77,21 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 System.Reflection.BindingFlags.NonPublic);
             if (open == null)
             {
-                Debug.LogError("[ShaderSpike] ShaderUtil.OpenCompiledShader not found; API changed. Methods: " +
+                Fail("ShaderUtil.OpenCompiledShader not found; API changed. Methods: " +
                     string.Join(", ", typeof(ShaderUtil).GetMethods(
                         System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.Public |
-                        System.Reflection.BindingFlags.NonPublic).Select(m => m.Name).Distinct()));
+                        System.Reflection.BindingFlags.NonPublic).Select(m => m.Name).Distinct()), log);
                 return;
             }
-            log.AppendLine("[ShaderSpike] OpenCompiledShader signature: " +
-                string.Join(", ", open.GetParameters().Select(p => p.ParameterType.Name + " " + p.Name)));
+            string signature = string.Join(", ", open.GetParameters().Select(p => p.ParameterType.Name + " " + p.Name));
+            log.AppendLine("[ShaderSpike] OpenCompiledShader signature: " + signature);
+            string shapeProblem = SignatureProblem(open);
+            if (shapeProblem != null)
+            {
+                Fail("OpenCompiledShader signature is not the shape BuildArgs fills: " + shapeProblem +
+                     " (got: " + signature + ")", log);
+                return;
+            }
             try
             {
                 object[] args = BuildArgs(open, shader, mask);
@@ -87,7 +99,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             }
             catch (Exception ex)
             {
-                log.AppendLine("[ShaderSpike] OpenCompiledShader threw: " + (ex.InnerException ?? ex));
+                Fail("OpenCompiledShader threw: " + (ex.InnerException ?? ex), log);
+                return;
             }
 
             DumpMessages(shader, "after Metal compile", log);
@@ -95,7 +108,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             string dump = SafeGlob("Temp", "Compiled-*.shader").FirstOrDefault();
             if (dump == null)
             {
-                log.AppendLine("[ShaderSpike] no Temp/Compiled-*.shader was produced.");
+                Fail("no Temp/Compiled-*.shader was produced - nothing was compiled, so any count " +
+                     "this run could report would be zero rather than a pass.", log);
+                return;
             }
             else
             {
@@ -114,17 +129,52 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Debug.Log(log.ToString());
         }
 
+        /// <summary>
+        /// Flushes what was gathered so far, then fails the run loudly. Every path that reaches
+        /// here means the spike measured NOTHING - and a spike that measures nothing must not look
+        /// like one that measured a comfortable zero. In batch mode that means a non-zero exit, the
+        /// way MobileModBuilder fails a bundle build; the log is emitted first so the CI artifact
+        /// still carries the signature and the shader messages that explain what broke.
+        /// </summary>
+        static void Fail(string message, StringBuilder log)
+        {
+            if (log != null && log.Length > 0) Debug.Log(log.ToString());
+            Debug.LogError("[ShaderSpike] FAILED: " + message);
+            if (Application.isBatchMode) EditorApplication.Exit(1);
+        }
+
+        /// <summary>
+        /// The positional contract BuildArgs relies on: (Shader, int mode, int mask, then bools).
+        /// Returns null when the reflected method matches it, or the first thing that does not.
+        /// Trailing bools are open-ended on purpose - Unity has appended two of them since this
+        /// tool was written, and appending another is harmless; changing one of the first three is
+        /// not, and is exactly what would silently compile for a platform nobody asked for.
+        /// </summary>
+        static string SignatureProblem(System.Reflection.MethodInfo open)
+        {
+            var ps = open.GetParameters();
+            if (ps.Length < 4) return "expected at least 4 parameters, found " + ps.Length;
+            if (ps[0].ParameterType != typeof(Shader)) return "parameter 0 is " + ps[0].ParameterType.Name + ", expected Shader";
+            if (ps[1].ParameterType != typeof(int)) return "parameter 1 (mode) is " + ps[1].ParameterType.Name + ", expected Int32";
+            if (ps[2].ParameterType != typeof(int)) return "parameter 2 (platform mask) is " + ps[2].ParameterType.Name + ", expected Int32";
+            for (int i = 3; i < ps.Length; i++)
+                if (ps[i].ParameterType != typeof(bool))
+                    return "parameter " + i + " is " + ps[i].ParameterType.Name + ", expected Boolean";
+            return null;
+        }
+
         static object[] BuildArgs(System.Reflection.MethodInfo open, Shader shader, int mask)
         {
+            // The shape is guaranteed by SignatureProblem, which runs first: positions 0/1/2 are
+            // Shader / mode / mask and everything after them is a bool, so this is a direct fill
+            // rather than the type sniff it used to be.
             var ps = open.GetParameters();
             var args = new object[ps.Length];
             args[0] = shader;
-            for (int i = 1; i < ps.Length; i++)
-            {
-                if (ps[i].ParameterType == typeof(bool)) args[i] = false;          // includeAllVariants
-                else if (i == 1) args[i] = 3;                                      // mode: custom platforms
-                else args[i] = mask;                                               // platform mask
-            }
+            args[1] = 3;                                                           // mode: custom platforms
+            args[2] = mask;                                                        // platform mask
+            for (int i = 3; i < ps.Length; i++)
+                args[i] = false;                                                   // includeAllVariants, preprocessOnly, stripLineDirectives
             return args;
         }
 

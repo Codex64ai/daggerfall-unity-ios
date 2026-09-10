@@ -706,6 +706,28 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             return n;
         }
 
+        /// <summary>
+        /// The braces-matched body of one method, so a check can say "the teardown releases X"
+        /// rather than "the file mentions X somewhere". Feed it comment-stripped source (comments
+        /// are where a method names what a NEIGHBOURING method does). Returns "" when the signature
+        /// is not found, which fails the caller's check rather than passing it vacuously.
+        /// </summary>
+        static string MethodBody(string source, string signature)
+        {
+            int at = source.IndexOf(signature, StringComparison.Ordinal);
+            if (at < 0) return "";
+            int open = source.IndexOf('{', at);
+            if (open < 0) return "";
+            int depth = 0;
+            for (int i = open; i < source.Length; i++)
+            {
+                if (source[i] == '{') depth++;
+                else if (source[i] == '}' && --depth == 0)
+                    return source.Substring(open, i - open + 1);
+            }
+            return "";
+        }
+
         // The World of Daggerfall - Biomes port is compiled in but inert: MobilePortedMods starts it
         // explicitly behind a default-off launcher entry, so no [Invoke] may survive the copy, and the
         // Location Loader nature swap reads the climate map off the installer instead of its own bundle.
@@ -1078,7 +1100,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "DistantTerrain: no tex2Dgrad on an atlas sampler survives");
             Check(!cginc.Contains("sampler2D _TileAtlasTex") && !src.Contains("_TileAtlasTex"),
                 "DistantTerrain: none of the twelve 2048^2 atlas samplers survive");
-            Check(!cginc.Contains("_AtlasSize") && !cginc.Contains("_GutterSize"),
+            // Both files: the uniforms are declared as shader PROPERTIES in the .shader and consumed
+            // in the .cginc, so checking only the include would pass a re-added
+            // `_AtlasSize("...", Float) = 2048.0` property block - the neighbouring _TileAtlasTex
+            // check already tests both for the same reason.
+            Check(!cginc.Contains("_AtlasSize") && !cginc.Contains("_GutterSize")
+                  && !src.Contains("_AtlasSize") && !src.Contains("_GutterSize"),
                 "DistantTerrain: atlas size / gutter uniforms are gone with the atlases");
 
             // Dead code the port drops.
@@ -1304,11 +1331,87 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(port.Contains("DistantTerrainPort.MarkInstalled();"),
                 "DistantTerrain: Installed is set from the far terrain build, not from Init");
 
+            // The teardown's full debt, checked against the port's own written-down contract rather
+            // than against a list retyped here. Destroying the far-terrain GameObject destroys the
+            // Terrain COMPONENT; the TerrainData, the runtime Material and the 1024^2 readable
+            // tilemap texture are free-standing objects that survive it, so a teardown that only
+            // nulls the fields leaks ~12-16 MB for the session - in the handler whose whole purpose
+            // is to undo a half-built world. Braces-matched body, so a Destroy elsewhere in the file
+            // cannot satisfy it.
+            string teardownBody = MethodBody(portCode, "void TearDownFarTerrain()");
+            string[] notDestroyed = global::DistantTerrain.DistantTerrain.TeardownDestroys
+                .Where(o => !teardownBody.Contains("Destroy(" + o + ")")).ToArray();
+            Check(teardownBody.Length > 0 && notDestroyed.Length == 0,
+                "DistantTerrain: the teardown destroys every object it allocated (TerrainData, material, tilemap texture, cameras, RT)",
+                teardownBody.Length == 0 ? "TearDownFarTerrain body not found" : "not destroyed: " + string.Join(", ", notDestroyed));
+            string[] notNulled = global::DistantTerrain.DistantTerrain.TeardownNulls
+                .Where(f => !teardownBody.Contains(f + " = null")).ToArray();
+            Check(teardownBody.Length > 0 && notNulled.Length == 0,
+                "DistantTerrain: the teardown nulls every field it dropped, the 4.2 MB Color32 tilemap included",
+                teardownBody.Length == 0 ? "TearDownFarTerrain body not found" : "not nulled: " + string.Join(", ", notNulled));
+            // OnDestroy owes the same three; upstream only dropped the references there.
+            string onDestroyBody = MethodBody(portCode, "void OnDestroy()");
+            Check(onDestroyBody.Contains("Destroy(terrain.terrainData)")
+                  && onDestroyBody.Contains("Destroy(terrainMaterial)")
+                  && onDestroyBody.Contains("Destroy(textureTerrainInfoTileMap)"),
+                "DistantTerrain: OnDestroy frees the TerrainData, the material and the tilemap texture too");
+            // And the refusal path inside GenerateWorldTerrain, which destroys the Terrain object it
+            // just built. The TerrainData behind it is not reachable from the teardown at that point
+            // (the `terrain` field is only assigned after this method returns true), so it has to go
+            // here or nowhere.
+            string generateBody = MethodBody(portCode, "private bool GenerateWorldTerrain()");
+            Check(generateBody.Contains("Destroy(terrain.terrainData)") && generateBody.Contains("Destroy(terrainGameObject)"),
+                "DistantTerrain: the tileset refusal destroys the TerrainData it created, not just the Terrain object");
+            // Running/Installed are cleared where they are set - see the sky's poll, which waits on
+            // Running whenever it is true and would otherwise never release after a failed build.
+            Check(teardownBody.Contains("DistantTerrainPort.MarkStopped();"),
+                "DistantTerrain: the teardown clears Running and Installed (MarkStopped, symmetric with MarkInstalled)");
+            MethodInfo markStopped = typeof(global::DistantTerrain.DistantTerrainPort)
+                .GetMethod("MarkStopped", BindingFlags.Static | BindingFlags.NonPublic);
+            Check(markStopped != null && markStopped.GetParameters().Length == 0,
+                "DistantTerrain: MarkStopped() exists beside MarkInstalled()");
+
+            // The cross-season array check. Per season, PackSeason already refuses four archives
+            // that cannot share one array; this is the gap that left - the shader takes ONE
+            // dimension (max of _TileArraySummer_TexelSize.z/.w) and computes the mip LOD for winter
+            // and rain from it, because snow caps always sample winter and snow-free climates always
+            // sample summer. Fake dimensions, three "seasons", so the rule is exercised without a GPU.
+            string seasonDetail;
+            Check(global::DistantTerrain.DistantTerrain.TilesetsCompatible(
+                      new[] { 64, 64, 64 }, new[] { 64, 64, 64 }, new[] { 5, 5, 5 }, new[] { 7, 7, 7 }, out seasonDetail),
+                "DistantTerrain: three identical packed arrays pass the cross-season check");
+            Check(!global::DistantTerrain.DistantTerrain.TilesetsCompatible(
+                      new[] { 64, 128, 64 }, new[] { 64, 128, 64 }, new[] { 5, 5, 5 }, new[] { 7, 8, 7 }, out seasonDetail)
+                  && seasonDetail.Contains("128"),
+                "DistantTerrain: a winter array packed at 128 while summer is 64 is refused, and the detail names the size",
+                seasonDetail);
+            Check(!global::DistantTerrain.DistantTerrain.TilesetsCompatible(
+                      new[] { 64, 64, 64 }, new[] { 64, 64, 64 }, new[] { 5, 5, 5 }, new[] { 7, 7, 1 }, out seasonDetail)
+                  && seasonDetail.Contains("mip"),
+                "DistantTerrain: a rain array with no mip chain while summer has seven is refused",
+                seasonDetail);
+            Check(portCode.Contains("tileArraySummer.width, tileArrayWinter.width, tileArrayRain.width"),
+                "DistantTerrain: BuildTileArrays runs that check across the three PACKED arrays, not only within each season");
+
+            // The beacons. Upstream shipped HighlightLocations true with RuntimeVisible false (baked
+            // but hidden behind the End key); this port drops the hotkey, so the master switch is the
+            // whole gate and its default is the iOS preset. The bundle's own modsettings.json still
+            // says true - fetched content this port does not patch - so it is treated as unset.
+            Check(!global::DistantTerrain.DistantTerrainLocationConfig.HighlightLocations,
+                "DistantTerrain: the location beacons default OFF in code (the iOS preset lives here, not in the fetched modsettings.json)");
+            Check(global::DistantTerrain.DistantTerrainLocationConfig.RuntimeVisible,
+                "DistantTerrain: RuntimeVisible stays true - with the End key gone it would otherwise hide the beacons even when asked for");
+            Check(!global::DistantTerrain.DistantTerrainPort.HighlightLocationsFrom(false, true)
+                  && !global::DistantTerrain.DistantTerrainPort.HighlightLocationsFrom(false, false)
+                  && global::DistantTerrain.DistantTerrainPort.HighlightLocationsFrom(true, true)
+                  && !global::DistantTerrain.DistantTerrainPort.HighlightLocationsFrom(true, false),
+                "DistantTerrain: only a settings file the player has on disk can turn the beacons on (all four cases)");
+
             // The log literals. These are the lines Task 8 documents, Task 9 greps for in the
             // simulator run and the device hand-off asks for; a reworded one is a broken contract.
             foreach (string literal in new[]
             {
-                "[DistantTerrain] far terrain built in {0} ms (heightmap {1} ms, carve {2} ms, lifts {3} ms, tilemap {4} ms)",
+                "[DistantTerrain] far terrain built in {0} ms (heightmap {1} ms, carve {2} ms, lifts {3} ms, tilemap {4} ms, arrays {5} ms)",
                 "[DistantTerrain] map-pixel update {0} ms",
                 "[DistantTerrain] arrays {0} MB",
                 "[DistantTerrain] far terrain ready",
@@ -1320,6 +1423,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "DistantTerrain: log literal \"[DistantTerrain] not available: \"");
             Check(!port.Contains("[Distant Terrain]") && !startup.Contains("[Distant Terrain]"),
                 "DistantTerrain: one log prefix, so grepping [DistantTerrain] finds every line the port writes");
+            // The fifth stage is measured, not just printed: the pack runs near the end of
+            // GenerateWorldTerrain, after the other three stages are recorded and before the tilemap
+            // stopwatch starts, so a literal with an `arrays` field and no stopwatch behind it would
+            // print a constant zero and read as "free".
+            Check(portCode.Contains("lastArraysMs = arraysWatch.Elapsed.TotalMilliseconds")
+                  && portCode.Contains("bool arraysBuilt = BuildTileArrays();"),
+                "DistantTerrain: the arrays stage is timed around BuildTileArrays, not inferred");
         }
 
 
@@ -1499,6 +1609,38 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobilePortedMods.SkyStackedCameraWait == "[PortedMods] Dynamic Skies waiting for Distant Terrain's stacked camera",
                 "PortedMods: the stacked-camera wait line is the literal a Player.log reader greps for",
                 MobilePortedMods.SkyStackedCameraWait);
+
+            // That wait is bounded. A far terrain that threw or refused now clears Running from its
+            // teardown, which releases the poll on the next pass - but the bound is what stops ANY
+            // other reason for an absent stacked camera stranding Dynamic Skies for a whole session
+            // on one log line. Only passes spent with the rest of the scene up and that one camera
+            // missing are counted, so a long title screen never spends the budget.
+            Check(MobilePortedMods.SkyStackedCameraWaitPasses == 15,
+                "PortedMods: the sky waits fifteen 1 Hz passes for the stacked camera before starting anyway",
+                MobilePortedMods.SkyStackedCameraWaitPasses.ToString());
+            bool giveUpOk = true;
+            for (int passes = 0; passes <= 20; passes++)
+                if (MobilePortedMods.GiveUpOnStackedCamera(passes) != (passes >= 15))
+                    giveUpOk = false;
+            Check(giveUpOk && !MobilePortedMods.GiveUpOnStackedCamera(14) && MobilePortedMods.GiveUpOnStackedCamera(15),
+                "PortedMods: GiveUpOnStackedCamera flips at the fifteenth wasted pass and not before (0-20)");
+            Check(MobilePortedMods.SkyStackedCameraGiveUp == "[PortedMods] Dynamic Skies starting without Distant Terrain's stacked camera",
+                "PortedMods: the give-up line is the literal a Player.log reader greps for",
+                MobilePortedMods.SkyStackedCameraGiveUp);
+
+            // Dynamic Skies' own branch, which the give-up path lands on. Upstream keyed it on the
+            // DistantTerrain OBJECT; that object is DontDestroyOnLoad and survives a teardown that
+            // destroyed the camera, so a fallback start took the else branch, left stackedCam null
+            // AND skipped `cameraClearExterior = Skybox` - the line that stops CameraClearManager
+            // unsetting the skybox after an exterior transition. Keyed on the camera it is identical
+            // when Distant Terrain is off and correct when its build failed.
+            string skyboxSrc = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/Ports/DynamicSkies/BLBSkybox.cs"));
+            Check(skyboxSrc.Contains("GameObject goCam = GameObject.Find(\"stackedCamera\");")
+                  && !skyboxSrc.Contains("GameObject.Find(\"DistantTerrain\")"),
+                "DynamicSkies: the stacked-camera branch is keyed on the camera, not on the DistantTerrain object");
+            Check(skyboxSrc.Contains("[DynamicSkies] clear flags on: player camera")
+                  && skyboxSrc.Contains("[DynamicSkies] clear flags on: stackedCamera"),
+                "DynamicSkies: the branch says which camera the sky's clear flags landed on");
 
             // Start order, from the source: Distant Terrain's Init runs after the Terrain port's and
             // before StartEnabled hands the sky back for its deferred start. Comments are stripped so
@@ -3422,6 +3564,47 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(derivTex != null && derivTex.width >= 1000 && derivTex.height >= 500,
                 "PackTextureRules: the imported deriv map still oversamples the 1000x500 world grid",
                 derivTex == null ? "asset did not load" : derivTex.width + "x" + derivTex.height);
+            // MOBILE: the rules above are pure functions; these four are the IMPORT they are supposed
+            // to produce, asserted against the asset on disk. Until now R8, readability, the absent
+            // mip chain and the iOS 2048 clamp were proven only by a one-off manual sabotage/restore
+            // whose .meta snapshots live in a gitignored workspace and will never run again - so an
+            // importer edit that quietly reverted this file to RGBA32, or re-enabled mips, left the
+            // suite green and cost 12 MB and a broken carve on a device. The asset is fetched
+            // content, so a clone that has not run fetch.py skips them by name rather than adding a
+            // second permanent FAIL beside the oversample check above.
+            if (derivTex == null)
+            {
+                log.AppendLine("  SKIP  the Distant Terrain deriv map's import guarantees (R8 / readable / no mips / iOS 63-2048-overridden) - not fetched, run tools/bundled-mods/fetch.py --only DistantTerrainWoD");
+            }
+            else
+            {
+                // R8, not RGBA32: the carve reads .r only, so three of four channels would be waste
+                // on both the GPU copy and the readable CPU copy this texture is obliged to keep.
+                Check(derivTex.format == TextureFormat.R8,
+                    "PackTextureRules: the imported deriv map is R8 (a quarter of RGBA32, on both copies)",
+                    derivTex.format.ToString());
+                // ApplyDerivativeHeightmap calls GetPixels32 on it at world entry.
+                Check(derivTex.isReadable,
+                    "PackTextureRules: the imported deriv map is readable (ApplyDerivativeHeightmap reads it with GetPixels32)");
+                // Nothing samples it on the GPU, so a mip chain is memory nothing can ever reach.
+                Check(derivTex.mipmapCount == 1,
+                    "PackTextureRules: the imported deriv map carries no mip chain",
+                    derivTex.mipmapCount + " mip levels");
+                // And the half the editor's own imported texture cannot show: the iOS override. The
+                // default platform block resolves to R8 here too, so only this asks the shipped
+                // question - format 63 (TextureImporterFormat.R8), 2048, and actually overridden
+                // rather than inheriting whatever the default block happens to say.
+                var derivImporter = AssetImporter.GetAtPath(DistantDerivMap) as TextureImporter;
+                TextureImporterPlatformSettings iosSettings =
+                    derivImporter != null ? derivImporter.GetPlatformTextureSettings("iPhone") : null;
+                Check(iosSettings != null && iosSettings.overridden
+                      && iosSettings.format == TextureImporterFormat.R8
+                      && iosSettings.maxTextureSize == 2048,
+                    "PackTextureRules: the deriv map's iOS override is R8 (63) at 2048 and is overridden",
+                    iosSettings == null ? "no TextureImporter at " + DistantDerivMap
+                        : "format " + iosSettings.format + " (" + (int)iosSettings.format + "), maxTextureSize "
+                          + iosSettings.maxTextureSize + ", overridden " + iosSettings.overridden);
+            }
             // Every check above pins the rule against the SAME literal the rule holds, so a rename or a
             // case change of the mods.json entry - which is the fetched folder name, which is what For()
             // matches - leaves this suite green while 225 textures silently revert to ASTC and the

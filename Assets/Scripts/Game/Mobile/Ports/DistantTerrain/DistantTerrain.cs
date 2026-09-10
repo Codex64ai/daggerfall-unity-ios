@@ -160,6 +160,13 @@ namespace DistantTerrain
         double lastHeightmapMs = 0;
         double lastCarveMs = 0;
         double lastLiftsMs = 0;
+        // MOBILE: the tile-array pack - twelve GetTerrainTextureArray builds (672 record decodes and
+        // twelve Apply(true) mip generations) plus 672 GPU slice copies. It runs near the end of
+        // GenerateWorldTerrain, after the three stages above are already recorded and before the
+        // tilemap stopwatch starts, so without its own stage it is the one part of the world-entry
+        // cost the printed line cannot account for - and it is the part most likely to dominate it.
+        // Zero on the second and later world entries: the arrays are packed once per session.
+        double lastArraysMs = 0;
 
         // MOBILE: how many map-pixel updates have been timed this session, and the reposition cost
         // waiting to be reported with the near-terrain rebuild that completes the same cross.
@@ -405,6 +412,51 @@ namespace DistantTerrain
             return count <= 10 || count % 25 == 0;
         }
 
+        /// <summary>
+        /// MOBILE: the contract TearDownFarTerrain implements, written down so it can be checked
+        /// without a scene. Every entry is a UnityEngine.Object this component ALLOCATED and whose
+        /// memory does not go away when the far-terrain GameObject is destroyed: destroying a
+        /// GameObject destroys its Terrain component, not the TerrainData asset behind it; a
+        /// runtime Material and a 1024^2 Texture2D are free-standing objects that merely happen to
+        /// be referenced from one. Dropping the reference leaks ~12-16 MB for the session - inside
+        /// the very handler whose purpose is to undo a half-built world. The self-test walks this
+        /// list against the teardown's body, so a new allocation that is not freed fails the suite.
+        /// </summary>
+        public static readonly string[] TeardownDestroys =
+        {
+            "worldTerrainGameObject",
+            "terrain.terrainData",
+            "terrainMaterial",
+            "textureTerrainInfoTileMap",
+            "stackedCamera.gameObject",
+            "goRenderSkyboxToTexture",
+            "renderTextureSky",
+        };
+
+        /// <summary>
+        /// MOBILE: the fields the teardown must set to null once their objects are gone or dropped.
+        /// Destroying a Unity object does not null the C# field that points at it, and the managed
+        /// arrays here (the 4.2 MB Color32 tilemap, the three float[1025,1025] heightmaps) are held
+        /// alive by nothing else. Checked the same way as TeardownDestroys.
+        /// </summary>
+        public static readonly string[] TeardownNulls =
+        {
+            "worldTerrainGameObject",
+            "terrain",
+            "terrainMaterial",
+            "textureTerrainInfoTileMap",
+            "terrainInfoTileMap",
+            "worldHeights",
+            "baseWorldHeights",
+            "preDerivWorldHeights",
+            "oceanMask",
+            "mountainLifted",
+            "stackedCamera",
+            "goRenderSkyboxToTexture",
+            "cameraRenderSkyboxToTexture",
+            "renderTextureSky",
+        };
+
         // The four biome archives per season, in slice-block order: desert, mountain, woodland, swamp.
         static readonly int[] SummerArchives = { 2, 102, 302, 402 };
         static readonly int[] WinterArchives = { 3, 103, 303, 403 };
@@ -436,6 +488,33 @@ namespace DistantTerrain
 
             if (tileArraySummer == null || tileArrayWinter == null || tileArrayRain == null)
             {
+                DestroyTileArrays();
+                return false;
+            }
+
+            // MOBILE: PackSeason only guarantees the FOUR archives within one season agree. The
+            // shader takes one dimension for all three arrays - `sliceDim = max(
+            // _TileArraySummer_TexelSize.z, _TileArraySummer_TexelSize.w)` in FarTerrainCommon.cginc
+            // - and computes the mip LOD for winter and rain from it too, because the snow caps
+            // always sample winter and a snow-free climate always samples summer. A replacement pack
+            // that resizes one season and not another passes all three per-season checks and then
+            // mip-selects two of the three arrays by the wrong dimension: two mip levels off per
+            // doubling, i.e. visible aliasing or blur on exactly those fragments. The `dim` and the
+            // memory line below read summer alone for the same reason. So the three packed arrays
+            // are compared to each other before any of them is bound.
+            string crossDetail;
+            if (!TilesetsCompatible(
+                    new[] { tileArraySummer.width, tileArrayWinter.width, tileArrayRain.width },
+                    new[] { tileArraySummer.height, tileArrayWinter.height, tileArrayRain.height },
+                    new[] { (int)tileArraySummer.format, (int)tileArrayWinter.format, (int)tileArrayRain.format },
+                    new[] { tileArraySummer.mipmapCount, tileArrayWinter.mipmapCount, tileArrayRain.mipmapCount },
+                    out crossDetail))
+            {
+                // Tileset 0 is summer, 1 winter, 2 rain - named in the line so the detail's index
+                // means something to whoever reads it out of a Player.log.
+                Debug.LogWarning(string.Format(
+                    "[DistantTerrain] tileset arrays mismatch: {0} (across seasons; 0 summer, 1 winter, 2 rain)",
+                    crossDetail));
                 DestroyTileArrays();
                 return false;
             }
@@ -815,19 +894,22 @@ namespace DistantTerrain
             terrainMaterial.SetInt("_HighlightLocations", highlightGate);
             _cachedHighlightLocations = highlightGate;
 
-            // MOBILE: one line for the whole world-entry cost, split into the four stages that can
+            // MOBILE: one line for the whole world-entry cost, split into the five stages that can
             // each be slow for a different reason: sampling WOODS.WLD, carving the deriv map,
-            // parsing the three mountain CSVs and lifting their peaks, and baking the climate /
-            // region / location tilemap. Task 8 documents them; Task 9 and the device run read them.
+            // parsing the three mountain CSVs and lifting their peaks, baking the climate /
+            // region / location tilemap, and packing the three tile arrays. Task 8 documents them;
+            // Task 9 and the device run read them. The arrays stage reads 0 on the second and later
+            // world entries of a session - they are packed once and kept.
             tilemapWatch.Stop();
             total.Stop();
             Debug.Log(string.Format(
-                "[DistantTerrain] far terrain built in {0} ms (heightmap {1} ms, carve {2} ms, lifts {3} ms, tilemap {4} ms)",
+                "[DistantTerrain] far terrain built in {0} ms (heightmap {1} ms, carve {2} ms, lifts {3} ms, tilemap {4} ms, arrays {5} ms)",
                 (long)total.Elapsed.TotalMilliseconds,
                 (long)lastHeightmapMs,
                 (long)lastCarveMs,
                 (long)lastLiftsMs,
-                (long)tilemapWatch.Elapsed.TotalMilliseconds));
+                (long)tilemapWatch.Elapsed.TotalMilliseconds,
+                (long)lastArraysMs));
 
             // MOBILE: the far terrain is on screen. This is the only place Installed becomes true,
             // and it is the last line of the build - a throw or a refusal above never reaches it.
@@ -844,6 +926,21 @@ namespace DistantTerrain
         /// </summary>
         void TearDownFarTerrain()
         {
+            // MOBILE: destroying the GameObject destroys the Terrain COMPONENT, not the TerrainData
+            // behind it (a free-standing UnityEngine.Object holding the 1025^2 heightmap and Unity's
+            // heightmap texture, ~4-6 MB), so it goes first, while `terrain` still points at it.
+            // Same for the runtime Material and the 1024^2 readable tilemap Texture2D (~8.4 MB, GPU
+            // plus CPU copy) - nulling the fields would drop the only references and leak them for
+            // the session. See TeardownDestroys / TeardownNulls, which the self-test reads.
+            if (terrain != null && terrain.terrainData != null)
+                Destroy(terrain.terrainData);
+            if (terrainMaterial != null)
+                Destroy(terrainMaterial);
+            if (textureTerrainInfoTileMap != null)
+                Destroy(textureTerrainInfoTileMap);
+            textureTerrainInfoTileMap = null;
+            terrainInfoTileMap = null;      // 4.2 MB of managed Color32, held alive by nothing else
+
             if (worldTerrainGameObject != null)
             {
                 Destroy(worldTerrainGameObject);
@@ -884,6 +981,13 @@ namespace DistantTerrain
                 Camera.main.clearFlags = savedMainCameraClearFlags;
             }
             mainCameraSaved = false;
+
+            // MOBILE: the flags the build sets, cleared the way the build sets them. Without this a
+            // failed or refused build leaves DistantTerrainPort.Running true with no stacked camera
+            // in the scene, and MobilePortedMods' sky poll - which waits for that camera whenever
+            // Running is true - is stranded for the rest of the session, so Dynamic Skies never
+            // starts on exactly the launch where there is no far terrain left to wait for.
+            DistantTerrainPort.MarkStopped();
         }
 
         /// <summary>MOBILE: releases the three packed arrays (~15 MB of GPU memory this port owns).</summary>
@@ -1003,6 +1107,18 @@ namespace DistantTerrain
 
         void OnDestroy()
         {
+            // MOBILE: upstream only dropped the references here. The TerrainData, the runtime
+            // Material and the 1024^2 readable tilemap texture are free-standing UnityEngine.Objects
+            // that outlive their fields, so they are destroyed for the same reason the tile arrays
+            // below are - see TearDownFarTerrain, which owes the same debt on the failure path.
+            if (terrain != null && terrain.terrainData != null)
+                Destroy(terrain.terrainData);
+            if (terrainMaterial != null)
+                Destroy(terrainMaterial);
+            if (textureTerrainInfoTileMap != null)
+                Destroy(textureTerrainInfoTileMap);
+            terrain = null;
+
             worldHeights = null;
             worldTerrainGameObject = null;
             terrainMaterial = null;
@@ -2498,10 +2614,21 @@ namespace DistantTerrain
             // MOBILE: this is where the twelve GetTerrainTilesetTexture(...).albedoMap calls built
             // twelve 2048^2 atlases. They are packed into three 224-slice arrays instead; a refusal
             // here (see BuildTileArrays) means no far terrain, so nothing further is built.
-            if (!BuildTileArrays())
+            System.Diagnostics.Stopwatch arraysWatch = System.Diagnostics.Stopwatch.StartNew();   // MOBILE
+            bool arraysBuilt = BuildTileArrays();
+            arraysWatch.Stop();                                                                   // MOBILE
+            lastArraysMs = arraysWatch.Elapsed.TotalMilliseconds;                                 // MOBILE
+            if (!arraysBuilt)
             {
                 // MOBILE: the Terrain object exists by now (it is created at the top of this method);
-                // a refusal here must not leave it in the scene for the teardown to miss.
+                // a refusal here must not leave it in the scene for the teardown to miss - and
+                // destroying the GameObject does NOT destroy the TerrainData created above it, which
+                // is the 1025^2 heightmap plus Unity's heightmap texture (~4-6 MB). `terrain` here is
+                // this method's own local component reference; the FIELD of the same name is still
+                // null (BuildFarTerrain assigns it only after this method returns true), so the
+                // teardown that runs next cannot reach this TerrainData. It goes here or nowhere.
+                if (terrain.terrainData != null)
+                    Destroy(terrain.terrainData);
                 Destroy(terrainGameObject);
                 return false;
             }

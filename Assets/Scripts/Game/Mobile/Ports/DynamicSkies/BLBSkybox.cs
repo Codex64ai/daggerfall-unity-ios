@@ -179,16 +179,23 @@ public class BLBSkybox : MonoBehaviour
         Instance.OnWeatherChange(Instance.currentWeather);
         Instance.SetFogDistance(Instance.currentWeather);
 
-        GameObject distantTerrain = GameObject.Find("DistantTerrain");
-        if(distantTerrain == null) {
+        // MOBILE: keyed on the stacked CAMERA, not on the DistantTerrain object upstream looked for.
+        // The two agree whenever the far terrain built; they part company when its build threw or
+        // refused, because the teardown destroys the camera and leaves the (DontDestroyOnLoad)
+        // object standing. Keying on the object there took this branch's `else`, left stackedCam
+        // null AND skipped the cameraClearExterior line - so CameraClearManager would unset the
+        // skybox after the next exterior transition, on exactly the launch that has no far terrain
+        // to hide it. The camera is the thing this code actually needs, so it is the thing asked
+        // for; and the branch says which way it went, since the two look identical from outside.
+        GameObject goCam = GameObject.Find("stackedCamera");
+        if(goCam == null) {
             //Change the clear flags in the camera clear manager, otherwise it would unset the skybox in its Update method after an exterior transition
             CameraClearManager ccm = Instance.playerCam.GetComponent<CameraClearManager>();
             ccm.cameraClearExterior = CameraClearFlags.Skybox;
+            Debug.Log("[DynamicSkies] clear flags on: player camera");
         } else {
-            GameObject goCam = GameObject.Find("stackedCamera");
-            if(goCam) {
-                Instance.stackedCam = goCam.GetComponent<Camera>();
-            }
+            Instance.stackedCam = goCam.GetComponent<Camera>();
+            Debug.Log("[DynamicSkies] clear flags on: stackedCamera");
         }
 
         //Instance.SetPalettizationMaterial();
