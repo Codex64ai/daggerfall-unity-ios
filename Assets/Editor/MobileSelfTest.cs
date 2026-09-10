@@ -1471,11 +1471,23 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "MobileCRT native: a zero or negative viewport clamps to 1x1 (a 0-sized RenderTexture throws)");
             Check(MobileCrt.NativeTargetSize(99999, 99999) == new Vector2Int(8192, 8192),
                 "MobileCRT native: an absurd viewport clamps to 8192 rather than trying to allocate it");
-            // The price of the feature, stated as a number so it cannot drift silently: RGBA8 colour
-            // plus a 32-bit depth surface. 2732x2048 is the 12.9" iPad Pro.
-            Check(MobileCrt.NativeTargetBytes(2732, 2048) == 2732L * 2048L * 8L,
-                "MobileCRT native: the target costs 8 bytes a pixel (RGBA8 colour + 32-bit depth)",
-                (MobileCrt.NativeTargetBytes(2732, 2048) / (1024 * 1024)) + " MB at 2732x2048");
+            // The price of the feature, stated as the CONCRETE NUMBERS the docs quote rather than as
+            // the formula the implementation uses - restating `w * h * 4` here could only fail if
+            // multiplication itself were broken, whereas these fail the moment the surface count or
+            // the format changes, which is the moment README-iOS and UPSTREAM-PATCHES go stale.
+            // RGBA8 colour only: the 32-bit depth surface is RenderTextureMemoryless.Depth and never
+            // reaches system memory on Metal. 2732x2048 is the 12.9" iPad Pro, 2360x1640 the 11".
+            Check(MobileCrt.NativeTargetBytes(2732, 2048) == 22380544L,
+                "MobileCRT native: 2732x2048 costs 22,380,544 bytes (21.3 MB), colour only",
+                MobileCrt.NativeTargetBytes(2732, 2048).ToString("N0"));
+            Check(MobileCrt.NativeTargetBytes(2360, 1640) == 15481600L,
+                "MobileCRT native: 2360x1640 costs 15,481,600 bytes (14.8 MB), colour only",
+                MobileCrt.NativeTargetBytes(2360, 1640).ToString("N0"));
+            // Four bytes a pixel, not eight: if the depth surface is ever counted back in, the two
+            // figures above move and so must every doc that quotes them.
+            Check(MobileCrt.NativeTargetBytes(1000, 1000) == 4000000L,
+                "MobileCRT native: the target is counted at 4 bytes a pixel (depth is memoryless)",
+                MobileCrt.NativeTargetBytes(1000, 1000).ToString("N0"));
 
             // ---- 2. the shader ----
             const string shaderName = "Daggerfall/Mobile/CRT";
@@ -1655,6 +1667,61 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 CountOccurrences(native, "new RenderTexture(") + " of 1");
             Check(native.Contains("RuntimeInitializeOnLoadMethod"),
                 "MobileCRT native: the driver installs itself, with no scene edit to lose on a rebuild");
+
+            // ---- the four review fixes, pinned where they live ----
+            // None of these is reachable from an Editor run: they are all inside the Tick / Stop /
+            // Release lifecycle, which needs a scene, a main camera and a presenter. Source text in
+            // the OWNING METHOD is the honest guard - MethodBody is what keeps "the file mentions it
+            // somewhere" from passing for "the teardown does it".
+            string recreateBody = MethodBody(native, "static void Recreate(Vector2Int size)");
+            Check(recreateBody.Contains("target.memorylessMode = RenderTextureMemoryless.Depth;"),
+                "MobileCRT native: the depth surface is memoryless - it never resolves to system memory on Metal");
+            // Before Create(), or Metal has already allocated the attachment and the hint is inert.
+            Check(recreateBody.IndexOf("memorylessMode", StringComparison.Ordinal) >= 0
+                  && recreateBody.IndexOf("memorylessMode", StringComparison.Ordinal) < recreateBody.IndexOf("target.Create()", StringComparison.Ordinal),
+                "MobileCRT native: memorylessMode is set BEFORE Create(), where it still means something");
+
+            // The create-failure latch. A 15-25 MB allocation that failed under memory pressure must
+            // not be retried at 60 Hz with a log line each time, so: raised where Create() fails,
+            // tested in Tick before anything is touched, and cleared on the way out of the path.
+            Check(recreateBody.Contains("creationFailed = true;"),
+                "MobileCRT native: a failed Create() latches creationFailed");
+            string tickBody = MethodBody(native, "static void Tick()");
+            Check(tickBody.Contains("if (creationFailed)"),
+                "MobileCRT native: Tick bails on the latch instead of re-attempting the allocation every frame");
+            Check(tickBody.Contains("creationFailed = false;") && tickBody.Contains("creationFailed = true;"),
+                "MobileCRT native: Tick clears the latch when the filter goes off and re-raises it after a failed re-allocation");
+            Check(MethodBody(native, "static void Stop()").Contains("creationFailed = false;"),
+                "MobileCRT native: Stop clears the latch, so switching the filter off and on retries once");
+            Check(CountOccurrences(native, "Debug.LogWarning") == 1,
+                "MobileCRT native: exactly one LogWarning in the file - the failure is reported once, from one place",
+                CountOccurrences(native, "Debug.LogWarning") + " of 1");
+            // ... and the presenter is only switched on once there is a target worth presenting.
+            Check(tickBody.IndexOf("SetActive(true)", StringComparison.Ordinal) > tickBody.IndexOf("Recreate(size)", StringComparison.Ordinal),
+                "MobileCRT native: the presenter is activated only after the target is known good");
+
+            // The saved presenter state belongs to a particular presenter. When the cached one is
+            // lost (a scene change), the state has to go with it, or the next Stop() writes the
+            // previous scene's destroyed RenderTexture into the new presenter.
+            string resolveBody = MethodBody(native, "static RetroPresentation ResolvePresenter()");
+            Check(resolveBody.Contains("presenterStateSaved = false;") && resolveBody.Contains("presenterSourceWasAt = null;"),
+                "MobileCRT native: re-resolving the presenter drops the state saved for the old one");
+
+            // Camera.allCameras is documented as all ENABLED cameras, and a camera holding this
+            // target while disabled is exactly the one that would keep a dangling reference.
+            string releaseBody = MethodBody(native, "static void Release()");
+            Check(releaseBody.Contains("Resources.FindObjectsOfTypeAll<Camera>()") && !releaseBody.Contains("Camera.allCameras"),
+                "MobileCRT native: Release sweeps disabled cameras too, not only Camera.allCameras");
+
+            // The two screen-space sites that used to read the retro setting as a proxy for "the main
+            // camera has a target texture". Both are upstream files, both are silently survivable on
+            // a rebase (a misplaced ray and a misplaced label, no error), so both are pinned here.
+            string activate = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/PlayerActivate.cs"));
+            Check(activate.Contains("if (mainCamera.targetTexture != null)") && !activate.Contains("if (DaggerfallUnity.Settings.RetroRenderingMode > 0)"),
+                "MobileCRT native hook: PlayerActivate's cursor ray gates on the target texture, not on the retro setting");
+            string placeMarker = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/UserInterface/HUDPlaceMarker.cs"));
+            Check(placeMarker.Contains("mainCamera.targetTexture != null ? largeHUDHeight / LocalScale.y : 0f"),
+                "MobileCRT native hook: HUDPlaceMarker's retro-off labels take the docked HUD offset under the native path");
 
             // ---- 3. the settings table ----
             string settingsSrc = File.ReadAllText("Assets/Scripts/SettingsManager.cs");

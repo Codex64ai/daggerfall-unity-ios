@@ -34,16 +34,22 @@
 //      onto its stacked camera (that is how it survives retro mode), so pointing Camera.main at a
 //      texture puts BOTH cameras in it and the filter sees the finished composite. Free.
 //
-// WHAT IT COSTS. One render target the size of the viewport, colour plus depth: about 31 MB on an
-// 11" iPad (2360x1640) and about 45 MB on a 12.9" (2732x2048), allocated only while the filter is
-// on with retro mode off, released the moment it goes off. Plus one full-screen blit, which is the
-// same blit the retro path already pays. There is no second copy of the frame and no grab pass.
+// WHAT IT COSTS. One render target the size of the viewport. The COLOUR surface is the whole price
+// in system memory - about 15 MB on an 11" iPad (2360x1640) and about 21 MB on a 12.9" (2732x2048) -
+// because the depth surface is declared RenderTextureMemoryless.Depth and therefore lives only in
+// the GPU's tile memory on Metal: nothing ever samples it, and both cameras that write into this
+// target clear depth on entry, so there is no cross-pass dependency to preserve. (On a desktop
+// graphics API the hint is ignored and depth costs its 4 bytes a pixel; iOS is what this is for.)
+// Allocated only while the filter is on with retro mode off, released the moment it goes off. Plus
+// one full-screen blit, which is the same blit the retro path already pays. There is no second copy
+// of the frame and no grab pass.
 //
 // KNOWN EDGES, recorded rather than hidden:
-//  - Screen-space maths that assumes "retro off means no target texture" is off by the docked HUD's
-//    height while this path runs: PlayerActivate's cursor ray (mouse only - the touch layer does not
-//    use it) and HUDPlaceMarker's quest-marker labels. Undocked, the target is the whole screen and
-//    both are exact.
+//  - Screen-space maths that assumed "retro off means no target texture" was off by the docked HUD's
+//    height while this path runs. Both sites - PlayerActivate's cursor ray and HUDPlaceMarker's
+//    quest-marker labels - now gate on `mainCamera.targetTexture != null`, which is the fact rather
+//    than a proxy for it, and their existing docked-HUD maths then covers this path too. Undocked,
+//    the target is the whole screen and both were always exact.
 //  - The presenter camera is pushed to Camera.main.depth + 1 so it always presents after the world
 //    is drawn; the retro path's own depth is left exactly as it was.
 //
@@ -61,6 +67,15 @@ namespace DaggerfallWorkshop.Game.Mobile
     {
         static RenderTexture target;
         static bool active;
+
+        // Latched when RenderTexture.Create() fails, and cleared only when the player stops asking
+        // for the path. Without it a failed 15-25 MB allocation is retried every LateUpdate for the
+        // rest of the session - 60 allocation attempts and 60 log lines a second, under exactly the
+        // memory pressure that made the first one fail, which is how a recoverable warning becomes a
+        // jetsam kill. One attempt, one warning, then silence until the filter is switched off and on.
+        static bool creationFailed;
+
+        static DaggerfallSky skyRig;
 
         static RetroPresentation presenter;
         static Camera presenterCamera;
@@ -149,18 +164,27 @@ namespace DaggerfallWorkshop.Game.Mobile
             {
                 if (active)
                     Stop();
+                // The player has switched the filter (or retro mode) off, so a later "on" is a new
+                // request and gets a fresh attempt. This is also the reset for the not-active case,
+                // where Stop() above did not run: after a latched failure the path never becomes
+                // active, so Stop() is not what clears the latch - this line is.
+                creationFailed = false;
                 return;
             }
 
+            // Latched: the allocation failed once and the settings have not changed since. Bail
+            // before touching the presenter, so the failure leaves the scene exactly as it found it.
+            if (creationFailed)
+                return;
+
             Camera main = GameManager.Instance.MainCamera;
 
-            // The presenter has to be alive before its camera can be asked how big its viewport is,
-            // so the first frame of the path sizes the target from the whole screen and the second
-            // corrects it if a docked large HUD has taken the bottom. Costs one reallocation the
-            // first time the filter is switched on with the HUD docked, and nothing after.
-            if (!presenter.gameObject.activeSelf)
-                presenter.gameObject.SetActive(true);
-
+            // The presenter's camera is asked how big its viewport is before its GameObject is
+            // switched on - a Camera reports pixelWidth/Height from its rect and the screen whether
+            // or not it is enabled, and activating it here would not run its ViewportChanger until
+            // the next frame anyway. So the first frame of the path sizes the target from the whole
+            // screen and the second corrects it if a docked large HUD has taken the bottom. Costs
+            // one reallocation the first time the filter is switched on with the HUD docked.
             Vector2Int size = presenterCamera != null && presenterCamera.pixelWidth > 0 && presenterCamera.pixelHeight > 0
                 ? MobileCrt.NativeTargetSize(presenterCamera.pixelWidth, presenterCamera.pixelHeight)
                 : MobileCrt.NativeTargetSize(Screen.width, Screen.height);
@@ -170,10 +194,19 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             if (target == null)
             {
+                // Stop() clears the latch, because its usual caller is "the player switched it off".
+                // This caller is not that: re-latch after it, or a failed RE-allocation (the path was
+                // already running when the viewport changed) would loop.
                 if (active)
                     Stop();
+                creationFailed = true;
                 return;
             }
+
+            // Only now that there is a target worth presenting. The failure path above leaves the
+            // presenter switched off, as retro-mode-off found it.
+            if (!presenter.gameObject.activeSelf)
+                presenter.gameObject.SetActive(true);
 
             SavePresenterState();
 
@@ -224,14 +257,26 @@ namespace DaggerfallWorkshop.Game.Mobile
             target.useMipMap = false;
             target.autoGenerateMips = false;
 
+            // The depth surface never has to reach system memory on Metal, and it is half the naive
+            // cost of this feature. Nothing samples it, MSAA is off (the other precondition), and
+            // both cameras that render into this target clear depth on entry - Distant Terrain sets
+            // clearFlags = Depth on Camera.main and on its stacked camera - so there is no
+            // cross-pass depth dependency to preserve. Must be set before Create(); ignored by
+            // graphics APIs that have no tile memory, where depth costs what it always did.
+            target.memorylessMode = RenderTextureMemoryless.Depth;
+
             if (!target.Create())
             {
+                // Once, and once only: the latch below is what stops the next LateUpdate coming
+                // straight back here. It is raised again in Tick after the Stop() that follows a
+                // failed re-allocation, because Stop() is also the "player switched it off" reset.
+                creationFailed = true;
                 Debug.LogWarning("[CRT] could not create the " + size.x + "x" + size.y + " native target - CRT filter stays off with retro mode off");
                 target = null;
                 return;
             }
 
-            Debug.Log(string.Format("[CRT] native target {0}x{1} ({2:0.0} MB colour+depth)",
+            Debug.Log(string.Format("[CRT] native target {0}x{1} ({2:0.0} MB colour; depth memoryless on Metal)",
                 size.x, size.y, MobileCrt.NativeTargetBytes(size.x, size.y) / (1024f * 1024f)));
         }
 
@@ -251,9 +296,16 @@ namespace DaggerfallWorkshop.Game.Mobile
             // camera and only notices a change on its next Update, so destroying the texture first
             // would leave that camera rendering into a destroyed target for a frame. The list is
             // half a dozen cameras and this runs once, when the filter is switched off.
-            foreach (Camera other in Camera.allCameras)
+            //
+            // FindObjectsOfTypeAll, not Camera.allCameras: the latter is documented as all ENABLED
+            // cameras, and a camera that holds this target while its component or GameObject is
+            // disabled is exactly the one that would keep a dangling reference across the Destroy.
+            // (Distant Terrain's stacked camera is the real candidate.) The scene check is what
+            // keeps this off camera components that live in loaded prefab ASSETS rather than in the
+            // scene - they cannot be holding a runtime texture, but nothing here should touch them.
+            foreach (Camera other in Resources.FindObjectsOfTypeAll<Camera>())
             {
-                if (other != null && other.targetTexture == target)
+                if (other != null && other.targetTexture == target && other.gameObject.scene.IsValid())
                     other.targetTexture = null;
             }
 
@@ -286,6 +338,11 @@ namespace DaggerfallWorkshop.Game.Mobile
             RestoreMainCameraRect();
 
             presenterStateSaved = false;
+
+            // Switching the filter off and on is a new request and deserves a fresh allocation
+            // attempt. Tick re-raises this immediately when the caller was a failed allocation
+            // rather than the player.
+            creationFailed = false;
         }
 
         /// <summary>
@@ -332,12 +389,20 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (!GameManager.HasInstance)
                 return;
 
-            DaggerfallSky sky = GameManager.Instance.SkyRig;
-            if (sky == null || sky.SkyCamera == null)
+            // Cached, and resolved through the NON-throwing overload. GameManager.SkyRig uses
+            // GetMonoBehaviour<DaggerfallSky>() with errorIfNotFound defaulted to true, which logs
+            // an error and THROWS when there is no sky rig; every other GameManager accessor this
+            // path uses is the tolerant one, and this is a per-frame call on a path the player can
+            // switch on at any moment. Unity's == sees a destroyed rig as null, so a scene change
+            // re-resolves rather than sticking to a corpse.
+            if (skyRig == null)
+                skyRig = GameManager.GetMonoBehaviour<DaggerfallSky>(false);
+
+            if (skyRig == null || skyRig.SkyCamera == null)
                 return;
 
-            if (sky.SkyCamera.targetTexture != to)
-                sky.SkyCamera.targetTexture = to;
+            if (skyRig.SkyCamera.targetTexture != to)
+                skyRig.SkyCamera.targetTexture = to;
         }
 
         /// <summary>
@@ -349,6 +414,17 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             if (presenter != null)
                 return presenter;
+
+            // The cached presenter is gone (a scene change; Unity's == sees the destroyed component
+            // as null), and so is everything we saved ABOUT it. presenterSourceWasAt in particular
+            // is a RenderTexture belonging to the previous scene's RetroRenderer: leave it here and
+            // the next Stop() writes a destroyed texture into the NEW presenter, which then blits
+            // nothing - a black world under a live HUD until retro mode is toggled. Dropping it lets
+            // SavePresenterState's own null-source fallback repopulate it from the new scene's
+            // RetroPresentationTarget on the next frame, which is exactly what that fallback is for.
+            presenterStateSaved = false;
+            presenterSourceWasAt = null;
+            presenterDepthWas = 0f;
 
             if (GameManager.HasInstance)
                 presenter = GameManager.Instance.RetroPresenter;

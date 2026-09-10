@@ -84,10 +84,17 @@ namespace DaggerfallWorkshop.Game.UserInterface
                 // Need to adjust for docked large HUD
                 // Also Unity screen position is bottom-left whereas Panel position is top-left
                 Vector2 panelPos = Vector2.zero;
+                // MOBILE: case 0 assumed "retro off means no target texture", so WorldToScreenPoint
+                // was screen-space and the docked HUD needed no correction. The iOS CRT filter hands
+                // Camera.main a viewport-sized target with retro mode off (MobileCrtNative), and then
+                // screenPos.y is measured from the BOTTOM OF THE VIEWPORT - i.e. from largeHUDHeight
+                // up the screen - so the label needs the same offset the two retro cases already
+                // apply. Same gate as PlayerActivate's cursor ray: test the fact, not the setting.
+                float nativeTargetHUDOffset = mainCamera.targetTexture != null ? largeHUDHeight / LocalScale.y : 0f;
                 switch (DaggerfallUnity.Settings.RetroRenderingMode)
                 {
                     case 0: // Off
-                        panelPos = new Vector2(screenPos.x / LocalScale.x, (Screen.height - screenPos.y) / LocalScale.y);
+                        panelPos = new Vector2(screenPos.x / LocalScale.x, (Screen.height - screenPos.y) / LocalScale.y - nativeTargetHUDOffset);
                         break;
                     case 1: // 320x200
                         panelPos = new Vector2(screenPos.x * 2, Screen.height / LocalScale.y - screenPos.y * 2 - largeHUDHeight / LocalScale.y);

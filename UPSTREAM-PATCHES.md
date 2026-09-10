@@ -795,10 +795,10 @@ harmless (louder, not wrong).
 
 ---
 
-### Mobile CRT filter (2026-09-10) — `Assets/Scripts/Utility/RetroPresentation.cs`, `Assets/Scripts/Utility/RetroRenderer.cs (+13/-1)`, `Assets/Scripts/Utility/ViewportChanger.cs (+13/-1)`, `Assets/Scripts/SettingsManager.cs`, `Assets/Resources/defaults.ini.txt`, `Assets/Scripts/Game/UserInterfaceWindows/GameEffectsConfigWindow.cs (+1)`
+### Mobile CRT filter (2026-09-10) — `Assets/Scripts/Utility/RetroPresentation.cs`, `Assets/Scripts/Utility/RetroRenderer.cs (+16/-2)`, `Assets/Scripts/Utility/ViewportChanger.cs (+14/-2)`, `Assets/Scripts/Game/PlayerActivate.cs (+9/-2)`, `Assets/Scripts/Game/UserInterface/HUDPlaceMarker.cs (+8/-1)`, `Assets/Scripts/SettingsManager.cs`, `Assets/Resources/defaults.ini.txt`, `Assets/Scripts/Game/UserInterfaceWindows/GameEffectsConfigWindow.cs (+1)`
 
-Four engine files, and every patch is small because the retro path hands out an ideal
-insertion point — one that the filter now reaches with retro mode **off** as well as on.
+Seven engine files (plus `defaults.ini.txt`), and every patch is small because the retro path
+hands out an ideal insertion point — one that the filter now reaches with retro mode **off** as well as on.
 
 **`RetroPresentation.cs`** is 31 lines upstream and holds the *single* `Graphics.Blit` that
 puts the retro picture on the backbuffer — the one `OnRenderImage` in the whole of
@@ -835,7 +835,7 @@ chain at native resolution** — it hands `Camera.main` a viewport-sized render 
 the presenter back on and points `RetroPresentationSource` at that texture. Every other component
 then sees the state it already handles, because retro mode has always put them in it.
 
-Three alternatives were considered and rejected, and the reason is the same for both of them:
+Two alternatives were considered and rejected, and they fail for the same two reasons:
 
 - **An `OnRenderImage` image effect on `Camera.main`.** With the large HUD docked, `ViewportChanger`
   gives `Camera.main` a partial `camera.rect`, and centring the curvature and vignette on the
@@ -852,14 +852,31 @@ Three alternatives were considered and rejected, and the reason is the same for 
   cameras in it and the filter sees the finished composite, for free.
 
 **The cost, stated plainly, because it is the whole price of the feature:** one render target the
-size of the viewport, colour plus depth — 8 bytes a pixel. **2360×1640 = 29.5 MB** measured in the
-simulator (the log line is `[CRT] native target 2360x1640 (29.5 MB colour+depth)`), about **45 MB**
-on a 12.9in iPad's 2732×2048. It is allocated when the filter is switched on with retro mode off,
-re-allocated at the new size when the docked large HUD changes the viewport
-(`2360x1301 (23.4 MB)`, observed), and released the moment the filter goes off. Retro mode pays
-nothing new — it already renders into a texture.
+size of the viewport — and on iOS only its **colour** surface is in system memory, **4 bytes a
+pixel**. The depth surface is declared `RenderTextureMemoryless.Depth`, so on Metal it lives in tile
+memory and is never resolved: nothing samples it, MSAA is off, and both cameras that render into
+this target clear depth on entry (Distant Terrain sets `clearFlags = Depth` on `Camera.main` and on
+its stacked camera), so there is no cross-pass dependency to preserve. That is **2360×1640 =
+14.8 MB** on an 11in iPad and about **21.3 MB** on a 12.9in iPad's 2732×2048 — half what the naive
+colour+depth accounting gives, and memory is the risk this feature actually carries. (On a desktop
+graphics API with no tile memory the hint is ignored and depth costs its four bytes again; the
+figures quoted here are the iOS ones. `MobileCrt.NativeTargetBytes` counts colour only and the
+self-test pins both numbers, so they cannot drift away from this paragraph.) The target is allocated
+when the filter is switched on with retro mode off, re-allocated at the new size when the docked
+large HUD changes the viewport (observed at `2360x1301`), and released the moment the filter goes
+off. Retro mode pays nothing new — it already renders into a texture. The simulator run that
+produced the log line `[CRT] native target 2360x1640 (29.5 MB colour+depth)` predates the memoryless
+change; the line now reads `(14.8 MB colour; depth memoryless on Metal)`, and the saving is one of
+the things the device round is meant to confirm — a driver that silently ignored the hint would show
+as unchanged memory, not as a wrong picture.
 
-The three upstream edits this needs:
+A failed allocation is latched (`MobileCrtNative.creationFailed`) rather than retried: the failure
+that matters is `Create()` refusing under memory pressure, and the wrong answer to it is 60
+allocation attempts and 60 log lines a second. One attempt, one warning, then silence until the
+player switches the filter off and on.
+
+The three edits this needs in existing files — two upstream, one ours (the two screen-space
+sites patched below make five in all):
 
 - **`RetroRenderer.cs`** — `UpdateRenderTarget`'s `RetroRenderingMode == 0` branch calls
   `Game.Mobile.MobileCrtNative.ReassertTarget()` and returns if it took, so a viewport change
@@ -878,12 +895,25 @@ The three upstream edits this needs:
   `stackedCamera.targetTexture != Camera.main.targetTexture`, which covers the CRT toggle and is a
   more exact test of what `SetUpCameras` actually copies.
 
-**Known edges, recorded rather than hidden.** Two pieces of screen-space maths assume "retro off
-means no target texture" and are off by the docked large HUD's height while this path runs:
-`PlayerActivate`'s cursor ray (mouse only — the touch layer does not use it) and
-`HUDPlaceMarker`'s quest-marker labels. Undocked, the target is the whole screen and both are
-exact. Neither is patched, because both would need the same "which rectangle am I in" helper that
-upstream does not have.
+**The two screen-space sites, patched.** Two pieces of maths read `RetroRenderingMode > 0` as a
+proxy for "the main camera has a target texture", and were therefore off by the docked large HUD's
+height while this path runs. Both now gate on the fact — `mainCamera.targetTexture != null` — and
+nothing else about either of them changes, because the docked-HUD arithmetic they already carry is
+exactly right for a target that *is* the viewport:
+
+- **`PlayerActivate.cs`** `:286` — the cursor-mode activation ray. Not a theoretical path on this
+  build: `MobileSettingsPanel` exposes "Cursor mode (arrow, camera parked)" as a live toggle and
+  `MobileInputController` deliberately lets it stay on under touch, so an iPad player in cursor mode
+  with the large HUD docked and the filter on would otherwise click a door and open the one above
+  it. `xm`/`ym` already normalise "screen minus HUD" and multiply by the target size.
+- **`HUDPlaceMarker.cs`** `:93` — the quest-marker labels, case 0 of the retro switch. It now
+  subtracts `largeHUDHeight / LocalScale.y` when there is a target texture, which is what cases 1
+  and 2 have always done. Behind `QuestDebugger.State != Nothing`, so it is the quest debugger's
+  view only.
+
+Undocked, the target is the whole screen and both were always exact. Both edits are one gate and are
+pinned by source-text checks in `MobileSelfTest`, because taking theirs on a rebase leaves a build
+that compiles and misaims silently.
 
 The world is filtered and the UI is not. `DaggerfallUI` draws in `OnGUI` after every camera,
 so the HUD, menus and paper doll stay pin-sharp and flat over a curved world. That is a

@@ -415,8 +415,9 @@ raster; the world is drawn at the panel's own resolution, so the count becomes a
 
 **What it costs with retro mode off.** The filter needs the world in a texture before it can
 curve it, so with retro mode off the game renders into one full-size render target - about
-**30 MB** on an 11in iPad, **45 MB** on a 12.9in - allocated when you switch the filter on and
-freed the moment you switch it off. There is no such cost in retro mode, which already renders
+**15 MB** on an 11in iPad, **21 MB** on a 12.9in - allocated when you switch the filter on and
+freed the moment you switch it off. (Only the colour surface is counted, because the depth buffer
+is declared memoryless and stays in the GPU's tile memory on Metal, which is half the cost gone.) There is no such cost in retro mode, which already renders
 into a texture, and none at all while the filter is off. The drawing cost is one extra
 full-screen pass either way; in the simulator it did not move the frame-time counter beyond its
 0.1 ms resolution, and it has not yet been measured on a device.

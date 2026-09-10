@@ -165,7 +165,7 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
 
         /// <summary>
         /// Nothing to deploy: the filter is not a PPv2 effect and has no CoreGameEffectSettingsGroups
-        /// entry. RetroPresentation reads the five settings on every frame it presents, so the
+        /// entry. RetroPresentation reads the six settings on every frame it presents, so the
         /// picture already followed the slider.
         /// </summary>
         public override void DeploySettings()

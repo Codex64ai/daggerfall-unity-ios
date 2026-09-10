@@ -283,9 +283,16 @@ namespace DaggerfallWorkshop.Game
                 Ray ray = new Ray();
                 if (GameManager.Instance.PlayerMouseLook.cursorActive)
                 {
-                    if (DaggerfallUnity.Settings.RetroRenderingMode > 0)
+                    // MOBILE: was `if (DaggerfallUnity.Settings.RetroRenderingMode > 0)`, which is a
+                    // proxy for "the main camera has a target texture". The iOS CRT filter gives the
+                    // camera one with retro mode OFF as well (MobileCrtNative), and cursor mode is a
+                    // live toggle in the touch settings panel, so the proxy would send the ray off by
+                    // the docked large HUD's height. The maths below already generalises - xm/ym
+                    // normalise "screen minus HUD" and multiply by the target size, which is exactly
+                    // what the native target is - so only the gate changes: test the fact.
+                    if (mainCamera.targetTexture != null)
                     {
-                        // Need to scale screen mouse position to match actual viewport area when retro rendering enabled
+                        // Need to scale screen mouse position to match actual viewport area when rendering into a texture
                         // Also need to account for when large HUD is enabled and docked as this changes the retro viewport area
                         // Undocked large HUD does not change retro viewport area
                         float largeHUDHeight = 0;

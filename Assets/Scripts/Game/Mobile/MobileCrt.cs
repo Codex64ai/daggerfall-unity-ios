@@ -236,14 +236,19 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         /// <summary>
-        /// Bytes of video memory the native path's render target costs at a given size: an 8-bit
-        /// RGBA colour surface plus a 32-bit depth surface. Reported in the log when the target is
-        /// created, because this is the whole price of the feature and it is not small - a 12.9"
-        /// iPad Pro's 2732x2048 comes to about 45 MB.
+        /// Bytes of memory the native path's render target costs at a given size: the 8-bit RGBA
+        /// colour surface, four bytes a pixel, and nothing else. The 32-bit depth surface is
+        /// declared RenderTextureMemoryless.Depth, so on iOS/Metal it is a tile-memory attachment
+        /// that is never resolved to system memory - see MobileCrtNative.Recreate for why that is
+        /// sound here (nothing samples depth, MSAA is off, both cameras clear depth on entry). On a
+        /// graphics API with no tile memory the hint is ignored and depth costs another 4 bytes a
+        /// pixel, which is not the platform this number is quoted for. Reported in the log when the
+        /// target is created, because it is the whole price of the feature: a 12.9" iPad Pro's
+        /// 2732x2048 comes to about 21 MB.
         /// </summary>
         public static long NativeTargetBytes(int width, int height)
         {
-            return (long)width * height * 8L;
+            return (long)width * height * 4L;
         }
     }
 }
