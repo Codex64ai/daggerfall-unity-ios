@@ -1005,11 +1005,14 @@ also on.
 
 There is no CRT mod for Daggerfall Unity, and nothing was ported to make one. The filter is
 `Assets/Shaders/Mobile/MobileCRT.shader` (181 lines, shader name `Daggerfall/Mobile/CRT`),
-`Assets/Scripts/Game/Mobile/MobileCrt.cs` and
-`Assets/Scripts/Game/UserInterfaceWindows/CRTConfigPage.cs` - all three written for this port and MIT
+`Assets/Scripts/Game/Mobile/MobileCrt.cs`,
+`Assets/Scripts/Game/Mobile/MobileCrtNative.cs` and
+`Assets/Scripts/Game/UserInterfaceWindows/CRTConfigPage.cs` - all four written for this port and MIT
 licensed on the same terms as the rest of it. The retro presentation it hangs on
 (`RetroPresentation.cs`, 320x200 / 640x400, the VGA palette, the 4:3 stretch) is Daggerfall Unity's
-own, MIT, copyright (c) 2009-2023 Daggerfall Workshop.
+own, MIT, copyright (c) 2009-2023 Daggerfall Workshop; `MobileCrtNative.cs` re-uses that same
+presenter with retro mode off by giving the main camera a native-resolution render target, so the
+filter is not tied to one picture. It too is ours - no third-party code is involved in either path.
 
 This section exists to record a *negative*: **no code was copied from any existing CRT shader.** The
 well-known ones - crt-pi, crt-geom, crt-easymode, crt-royale - are GPL, and a GPL shader compiled

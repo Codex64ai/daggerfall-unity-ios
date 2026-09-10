@@ -795,24 +795,27 @@ harmless (louder, not wrong).
 
 ---
 
-### Mobile CRT filter (2026-09-10) — `Assets/Scripts/Utility/RetroPresentation.cs (+58/-1)`, `Assets/Scripts/SettingsManager.cs (+28/-2)`, `Assets/Resources/defaults.ini.txt (+6/-1)`, `Assets/Scripts/Game/UserInterfaceWindows/GameEffectsConfigWindow.cs (+1)`
+### Mobile CRT filter (2026-09-10) — `Assets/Scripts/Utility/RetroPresentation.cs`, `Assets/Scripts/Utility/RetroRenderer.cs (+13/-1)`, `Assets/Scripts/Utility/ViewportChanger.cs (+13/-1)`, `Assets/Scripts/SettingsManager.cs`, `Assets/Resources/defaults.ini.txt`, `Assets/Scripts/Game/UserInterfaceWindows/GameEffectsConfigWindow.cs (+1)`
 
-Two engine files, and both patches are small because the retro path hands out an ideal
-insertion point.
+Four engine files, and every patch is small because the retro path hands out an ideal
+insertion point — one that the filter now reaches with retro mode **off** as well as on.
 
 **`RetroPresentation.cs`** is 31 lines upstream and holds the *single* `Graphics.Blit` that
 puts the retro picture on the backbuffer — the one `OnRenderImage` in the whole of
 `Assets/Scripts`. The patch gives that blit a material argument:
 
 - `:13` — `using DaggerfallWorkshop.Game.Mobile;`
-- `:24-63` — a lazily-resolved `static Material crtMaterial` (built once from
-  `MobileShaders.Find(MobileCrt.ShaderName)`, warns once and stays null if the shader was
-  stripped) plus five cached `Shader.PropertyToID` ids.
-- `:69-82` — inside the existing `if`, when `MobileCrt.Active(CRTFilter, RetroRenderingMode,
-  material != null)`: push the five uniforms and
-  `Graphics.Blit(RetroPresentationSource, null as RenderTexture, crt)`, then return.
-- `:85` — the upstream plain blit is untouched and is still the path taken whenever the
-  filter is off, retro mode is 0, or the material did not resolve.
+- five cached `Shader.PropertyToID` ids. The material itself lives in `MobileCrt.Material`
+  (built once from `MobileShaders.Find`, warns once and stays null if the shader was stripped),
+  not here, so this upstream file carries as little as possible.
+- inside the existing `if`, when the filter is on and the material resolved: push the five
+  uniforms — the scanline count coming from `MobileCrt.ScanlineCount(retroMode, CRTScanlineCount)`
+  — and `Graphics.Blit(RetroPresentationSource, null as RenderTexture, crt)`, then return.
+- the upstream plain blit is untouched and is still the path taken whenever the filter is off
+  or the material did not resolve.
+- the guard on the whole method becomes `RetroPresentationSource && (RetroRenderingMode != 0 ||
+  MobileCrtNative.Active)`. Upstream's condition stays first, so with the filter off this file
+  behaves exactly as it did.
 
 Why here and nowhere else: this blit runs at **native backbuffer resolution**, which is what
 scanlines and a phosphor grille need (the same effect inside the 640×400 intermediate would
@@ -822,12 +825,75 @@ HUD keep working; and it sits downstream of every camera target, so nothing that
 camera — can interact with it. The PPv2 route was rejected for the opposite reason: a
 `PostProcessEffectRenderer` runs on `Camera.main`, i.e. *inside* the 320×200 texture.
 
+#### The retro-mode-off path (2026-09-10, later the same day)
+
+Ikram: *"I want it during the full game as well and just as an option ... I don't want it to be
+tied down to one view."* With retro mode off there is no chain to hook: `Camera.main` draws
+straight to the backbuffer and `RetroPresentation`'s GameObject is switched off. The port's
+`Assets/Scripts/Game/Mobile/MobileCrtNative.cs` (new, ours) **rebuilds the last stage of that
+chain at native resolution** — it hands `Camera.main` a viewport-sized render texture, switches
+the presenter back on and points `RetroPresentationSource` at that texture. Every other component
+then sees the state it already handles, because retro mode has always put them in it.
+
+Three alternatives were considered and rejected, and the reason is the same for both of them:
+
+- **An `OnRenderImage` image effect on `Camera.main`.** With the large HUD docked, `ViewportChanger`
+  gives `Camera.main` a partial `camera.rect`, and centring the curvature and vignette on the
+  viewport rather than the screen then means re-deriving the mapping from `camera.pixelRect` and
+  trusting an assumption about how Unity sizes its intermediate. Here the render target **is** the
+  viewport, to the pixel, and the presenter blits it into exactly the rect it was sized from.
+- **A `CommandBuffer` at `CameraEvent.AfterEverything`.** Same viewport question, plus a grab of
+  the camera target to read and write it in one pass.
+- Both also have to answer **camera stacking**: Distant Terrain draws the far terrain from a
+  second camera at a lower depth than `Camera.main`, and Dynamic Skies puts the skybox clear on
+  whichever of the two renders first. An effect on `Camera.main` sees only `Camera.main`'s own
+  intermediate. Distant Terrain already copies `Camera.main.targetTexture` onto its stacked camera
+  — that is how it survives retro mode — so pointing `Camera.main` at a texture puts **both**
+  cameras in it and the filter sees the finished composite, for free.
+
+**The cost, stated plainly, because it is the whole price of the feature:** one render target the
+size of the viewport, colour plus depth — 8 bytes a pixel. **2360×1640 = 29.5 MB** measured in the
+simulator (the log line is `[CRT] native target 2360x1640 (29.5 MB colour+depth)`), about **45 MB**
+on a 12.9in iPad's 2732×2048. It is allocated when the filter is switched on with retro mode off,
+re-allocated at the new size when the docked large HUD changes the viewport
+(`2360x1301 (23.4 MB)`, observed), and released the moment the filter goes off. Retro mode pays
+nothing new — it already renders into a texture.
+
+The three upstream edits this needs:
+
+- **`RetroRenderer.cs`** — `UpdateRenderTarget`'s `RetroRenderingMode == 0` branch calls
+  `Game.Mobile.MobileCrtNative.ReassertTarget()` and returns if it took, so a viewport change
+  cannot pull the target out from under the filter; `UpdateSettings` keeps the presenter alive
+  (`SetActive(retroMode != 0 || MobileCrtNative.Active)`) and stops nulling the classic sky
+  camera's target while the path runs.
+- **`ViewportChanger.cs`** — the "camera viewport does not work with render textures" branch now
+  also triggers for `MobileCrtNative.Active`, so `Camera.main` takes a full rect and the target is
+  resized instead; and the retro **aspect-correction** branch gains
+  `&& RetroRenderingMode != 0`, because it was previously unreachable with retro mode off (the
+  presenter was switched off) and squeezing a native 16:9 render into a 4:3 box because a retro
+  setting was left on is not what anyone asked for.
+- **`Assets/Scripts/Game/Mobile/Ports/DistantTerrain/DistantTerrain.cs`** (a port file, not
+  upstream) — its per-frame poll was `RetroRenderingMode != lastRetroMode`, a proxy for "did
+  `Camera.main`'s target change". It now also compares
+  `stackedCamera.targetTexture != Camera.main.targetTexture`, which covers the CRT toggle and is a
+  more exact test of what `SetUpCameras` actually copies.
+
+**Known edges, recorded rather than hidden.** Two pieces of screen-space maths assume "retro off
+means no target texture" and are off by the docked large HUD's height while this path runs:
+`PlayerActivate`'s cursor ray (mouse only — the touch layer does not use it) and
+`HUDPlaceMarker`'s quest-marker labels. Undocked, the target is the whole screen and both are
+exact. Neither is patched, because both would need the same "which rectangle am I in" helper that
+upstream does not have.
+
 The world is filtered and the UI is not. `DaggerfallUI` draws in `OnGUI` after every camera,
 so the HUD, menus and paper doll stay pin-sharp and flat over a curved world. That is a
 decision, not an oversight: filtering the whole screen needs a second pass after the UI and
 would curve the touch controls away from where fingers land.
 
-**`SettingsManager.cs`** gains the five `CRT*` keys (`:167-171` properties, `:429-433` load,
+**`SettingsManager.cs`** gains the six `CRT*` keys — five floats/bool plus
+`CRTScanlineCount` (int, `GetInt(sectionVideo, "CRTScanlineCount", 100, 1200)`, default 480,
+which is the count the non-retro path draws; in retro mode the raster's own height wins and the
+setting is not read) — (`:167-171` properties, `:429-433` load,
 `:634-638` save) and — the part that is worth having upstream — **clamps the two retro keys
 that had no bounds at all**:
 
@@ -896,7 +962,7 @@ restores both `settings.ini` and its `.bak` byte for byte — and then checks th
 
 **`GameEffectsConfigWindow.cs`** gains exactly one line, in `AddCorePages`:
 `AddConfigPage(new CRTConfigPage());`, placed immediately after `RetroModeConfigPage` because the
-filter does nothing while retro mode is off. The page itself,
+two shape the same picture. The page itself,
 `Assets/Scripts/Game/UserInterfaceWindows/CRTConfigPage.cs`, is ours (MIT header) and lives in
 that folder only because the window constructs its pages by name out of this namespace — nothing
 discovers them. The page writes `DaggerfallUnity.Settings` directly and implements
@@ -907,8 +973,10 @@ becomes unreachable while still compiling — `MobileSelfTest.TestMobileCRTUI` c
 and for its position next to Retro Mode, so the tripwire fires in the Editor.
 
 Two notes on the page, since neither is obvious from the diff. Its sliders' ranges **are** the
-loader's clamps (`0..MobileCrt.MaxCurvature`, and `0..1` three times), so the UI cannot ask for a
-value the next launch would refuse; and it guards its own `OnScroll` handlers while
+loader's clamps (`0..MobileCrt.MaxCurvature`, `0..1` three times, and
+`MobileCrt.Min..MaxScanlineCount`), so the UI cannot ask for a value the next launch would refuse
+— and the scanline-count slider is shown only while retro mode is off, because in retro mode the
+raster sets the count and any other number is a moire generator; and it guards its own `OnScroll` handlers while
 `ReadSettings` and `Setup` run, because `HorizontalSlider.SetIndicator` raises `OnScroll` as it
 positions the thumb and the other config pages consequently write their rounded slider values
 back over the settings they were built from (curvature 0.08 would become 0.1 the first time the
@@ -919,10 +987,18 @@ four-step control; the 0.08 default is reachable through "set page defaults".
 on the 31-line presenter deletes the filter wholesale and still compiles — the `MobileCrt`
 call and the material overload both vanish with the file. `MobileSelfTest.TestMobileCRT`
 reads the presenter as comment-stripped text and requires the material overload, the
-`MobileCrt.Active(` gate, the `MobileShaders.Find(MobileCrt.ShaderName)` lookup and the
-surviving plain blit, so the tripwire fires in the Editor. Taking theirs on
-`SettingsManager.cs` drops the five keys (compile error at the presenter, so it cannot pass
-unnoticed) and re-opens the two clamps (source-text checks catch that too).
+`MobileCrt.Active(` gate, `MobileCrt.Material`, `MobileCrtNative.Active` and the surviving plain
+blit, so the tripwire fires in the Editor. Taking theirs on `SettingsManager.cs` drops the six
+keys (compile error at the presenter, so it cannot pass unnoticed) and re-opens the two clamps
+(source-text checks catch that too).
+
+*Rebase risk for the retro-off path: MEDIUM on `RetroRenderer.cs` and `ViewportChanger.cs`.*
+Each of the four hooks is silently survivable — taking theirs on any one still compiles and
+gives a black screen, a stretched picture, or a vanished far terrain rather than an error. They
+are therefore checked as source text too, in `MobileSelfTest.TestMobileCRT`'s "the hook,
+non-retro half": `Game.Mobile.MobileCrtNative.ReassertTarget()`, the `SetActive(retroMode != 0 ||
+...)` line, the sky-camera condition, the `ViewportChanger` disjunction, the aspect-correction
+guard, and Distant Terrain's target comparison.
 
 ---
 

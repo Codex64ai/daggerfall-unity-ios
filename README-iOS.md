@@ -382,6 +382,45 @@ Open **Pause -> Mobile Settings -> Input** and adjust **Swipe to attack** and **
 most. Enable `showGestureDebug` on the `MobileInput` object to see the required swipe
 distance in pixels.
 
+## Picture: retro mode and the CRT filter
+
+Two independent switches, both in **Pause -> Mobile Settings -> HUD** and (with all their
+sliders) in **Pause -> options -> Game Effects**.
+
+**Retro mode** is Daggerfall Unity's own: it renders the world at 320x200 or 640x400 and can
+crush the colours back to the 1996 VGA palette (*Game Effects -> Retro Mode*), with optional 4:3
+or 16:10 aspect correction.
+
+**The CRT filter** is this port's, and it works **with retro mode on or off** - it is not tied to
+one picture. It draws a curved tube, scanlines, an RGB phosphor grille and a vignette over the
+**world**; the HUD, the touch controls, the menus and the paper doll stay pin-sharp and flat on
+top of it. That is deliberate: curving the touch controls away from where your fingers land would
+be worse than the inconsistency. Curvature crops the extreme edges of the view.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `CRTFilter` | off | the whole filter |
+| `CRTCurvature` | 0.08 | barrel warp, 0 to 0.3 |
+| `CRTScanlines` | 0.35 | scanline depth, 0 to 1 |
+| `CRTMask` | 0.25 | phosphor grille depth, 0 to 1 |
+| `CRTVignette` | 0.25 | corner falloff, 0 to 1 |
+| `CRTScanlineCount` | 480 | **lines drawn when retro mode is OFF**, 100 to 1200 |
+
+`CRTScanlineCount` only appears while retro mode is off, and only matters there. **In retro mode
+the number of scanlines is not yours to pick**: it is the height of the raster the game is
+actually rendering - 200, 400, or 154 / 308 when the large HUD is docked - because lines drawn at
+any other pitch beat against that raster and crawl as you move. With retro mode off there is no
+raster; the world is drawn at the panel's own resolution, so the count becomes a taste setting.
+480 is a VGA monitor's count and is the default; 360 is heavier, 240 is a television.
+
+**What it costs with retro mode off.** The filter needs the world in a texture before it can
+curve it, so with retro mode off the game renders into one full-size render target - about
+**30 MB** on an 11in iPad, **45 MB** on a 12.9in - allocated when you switch the filter on and
+freed the moment you switch it off. There is no such cost in retro mode, which already renders
+into a texture, and none at all while the filter is off. The drawing cost is one extra
+full-screen pass either way; in the simulator it did not move the frame-time counter beyond its
+0.1 ms resolution, and it has not yet been measured on a device.
+
 ## Survival
 
 Three desktop mods are built into the app and switched in the launcher's MODS window, all off by default:
