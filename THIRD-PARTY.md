@@ -609,11 +609,16 @@ main far clip to 145,000), and **the iOS preset lives in the code defaults, not 
 `modsettings.json`** - that file is fetched data this port does not patch. The two feature dials do
 still come from the bundle's own settings: `EnableTreesAndDirt` (the procedural distant tree specks
 and woodland dirt) is already **off** in upstream's shipped settings, and
-`HighlightDistantLocations` (the colour-coded location beacons) is **on** there. The beacons are the
-one preset item still at upstream's value; if the device says they cost, the code default is the
-one-line change. Upstream's second, *live* beacon gate (`RuntimeVisible`, flipped in game by an End
-key that only the deleted fly-map polled) now starts **true**, because with the hotkey gone leaving
-it false would mean the beacons could never appear at all; the master switch decides alone.
+`HighlightDistantLocations` (the colour-coded location beacons) is **on** there - and the port
+overrides that. Upstream's second, *live* beacon gate (`RuntimeVisible`, flipped in game by an End
+key that only the deleted fly-map polled) has to start **true** here, because with the hotkey gone
+leaving it false would mean the beacons could never appear at all - which makes the master switch
+the whole gate, so the master switch carries the preset: `HighlightLocations` defaults to **false**
+in code, and `DistantTerrainPort.HighlightLocationsFrom` treats the bundle's `true` as *unset*.
+DFU merges a player's own settings file over the bundle's `modsettings.json` and offers no way to
+ask which of the two a value came from, so the file's existence is the test: **only a settings file
+the player actually has on disk can turn the beacons on.** Upstream shipped them baked-but-hidden
+(`true`/`false`); this port ships them not baked at all unless asked for (`false`/`true`).
 
 Two behavioural differences from upstream are worth naming because they are the largest ones.
 Upstream's `Awake` called `Application.Quit()` when `StreamingWorld`, `PlayerGPS` or `WeatherManager`
@@ -625,8 +630,14 @@ start-up** - which is exactly what makes the sky's wait for it meaningful (below
 `InitFarTerrain` is now a try/catch wrapper around the build: upstream let a throw escape into
 `StreamingWorld.OnReady`'s invocation list, where it stops every later subscriber for the session.
 On a throw the port logs `[DistantTerrain] far terrain failed: <ex>` and tears down - the far terrain
-object, the stacked camera, the skybox camera and its render texture, the heightmap arrays, the tile
-arrays - and puts the main camera's saved `farClipPlane` and `clearFlags` back. Smaller ones in the
+object, its `TerrainData`, the runtime material, the 1024² tilemap texture and the managed `Color32`
+copy behind it, the stacked camera, the skybox camera and its render texture, the heightmap arrays,
+the tile arrays - and puts the main camera's saved `farClipPlane` and `clearFlags` back, and clears
+`Running`/`Installed` so nothing downstream keeps waiting on a far terrain that removed itself. The
+first four of those are objects that outlive the GameObject holding them: destroying a `Terrain`
+does not destroy its `TerrainData`, and dropping a reference to a runtime `Material` or a readable
+1024² `Texture2D` leaks it for the session (~12-16 MB) inside the handler whose purpose is to
+undo the half-built world. Smaller ones in the
 same spirit: the `TerrainData` alphamap and basemap resolutions drop from 1,000 to 16 and the detail
 resolution to 16/8, because the far terrain paints nothing through splat, basemap or detail maps and
 upstream sized all three at world resolution; the driver object is `DontDestroyOnLoad`; source tile
@@ -638,7 +649,15 @@ port writes.
 **Start order with Dynamic Skies.** The launcher starts Distant Terrain *before* the sky's deferred
 start, and the sky's 1 Hz readiness poll additionally waits for `GameObject.Find("stackedCamera")`
 while Distant Terrain is running, so `BLBSkybox.Init` takes its stacked-camera branch
-deterministically instead of racing for it. Because the stacked camera now only exists from world
+deterministically instead of racing for it. That extra wait is bounded at fifteen passes: after
+that the sky starts anyway with one line
+(`[PortedMods] Dynamic Skies starting without Distant Terrain's stacked camera`), so no reason for
+an absent stacked camera can strand it for a session. The sky's own branch is keyed on that camera
+rather than on the `DistantTerrain` object upstream looked for - the object is `DontDestroyOnLoad`
+and survives a teardown that destroyed the camera, and taking the stacked branch without a stacked
+camera skipped the `cameraClearExterior = Skybox` line that stops `CameraClearManager` unsetting
+the skybox after an exterior transition. It says which way it went:
+`[DynamicSkies] clear flags on: player camera` or `[DynamicSkies] clear flags on: stackedCamera`. Because the stacked camera now only exists from world
 entry, the practical consequence is that **with Distant Terrain on, the sky starts at world entry
 rather than at the title screen** - accepted, since the title screen needs no sky. Fog is the loose
 end: Distant Terrain's `Start()` overwrites five `WeatherManager` fog settings, which is upstream's
@@ -654,7 +673,7 @@ the timing lines, the teardown and the title-screen behaviour are all first exer
 simulator run. The port carries its own measurement for when it is:
 
 ```
-[DistantTerrain] far terrain built in N ms (heightmap A ms, carve B ms, lifts C ms, tilemap D ms)
+[DistantTerrain] far terrain built in N ms (heightmap A ms, carve B ms, lifts C ms, tilemap D ms, arrays E ms)
 [DistantTerrain] map-pixel update N ms
 [DistantTerrain] arrays N MB
 [DistantTerrain] far terrain ready
@@ -662,12 +681,17 @@ simulator run. The port carries its own measurement for when it is:
 
 once per world entry, then per map-pixel crossing for the first ten and every twenty-fifth after,
 plus the array total once per session (analytic, from slice geometry rather than from the profiler,
-and it deliberately over-reports a compressed replacement set). The refusal and failure lines are
+and it deliberately over-reports a compressed replacement set). Of the five stages, `arrays E ms` -
+the twelve tileset builds and the 672 GPU slice copies behind them - is the only one that is not
+paid on every entry: the arrays are packed once and kept, so it reads a real number on the first
+world entry of a session and 0 on every one after it. The refusal and failure lines are
 `[DistantTerrain] not available: <reason>` (the gate: shader unresolved or unsupported, a missing
 CSV, a missing deriv map, or no scene at world entry), `[DistantTerrain] far terrain failed: <ex>`
-(the build threw and was torn down) and `[DistantTerrain] tileset arrays mismatch: ...` (four
-independently-imported source arrays that cannot share one destination - vanilla is always
-64x64 ARGB32 with matching mip counts, so this only bites under an asymmetric replacement pack).
+(the build threw and was torn down) and `[DistantTerrain] tileset arrays mismatch: ...` - four
+independently-imported source arrays that cannot share one destination, or three PACKED arrays whose
+seasons disagree with each other (the shader derives one mip dimension from the summer array and
+applies it to all three), vanilla being always 64x64 ARGB32 with matching mip counts, so either only
+bites under an asymmetric replacement pack.
 
 Memory, added up: the three tile arrays ~15 MB, the 1024² RGBA32 terrain-info tilemap 4 MB on the GPU
 and 4 more in the CPU copy it keeps, the deriv map 2 + 2, the 256² skybox render texture and its
