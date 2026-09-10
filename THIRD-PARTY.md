@@ -936,20 +936,34 @@ defaulted to - and the two modes are 16x apart in what a value MEANS. `CoverageM
 because it is resolution-independent, because nothing at Classic densities gets near its ceiling,
 and because an explicit mode beats an inherited default; the port calls
 `SetDetailScatterMode(CoverageMode)` once per `TerrainData`, before any `SetDetailLayer`, and
-**averages** the four upstream sub-cell writes into the one cell they now share - rounded to nearest
-rather than floored, so a thin single write does not vanish. Under coverage semantics a value is how
-much of the cell's ground the grass covers, so the mean is parity **across the resolution change**:
-the same coverage on the same ground as upstream's four cells put there. Summing them, which an
-earlier revision did, would have been four times that on the platform whose whole reason for this
-port is cost.
+**totals** the four upstream sub-cell writes into the one cell they now share.
 
-What the fold does *not* settle is absolute density, and the two are easy to run together. Upstream
-authored those numbers as counts ("number of grass patches per terrain tile") and they now reach
-Unity as coverage fractions of 255, which Unity converts to billboards natively - a re-denomination
-no amount of reading can verify. It is a device question, and the dial for it is `DetailDensity`
-(0.6, which becomes Unity's `detailObjectDensity`), one constant that moves density without touching
-the fold or any write site. The mode and the ceiling are named in the memory line, so a log settles
-that half rather than a document.
+The total, not their mean, because the numbers also change denomination and that is the harder half.
+Upstream authored counts ("number of grass patches per terrain tile") and ran on
+`InstanceCountMode`, where a cell holding 12 gets twelve billboards; a coverage value of 12 is
+12/255 of a *linear* axis, i.e. 0.22 % of the cell's area. An earlier revision carried the numbers
+across unchanged and averaged them, on the reasoning that coverage is area-normalised - which is
+true of the resolution change and says nothing about the denomination. Measured in the running app
+that shipped **0.0024 instances/m²** against upstream's **0.195-1.56**: 80x to 650x thin, twelve
+blades on the whole 40 m detail disc. Empty, not sparse.
+
+So the fold converts. Driving Unity's own `TerrainData.ComputeDetailInstanceTransforms` over a
+terrain built exactly as the port builds one, and sweeping both the value and the prototype width,
+gives `instances/m² = (v/255)² / w²` - the value is linear coverage per axis, so instance count goes
+as its square. Inverted, the value that buys N instances in a cell of area A is
+`v = 255·w·√(N/A)`, which is `RealGrassPort.CoverageValueForInstances`; A comes from the live
+`terrainData.size` and detail resolution (6.4 m cells, 40.96 m²) and w from the live prototype
+(0.8-1.0, mean 0.9), so neither is a magic number. Checked against upstream's own configuration
+measured through the same API: a cell owing 8 instances gives coverage 101 and 0.194/m² against
+upstream's 0.1953; 20 gives 160 and 0.486 against 0.4883; 48 gives 248 and 1.168 against 1.1719.
+Within 1 % across the authored range. Only the very thickest cell saturates - four sub-cells at 19
+want coverage 313 and get 255, exactly as upstream's own 16-per-cell ceiling capped the same cell.
+The memory line now states the calibrated figure (`target 1.17 inst/m2`) alongside the mode and the
+ceiling, so a log settles it rather than a document.
+
+`DetailDensity` (0.6, which becomes Unity's `detailObjectDensity`) is **not** the dial for this and
+an earlier revision was wrong to name it as one: Unity hard-clamps that property to 0..1, so it can
+only ever thin the grass. It stays 0.6 as a mobile fill-rate discount on the calibrated number.
 
 Two upstream bugs are fixed in passing, both forced by what the bundle holds. `UpdateClimateDesert`
 asked for a `DesertGrass_tex` asset that **does not exist in any version of the mod** (the desert art
@@ -978,8 +992,9 @@ nothing in the port calls `mod.GetSettings()` and nothing can throw on its absen
 upstream's settings file supplied is hard-coded from that file's own shipped defaults.
 
 Not device-verified at the time of writing. The gate declines with
-`[RealGrass] not available: <reason>` when any of the three shaders is unresolved or the grass
-textures are missing (which is exactly what a public build with no bundle looks like), the promotion
+`[RealGrass] not available: <reason>` when any of the three shaders is unresolved **or resolves but
+reports `isSupported` false** (a stripped or unrunnable variant set draws nothing and says nothing),
+or the grass textures are missing (which is exactly what a public build with no bundle looks like), the promotion
 handler is wrapped so a throw leaves DFU's empty detail layers rather than escaping into world
 streaming, and the cost is logged rather than asserted: `[RealGrass] detail data ~N MB (...)` once and
 `[RealGrass] details on N terrains` every twenty-fifth promotion. Memory grows with the number of

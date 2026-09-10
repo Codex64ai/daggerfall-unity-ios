@@ -8,7 +8,8 @@
 // is now a DetailMap: one int[128,128] allocated at construction, cleared with Array.Clear, and
 // addressed in upstream's 256-space so that none of the ~200 density write sites below had to be
 // touched or re-derived. See DetailMap and RealGrassPort.FoldDetailValue for what the fold does to
-// the values.
+// the values - it converts upstream's instance counts into the coverage values that place the same
+// number of billboards under this port's scatter mode.
 
 // Project:         Real Grass for Daggerfall Unity
 // Web Site:        http://forums.dfworkshop.net/viewtopic.php?f=14&t=17
@@ -67,11 +68,12 @@ namespace RealGrass
     /// the tilemap and those four cells fold into one. The fold is TWO steps, and both are needed:
     /// the indexer ACCUMULATES the four sub-cell writes through
     /// <see cref="RealGrassPort.AccumulateSubCell"/> rather than assigning (so the fourth write
-    /// does not erase the first three), and <see cref="FoldToMean"/> then divides every cell by the
-    /// four sub-cells it stands for, once, before the layer goes to the terrain. Averaging - not
-    /// summing - is what keeps grass per square metre the same as upstream: under the coverage
-    /// scatter mode this port forces, a value is coverage of the cell's ground, so a cell four
-    /// times as large carries the mean of the four it replaced. See
+    /// does not erase the first three), and <see cref="FoldToCoverage"/> then turns every
+    /// accumulated total into the coverage value that buys that many billboards, once, before the
+    /// layer goes to the terrain. The total is the right input because upstream's numbers are
+    /// INSTANCE COUNTS per sub-cell and counts add; the conversion to coverage is what makes them
+    /// mean the same thing under this port's scatter mode. See
+    /// <see cref="RealGrassPort.CoverageValueForInstances"/> and
     /// <see cref="RealGrassPort.FoldDetailValue"/>.
     /// </summary>
     public sealed class DetailMap
@@ -82,7 +84,8 @@ namespace RealGrass
         /// <summary>MOBILE: upstream cells that fold into one cell of this map, per axis.</summary>
         public static readonly int Fold = Mathf.Max(1, UpstreamResolution / RealGrassPort.DetailResolution);
 
-        /// <summary>MOBILE: upstream cells behind one cell of this map. 2 x 2 = 4 - the divisor of the mean.</summary>
+        /// <summary>MOBILE: upstream cells behind one cell of this map. 2 x 2 = 4 - the number of
+        /// upstream sub-cell counts that add up into one cell's instance total.</summary>
         public static readonly int SubCells = Fold * Fold;
 
         /// <summary>MOBILE: the array handed to TerrainData.SetDetailLayer. Never reallocated.</summary>
@@ -93,7 +96,7 @@ namespace RealGrass
             Cells = new int[RealGrassPort.DetailResolution, RealGrassPort.DetailResolution];
         }
 
-        /// <summary>MOBILE: set once FoldToMean has run; reset by Clear. Keeps the fold idempotent.</summary>
+        /// <summary>MOBILE: set once FoldToCoverage has run; reset by Clear. Keeps the fold idempotent.</summary>
         bool folded;
 
         /// <summary>MOBILE: what upstream's EmptyMap() allocation cost, for free.</summary>
@@ -104,7 +107,7 @@ namespace RealGrass
             folded = false;
         }
 
-        /// <summary>MOBILE: upstream 256-space in, accumulated cell out (a SUM until FoldToMean).</summary>
+        /// <summary>MOBILE: upstream 256-space in, accumulated cell out (a SUM until FoldToCoverage).</summary>
         public int this[int y, int x]
         {
             get { return Cells[y / Fold, x / Fold]; }
@@ -116,17 +119,18 @@ namespace RealGrass
         }
 
         /// <summary>
-        /// MOBILE: the second half of the fold - turn every accumulated sum into the mean of the
-        /// <see cref="SubCells"/> upstream cells behind it, clamped to Unity's scatter ceiling.
-        /// Run once per promotion, after the density pass and before SetDetailLayer; idempotent
-        /// until the next Clear, so a second call cannot average an already-averaged layer.
+        /// MOBILE: the second half of the fold - turn every accumulated instance count into the
+        /// coverage value that places that many billboards on this cell's ground, clamped to
+        /// Unity's scatter ceiling. Run once per promotion, after the density pass and before
+        /// SetDetailLayer; idempotent until the next Clear, so a second call cannot re-convert an
+        /// already-converted layer (which would square the error).
         /// </summary>
-        internal void FoldToMean()
+        internal void FoldToCoverage()
         {
             if (folded) return;
             folded = true;
-            int max = RealGrassPort.MaxDetailValue, subCells = SubCells;
-            if (subCells <= 1) return;
+            int max = RealGrassPort.MaxDetailValue;
+            float cellArea = RealGrassPort.DetailCellAreaM2, meanWidth = RealGrassPort.MeanPrototypeWidth;
             int[,] cells = Cells;
             int height = cells.GetLength(0), width = cells.GetLength(1);
             for (int y = 0; y < height; y++)
@@ -134,7 +138,7 @@ namespace RealGrass
                 {
                     int sum = cells[y, x];
                     if (sum != 0)
-                        cells[y, x] = RealGrassPort.FoldDetailValue(sum, subCells, max);
+                        cells[y, x] = RealGrassPort.FoldDetailValue(sum, cellArea, meanWidth, max);
                 }
         }
     }
@@ -218,17 +222,18 @@ namespace RealGrass
 
         /// <summary>
         /// MOBILE: the second half of the fold, once per promotion. After the density pass each
-        /// cell holds the SUM of the up-to-four upstream sub-cell writes that landed in it; the
-        /// coverage scatter mode this port forces wants their MEAN, so every layer is averaged in
-        /// place here, immediately before RealGrass hands them to TerrainData.SetDetailLayer.
+        /// cell holds the SUM of the up-to-four upstream sub-cell writes that landed in it, which
+        /// is upstream's instance count for the ground that cell covers; the coverage scatter mode
+        /// this port forces denominates in coverage instead, so every layer is converted in place
+        /// here, immediately before RealGrass hands them to TerrainData.SetDetailLayer.
         /// </summary>
         public void FoldDetailLayers()
         {
-            Grass.FoldToMean();
-            if (GrassDetails != null) GrassDetails.FoldToMean();
-            if (GrassAccents != null) GrassAccents.FoldToMean();
-            if (WaterPlants != null) WaterPlants.FoldToMean();
-            if (Rocks != null) Rocks.FoldToMean();
+            Grass.FoldToCoverage();
+            if (GrassDetails != null) GrassDetails.FoldToCoverage();
+            if (GrassAccents != null) GrassAccents.FoldToCoverage();
+            if (WaterPlants != null) WaterPlants.FoldToCoverage();
+            if (Rocks != null) Rocks.FoldToCoverage();
         }
 
         /// <summary>
