@@ -334,7 +334,13 @@ float LocationWeight(float2 pos, float portHeight, out float basemapHeight, out 
 
         locationHeightData[i] = float3(nearestEdge, baseHeight);
 
-        float2 edgeDir = normalize(nearestEdge - locCenter);
+        // MOBILE: guarded - normalize(0) is NaN. nearestEdge == locCenter for a sample landing
+        // MOBILE: exactly on a location's centre; edgeDir only offsets the noise sample point
+        // MOBILE: (samplePt), never a distance or fade, so any unit vector keeps the centre
+        // MOBILE: sample behaving as the interior point it is.
+        float2 ed = nearestEdge - locCenter;
+        float edLen = length(ed);
+        float2 edgeDir = edLen > 1e-5 ? (ed / edLen) : float2(1.0, 0.0);
         float2 samplePt = nearestEdge + edgeDir * 5.0;
 
         noiseParams = PerlinDune(samplePt);
@@ -363,7 +369,10 @@ float LocationWeight(float2 pos, float portHeight, out float basemapHeight, out 
 
     wildernessWeight = 1.0 - saturate(narrowWeight);
 
-    basemapHeight = max(80.0 / newHeight, height / weight); // Default: 105.0 - but lower this to 80 seems to fix the mini-craters
+    // MOBILE: guarded - 0/0 is NaN: weight is exactly 0 when no location in range
+    // MOBILE: contributes any fade weight (including locationCount == 0).
+    float meanHeight = weight > 1e-5 ? (height / weight) : 0.0;
+    basemapHeight = max(80.0 / newHeight, meanHeight); // Default: 105.0 - but lower this to 80 seems to fix the mini-craters
     weight = saturate(weight);
     basemapHeight = lerp(basemapHeight, nearestHeight, saturate(narrowWeight));
     basemapHeight = saturate(basemapHeight);
@@ -424,7 +433,13 @@ float PortLocationWeight(float2 pos, float portHeight, out float basemapHeight, 
 
         locationHeightData[i] = float3(nearestEdge, baseHeight);
 
-        float2 edgeDir = normalize(nearestEdge - locCenter);
+        // MOBILE: guarded - normalize(0) is NaN. nearestEdge == locCenter for a sample landing
+        // MOBILE: exactly on a location's centre; edgeDir only offsets the noise sample point
+        // MOBILE: (samplePt), never a distance or fade, so any unit vector keeps the centre
+        // MOBILE: sample behaving as the interior point it is.
+        float2 ed = nearestEdge - locCenter;
+        float edLen = length(ed);
+        float2 edgeDir = edLen > 1e-5 ? (ed / edLen) : float2(1.0, 0.0);
         float2 samplePt = nearestEdge + edgeDir * 5.0;
 
         noiseParams = PerlinDune(samplePt);
@@ -453,7 +468,10 @@ float PortLocationWeight(float2 pos, float portHeight, out float basemapHeight, 
 
     wildernessWeight = 1.0 - saturate(narrowWeight);
 
-    basemapHeight = max(80.0 / newHeight, height / weight); // Default: 105.0 - but lower this to 80 seems to fix the mini-craters
+    // MOBILE: guarded - 0/0 is NaN: weight is exactly 0 when no location in range
+    // MOBILE: contributes any fade weight (including locationCount == 0).
+    float meanHeight = weight > 1e-5 ? (height / weight) : 0.0;
+    basemapHeight = max(80.0 / newHeight, meanHeight); // Default: 105.0 - but lower this to 80 seems to fix the mini-craters
     weight = saturate(weight);
     basemapHeight = lerp(basemapHeight, nearestHeight, saturate(narrowWeight));
     basemapHeight = saturate(basemapHeight);

@@ -55,7 +55,11 @@ float GetRoadSegmentWeight(float2 pos, float2 roadStart, float2 roadEnd) {
     float2 roadPt = NearestPointInLine(pos, roadStart, roadEnd);
 
     // Calculate directional vector and sample position for noise
-    float2 dir = normalize(pos - roadPt);
+    // MOBILE: guarded - normalize(0) is NaN for a sample lying exactly on the road segment;
+    // MOBILE: dir only offsets the noise sample point, so any unit vector will do.
+    float2 toPos = pos - roadPt;
+    float toPosLen = length(toPos);
+    float2 dir = toPosLen > 1e-5 ? (toPos / toPosLen) : float2(1.0, 0.0);
     float2 samplePos = roadPt + dir * 15.0; // Adjust as needed
     samplePos -= (floor(samplePos / terrainSize) * terrainSize);
     samplePos /= terrainSize;
