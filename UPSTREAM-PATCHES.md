@@ -850,7 +850,17 @@ Everything else the filter needs is ours and outside upstream's tree:
 see `THIRD-PARTY.md`), `Assets/Scripts/Game/Mobile/MobileCrt.cs` (new, the pure rules),
 `MobileShaders.cs (+4)` (name registration), `Assets/Editor/MobileBuildSetup.cs (+4)` and
 `ProjectSettings/GraphicsSettings.asset (+1)` (Always-Included pin),
-`RequiredShaderVariants.shadervariants (+7)` (the `CRT_HALATION` pair).
+`RequiredShaderVariants.shadervariants (+7)` (the `CRT_HALATION` pair),
+`Assets/Scripts/Game/UserInterfaceWindows/CRTConfigPage.cs` (new, 184 lines, the Game Effects
+page — see below), `Assets/Scripts/Game/Mobile/MobileSettingsPanel.cs (+50)` (three rows in the
+touch panel's HUD section: Retro mode, Aspect, CRT filter) and
+`Assets/Editor/MobileSelfTest.cs (+636)` across the feature's three commits.
+
+The `CRT_HALATION` keyword is the one loose end left deliberately: the variant compiles, both
+`.shadervariants` entries exist and it costs about seven extra Metal statements and two extra
+texture fetches, but **nothing turns it on** — no setting, no slider, no quality tier. It is kept because the pin is
+what makes a later tier a shader-free change; if it is still unused after the device round, the
+pair is two lines to delete.
 
 **Review fixes (same day, commit 2 of the feature).** Three defects the Task 1 review found,
 all in our own files, none of them in an upstream one: the vignette factor is now
@@ -901,3 +911,73 @@ reads the presenter as comment-stripped text and requires the material overload,
 surviving plain blit, so the tripwire fires in the Editor. Taking theirs on
 `SettingsManager.cs` drops the five keys (compile error at the presenter, so it cannot pass
 unnoticed) and re-opens the two clamps (source-text checks catch that too).
+
+---
+
+### Real Grass support (2026-09-10) — `ProjectSettings/GraphicsSettings.asset (+3)`, `Assets/Editor/MobileBuildSetup.cs (+15)`
+
+**No engine file is patched for this one**, and that is the whole entry's point. Real Grass hooks
+`DaggerfallTerrain.OnPromoteTerrainData`, a public event DFU already raises, and fills Unity's own
+terrain detail layers through public `TerrainData` API. It takes none of DFU's four terrain slots.
+So the port needed nothing from upstream's tree except a build setting.
+
+That setting is the interesting half. The detail renderer draws through three **built-in engine**
+shaders — `Hidden/TerrainEngine/Details/Vertexlit`, `Hidden/TerrainEngine/Details/WavingDoublePass`
+and `Hidden/TerrainEngine/Details/BillboardWavingDoublePass` (lower-case `l` in `Vertexlit`; the
+names were read out of `unity_builtin_extra` with `strings` and confirmed with `Shader.Find` +
+`isSupported` in a 6000.3.23f1 Editor run). Nothing in this project references them: no scene holds a
+`Terrain`, DFU builds every one at runtime, and no material asset names them. An IL2CPP player build
+is therefore free to strip all three, and without the pin the failure mode would be silent — grass
+renders as nothing at all, with no error. (The port gates on `Shader.Find` of the three at runtime as
+well, so a lost pin reads as `[RealGrass] not available: ...` rather than as bare ground, but the pin
+is what keeps them in the build in the first place.) `EnsureAlwaysIncludedShaders` gained the
+three names as literals and `ApplyIOSSettings` wrote them into `GraphicsSettings.asset` as
+`{fileID: 10500 | 10501 | 10502, guid: 0000000000000000f000000000000000}`.
+
+`RequiredShaderVariants.shadervariants` was deliberately **not** touched, for two reasons: an
+Always-Included entry pins a shader with all of its variants, which is the insurance wanted; and a
+built-in shader has no project GUID, so an entry there could only name it by a fileID into
+`unity_builtin_extra` — a number no test should hard-code and no Unity upgrade should be trusted to
+preserve. For the same reason `MobileSelfTest` checks the pin by **object identity** (load the asset,
+walk `m_AlwaysIncludedShaders`, compare against `Shader.Find(name)`) rather than by the source-text
+grep the CRT and Distant Terrain pins use — those shaders are project assets, so their GUIDs are in
+the file; these three are not in the text at all.
+
+Everything else is ours and outside upstream's tree:
+`Assets/Scripts/Game/Mobile/Ports/RealGrass/{RealGrass,DensityManager,DetailPrototypesManager,Range}.cs`
+(new, 2,633 lines, MIT headers preserved — see `THIRD-PARTY.md`),
+`Assets/Scripts/Game/Mobile/MobilePortedMods.cs (+30/-1)` (the launcher entry),
+`Assets/Editor/MobileSelfTest.cs (+430/-28)` across the feature's three commits, and
+`tools/bundled-mods/mods.json (+12)` with `tools/bundled-mods/manifests/RealGrass.dfmod.json (+13)`.
+
+The launcher entry is the smallest of the family and worth naming for what it does *not* have.
+`GrassTitle = "Real Grass"` — the fetched manifest's own `ModTitle`, which the self test compares the
+literal against — is appended to `Titles`, so `DefaultOff` starts it off and only a saved choice
+turns it on. Its block sits after Distant Terrain's and before the sky is handed back, last of the
+immediate `Init`s, so an `Init` that threw here cannot cost the mods before it their start. **There
+is no dependency gate**: unlike Biomes, WoD or the terrain ports there is nothing to check, because
+this mod takes none of DFU's four terrain slots. It uses the **four-argument** `StartOne`
+(`RealGrassPort.Installed`, hint `[RealGrass]`) for the same reason the two terrain ports do — `Init`
+declines by logging `[RealGrass] not available: ...` and returning, never by throwing, and the plain
+`StartOne` would report "started Real Grass" for a mod that did nothing.
+
+One note on the fetch, because the entry does not read the way the other mods' do. Upstream is a
+monorepo with **two** roots — `RealGrass/` for the code and manifest, `RealGrassAssets/` for the art
+— and `fetch.py` resolves a manifest's `Files` against `<subdir>/` while reading the manifest itself
+from `<subdir>/<manifest>`. No single subdir satisfies both. The entry therefore pairs
+`subdir: "RealGrassAssets"` with `manifest_override: "manifests/RealGrass.dfmod.json"`, the
+mechanism `DetailedDungeonExteriors` already uses; the mod folder is still named `RealGrass` (that
+comes from `name`, not `subdir`), the override keeps upstream's `ModTitle`, version, authors and
+GUID, and `strip_code` + `exclude_globs` become guards over the override rather than filters — they
+report "0 files" today and exist so that no VMblast `.psd`, mesh, material or `.cs` can ride along
+if the override ever grows.
+
+*Rebase risk: LOW, and it is not the usual kind.* There is no hunk for a merge to take theirs on. The
+two things that can silently break it are a Unity upgrade or an Editor session **reserialising
+`GraphicsSettings.asset`** and dropping the three fileID entries, and an upstream change to
+`DaggerfallTerrain`'s promotion event or to `TerrainData`'s detail API — the second is a compile
+error in `Ports/RealGrass/`, which is the good failure mode, and the first is caught by the
+self-test's object-identity check in the Editor rather than by a black patch of ground on a device.
+The port also reads `StreamingWorld.TerrainDistance` (for the live-terrain count in its memory line)
+and `terrainData.maxDetailScatterPerRes`; neither is load-bearing — the first falls back to DFU's
+shipped 3, and the second only sets the clamp ceiling.

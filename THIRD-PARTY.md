@@ -845,3 +845,145 @@ are about **300 MB of mod memory** on top of DFU's own baseline: comfortable in 
 the world-entry peak the thing to watch, because Distant Terrain's build lands on the same frame as
 World of Daggerfall's location loading. **Watch memory at world entry with all three WoD mods on** is
 therefore a named item of the device hand-off, not a general caution.
+
+## Real Grass (compiled in, private draft only)
+
+The only mod in this build that uses Unity's terrain **detail** renderer - the grass billboards
+themselves, rather than the ground they stand on. It takes none of DFU's four terrain slots, so it is
+additive with Basic Roads, Biomes, WoD Terrain, Location Loader and Distant Terrain rather than
+competing with them.
+
+Its licence forks along the same seam as the repository does. **The code is MIT and the art folder is
+not.** Upstream is an archived monorepo with two roots: `RealGrass/` (the five C# files, the manifest,
+`modsettings.json`, `LICENSE`, `credits.txt`) and `RealGrassAssets/` (28 MB of source art). The
+`LICENSE` in the code folder is a plain MIT grant, reproduced verbatim below; `README.md` then takes
+the whole of `RealGrassAssets/` *out* of that grant and points at `credits.txt`, which licenses
+positively only (a) VMblast's textures, "authorized for this project only", and (b) *some* meshes and
+textures drawn from three CC0 packs, without mapping any file to any pack.
+
+| Mod | Author, licence | Source | What is NOT shipped |
+|---|---|---|---|
+| Real Grass 2.11 | Uncanny_Valley & TheLacus. Code: **MIT** (`RealGrass/LICENSE`, header preserved on all four ported files). Art: **NO LICENCE DECLARED for the two textures shipped** - they are outside VMblast's named list, but nothing states positively whose they are (permission being sought by Ikram) | github.com/TheLacus/daggerfall-unity-mods @ `556ef6e1dd0f2da95aa34275a30861daf58fee86` ("Bump version", 2023-08-25); manifest `RealGrass.dfmod.json`, GUID `2185b00e-bc5d-4758-81f5-7540817e2cbc` | Every VMblast `.psd` (`Grass_tex`, all `GrassDetails_*`, `DesertGrass`); every `.fbx`, `.prefab` and `.mat` - the Classic billboard path wants textures and nothing else; the stone, water-plant and firefly art with the features that read it; `External/RealGrassConsoleCommands.cs` (a desktop console this port has no way to reach); `modsettings.json` and `modpresets.json`, which live in the code root and are unreachable from the asset root the fetch reads |
+
+**What ships is two 128² PNGs**: `BrownGrass_tex.png` (25,073 bytes) and `GreenGrass_tex.png`
+(40,306 bytes), the Classic set. Neither appears in VMblast's list, and the history says they predate
+his contribution - both were added in 2017 and last touched in 2018, where the changelog dates
+VMblast's textures to 2.3 and 2.11, and the green one has a changelog line in the original author's
+own voice ("Improved the green grass texture (I'm no artist but I try)"). That is a strong lead and
+it is not a licence, so the same rule as the WoD family applies: `private_only: true` with a
+`pending:` record in `tools/bundled-mods/mods.json`, the bundle rides the private test draft only,
+and `pack.py` keeps `realgrass.dfmod` out of the public MIT mod pack. One line from TheLacus or
+Uncanny_Valley would flip it; so would replacing the two textures with our own, which at 128² is
+cheap. The evidence is in the `licence` string so a future reader need not redo the archaeology.
+
+The MIT text below is the one that matters even on a build with no bundle at all, because **the code
+is compiled into the app**: the app is a distribution of it, and MIT requires this notice to travel
+with it. The bundle's own licence record in `tools/bundled-mods/mods.json` quotes the copyright line
+and summarises the grant in prose, and every ported file keeps upstream's header - but a summary is
+not the permission notice, which is why the verbatim text lives here.
+
+```
+MIT License
+
+Copyright (c) 2016-2019 Uncanny_Valley, TheLacus
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+**The port runs one configuration, and it is the cheap one.** Upstream's shipped defaults are the
+`Full` style with prototype meshes, water plants, stones and a 120 m detail distance; this build
+forces **Classic** style with **billboards** (no FBX prototypes, no Standard-shader meshes, so
+nothing the bundle does not contain is ever asked for), stones off, water plants off, fireflies off.
+The detail store is `SetDetailResolution(128, 16)` where upstream forces `(256, 8)`: **64 detail
+patches per terrain instead of 1,024, and a quarter of the resident detail data**. The number to hold
+on to is that 128 at 16 per patch is not finer than DFU - it is **exactly DFU's own store**, which
+`DaggerfallTerrain` creates as `SetDetailResolution(heightmapDimension, 16)` with a heightmap
+dimension of 129, i.e. a 128² store in 64 patches. So the win is 16x against upstream, and parity
+with the terrain the game already builds; the guard that would resize the store normally finds it
+already the right shape and does nothing. Upstream's `new int[256,256]` per layer per promotion is
+gone too: the layers are allocated once and cleared with `System.Array.Clear`, so a map-pixel
+crossing that promotes a ring of terrains allocates nothing.
+
+Folding a 256-space mod onto a 128-space store is the one place where the port's arithmetic differs
+from upstream's rather than merely being cheaper, and it is why the scatter mode is now **set
+explicitly**. Unity has two: `CoverageMode`, where a sample is how much ground the detail covers
+(ceiling 255, resolution-independent), and the legacy `InstanceCountMode`, where it is an instance
+count (ceiling 16, which is *below* Classic's own thick density of 6..20). DFU builds its terrain
+data with a bare `new TerrainData()` and never sets the mode, so it was whatever the engine
+defaulted to - and the two modes are 16x apart. The port calls
+`SetDetailScatterMode(CoverageMode)` once per `TerrainData`, before any `SetDetailLayer`, and
+**averages** the four upstream sub-cell writes into the one cell they now share - rounded to nearest
+rather than floored, so a thin single write does not vanish. Under coverage semantics a value is how
+much of the cell's ground the grass covers, so the mean is parity with upstream's grass per square
+metre; summing them, which an earlier revision did, would have been four times upstream's density on
+the platform whose whole reason for this port is cost. The mode and the ceiling are named in the memory line, so a log settles it rather
+than a document.
+
+Two upstream bugs are fixed in passing, both forced by what the bundle holds. `UpdateClimateDesert`
+asked for a `DesertGrass_tex` asset that **does not exist in any version of the mod** (the desert art
+is a `.psd` named `DesertGrass`), so upstream drew no desert grass at all in billboard style and
+logged a failed load on every climate change; the port points desert at the brown grass, which
+`RefreshDesert` recolours anyway. And `ResetColor(DetailPrototypes[WaterPlants])` ran unconditionally
+in `UpdateClimateSummer` - with water plants off, `WaterPlants` is layer index **0**, the grass layer,
+so that line was resetting the grass prototype to grey on every season change, undoing the seasonal
+colours set moments earlier. It is now behind `if (options.WaterPlants)`.
+
+Three **engine** shaders had to be pinned, and this is the part that is invisible until it fails: the
+detail renderer draws through `Hidden/TerrainEngine/Details/Vertexlit`, `.../WavingDoublePass` and
+`.../BillboardWavingDoublePass` (note the lower-case `l` in `Vertexlit`), no scene or prefab in this
+project references them, and an IL2CPP player build is therefore free to strip them - after which
+grass renders as nothing at all, with no error. They are in `EnsureAlwaysIncludedShaders` and in
+`ProjectSettings/GraphicsSettings.asset`, and an Always-Included entry pins every variant, so no
+`.shadervariants` entry is needed (nor easily written: a built-in shader has no project GUID and
+could only be named there by a fileID into `unity_builtin_extra`). `MobileShaders.names` is
+deliberately unchanged - these are engine shaders, so there is no captured copy to prefer and no mod
+bundle that could shadow them by name.
+
+The two dials are `RealGrassPort.DetailDistance` (40 m, upstream 120) and `RealGrassPort.DetailDensity`
+(0.6, upstream 1.0), public static fields rather than constants because there is no settings file in
+the bundle to read them from - `modsettings.json` lives in the code root the fetch cannot reach, so
+nothing in the port calls `mod.GetSettings()` and nothing can throw on its absence. Every other value
+upstream's settings file supplied is hard-coded from that file's own shipped defaults.
+
+Not device-verified at the time of writing. The gate declines with
+`[RealGrass] not available: <reason>` when any of the three shaders is unresolved or the grass
+textures are missing (which is exactly what a public build with no bundle looks like), the promotion
+handler is wrapped so a throw leaves DFU's empty detail layers rather than escaping into world
+streaming, and the cost is logged rather than asserted: `[RealGrass] detail data ~N MB (...)` once and
+`[RealGrass] details on N terrains` every twenty-fifth promotion. Memory grows with the number of
+live terrains, so the measurement to take is after fast travel with Distant Terrain and WoD Terrain
+also on.
+
+## Mobile CRT filter (ours, no third-party code)
+
+There is no CRT mod for Daggerfall Unity, and nothing was ported to make one. The filter is
+`Assets/Shaders/Mobile/MobileCRT.shader` (181 lines, shader name `Daggerfall/Mobile/CRT`),
+`Assets/Scripts/Game/Mobile/MobileCrt.cs` and
+`Assets/Scripts/Game/UserInterfaceWindows/CRTConfigPage.cs` - all three written for this port and MIT
+licensed on the same terms as the rest of it. The retro presentation it hangs on
+(`RetroPresentation.cs`, 320x200 / 640x400, the VGA palette, the 4:3 stretch) is Daggerfall Unity's
+own, MIT, copyright (c) 2009-2023 Daggerfall Workshop.
+
+This section exists to record a *negative*: **no code was copied from any existing CRT shader.** The
+well-known ones - crt-pi, crt-geom, crt-easymode, crt-royale - are GPL, and a GPL shader compiled
+into an MIT app relicenses the app. The four techniques here are textbook and were written from the
+formulas: a barrel warp of the sampled UV (`uv *= 1 + k * dot(uv, uv)` about the centre, with
+everything outside the warped rectangle black), raised-cosine scanlines evaluated against the source
+raster, a three-band phosphor grille taken from the destination pixel's own x coordinate, and a
+radial vignette. One texture fetch, one sampler, no dependent read.
