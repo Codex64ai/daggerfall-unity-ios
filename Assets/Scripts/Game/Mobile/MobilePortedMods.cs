@@ -3,7 +3,7 @@
 //
 // Starts the desktop mods whose code is compiled into this app: Roleplay and Realism, its Items
 // module, Climates & Calories, Dynamic Skies, Location Loader, World of Daggerfall, World of
-// Daggerfall - Biomes and World of Daggerfall - Terrain
+// Daggerfall - Biomes, World of Daggerfall - Terrain and Distant Terrain of the World of Daggerfall
 // (Assets/Scripts/Game/Mobile/Ports/). This class calls the mod's own Init exactly as DFU would
 // have called its [Invoke] loader, but only when the entry is enabled, and only with its
 // dependencies on. Nothing runs otherwise.
@@ -30,10 +30,25 @@
 // sampler on a device without compute shaders. Default off - turning it on moves the ground under
 // existing saves and redraws the travel map.
 //
+// MOBILE: Distant Terrain of the World of Daggerfall is a bundle too - three mountain tables and a
+// river/coast map - and, like Terrain, gated by nothing but its own switch. It draws the far
+// terrain out to the horizon on a second, stacked camera. It goes after Terrain: both are off by
+// default, and on a launch with both on the near sampler is the more invasive of the two, so it
+// keeps its "started last of the invasive pair" position. Distant Terrain still runs before the
+// sky is handed back below, because the sky now waits on the camera this mod creates.
+//
 // The survival mods start as soon as the bundles are loaded, at the title. Dynamic Skies cannot:
 // its Init reaches into the scene for the sun light and the camera, and on a player build neither
 // exists at the title. So the sky waits here, polling once a second, and starts when the scene has
 // them - which is when a game is running.
+//
+// MOBILE: and when Distant Terrain is running, the sky waits for one thing more. BLBSkybox.Init
+// decides ONCE, from what is in the scene at that moment, whether to clear the sky on the main
+// camera or on Distant Terrain's stacked camera. Distant Terrain builds that camera only at world
+// entry - the same moment the sun light and the main camera appear - so without the extra wait the
+// branch is settled by a race between two deferred starts, and losing it leaves the far terrain
+// drawn over a sky that was never cleared for it. The wait costs nothing when Distant Terrain is
+// off or declined to install: the flag it asks is false, and the poll is the two-argument one.
 
 using System.Collections;
 using UnityEngine;
@@ -59,6 +74,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         // cannot drift apart.
         public const string BiomesDetNote = WoDDetNote;
         public const string TerrainTitle = "World of Daggerfall - Terrain";
+        // MOBILE: the ModTitle declared in distantterrain.dfmod.json, verbatim. The launcher resolves
+        // the entry by title, so a wrong literal here does not fail - the mod is simply never there.
+        public const string DistantTitle = "Distant Terrain of the World of Daggerfall";
+        // MOBILE: composed from SkyTitle so the two lines the sky writes while it waits can never
+        // disagree about its name. Reads "[PortedMods] Dynamic Skies waiting for Distant Terrain's
+        // stacked camera".
+        public const string SkyStackedCameraWait = "[PortedMods] " + SkyTitle + " waiting for Distant Terrain's stacked camera";
 
         /// <summary>Pure: which of (rr, rrItems, cc) may run. Items needs RR; C&C needs both.</summary>
         public static bool[] Gate(bool rr, bool rrItems, bool cc)
@@ -70,8 +92,22 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// <summary>Pure: Dynamic Skies runs only when its launcher entry exists (bundle installed) and is on.</summary>
         public static bool SkyRuns(bool entryPresent, bool enabled) => entryPresent && enabled;
 
-        /// <summary>Pure: the sky's Init can only work once the scene holds the sun light and the camera it looks up.</summary>
-        public static bool SkySceneReady(bool sunLightPresent, bool mainCameraPresent) => sunLightPresent && mainCameraPresent;
+        /// <summary>
+        /// Pure: the sky's Init can only work once the scene holds the sun light and the camera it
+        /// looks up - and, when Distant Terrain is running, not before its stacked camera exists
+        /// either. BLBSkybox.Init reads the scene once and picks the camera it clears the sky on
+        /// from what it finds; Distant Terrain creates that camera at world entry, the same moment
+        /// the sun light and the main camera appear. Without this the choice is a race.
+        /// </summary>
+        public static bool SkySceneReady(bool sunLightPresent, bool mainCameraPresent, bool distantRunning, bool stackedCameraPresent)
+            => sunLightPresent && mainCameraPresent && (!distantRunning || stackedCameraPresent);
+
+        /// <summary>
+        /// Pure: the two-argument form, kept for callers that know nothing of Distant Terrain. It
+        /// asks the same question with the mod not running, which is exactly what "no extra wait"
+        /// means - not "the stacked camera is already up".
+        /// </summary>
+        public static bool SkySceneReady(bool sunLightPresent, bool mainCameraPresent) => SkySceneReady(sunLightPresent, mainCameraPresent, false, false);
 
         /// <summary>
         /// Pure: World of Daggerfall is a location mod - it is nothing without Location Loader reading it,
@@ -92,7 +128,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         public static bool BiomesRunning;
 
         /// <summary>Titles of the compiled-in mods, in dependency order.</summary>
-        public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle, SkyTitle, LLTitle, WoDTitle, BiomesTitle, TerrainTitle };
+        public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle, SkyTitle, LLTitle, WoDTitle, BiomesTitle, TerrainTitle, DistantTitle };
 
         /// <summary>
         /// Called by ModManager after it found the bundles and before it applies saved settings: a
@@ -169,12 +205,33 @@ namespace DaggerfallWorkshop.Game.Mobile
         static IEnumerator StartSkyWhenSceneReady(Mod sky)
         {
             bool logged = false;
-            while (!SkySceneReady(GameObject.Find("SunLight") != null, GameObject.FindGameObjectWithTag("MainCamera") != null))
+            bool stackedLogged = false;
+            while (true)
             {
-                if (!logged)
+                bool sunLight = GameObject.Find("SunLight") != null;
+                bool mainCamera = GameObject.FindGameObjectWithTag("MainCamera") != null;
+                // MOBILE: asked every pass rather than captured once. Distant Terrain's Init has
+                // already run by the time this coroutine does - StartEnabled is synchronous - but
+                // reading the flag here keeps the poll's answer a function of the world as it is,
+                // and the stacked camera is a scene object that can come and go with a reload.
+                bool distantRunning = DistantTerrain.DistantTerrainPort.Running;
+                bool stackedCamera = GameObject.Find("stackedCamera") != null;
+                if (SkySceneReady(sunLight, mainCamera, distantRunning, stackedCamera)) break;
+                if (!sunLight || !mainCamera)
                 {
-                    Debug.Log("[PortedMods] " + SkyTitle + " waiting for the scene (SunLight, MainCamera)");
-                    logged = true;
+                    if (!logged)
+                    {
+                        Debug.Log("[PortedMods] " + SkyTitle + " waiting for the scene (SunLight, MainCamera)");
+                        logged = true;
+                    }
+                }
+                // MOBILE: the scene is up and the only thing still missing is Distant Terrain's
+                // camera. Said once, and only in that case, so a reader who sees it knows the wait
+                // is this mod's and not the title screen's.
+                else if (!stackedLogged)
+                {
+                    Debug.Log(SkyStackedCameraWait);
+                    stackedLogged = true;
                 }
                 yield return new WaitForSecondsRealtime(1f);
             }
@@ -373,6 +430,27 @@ namespace DaggerfallWorkshop.Game.Mobile
                     Debug.Log("[PortedMods] " + TerrainTitle + ": this changes ground height under existing saves and the travel map (by design)");
                 }
             }
+
+            // MOBILE: Distant Terrain of the World of Daggerfall. No dependency gate, for the same
+            // reason the Terrain port has none: its own switch is the whole condition, and its Init
+            // declines by logging "[DistantTerrain] not available: ..." and returning when the
+            // far-terrain shader did not compile or the bundle is missing its three mountain tables
+            // or the river/coast map. So it needs the four-argument StartOne, and the flag it is
+            // asked is Running - the gate passed, the world-entry hooks are subscribed - not the
+            // flag that only turns true once StreamingWorld.OnReady has actually built the far
+            // terrain, which is long after this Init returns and would always read "did not start"
+            // here. That the far terrain really got built is said by "[DistantTerrain] far terrain
+            // ready", from the build itself.
+            //
+            // After the Terrain block, before the sky is handed back: the sky's deferred start now
+            // waits on the stackedCamera this Init's mod creates, so the flag it polls must already
+            // be settled by the time StartSkyWhenSceneReady begins.
+            Mod distant = Entry(DistantTitle);
+            if (distant != null && distant.Enabled)
+                StartOne(DistantTitle,
+                    () => DistantTerrain.DistantTerrainPort.Init(new InitParams(distant, ModManager.Instance.GetModIndex(DistantTitle), count)),
+                    () => DistantTerrain.DistantTerrainPort.Running,
+                    "[DistantTerrain]");
 
             return SkyRuns(sky != null, sky != null && sky.Enabled) ? sky : null;
         }

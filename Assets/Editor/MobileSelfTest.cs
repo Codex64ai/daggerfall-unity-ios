@@ -1435,13 +1435,85 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
             // World of Daggerfall - Terrain: its own data bundle, off by default, and gated by nothing
             // - Basic Roads is optional to it and Daggerfall Expanded Textures is not its dependency at
-            // all. It replaces DaggerfallUnity.TerrainSampler, so it is started LAST: an Init that threw
+            // all. It replaces DaggerfallUnity.TerrainSampler, so it is started late: an Init that threw
             // there cannot then cost the mods before it their start.
             Check(MobilePortedMods.TerrainTitle == "World of Daggerfall - Terrain" && System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.TerrainTitle) >= 0, "PortedMods: World of Daggerfall - Terrain is a default-off title");
             // Titles is what DefaultOff walks, so this pins the default-off coverage and the dependency
             // ORDER OF THAT LIST - not the start order, which is the statement sequence in StartEnabled
-            // and is pinned by the block comment there.
-            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 1] == MobilePortedMods.TerrainTitle, "PortedMods: World of Daggerfall - Terrain is last in Titles, the list DefaultOff walks");
+            // and is pinned by the block comment there. Distant Terrain was appended after it, so the
+            // Terrain entry is now next to last.
+            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 2] == MobilePortedMods.TerrainTitle, "PortedMods: World of Daggerfall - Terrain is next to last in Titles, the list DefaultOff walks");
+
+            // MOBILE: Distant Terrain (World of Daggerfall flavour). Gated by nothing but its own
+            // switch, like the Terrain port, and started after it - last of the immediate Inits,
+            // because the sky's deferred start below now waits on the stacked camera this port
+            // creates. The title is the bundle's own ModTitle: get it wrong and the launcher entry
+            // simply never resolves, so the mod is silently absent rather than broken.
+            Check(MobilePortedMods.DistantTitle == "Distant Terrain of the World of Daggerfall",
+                "PortedMods: the Distant Terrain title is the ModTitle its bundle declares",
+                MobilePortedMods.DistantTitle);
+            // ...and that literal is checked against the fetched manifest itself where it is present.
+            // The fetched folder is gitignored, so a clone that has not run fetch.py skips this.
+            string distantManifest = "Assets/Game/Mods/DistantTerrainWoD/distantterrain.dfmod.json";
+            if (File.Exists(distantManifest))
+            {
+                var manifestMatch = System.Text.RegularExpressions.Regex.Match(File.ReadAllText(distantManifest), "\"ModTitle\"\\s*:\\s*\"([^\"]*)\"");
+                Check(manifestMatch.Success && manifestMatch.Groups[1].Value == MobilePortedMods.DistantTitle,
+                    "PortedMods: DistantTitle is the ModTitle in distantterrain.dfmod.json",
+                    manifestMatch.Success ? manifestMatch.Groups[1].Value : "no ModTitle in " + distantManifest);
+            }
+            else log.AppendLine("  SKIP  DistantTitle against the fetched manifest (not fetched - run tools/bundled-mods/fetch.py --only DistantTerrainWoD)");
+            Check(System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.DistantTitle) >= 0,
+                "PortedMods: Distant Terrain is a default-off title");
+            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 1] == MobilePortedMods.DistantTitle,
+                "PortedMods: Distant Terrain is last in Titles, after World of Daggerfall - Terrain");
+
+            // The sky's scene poll, now four-argument. Dynamic Skies' Init picks its stacked-camera
+            // branch from what is in the scene at the moment it runs, so when Distant Terrain is
+            // running the sky must not start until that camera exists - otherwise the branch is
+            // decided by a race between two deferred starts. Contract, stated independently of the
+            // implementation: sunLight && mainCamera && (!distantRunning || stackedCamera).
+            bool skyTableOk = true;
+            for (int mask = 0; mask < 16; mask++)
+            {
+                bool sun = (mask & 1) != 0, cam = (mask & 2) != 0, running = (mask & 4) != 0, stacked = (mask & 8) != 0;
+                if (MobilePortedMods.SkySceneReady(sun, cam, running, stacked) != (sun && cam && (!running || stacked)))
+                    skyTableOk = false;
+            }
+            Check(skyTableOk, "PortedMods: SkySceneReady is sunLight && mainCamera && (!distantRunning || stackedCamera) (all sixteen cases)");
+            // The two rows the whole change exists for, named so a regression says which one broke.
+            Check(!MobilePortedMods.SkySceneReady(true, true, true, false),
+                "PortedMods: the sky waits when Distant Terrain is running and the stacked camera is not up yet");
+            Check(MobilePortedMods.SkySceneReady(true, true, false, false),
+                "PortedMods: the sky does not wait for a stacked camera when Distant Terrain is not running");
+            // The two-argument form is kept for the callers that never knew about Distant Terrain:
+            // it must mean exactly "Distant Terrain is not running", not "the stacked camera is up".
+            bool forwardOk = true;
+            for (int mask = 0; mask < 4; mask++)
+            {
+                bool sun = (mask & 1) != 0, cam = (mask & 2) != 0;
+                if (MobilePortedMods.SkySceneReady(sun, cam) != MobilePortedMods.SkySceneReady(sun, cam, false, false))
+                    forwardOk = false;
+            }
+            Check(forwardOk, "PortedMods: the two-argument SkySceneReady forwards to (sunLight, mainCamera, false, false)");
+            Check(MobilePortedMods.SkyStackedCameraWait == "[PortedMods] Dynamic Skies waiting for Distant Terrain's stacked camera",
+                "PortedMods: the stacked-camera wait line is the literal a Player.log reader greps for",
+                MobilePortedMods.SkyStackedCameraWait);
+
+            // Start order, from the source: Distant Terrain's Init runs after the Terrain port's and
+            // before StartEnabled hands the sky back for its deferred start. Comments are stripped so
+            // a check for an absent symbol cannot be satisfied by a comment that names it.
+            string launcherSrc = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobilePortedMods.cs"));
+            int terrainInitAt = launcherSrc.IndexOf("Monobelisk.InterestingTerrains.Init");
+            int distantInitAt = launcherSrc.IndexOf("DistantTerrainPort.Init");
+            int skyReturnAt = launcherSrc.LastIndexOf("return SkyRuns");
+            Check(terrainInitAt >= 0 && distantInitAt > terrainInitAt && skyReturnAt > distantInitAt,
+                "PortedMods: Distant Terrain starts after World of Daggerfall - Terrain and before the sky is handed back for its deferred start",
+                "terrain " + terrainInitAt + ", distant " + distantInitAt + ", sky return " + skyReturnAt);
+            // Installed only becomes true at StreamingWorld.OnReady, long after Init returns, so the
+            // launcher's four-argument StartOne would always write "did not start" if it asked that.
+            Check(launcherSrc.Contains("DistantTerrainPort.Running") && !launcherSrc.Contains("DistantTerrainPort.Installed"),
+                "PortedMods: the launcher asks Running, not the world-entry Installed flag");
 
             // A mod whose Init throws must not take the mods after it - or the sky's deferred start -
             // down with it. The LogError below is this check working, not a failure.
