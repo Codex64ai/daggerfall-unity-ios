@@ -105,8 +105,9 @@ namespace LocationLoader
                 if (mod.AssetBundle && mod.AssetBundle.GetAllAssetNames().Length > 0)
                 {
                     string dummyFilePath = mod.AssetBundle.GetAllAssetNames()[0];
-                    string modFolderPrefix = dummyFilePath.Substring(17);
-                    modFolderPrefix = dummyFilePath.Substring(0, 17 + modFolderPrefix.IndexOf('/'));
+                    string modFolderPrefix = LocationHelper.ModFolderPrefix(dummyFilePath);   // MOBILE
+                    if (modFolderPrefix == null)                               // MOBILE
+                        continue;                                              // MOBILE
 
                     string globalFolder = modFolderPrefix + "/locations";
 
@@ -127,8 +128,9 @@ namespace LocationLoader
                 else if (mod.IsVirtual && mod.ModInfo.Files.Count > 0)
                 {
                     string dummyFilePath = mod.ModInfo.Files[0];
-                    string modFolderPrefix = dummyFilePath.Substring(17);
-                    modFolderPrefix = dummyFilePath.Substring(0, 17 + modFolderPrefix.IndexOf('/'));
+                    string modFolderPrefix = LocationHelper.ModFolderPrefix(dummyFilePath);   // MOBILE
+                    if (modFolderPrefix == null)                               // MOBILE
+                        continue;                                              // MOBILE
 
                     string globalFolder = modFolderPrefix + "/Locations";
 
@@ -275,8 +277,9 @@ namespace LocationLoader
                     if (mod.AssetBundle && mod.AssetBundle.GetAllAssetNames().Length > 0)
                     {
                         string dummyFilePath = mod.AssetBundle.GetAllAssetNames()[0];
-                        string modFolderPrefix = dummyFilePath.Substring(17);
-                        modFolderPrefix = dummyFilePath.Substring(0, 17 + modFolderPrefix.IndexOf('/'));
+                        string modFolderPrefix = LocationHelper.ModFolderPrefix(dummyFilePath);   // MOBILE
+                        if (modFolderPrefix == null)                               // MOBILE
+                            continue;                                              // MOBILE
 
                         string regionIndexFolder = modFolderPrefix + "/Locations/" + regionIndex.ToString();
                         string regionNameFolder = modFolderPrefix + "/Locations/" + regionName;
@@ -294,8 +297,9 @@ namespace LocationLoader
                     else if (mod.IsVirtual && mod.ModInfo.Files.Count > 0)
                     {
                         string dummyFilePath = mod.ModInfo.Files[0];
-                        string modFolderPrefix = dummyFilePath.Substring(17);
-                        modFolderPrefix = dummyFilePath.Substring(0, 17 + modFolderPrefix.IndexOf('/'));
+                        string modFolderPrefix = LocationHelper.ModFolderPrefix(dummyFilePath);   // MOBILE
+                        if (modFolderPrefix == null)                               // MOBILE
+                            continue;                                              // MOBILE
 
                         string regionIndexFolder = modFolderPrefix + "/Locations/" + regionIndex.ToString();
                         string regionNameFolder = modFolderPrefix + "/Locations/" + regionName;
@@ -371,8 +375,9 @@ namespace LocationLoader
                 if (mod.AssetBundle && mod.AssetBundle.GetAllAssetNames().Length > 0)
                 {
                     string dummyFilePath = mod.AssetBundle.GetAllAssetNames()[0];
-                    string modFolderPrefix = dummyFilePath.Substring(17);
-                    modFolderPrefix = dummyFilePath.Substring(0, 17 + modFolderPrefix.IndexOf('/'));
+                    string modFolderPrefix = LocationHelper.ModFolderPrefix(dummyFilePath);   // MOBILE
+                    if (modFolderPrefix == null)                               // MOBILE
+                        continue;                                              // MOBILE
 
                     string prefabFolder = modFolderPrefix + "/Locations/LocationPrefab/";
 
@@ -388,8 +393,9 @@ namespace LocationLoader
                 else if (mod.IsVirtual && mod.ModInfo.Files.Count > 0)
                 {
                     string dummyFilePath = mod.ModInfo.Files[0];
-                    string modFolderPrefix = dummyFilePath.Substring(17);
-                    modFolderPrefix = dummyFilePath.Substring(0, 17 + modFolderPrefix.IndexOf('/'));
+                    string modFolderPrefix = LocationHelper.ModFolderPrefix(dummyFilePath);   // MOBILE
+                    if (modFolderPrefix == null)                               // MOBILE
+                        continue;                                              // MOBILE
 
                     string prefabFolder = modFolderPrefix + "/Locations/LocationPrefab/";
 

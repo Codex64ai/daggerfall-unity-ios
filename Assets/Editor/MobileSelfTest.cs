@@ -2577,6 +2577,38 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "an unknown object type is still rejected",
                   unknown == null ? "prefab was null" : unknown.obj.Count.ToString());
 
+            // MOBILE: LocationResourceManager derived the mod's bundle folder with a bare
+            // `Substring(17)` at six sites. The input is the first asset name of EVERY enabled mod, so
+            // one bundle on the device whose assets are not under "assets/game/mods/" threw
+            // ArgumentOutOfRangeException out of Start and cost Location Loader every location for the
+            // session - not just that mod's. The prefix arithmetic is now one pure function.
+            Check(global::LocationLoader.LocationHelper.ModFolderPrefix(
+                      "assets/game/mods/worldofdaggerfall/locations/0/foo.txt") == "assets/game/mods/worldofdaggerfall"
+                  && global::LocationLoader.LocationHelper.ModFolderPrefix(
+                      "Assets/Game/Mods/WorldOfDaggerfall/Locations/0/foo.txt") == "Assets/Game/Mods/WorldOfDaggerfall",
+                  "LL: the mod folder prefix is the path up to the first '/' after assets/game/mods/, in either case",
+                  global::LocationLoader.LocationHelper.ModFolderPrefix(
+                      "assets/game/mods/worldofdaggerfall/locations/0/foo.txt") ?? "null");
+            // The three ways it used to throw or silently mis-parse: too short for the Substring, no
+            // '/' after the prefix (IndexOf -1 made the prefix sixteen characters, one short, and
+            // matched nothing), and an asset that is not under the prefix at all. All three now return
+            // null and the caller skips that mod.
+            Check(global::LocationLoader.LocationHelper.ModFolderPrefix("assets/game") == null
+                  && global::LocationLoader.LocationHelper.ModFolderPrefix("assets/game/mods/") == null
+                  && global::LocationLoader.LocationHelper.ModFolderPrefix("assets/game/mods/loose.txt") == null
+                  && global::LocationLoader.LocationHelper.ModFolderPrefix("assets/resources/thing/x.txt") == null
+                  && global::LocationLoader.LocationHelper.ModFolderPrefix("") == null
+                  && global::LocationLoader.LocationHelper.ModFolderPrefix(null) == null,
+                  "LL: a short, prefixless or slashless asset name yields no prefix instead of throwing");
+            Check(global::LocationLoader.LocationHelper.modAssetPrefix.Length == 17,
+                  "LL: the prefix whose length upstream hard-coded as 17 really is 17 characters",
+                  global::LocationLoader.LocationHelper.modAssetPrefix.Length.ToString());
+            // And no bare Substring(17) survives in the file the guard replaced them in.
+            Check(!System.IO.File.ReadAllText(
+                      "Assets/Scripts/Game/Mobile/Ports/LocationLoader/LocationResourceManager.cs")
+                  .Contains("Substring(17)"),
+                  "LL: LocationResourceManager has no unguarded Substring(17) left");
+
             // Rebase tripwire for the AddProps guard. RMBLayout.cs is an upstream file and the fix is
             // four lines; an upstream merge that takes theirs restores the discarded GetModelData
             // return, and the symptom is not a compile error but WoD's two dock blocks silently

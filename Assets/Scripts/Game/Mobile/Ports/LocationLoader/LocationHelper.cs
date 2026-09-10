@@ -1326,6 +1326,47 @@ namespace LocationLoader
             }
         }
 
+        // MOBILE: the prefix Unity gives every asset inside a mod bundle. Upstream wrote its length,
+        // 17, as a bare literal at six sites in LocationResourceManager.
+        public const string modAssetPrefix = "assets/game/mods/";
+
+        /// <summary>
+        /// MOBILE: the mod's own folder inside its bundle - "assets/game/mods/&lt;name&gt;" - or null
+        /// when the path is not one this arithmetic can parse.
+        ///
+        /// LocationResourceManager computed it three times over, at six sites, as
+        /// `dummyFilePath.Substring(17)` followed by
+        /// `dummyFilePath.Substring(0, 17 + that.IndexOf('/'))`, with no check that the path is 17
+        /// characters long or that a '/' follows them. What gets fed in is the FIRST asset name of
+        /// every enabled mod, so one bundle on the device whose assets are not under that prefix threw
+        /// ArgumentOutOfRangeException - and because the three callers run from `Start` and from the
+        /// terrain scan, the throw did not cost that one mod its locations, it cost Location Loader
+        /// the whole scan and every LL location for the session. A missing '/' was as bad in a quieter
+        /// way: `IndexOf` returning -1 made the prefix 16 characters, one short, and the folder
+        /// comparisons then matched nothing at all with nothing in any log to say so.
+        ///
+        /// Case-INSENSITIVE on purpose. Unity lowercases bundle asset names ("assets/game/mods/..."),
+        /// but the `#if UNITY_EDITOR` virtual-mod branch feeds real project paths
+        /// ("Assets/Game/Mods/..."), and an ordinal test would reject every virtual mod in the Editor -
+        /// which is exactly where the self test runs.
+        ///
+        /// Pure, so the self test can pin it; lives here rather than on LocationResourceManager
+        /// because that class is internal (upstream's choice) and this is string arithmetic that
+        /// decides whether Location Loader sees any content at all.
+        /// </summary>
+        public static string ModFolderPrefix(string dummyFilePath)
+        {
+            if (string.IsNullOrEmpty(dummyFilePath)
+                || !dummyFilePath.StartsWith(modAssetPrefix, StringComparison.OrdinalIgnoreCase))
+                return null;
+
+            int slash = dummyFilePath.IndexOf('/', modAssetPrefix.Length);
+            if (slash < 0)
+                return null;
+
+            return dummyFilePath.Substring(0, slash);
+        }
+
         static Regex CsvSplit = new Regex("(?:^|,)(\"(?:\"\"|[^\"])*\"|[^,]*)", RegexOptions.Compiled);
 
         public static string[] SplitCsvLine(string line)
