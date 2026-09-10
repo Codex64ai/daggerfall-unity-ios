@@ -171,7 +171,9 @@ namespace Monobelisk
         ///
         /// One line for EVERY tile, not a sample: a terrain distance of 3 is 49 tiles, so a whole
         /// session is 49 lines, and the point of them is to be read against the simulator baseline for
-        /// the same map pixels in .superpowers/sdd/2026-09-10-terrain-pits/player-sim460.log. The
+        /// the same map pixels in ~/dev/dfu-mods/terrain-evidence/pits/player-final460.log (the path
+        /// this comment first carried was a plan folder that never existed; the logs live with the rest
+        /// of that round's evidence, and player-final460.log is the post-fix one). The
         /// inputs match exactly there (locations 46 at 460,51 on both the device and the simulator), so
         /// any tile whose numbers differ from the baseline's is the bug, and no threshold has to be
         /// guessed. SUSPECT still marks the three unambiguous shapes IsSuspectTile names.

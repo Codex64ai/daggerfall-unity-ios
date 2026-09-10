@@ -259,11 +259,19 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 int repairedHoles = Monobelisk.TerrainComputer.RepairWorldHeightmapHoles(
                     bytes, MapWidth, MapHeight);
                 int changedBytes = 0, maxByteDelta = 0;
+                // MOBILE: (R2) the coordinates, not just the count. "The per-tile `sample` lines changed
+                // only near a repaired hole" is a claim about WHERE the map moved, and a simulator run
+                // starts at one map pixel and streams a 7x7 window of tiles around it - so what has to
+                // be answerable is whether any repaired pixel lies near the pixel the run started at.
+                // The flatten sample blends up to four neighbouring map pixels, so the window below is
+                // deliberately wider than the tile grid.
+                var changedAt = new List<Px>();
                 for (int i = 0; i < bytes.Length; i++)
                 {
                     int d = bytes[i] - beforeRepair[i];
                     if (d == 0) continue;
                     changedBytes++;
+                    changedAt.Add(new Px { x = i % MapWidth, y = i / MapWidth });
                     if (d > maxByteDelta) maxByteDelta = d;
                 }
                 log.AppendLine(string.Format(
@@ -287,13 +295,34 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 }
                 if (isolatedList.Count > 0) log.AppendLine("[WoDProbe] holes: " + string.Join(" ", isolatedList.ToArray()));
 
+                // MOBILE: (R2) where the repair actually wrote, first 40 - enough to see which regions
+                // of the map moved without turning the log into a list of 542 coordinates.
+                if (changedAt.Count > 0)
+                {
+                    var repairedNames = new List<string>();
+                    for (int i = 0; i < changedAt.Count && i < 40; i++)
+                        repairedNames.Add(changedAt[i].x + "," + changedAt[i].y);
+                    log.AppendLine("[WoDProbe] repaired at (first " + repairedNames.Count + " of "
+                        + changedAt.Count + "): " + string.Join(" ", repairedNames.ToArray()));
+                }
+
                 // ---- named pixels, for diffing against a Player.log ---------------------
                 foreach (var p in NamedPixels())
                 {
                     int i = p.x + p.y * MapWidth;
                     if (i < 0 || i >= floats.Length) continue;
-                    log.AppendLine(string.Format("[WoDProbe] pixel {0},{1}: float={2:F6} byte={3} base={4:F4}",
-                        p.x, p.y, floats[i], bytes[i], bytes[i] / 255f));
+                    // MOBILE: (R2) `repaired` is this pixel itself; `within8` is how many repaired
+                    // pixels sit inside the 17x17 window around it - a simulator run at this pixel
+                    // streams tiles over roughly that much map, so within8 = 0 predicts that every
+                    // per-tile `sample` line for that run is unchanged by the repair.
+                    int within8 = 0;
+                    foreach (var c in changedAt)
+                        if (Math.Abs(c.x - p.x) <= 8 && Math.Abs(c.y - p.y) <= 8)
+                            within8++;
+                    log.AppendLine(string.Format(
+                        "[WoDProbe] pixel {0},{1}: float={2:F6} byte={3} base={4:F4} repaired={5} within8={6}",
+                        p.x, p.y, floats[i], bytes[i], bytes[i] / 255f,
+                        bytes[i] != beforeRepair[i] ? 1 : 0, within8));
                 }
             }
             finally
