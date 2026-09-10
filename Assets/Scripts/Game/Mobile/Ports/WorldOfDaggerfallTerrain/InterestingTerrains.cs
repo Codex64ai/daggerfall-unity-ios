@@ -309,8 +309,13 @@ namespace Monobelisk
 
         private void Start()
         {
-            if (CompatibilityUtils.BasicRoadsLoaded)
-                BasicRoadsUtils.Init();
+            // MOBILE: (R1) unconditional now. This call used to sit behind
+            // CompatibilityUtils.BasicRoadsLoaded, which asks ModManager for a mod titled "BasicRoads"
+            // - never true on iOS, where Basic Roads is compiled in - so Init never ran and the road
+            // smoothing was dead code behind a test that could not pass on this platform. Init makes
+            // the decision itself, over the compiled-in network, and logs which source it took. The
+            // self test reads this file for the gate's absence, so do not quote it back in a comment.
+            BasicRoadsUtils.Init();
 
             //DaggerfallUnity.Instance.TerrainTexturing = new WildernessOverhaul.WOTerrainTexturing(true, true);
         }

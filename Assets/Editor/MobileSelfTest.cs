@@ -1205,6 +1205,76 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && !Monobelisk.InterestingTerrains.ShouldRestoreWoodsBuffer(null, altered)
                   && !Monobelisk.InterestingTerrains.ShouldRestoreWoodsBuffer(originalCopy, originalCopy),
                 "WoDTerrain: a half-generated world heightmap puts WOODS.WLD back, and only when there is something to put back");
+
+            TestWoDTerrainRoads();
+        }
+
+        // MOBILE: (R1) Basic Roads smoothing. The mod's road-aware branch was behind
+        // `CompatibilityUtils.BasicRoadsLoaded`, i.e. "is there a mod titled BasicRoads" - which on
+        // iOS is never true, because Basic Roads is compiled into the port. So the shader was handed
+        // nine zero vectors for every tile and roads were painted across terrain generated as if they
+        // did not exist. These pin the replacement gather: the byte source is injected, so this runs
+        // with no mod, no world and no GPU, and the two things that could go wrong silently - the
+        // direction bits meaning something different from MobileRoadNetwork's, and the 3x3 slot index
+        // disagreeing with basicRoads.cginc - are exactly what is checked.
+        static void TestWoDTerrainRoads()
+        {
+            // Written with MobileRoadNetwork's own constants, not literals: that is what pins the two
+            // copies of Basic Roads' bitmask (N = 128 ... NW = 1) against each other. If either side
+            // renumbers, roads get smoothed in the wrong direction and nothing else says so.
+            const int centre = 4;   // si = (0 + 1) + (0 + 1) * 3
+            int pathPixels;
+            var oneTile = Monobelisk.Compatibility.BasicRoadsUtils.BuildRoadData(207, 213,
+                (x, y) => (x == 207 && y == 213)
+                    ? (byte)(DaggerfallWorkshop.Game.Mobile.MobileRoadNetwork.N
+                           | DaggerfallWorkshop.Game.Mobile.MobileRoadNetwork.E)
+                    : (byte)0,
+                out pathPixels);
+            Check(pathPixels == 1
+                  && oneTile.N_E_S_W[centre] == new Vector4(1, 1, 0, 0)
+                  && oneTile.NW_NE_SW_SE[centre] == Vector4.zero,
+                "WoDTerrain roads: a north/east road at the tile's own map pixel reaches the shader's centre slot",
+                "pathPixels " + pathPixels + " N_E_S_W " + oneTile.N_E_S_W[centre] + " NW_NE_SW_SE " + oneTile.NW_NE_SW_SE[centre]);
+
+            // The neighbour slot, in the shader's own indexing: the pixel one east and one north
+            // (map-pixel y - 1) is si = (1 + 1) + (-1 + 1) * 3 = 2.
+            var neighbour = Monobelisk.Compatibility.BasicRoadsUtils.BuildRoadData(207, 213,
+                (x, y) => (x == 208 && y == 212)
+                    ? DaggerfallWorkshop.Game.Mobile.MobileRoadNetwork.SE : (byte)0,
+                out pathPixels);
+            Check(pathPixels == 1
+                  && neighbour.NW_NE_SW_SE[2] == new Vector4(0, 0, 0, 1)
+                  && neighbour.NW_NE_SW_SE[centre] == Vector4.zero,
+                "WoDTerrain roads: a neighbouring map pixel's road lands in that neighbour's slot, not the centre's",
+                "pathPixels " + pathPixels + " slot2 " + neighbour.NW_NE_SW_SE[2]);
+
+            // At the map's western edge the x = -1 column does not exist. Upstream skips it, which
+            // leaves those three slots zero rather than wrapping to map pixel 999 - a road smoothed
+            // in from the far side of Tamriel.
+            var edge = Monobelisk.Compatibility.BasicRoadsUtils.BuildRoadData(0, 213,
+                (x, y) => 0xFF, out pathPixels);
+            Check(pathPixels == 6
+                  && edge.N_E_S_W[0] == Vector4.zero && edge.N_E_S_W[3] == Vector4.zero && edge.N_E_S_W[6] == Vector4.zero
+                  && edge.N_E_S_W[centre] == new Vector4(1, 1, 1, 1)
+                  && edge.NW_NE_SW_SE[centre] == new Vector4(1, 1, 1, 1),
+                "WoDTerrain roads: the column off the western edge of the map stays empty instead of wrapping",
+                "pathPixels " + pathPixels + " (expected 6)");
+
+            // And before Init has run - the editor's state, and the state of any session with the
+            // roads switch off - GetRoadData must hand the shader nine zero vectors rather than
+            // throw on a null path array, which is what upstream's HasRoadPoint did.
+            var idle = Monobelisk.Compatibility.BasicRoadsUtils.GetRoadData(207, 213);
+            bool allZero = idle.N_E_S_W != null && idle.NW_NE_SW_SE != null
+                           && idle.N_E_S_W.Length == 9 && idle.NW_NE_SW_SE.Length == 9;
+            for (int i = 0; allZero && i < 9; i++)
+                allZero = idle.N_E_S_W[i] == Vector4.zero && idle.NW_NE_SW_SE[i] == Vector4.zero;
+            Check(allZero, "WoDTerrain roads: with no path source the shader gets nine zero vectors, not an exception");
+
+            // The gather is now unconditional at start-up - the whole bug was a start-up gate that
+            // could not fire on this platform - so the gate's absence is the check.
+            string terrainsSrc = File.ReadAllText("Assets/Scripts/Game/Mobile/Ports/WorldOfDaggerfallTerrain/InterestingTerrains.cs");
+            Check(!terrainsSrc.Contains("if (CompatibilityUtils.BasicRoadsLoaded)"),
+                "WoDTerrain roads: BasicRoadsUtils.Init is no longer gated on a mod titled BasicRoads being loaded");
         }
 
         // The Dynamic Skies mod's procedural skybox shader ships compiled into the app with its
