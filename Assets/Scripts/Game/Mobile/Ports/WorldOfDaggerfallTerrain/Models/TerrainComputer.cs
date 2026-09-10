@@ -188,6 +188,60 @@ namespace Monobelisk
         }
 
         /// <summary>
+        /// MOBILE: (D3) the number of map pixels the start-up world heightmap reports as sea while
+        /// the land around them says otherwise - a HOLE, not a coast. These are what make the
+        /// reported location-sized pits: mapPixelHeights is this buffer, LocationWeight reads it at
+        /// each location's centre (with a -1.5/+0.5 texel offset, so up to four neighbouring map
+        /// pixels blend in), and a hole drags the flatten target down to regLocationHeight's
+        /// absolute 0.021 floor = 105 units while the terrain around the location is 300-700.
+        ///
+        /// "Sea" is byte &lt;= OceanFloorByte: GetBaseHeight's own analytic minimum is
+        /// (BASEHEIGHT_MIN - 1) / newHeight = 99/5000, which is 5.05/255, so a pixel at or under 5
+        /// carries no land height at all. "Land around it" is at least LandNeighboursForHole of the
+        /// eight neighbours at byte &gt;= LandByte (10/255 * 5000 = 196 units, clear of the beach).
+        /// A real coastline fails that test - it has sea on one side - so a non-zero count here is
+        /// the defect, and the number is the measurement the fix has to move.
+        ///
+        /// Pure: no GPU, no Unity state, so the self test can pin it.
+        /// </summary>
+        public const int OceanFloorByte = 5;
+        public const int LandByte = 10;
+        public const int LandNeighboursForHole = 5;
+
+        public static int CountWorldHeightmapHoles(byte[] altered)
+        {
+            if (altered == null || altered.Length < WoodsFile.MapWidth * WoodsFile.MapHeight)
+                return -1;
+
+            int holes = 0;
+            for (int y = 1; y < WoodsFile.MapHeight - 1; y++)
+            {
+                for (int x = 1; x < WoodsFile.MapWidth - 1; x++)
+                {
+                    if (altered[x + y * WoodsFile.MapWidth] > OceanFloorByte)
+                        continue;
+
+                    int land = 0;
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        for (int dx = -1; dx <= 1; dx++)
+                        {
+                            if (dx == 0 && dy == 0)
+                                continue;
+                            if (altered[(x + dx) + (y + dy) * WoodsFile.MapWidth] >= LandByte)
+                                land++;
+                        }
+                    }
+
+                    if (land >= LandNeighboursForHole)
+                        holes++;
+                }
+            }
+
+            return holes;
+        }
+
+        /// <summary>
         /// MOBILE: (D1) the height LocationWeight flattens one location TO, computed on the CPU exactly
         /// as TerrainComputer.compute:296-302 computes it on the GPU: floor the rect, take its centre,
         /// divide by terrainSize * (TERRAIN_X, TERRAIN_Y), saturate, add the same uvOffset, sample
@@ -543,8 +597,9 @@ namespace Monobelisk
 
                 watch.Stop();
                 // MOBILE: (h) the one-off cost of the whole start-up pass, in Ikram's Player.log.
-                Debug.Log(string.Format("[WoDTerrain] world heightmap {0} ms ({1} bands)",
-                    watch.ElapsedMilliseconds, bands.Length));
+                Debug.Log(string.Format("[WoDTerrain] world heightmap {0} ms ({1} bands) holes {2}",
+                    watch.ElapsedMilliseconds, bands.Length,
+                    CountWorldHeightmapHoles(alteredHeightmapBuffer)));
             }
             finally
             {

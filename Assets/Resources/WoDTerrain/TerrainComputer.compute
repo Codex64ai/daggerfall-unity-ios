@@ -282,6 +282,15 @@ float2 ClampToLine(float2 p1, float2 p2, float2 pos) {
 }
 
 #define F_MAX 99999999.9
+
+// MOBILE: (D3) how far below the world heightmap AT THE SAMPLE a location may be flattened before
+// the read that produced it is treated as a collapse rather than a height. 100 units at
+// newHeight 5000. Chosen from the artefact, not by taste: the reported pits are 200-400 units
+// (tile means 0.064-0.11 against a 0.021 flatten floor), and the generator's own largest
+// deliberate location-edge excursion is `transitionHeight`'s min(..., 250.0 / newHeight) further
+// down GetHeightSample - so 100 is comfortably inside what the mod does on purpose and
+// comfortably outside what a collapsed map pixel does by accident.
+#define MAX_LOCATION_SINK (100.0 / newHeight)
 float LocationWeight(float2 pos, float portHeight, out float basemapHeight, out float wildernessWeight) {
     float weight = 0.0;
     float narrowWeight = 0.0;
@@ -302,6 +311,32 @@ float LocationWeight(float2 pos, float portHeight, out float basemapHeight, out 
 
         float2 uv = saturate(locCenter / (terrainSize * float2(TERRAIN_X, TERRAIN_Y))) + uvOffset;
         float baseHeight = mapPixelHeights.SampleLevel(dm_linear_clamp_sampler, uv, 0).r;
+
+        // MOBILE: (D3) bound the sink against the world heightmap AT THIS SAMPLE. This is the one
+        // read that makes the reported pits ("tile/location-sized, vertical walls, floor at the
+        // waterline, fills with water"; device bisect 2026-09-10: pits only with Terrain ON).
+        // baseHeight is mapPixelHeights at the location's CENTRE, and mapPixelHeights holds ONE
+        // sample per map pixel of the mod's own start-up world heightmap - the value
+        // MainHeightmapComputer wrote for the tile CORNER, not the tile's mean - read here with a
+        // -1.5/+0.5 texel offset, so it is a bilinear blend of up to four NEIGHBOURING map pixels.
+        // Where that blend touches a river, a coast, or one of the knife-edge pixels the fault term
+        // in heightSampling.cginc:288-297 can collapse (Player.log has `base=0.0000` at map pixel
+        // 112,161 whose four neighbours all read 0.0588-0.0627, and the analytic minimum of
+        // GetBaseHeight is 99/newHeight = 0.0198 - so that zero is not a height, it is a collapse),
+        // the flatten target falls through to regLocationHeight's absolute max(..., 0.021) floor =
+        // 105 units while the ground this same dispatch is about to generate around the location is
+        // 300-700. 0.021 * newHeight is 105 and OceanElevation is 100.01, so the floor lands five
+        // units above the sea: a flat rectangular pit that fills with water. Exactly the screenshots.
+        //
+        // fallbackHeight is the SAME texture, the same offset and the same scale, sampled at the
+        // position being written rather than at the location's centre, so within one map pixel of a
+        // healthy location the two agree to a texel and this max() changes nothing (the sample
+        // below and the flatten it feeds are unchanged). It only ever RAISES a target that has
+        // fallen more than MAX_LOCATION_SINK below the world height where the sample actually is,
+        // which is the collapse case and nothing else. Sea-level and port locations are unaffected:
+        // GetHeightSample overrides locationHeight through portLocationHeight / the seaHeight
+        // branch AFTER regLocationHeight, so a genuine harbour still flattens to the sea.
+        baseHeight = max(baseHeight, fallbackHeight - MAX_LOCATION_SINK);
 
         float portLerp = saturate(portHeight * 10);
 
@@ -401,6 +436,32 @@ float PortLocationWeight(float2 pos, float portHeight, out float basemapHeight, 
 
         float2 uv = saturate(locCenter / (terrainSize * float2(TERRAIN_X, TERRAIN_Y))) + uvOffset;
         float baseHeight = mapPixelHeights.SampleLevel(dm_linear_clamp_sampler, uv, 0).r;
+
+        // MOBILE: (D3) bound the sink against the world heightmap AT THIS SAMPLE. This is the one
+        // read that makes the reported pits ("tile/location-sized, vertical walls, floor at the
+        // waterline, fills with water"; device bisect 2026-09-10: pits only with Terrain ON).
+        // baseHeight is mapPixelHeights at the location's CENTRE, and mapPixelHeights holds ONE
+        // sample per map pixel of the mod's own start-up world heightmap - the value
+        // MainHeightmapComputer wrote for the tile CORNER, not the tile's mean - read here with a
+        // -1.5/+0.5 texel offset, so it is a bilinear blend of up to four NEIGHBOURING map pixels.
+        // Where that blend touches a river, a coast, or one of the knife-edge pixels the fault term
+        // in heightSampling.cginc:288-297 can collapse (Player.log has `base=0.0000` at map pixel
+        // 112,161 whose four neighbours all read 0.0588-0.0627, and the analytic minimum of
+        // GetBaseHeight is 99/newHeight = 0.0198 - so that zero is not a height, it is a collapse),
+        // the flatten target falls through to regLocationHeight's absolute max(..., 0.021) floor =
+        // 105 units while the ground this same dispatch is about to generate around the location is
+        // 300-700. 0.021 * newHeight is 105 and OceanElevation is 100.01, so the floor lands five
+        // units above the sea: a flat rectangular pit that fills with water. Exactly the screenshots.
+        //
+        // fallbackHeight is the SAME texture, the same offset and the same scale, sampled at the
+        // position being written rather than at the location's centre, so within one map pixel of a
+        // healthy location the two agree to a texel and this max() changes nothing (the sample
+        // below and the flatten it feeds are unchanged). It only ever RAISES a target that has
+        // fallen more than MAX_LOCATION_SINK below the world height where the sample actually is,
+        // which is the collapse case and nothing else. Sea-level and port locations are unaffected:
+        // GetHeightSample overrides locationHeight through portLocationHeight / the seaHeight
+        // branch AFTER regLocationHeight, so a genuine harbour still flattens to the sea.
+        baseHeight = max(baseHeight, fallbackHeight - MAX_LOCATION_SINK);
 
         float portLerp = saturate(portHeight * 10);
 

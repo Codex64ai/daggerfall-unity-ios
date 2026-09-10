@@ -899,6 +899,29 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && Monobelisk.TerrainComputer.WorldHeightmapSample(alteredWorld, -1, 51) < 0f
                   && Monobelisk.TerrainComputer.WorldHeightmapSample(alteredWorld, 460, DaggerfallConnect.Arena2.WoodsFile.MapHeight) < 0f,
                 "WoDTerrain: the world heightmap sample is byte/255 at x + y * MapWidth, and -1 off the map");
+            // (D3) the hole census is the measurement the pit fix has to move, so pin what it counts:
+            // a map pixel at or under the ocean-floor byte with at least five of eight neighbours on
+            // clear land is a hole; the same pixel with sea on one side is a COASTLINE and must not be
+            // counted, or the number says "defect" everywhere the Iliac Bay meets the shore.
+            int mw = DaggerfallConnect.Arena2.WoodsFile.MapWidth;
+            var holeMap = new byte[mw * DaggerfallConnect.Arena2.WoodsFile.MapHeight];
+            for (int hy = 160; hy <= 162; hy++)
+                for (int hx = 111; hx <= 113; hx++)
+                    holeMap[hx + hy * mw] = 16;
+            holeMap[112 + 161 * mw] = 0;                       // the shape Player.log reported at 112,161
+            Check(Monobelisk.TerrainComputer.CountWorldHeightmapHoles(holeMap) == 1,
+                "WoDTerrain: a sea-level map pixel ringed by land counts as one world-heightmap hole");
+            var coastMap = new byte[mw * DaggerfallConnect.Arena2.WoodsFile.MapHeight];
+            for (int hy = 160; hy <= 162; hy++)
+                coastMap[113 + hy * mw] = 16;                  // one column of land to the east, open sea west
+            coastMap[112 + 161 * mw] = 0;
+            Check(Monobelisk.TerrainComputer.CountWorldHeightmapHoles(coastMap) == 0
+                  && Monobelisk.TerrainComputer.CountWorldHeightmapHoles(null) < 0
+                  && Monobelisk.TerrainComputer.CountWorldHeightmapHoles(new byte[10]) < 0,
+                "WoDTerrain: a coastline is not a hole, and a missing or short buffer reports -1");
+            Check(Monobelisk.TerrainComputer.OceanFloorByte == 5 && Monobelisk.TerrainComputer.LandByte == 10
+                  && Monobelisk.TerrainComputer.LandNeighboursForHole == 5,
+                "WoDTerrain: the hole census thresholds are the generator's own floor (99/5000 = 5.05/255) and clear land");
             Check(Monobelisk.InterestingTerrains.Available(true, true) && !Monobelisk.InterestingTerrains.Available(false, true) && !Monobelisk.InterestingTerrains.Available(true, false),
                 "WoDTerrain: needs compute support and both compute shaders");
             Check(Monobelisk.TerrainComputer.StartupBands == 10 && Monobelisk.TerrainComputer.GroupRowsY == 5,
