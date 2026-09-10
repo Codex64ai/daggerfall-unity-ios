@@ -242,6 +242,98 @@ namespace Monobelisk
         }
 
         /// <summary>
+        /// MOBILE: (D4) how many times RepairWorldHeightmapHoles sweeps the map. A pass judges the map
+        /// as it stood when the pass started, so a repaired pixel cannot seed its own neighbour inside
+        /// the same pass; two passes therefore close a hole two pixels wide (the widest the 459 census
+        /// contains) and stop. More passes would start eating real inlets: every sweep relaxes the
+        /// "ringed by land" test by one pixel of the previous sweep's own invention.
+        /// </summary>
+        public const int HoleRepairPasses = 2;
+
+        /// <summary>
+        /// MOBILE: (D4) replaces every hole CountWorldHeightmapHoles would count with the MEDIAN of its
+        /// land neighbours (the 3x3 ring, the neighbours at byte &gt;= LandByte), in place, and returns
+        /// how many pixels it rewrote. -1 for a null or too-small buffer, as the census does.
+        ///
+        /// Why this exists: the 459 holes are not heights the generator meant. They are map pixels the
+        /// 2048-clamped control maps averaged from land into water, and the shader reads that byte as a
+        /// LOCATION'S FLATTEN TARGET (LocationWeight samples mapPixelHeights at the location's centre,
+        /// with a -1.5/+0.5 texel offset that blends up to four neighbouring map pixels). A location
+        /// whose blend touches one loses its height and drops to regLocationHeight's absolute 0.021
+        /// floor. The 20-unit sink cap (TerrainComputer.compute) already stops that becoming a pit, but
+        /// the hole itself still shows: the travel map draws WOODS.WLD directly, so 459 map pixels of
+        /// inland Tamriel render as sea. Repairing the bytes fixes both readers at once.
+        ///
+        /// Median, not mean: a hole's neighbourhood is by definition a mix of the honest land around it
+        /// and (for a two-pixel hole) another floor byte, and the median ignores the outlier where a
+        /// mean would pull the repair back down towards the sea. It also cannot invent a height outside
+        /// the range its neighbours already hold, which is what keeps this from creating new terrain.
+        /// With an even number of land neighbours it takes the upper of the two middle values - stated
+        /// here because the self test pins it.
+        ///
+        /// Ocean is untouched (no land neighbours to take a median from) and so is a coastline (fewer
+        /// than LandNeighboursForHole land neighbours) - the same two exclusions the census makes, from
+        /// the same three constants, so "holes H repaired R" can only differ by holes the passes could
+        /// not reach.
+        ///
+        /// Pure: no GPU, no Unity state, dimensions passed in, so the self test can pin it on a 5x5.
+        /// </summary>
+        public static int RepairWorldHeightmapHoles(byte[] map, int w, int h)
+        {
+            if (map == null || w < 3 || h < 3 || map.Length < w * h)
+                return -1;
+
+            // MOBILE: (D4) `source` is what the pass READS and `map` is what it WRITES, so the outcome
+            // does not depend on the scan order and a pixel repaired at (x,y) is not already land when
+            // (x+1,y) is judged a line later.
+            byte[] source = (byte[])map.Clone();
+            var land = new byte[8];
+            int repaired = 0;
+
+            for (int pass = 0; pass < HoleRepairPasses; pass++)
+            {
+                int passRepairs = 0;
+
+                for (int y = 1; y < h - 1; y++)
+                {
+                    for (int x = 1; x < w - 1; x++)
+                    {
+                        if (source[x + y * w] > OceanFloorByte)
+                            continue;
+
+                        int n = 0;
+                        for (int dy = -1; dy <= 1; dy++)
+                        {
+                            for (int dx = -1; dx <= 1; dx++)
+                            {
+                                if (dx == 0 && dy == 0)
+                                    continue;
+                                byte b = source[(x + dx) + (y + dy) * w];
+                                if (b >= LandByte)
+                                    land[n++] = b;
+                            }
+                        }
+
+                        if (n < LandNeighboursForHole)
+                            continue;
+
+                        Array.Sort(land, 0, n);
+                        map[x + y * w] = land[n / 2];
+                        passRepairs++;
+                    }
+                }
+
+                repaired += passRepairs;
+                if (passRepairs == 0)
+                    break;
+                if (pass + 1 < HoleRepairPasses)
+                    Array.Copy(map, source, w * h);
+            }
+
+            return repaired;
+        }
+
+        /// <summary>
         /// MOBILE: (D1) the height LocationWeight flattens one location TO, computed on the CPU exactly
         /// as TerrainComputer.compute:296-302 computes it on the GPU: floor the rect, take its centre,
         /// divide by terrainSize * (TERRAIN_X, TERRAIN_Y), saturate, add the same uvOffset, sample
@@ -596,6 +688,26 @@ namespace Monobelisk
                 // ocean-floor heights inland".
                 int nonFinite;
                 alteredHeightmapBuffer = Utility.ToBytes(floatHeights, out nonFinite);
+
+                // MOBILE: (D4) the holes are repaired HERE, between ToBytes and the two readers, so
+                // there is exactly one copy of the bytes and both see the repaired map: the WoodsFile
+                // buffer swap on the next line (the travel map's own heightmap, by reference) and the
+                // baseHeightmap texture below (mapPixelHeights, the locations' flatten target).
+                // `holes` is counted BEFORE the repair, deliberately: it is the number every device log
+                // has been compared on (459 on the Mac, 14519 before Metal fast-math was turned off),
+                // and losing it would lose the fast-math regression detector. `repaired` is how many
+                // bytes the two passes rewrote. Note `repaired` can EXCEED `holes` and the two do not
+                // subtract: the census only counts a floor pixel that ALREADY has five land neighbours,
+                // while pass 2 judges against pass 1's output, so the repair front advances one pixel
+                // per pass. Measured on the Mac at 1000x500: holes 459, repaired 542, and the census
+                // afterwards reads 40 - that residue is the new fringe the front exposed, not an
+                // original hole left open (every original had five land neighbours and so was closed in
+                // pass 1). MobileWoDWorldHeightmapProbe prints the after-count; production does not
+                // pay for a second 500,000-pixel census.
+                int holes = CountWorldHeightmapHoles(alteredHeightmapBuffer);
+                int repaired = RepairWorldHeightmapHoles(
+                    alteredHeightmapBuffer, WoodsFile.MapWidth, WoodsFile.MapHeight);
+
                 woodsFile.Buffer = alteredHeightmapBuffer;
 
                 baseHeightmap = new Texture2D(WoodsFile.MapWidth, WoodsFile.MapHeight, TextureFormat.ARGB32, false, true);
@@ -604,9 +716,9 @@ namespace Monobelisk
 
                 watch.Stop();
                 // MOBILE: (h) the one-off cost of the whole start-up pass, in Ikram's Player.log.
-                Debug.Log(string.Format("[WoDTerrain] world heightmap {0} ms ({1} bands) holes {2} nonfinite {3}",
-                    watch.ElapsedMilliseconds, bands.Length,
-                    CountWorldHeightmapHoles(alteredHeightmapBuffer), nonFinite));
+                Debug.Log(string.Format(
+                    "[WoDTerrain] world heightmap {0} ms ({1} bands) holes {2} repaired {3} nonfinite {4}",
+                    watch.ElapsedMilliseconds, bands.Length, holes, repaired, nonFinite));
             }
             finally
             {

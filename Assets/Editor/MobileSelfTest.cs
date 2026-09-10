@@ -922,6 +922,73 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(Monobelisk.TerrainComputer.OceanFloorByte == 5 && Monobelisk.TerrainComputer.LandByte == 10
                   && Monobelisk.TerrainComputer.LandNeighboursForHole == 5,
                 "WoDTerrain: the hole census thresholds are the generator's own floor (99/5000 = 5.05/255) and clear land");
+            // MOBILE: (D4) the REPAIR is what turns that census into a fix. A hole takes the MEDIAN of
+            // its land neighbours, so it lands inside the range the neighbourhood already holds and an
+            // outlier (the 200 below, which a mean would chase) cannot move it. Run on a 5x5 so the
+            // arithmetic is checkable by hand: sorted land = 12 20 30 40 40 60 80 200 and the
+            // even-count convention is the upper middle, 40. The two readers this protects are the
+            // travel map (WoodsFile.Buffer, drawn straight from these bytes - 459 inland map pixels
+            // rendered as sea) and mapPixelHeights (every location's flatten target).
+            const int rw = 5, rh = 5;
+            var repairHole = new byte[]
+            {
+                 0,  0,  0,   0, 0,
+                 0, 12, 20,  30, 0,
+                 0, 40,  3,  40, 0,
+                 0, 60, 80, 200, 0,
+                 0,  0,  0,   0, 0,
+            };
+            // Odd count: one neighbour dropped to sea leaves seven land, sorted 12 20 30 44 50 60 70,
+            // true median 44. The dropped corner is itself only two-land-neighboured, so it is not a
+            // hole and the count stays 1.
+            var repairOdd = new byte[]
+            {
+                 0,  0,  0,  0, 0,
+                 0, 12, 20, 30, 0,
+                 0, 44,  0, 50, 0,
+                 0, 60, 70,  0, 0,
+                 0,  0,  0,  0, 0,
+            };
+            Check(Monobelisk.TerrainComputer.RepairWorldHeightmapHoles(repairHole, rw, rh) == 1
+                  && repairHole[2 + 2 * rw] == 40
+                  && Monobelisk.TerrainComputer.RepairWorldHeightmapHoles(repairOdd, rw, rh) == 1
+                  && repairOdd[2 + 2 * rw] == 44,
+                "WoDTerrain: a world-heightmap hole is repaired to the median of its land neighbours");
+            // The two exclusions the census makes must hold for the repair too, or it would fill the
+            // Iliac Bay in: open sea has no land neighbours to take a median from, and a coastline
+            // (land on one side only, fewer than five of eight) is real geography.
+            var repairOcean = new byte[rw * rh];
+            var repairCoast = new byte[]
+            {
+                 0, 0, 0, 30, 0,
+                 0, 0, 0, 40, 0,
+                 0, 0, 0, 50, 0,
+                 0, 0, 0, 60, 0,
+                 0, 0, 0, 70, 0,
+            };
+            Check(Monobelisk.TerrainComputer.RepairWorldHeightmapHoles(repairOcean, rw, rh) == 0
+                  && repairOcean[2 + 2 * rw] == 0
+                  && Monobelisk.TerrainComputer.RepairWorldHeightmapHoles(repairCoast, rw, rh) == 0
+                  && repairCoast[2 + 2 * rw] == 0
+                  && Monobelisk.TerrainComputer.RepairWorldHeightmapHoles(null, rw, rh) < 0
+                  && Monobelisk.TerrainComputer.RepairWorldHeightmapHoles(new byte[10], rw, rh) < 0,
+                "WoDTerrain: open sea and a coastline are never repaired, and a missing or short buffer reports -1");
+            // A pass reads the map as it stood when the pass STARTED, so the outcome cannot depend on
+            // the scan order - and that is exactly why a second pass is needed: (3,2) has only four
+            // land neighbours until (2,2) is repaired, and it is scanned one column AFTER (2,2) in the
+            // same pass. Two passes therefore close a two-pixel hole and stop.
+            var repairTwoPass = new byte[]
+            {
+                 0,  0,  0,  0, 0,
+                 0, 20, 20, 20, 0,
+                 0, 20,  0,  0, 0,
+                 0, 20, 20, 20, 0,
+                 0,  0,  0,  0, 0,
+            };
+            Check(Monobelisk.TerrainComputer.RepairWorldHeightmapHoles(repairTwoPass, rw, rh) == 2
+                  && repairTwoPass[2 + 2 * rw] == 20 && repairTwoPass[3 + 2 * rw] == 20
+                  && Monobelisk.TerrainComputer.HoleRepairPasses == 2,
+                "WoDTerrain: the second repair pass closes a hole the first cannot reach, and there are two");
             // MOBILE: (F2) Utility.ToBytes is the ONE conversion the mod's entire start-up world
             // heightmap passes through - the texture every location's flatten target is read from -
             // and upstream's `(byte)(uint)(f * 255f)` has no guard at all. NaN arrives as byte 0,

@@ -251,6 +251,26 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 log.AppendLine("[WoDProbe] TerrainComputer.CountWorldHeightmapHoles (byte<=5 ringed by land) = "
                     + Monobelisk.TerrainComputer.CountWorldHeightmapHoles(bytes));
 
+                // MOBILE: (D4) production repairs those holes between ToBytes and the two readers, so
+                // the probe runs the same call and re-censuses: `repaired` should equal the count above
+                // and `remaining` should be ~0 (only holes the two passes could not reach). The byte
+                // deltas are reported so the change to the map is visible as a number, not a claim.
+                var beforeRepair = (byte[])bytes.Clone();
+                int repairedHoles = Monobelisk.TerrainComputer.RepairWorldHeightmapHoles(
+                    bytes, MapWidth, MapHeight);
+                int changedBytes = 0, maxByteDelta = 0;
+                for (int i = 0; i < bytes.Length; i++)
+                {
+                    int d = bytes[i] - beforeRepair[i];
+                    if (d == 0) continue;
+                    changedBytes++;
+                    if (d > maxByteDelta) maxByteDelta = d;
+                }
+                log.AppendLine(string.Format(
+                    "[WoDProbe] RepairWorldHeightmapHoles: repaired {0}, remaining {1}, bytes changed {2}, max byte delta +{3}",
+                    repairedHoles, Monobelisk.TerrainComputer.CountWorldHeightmapHoles(bytes),
+                    changedBytes, maxByteDelta));
+
                 // The pit fix lives in TerrainComputer.compute; make sure it still compiles here
                 // rather than discovering it in an xcodebuild log.
                 var tileCs = AssetDatabase.LoadAssetAtPath<ComputeShader>("Assets/Resources/WoDTerrain/TerrainComputer.compute");
