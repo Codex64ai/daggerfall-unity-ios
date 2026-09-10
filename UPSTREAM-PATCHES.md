@@ -779,3 +779,16 @@ cleanly, with the dock blocks silently vanishing again. `MobileSelfTest` reads
 `RMBLayout.cs` as comment-stripped text and requires exactly two `GetModelData(` call
 sites, both assigned to `hasModelData` and both followed by an `if (!hasModelData)`
 skip — so the tripwire fires in the Editor, not on a device.
+
+**A second, port-only change to the same file, and this half is NOT an upstream
+candidate.** With the block building, the simulator run showed what the NRE had been
+hiding: both loops log one `Debug.LogError` **per record**, and World of Daggerfall's
+override blocks place models from carademono's RMB Resource Pack, one of the three
+optional WoD dependencies this build deliberately does not ship (`THIRD-PARTY.md`
+:178). One visit to a dock produced **190** error lines from 20 distinct ids; Daggerfall
+city produced 199 from 16. On desktop, with the pack installed, the condition does not
+arise — this is noise created by *our* choice not to ship it, so both sites now route
+through a private `ReportMissingModel(modelID, blockName)` that keeps the severity and
+the message but reports each id **once per session**, naming the first block that wanted
+it (190 → 20, 199 → 16). Do not offer this one upstream; on a rebase, taking theirs is
+harmless (louder, not wrong).

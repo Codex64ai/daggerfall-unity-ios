@@ -450,6 +450,26 @@ are one uninterruptible pause from the player's point of view. The number in
 `[WoDTerrain] world heightmap <ms> ms (10 bands)` is therefore the pause it names, not a fraction
 of it.
 
+**The generated world map is repaired before either reader sees it** (2026-09-10). 459 of its
+500,000 map pixels came out at or under the generator's own ocean floor byte while being ringed by
+clear land on five or more of their eight sides - inland Tamriel rendered as sea. They are not
+heights the generator meant: they are pixels its 2048-clamped control maps averaged from land into
+water, and both readers of that byte suffer for it. The travel and region maps draw `WOODS.WLD`
+directly, so each one is a hole in the coastline; and the tile shader samples the same map as a
+LOCATION'S FLATTEN TARGET with a texel offset that blends up to four neighbouring map pixels, so a
+location whose blend touched one lost its height (the 20-unit sink cap stops that becoming a pit,
+but the wrong target remains). `TerrainComputer.RepairWorldHeightmapHoles` replaces each with the
+MEDIAN of its land neighbours - median so a two-pixel hole's own floor byte cannot drag the repair
+back towards the sea, and so the result can never lie outside the range the neighbours already hold
+- in at most two passes, each judging the map as it stood when the pass began. Open sea and
+coastlines are excluded by the same three constants the census uses. It runs between `ToBytes` and
+the `WoodsFile` buffer swap, so the buffer and the `baseHeightmap` texture both see the repaired
+bytes, and it reports itself in the same line:
+`[WoDTerrain] world heightmap 42 ms (10 bands) holes 459 repaired 542 nonfinite 0`. Repaired (542)
+exceeds holes (459) because the second pass re-censuses; 40 remain, all in shapes two passes cannot
+reach without starting to eat real inlets. Measured on the Mac's Metal by the Editor probe and
+confirmed byte for byte on the iOS Simulator.
+
 **Read the per-tile number knowing that part of it is dead work.** Each tile dispatches the
 `TilemapComputer` kernel as well as `TerrainComputer`, reads its 16,641-int result back
 synchronously on the main thread (~66 KB), turns it into a `byte[16641]` and files it in
@@ -461,16 +481,34 @@ entry at promote. It is kept for this round because it is upstream's shape and b
 readback whose output is thrown away, and if the tile timings come back too high, that slice is the
 first thing to remove.
 
-**Road smoothing is inert in this build.** `BasicRoadsUtils` asks `ModManager` for a *mod titled*
-`"BasicRoads"` and then sends it a `getPathData` message; this port has no such mod - Basic Roads is
-compiled into the app as the "Roads & tracks" feature, with no message receiver - so
-`CompatibilityUtils.BasicRoadsLoaded` is always false, `GetRoadData` returns its zeroed arrays and
-the shader's road-flattening pass has nothing to flatten. The `daggerfall_road_map.png` mask that
-says *where* roads may be smoothed is still bound and still sampled; it just never has any direction
-data to work with. The visible cost is that roads on WoD Terrain's steeper hills are not levelled
-into the slope. The follow-up is to wire `BasicRoadsUtils` to the compiled-in road network directly
-rather than through the mod-message protocol; it is not done, and nothing about it is guessed at
-runtime.
+**Road smoothing works, over the compiled-in road network** (2026-09-10; it was inert in the first
+two builds and that is worth knowing when reading an older log). Upstream's `BasicRoadsUtils` asks
+`ModManager` for a *mod titled* `"BasicRoads"` and then sends it a `getPathData` message. This port
+has no such mod - Basic Roads is compiled into the app as the "Roads & tracks" feature, with no
+message receiver - so `CompatibilityUtils.BasicRoadsLoaded` was always false, `GetRoadData` returned
+its nine zeroed vectors, and the shader's `saturate(1.3 - roadWeight * smoothRoads)` never left
+1.3: the terrain was generated as though there were no roads, underneath roads the player can see
+painted across it.
+
+`BasicRoadsUtils.Init` now runs unconditionally and chooses its own source. When the roads switch is
+on for drawing it reads `MobileRoadNetwork` - the same `roadData`/`trackData` byte arrays Basic Roads
+authored, at the same 1000x500 map-pixel layout with the same direction bitmask, so this is that data
+by another door and not a second implementation. It says which source it took, once:
+`[WoDTerrain] roads: smoothing on, over the compiled-in Basic Roads network`, followed by
+`[WoDTerrain] roads: N map pixels with paths in the current tile (x,y, source compiled-in)` for the
+first tile - the one line that distinguishes "the flags reached the shader" from the old silent zero
+state. Upstream's message path is still there for a real bundle, and its answer is now checked for
+null and for length before anything indexes it (it fed a null-array dereference per direction per
+tile). The gate is the DRAWING switch, not merely the data: the network ships with the code either
+way (Real travel routes on it with roads switched off), and flattening a corridor the player cannot
+see would be an unexplained flat strip on a hillside. It is read once, which is correct rather than
+merely cheap - drawing roads is restart-required by design.
+
+Measured in the iOS Simulator with only that switch changed: 23 of the 49 tiles both runs built
+moved, `base=` identical on every one of them (so the world heightmap is untouched and this really
+is the per-tile pass), largest single change 0.0103 of `newHeight` - about 51 units of bump taken
+out of a road corridor. The other 26 tiles had no road in their 3x3 window and are byte-identical.
+The `daggerfall_road_map.png` mask still decides *where* smoothing is allowed at all.
 
 Two things change the moment the switch goes on, and both are by design rather than by accident.
 Ground height: `MaxTerrainHeight` goes from DFU's 1539 to 5000, `OceanElevation` from 27.2 to
