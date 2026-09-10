@@ -327,7 +327,7 @@ namespace DistantTerrain
 
         /// <summary>
         /// Pure: can these tilesets share ONE texture array at all? Size and mip count must match -
-        /// Graphics.ConvertTexture blits slice for slice and cannot rescale, and the shader derives
+        /// the pack copies or blits slice for slice and cannot rescale, and the shader derives
         /// one mip LOD from one dimension. FORMAT is deliberately not part of this: the pack converts
         /// (see PackSeason), because a mixed-format set is a real and legitimate configuration rather
         /// than a corruption. World of Daggerfall - Biomes installs a TextureArray terrain material
@@ -366,9 +366,9 @@ namespace DistantTerrain
 
         /// <summary>
         /// Pure: the stricter predicate Graphics.CopyTexture needs - same size, same mip count AND
-        /// the same format. Only the fallback path asks it, for a device whose driver offers no
-        /// format-converting blit (SystemInfo.copyTextureSupport == None): there, a mixed-format set
-        /// still has to refuse rather than corrupt, exactly as it did before ConvertTexture landed.
+        /// the same format. Only the refusal path asks it, for a device whose driver offers no GPU
+        /// texture copy at all (SystemInfo.copyTextureSupport == None): there the converting blit has
+        /// nowhere to land, so a mixed-format set still has to refuse rather than corrupt.
         /// </summary>
         public static bool TilesetsCompatible(int[] widths, int[] heights, int[] formats, int[] mipCounts, out string detail)
         {
@@ -402,56 +402,45 @@ namespace DistantTerrain
 
         /// <summary>
         /// How one source slice reaches the packed array. See <see cref="SlicePackMethod"/>.
+        ///
+        /// <para>MOBILE: there is deliberately no <c>Convert</c> member. Unity's
+        /// <c>Graphics.ConvertTexture</c> has no array-source path at all, so a member for it would
+        /// only ever name a call that fails.</para>
         /// </summary>
         public enum SlicePack
         {
             /// <summary>Graphics.CopyTexture - the source is already in the destination's format.</summary>
             Copy,
-            /// <summary>Graphics.ConvertTexture - a format-converting GPU blit, slice to slice.</summary>
-            Convert,
-            /// <summary>Graphics.Blit through a RenderTexture, then CopyTexture - the fallback.</summary>
+            /// <summary>Graphics.Blit through a RenderTexture, then CopyTexture - the converting path.</summary>
             Blit,
         }
 
         /// <summary>
-        /// Pure: the decision every slice of the pack goes through.
+        /// Pure: the decision every slice of the pack goes through, made by FORMAT ALONE.
         ///
-        /// <para>MOBILE: <c>Graphics.ConvertTexture(Texture2DArray, int, Texture2DArray, int)</c>
-        /// does not work here. It returns <c>false</c> for a genuine ARGB32 -> RGBA32 slice
-        /// conversion - and for a same-format one - even though <c>SystemInfo.copyTextureSupport</c>
-        /// reports <c>Basic, Copy3D, DifferentTypes, TextureToRT, RTToTexture</c>, so the capability
-        /// flags are not the right question. The simulator run of 2026-09-10 caught Unity's own
-        /// reason for the refusal in the player console: <c>"Graphics.ConvertTexture does not support
-        /// a Texture2DArray as source."</c> - an API precondition rather than a Metal quirk, which is
-        /// why no `copyTextureSupport` bit predicts it. With World of Daggerfall - Biomes installed
-        /// (which makes TextureReader hand back RGBA32 for one climate variant of a season and ARGB32
-        /// for another) that refusal cost the whole far terrain. The fallback does the conversion the
-        /// way nothing can refuse: sample the source slice into a RenderTexture of the DESTINATION
-        /// format with <c>Graphics.Blit(src, rt, sourceDepthSlice, 0)</c> - a texture FETCH, so the
-        /// channel order is decoded by the sampler and re-encoded by the ROP - and copy that back
-        /// into the slice.</para>
+        /// <para>MOBILE: <c>Graphics.ConvertTexture(Texture2DArray, int, Texture2DArray, int)</c> is
+        /// not an option here. Unity's API does not accept a <c>Texture2DArray</c> as a source at
+        /// all - the simulator run of 2026-09-10 caught Unity's own words in the player console,
+        /// <c>"Graphics.ConvertTexture does not support a Texture2DArray as source."</c> - so the
+        /// refusal is an API precondition rather than a driver answer, which is why no
+        /// <c>SystemInfo.copyTextureSupport</c> bit predicts it and why the same-format
+        /// <c>RGBA32 -> RGBA32</c> call was refused too. An earlier revision still PROBED it once per
+        /// session and latched the answer; the probe could never succeed and cost a red Unity error
+        /// line at the first world entry of every Biomes session, so it is gone.</para>
         ///
-        /// <para><paramref name="convertSupported"/> is what this session has LEARNED, not a
-        /// capability bit: it starts true (try the cheap path once) and latches false the first time
-        /// a real conversion is refused, so a runtime that ever grows array-source support gets the
-        /// one-call path for free and this one stops asking after a single refusal. The cost of
-        /// keeping the probe is one refused call and one Unity error line per session; the cost of
-        /// dropping it would be a hard-coded assumption about a Unity version.</para>
+        /// <para>What is left is a two-row table with no runtime input. Same format as the
+        /// destination: <c>Graphics.CopyTexture</c>, a plain slice copy. Different format (Biomes'
+        /// TextureArray provider hands back RGBA32 for one climate variant of a season and ARGB32
+        /// for another, and that mixture used to cost the whole far terrain): sample the source slice
+        /// into a RenderTexture of the DESTINATION format with
+        /// <c>Graphics.Blit(src, rt, sourceDepthSlice, 0)</c> - a texture FETCH, so the channel order
+        /// is decoded by the sampler and re-encoded by the ROP - and copy that back into the slice.
+        /// Nothing refuses that path.</para>
         /// </summary>
-        public static SlicePack SlicePackMethod(TextureFormat srcFormat, TextureFormat dstFormat, bool convertSupported)
+        public static SlicePack SlicePackMethod(TextureFormat srcFormat, TextureFormat dstFormat)
         {
-            if (srcFormat == dstFormat)
-                return SlicePack.Copy;      // no conversion needed, and a same-format ConvertTexture is refused anyway
-            return convertSupported ? SlicePack.Convert : SlicePack.Blit;
+            return srcFormat == dstFormat ? SlicePack.Copy : SlicePack.Blit;
         }
-
-        /// <summary>
-        /// MOBILE: false once a genuine slice conversion has been refused; null until one has been
-        /// tried. Session-scoped rather than per-season: the answer is a property of the runtime, so
-        /// the second and third seasons go straight to the blit instead of re-learning it - one
-        /// refused call per session, not one per archive.
-        /// </summary>
-        static bool? convertSlicesSupported = null;
 
         /// <summary>
         /// MOBILE: the scratch surface the blit fallback converts through - one slice of the
@@ -719,9 +708,9 @@ namespace DistantTerrain
         /// blit that needs only CopyTextureSupport.Basic and works on non-readable textures, so this
         /// is 224 slice copies rather than a GetPixels32 round trip. When the four archives come back
         /// in different formats (Biomes' TextureArray provider does exactly that) the slices that
-        /// need converting go through <c>Graphics.ConvertTexture</c> instead, which converts as it
-        /// copies - or, where the driver refuses that (Metal does), through a RenderTexture of the
-        /// destination format. See <see cref="SlicePackMethod"/>. Returns null (reason logged) if an
+        /// need converting are blitted through a RenderTexture of the destination format instead -
+        /// <c>Graphics.ConvertTexture</c> is not usable here, it takes no Texture2DArray source. See
+        /// <see cref="SlicePackMethod"/>. Returns null (reason logged) if an
         /// archive does not load or the four cannot share one array.
         /// </summary>
         Texture2DArray PackSeason(TextureReader reader, string season, int[] archives)
@@ -760,12 +749,12 @@ namespace DistantTerrain
                 }
 
                 // MOBILE: the four archives of a season may legitimately differ in FORMAT (Biomes'
-                // TextureArray provider - see TilesetsSameSize). Graphics.ConvertTexture is a
-                // format-converting GPU blit with the same slice-to-slice signature as CopyTexture,
-                // works on non-readable textures, and costs the same 224 blits; so a mixed set is
-                // converted into one array rather than refused. RGBA32 is the destination when the
-                // four disagree - it is the format the near terrain and the shader already expect,
-                // and converting into one of the two competing layouts would be arbitrary.
+                // TextureArray provider - see TilesetsSameSize). A differing slice is converted by a
+                // GPU blit through a RenderTexture of the destination format - it works on
+                // non-readable textures and costs one extra surface, so a mixed set is converted into
+                // one array rather than refused. RGBA32 is the destination when the four disagree -
+                // it is the format the near terrain and the shader already expect, and converting
+                // into one of the two competing layouts would be arbitrary.
                 bool formatsAgree = TilesetFormatsAgree(formats);
                 if (!formatsAgree && SystemInfo.copyTextureSupport == UnityEngine.Rendering.CopyTextureSupport.None)
                 {
@@ -794,26 +783,25 @@ namespace DistantTerrain
                 dst.wrapMode = TextureWrapMode.Repeat;
                 dst.anisoLevel = src[0].anisoLevel;
 
-                // MOBILE: copy-or-convert-or-blit is decided per ARCHIVE, not per season, and the
-                // decision itself is the pure SlicePackMethod above. `formatsAgree` is false as soon
-                // as ONE of the four disagrees, and the code before Task 10 then sent all four -
-                // including the ones already in the destination's format - through
-                // Graphics.ConvertTexture. On Metal (and the iOS simulator in particular) a
-                // same-format ConvertTexture returns FALSE, so a Biomes install refused the whole far
-                // terrain with the self-contradictory line "could not convert archive 3 record 0 from
-                // RGBA32 to RGBA32". A source already in the destination format is a plain slice copy
-                // and must stay one - and a source that genuinely needs converting must not be
-                // refused either, because Metal answers `false` to THAT too (diag-report §4). Hence
-                // the third method: blit the slice through a RenderTexture of the destination format.
+                // MOBILE: copy-or-blit is decided per ARCHIVE, not per season, and the decision
+                // itself is the pure SlicePackMethod above - by format alone, with nothing learned at
+                // runtime. `formatsAgree` is false as soon as ONE of the four disagrees, and the code
+                // before Task 10 then sent all four - including the ones already in the destination's
+                // format - through Graphics.ConvertTexture, which refused the whole far terrain under
+                // Biomes with the self-contradictory line "could not convert archive 3 record 0 from
+                // RGBA32 to RGBA32". ConvertTexture is not part of this path at all any more: Unity's
+                // API does not accept a Texture2DArray as a source, so probing it could only ever
+                // print a red Unity error and fall through. A source already in the destination
+                // format is a plain slice copy; one that differs is blitted through a RenderTexture
+                // of the destination format.
                 RenderTexture scratch = null;
                 List<string> blittedFrom = new List<string>();
-                List<string> convertedFrom = new List<string>();
                 int blittedSlices = 0;
                 try
                 {
                     for (int b = 0; b < archives.Length; b++)
                     {
-                        SlicePack method = SlicePackMethod(src[b].format, dstFormat, convertSlicesSupported ?? true);
+                        SlicePack method = SlicePackMethod(src[b].format, dstFormat);
                         string sourceFormatName = src[b].format.ToString();
                         for (int record = 0; record < SlicesPerBiome; record++)
                         {
@@ -822,29 +810,6 @@ namespace DistantTerrain
                             {
                                 Graphics.CopyTexture(src[b], record, dst, slice);
                                 continue;
-                            }
-
-                            if (method == SlicePack.Convert)
-                            {
-                                if (Graphics.ConvertTexture(src[b], record, dst, slice))
-                                {
-                                    convertSlicesSupported = true;
-                                    if (!convertedFrom.Contains(sourceFormatName)) convertedFrom.Add(sourceFormatName);
-                                    continue;
-                                }
-
-                                // Refused. That is not a broken tileset - Unity prints
-                                // "Graphics.ConvertTexture does not support a Texture2DArray as
-                                // source." right before this line - and it is the same answer for
-                                // every remaining slice of the session, so latch it, say so once
-                                // (this line is the one that explains Unity's), and fall through to
-                                // the RenderTexture path for this very record.
-                                Debug.LogWarning(string.Format(
-                                    "[DistantTerrain] tileset arrays: Graphics.ConvertTexture will not convert array " +
-                                    "slices here ({0} -> {1}, archive {2} record {3}); converting through a RenderTexture instead",
-                                    src[b].format, dstFormat, archives[b], record));
-                                convertSlicesSupported = false;
-                                method = SlicePack.Blit;
                             }
 
                             if (scratch == null)
@@ -876,11 +841,6 @@ namespace DistantTerrain
                     DestroySliceScratch(scratch);
                 }
 
-                if (convertedFrom.Count > 0)
-                {
-                    Debug.Log(string.Format("[DistantTerrain] tileset arrays converted: {0} -> {1} ({2})",
-                        string.Join(", ", convertedFrom.ToArray()), dstFormat, season));
-                }
                 if (blittedSlices > 0)
                 {
                     Debug.Log(string.Format("[DistantTerrain] tileset arrays blitted: {0} -> {1} ({2}, {3} slices)",

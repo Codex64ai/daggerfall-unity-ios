@@ -1393,26 +1393,32 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && !global::DistantTerrain.DistantTerrain.TilesetFormatsAgree(null),
                 "DistantTerrain: TilesetFormatsAgree decides whether the pack copies or converts");
 
-            // The per-slice decision, whole truth table. Graphics.ConvertTexture returns FALSE on
-            // array slices even for a genuine ARGB32 -> RGBA32 conversion (diag-report §4; the
-            // simulator console gives Unity's reason, "Graphics.ConvertTexture does not support a
-            // Texture2DArray as source"), so "the formats differ" can no longer mean "convert or
-            // refuse":
-            // a refused conversion falls back to a Blit through a RenderTexture of the destination
-            // format. A source ALREADY in the destination format is a plain copy in every column -
-            // a same-format ConvertTexture is refused too, and that is what cost the whole far
-            // terrain under Biomes before Task 9's fix.
-            Check(global::DistantTerrain.DistantTerrain.SlicePackMethod(TextureFormat.RGBA32, TextureFormat.RGBA32, true)
+            // The per-slice decision, whole truth table - now two rows decided by FORMAT ALONE, with
+            // no runtime input. Graphics.ConvertTexture takes no Texture2DArray as a source in this
+            // Unity at all (the simulator console gives Unity's own reason, "Graphics.ConvertTexture
+            // does not support a Texture2DArray as source"), so it is not a candidate for either row
+            // and probing it could only ever print a red Unity error: a differing format goes
+            // straight to a Blit through a RenderTexture of the destination format. A source ALREADY
+            // in the destination format is a plain copy - a same-format ConvertTexture was refused
+            // too, and that is what cost the whole far terrain under Biomes before Task 9's fix.
+            Check(global::DistantTerrain.DistantTerrain.SlicePackMethod(TextureFormat.RGBA32, TextureFormat.RGBA32)
                       == global::DistantTerrain.DistantTerrain.SlicePack.Copy
-                  && global::DistantTerrain.DistantTerrain.SlicePackMethod(TextureFormat.RGBA32, TextureFormat.RGBA32, false)
+                  && global::DistantTerrain.DistantTerrain.SlicePackMethod(TextureFormat.ARGB32, TextureFormat.ARGB32)
                       == global::DistantTerrain.DistantTerrain.SlicePack.Copy,
-                "DistantTerrain: a source already in the destination format is copied, whether or not the driver converts");
-            Check(global::DistantTerrain.DistantTerrain.SlicePackMethod(TextureFormat.ARGB32, TextureFormat.RGBA32, true)
-                      == global::DistantTerrain.DistantTerrain.SlicePack.Convert,
-                "DistantTerrain: a differing format is converted where the driver honours ConvertTexture");
-            Check(global::DistantTerrain.DistantTerrain.SlicePackMethod(TextureFormat.ARGB32, TextureFormat.RGBA32, false)
+                "DistantTerrain: a source already in the destination format is copied, whatever that format is");
+            Check(global::DistantTerrain.DistantTerrain.SlicePackMethod(TextureFormat.ARGB32, TextureFormat.RGBA32)
+                      == global::DistantTerrain.DistantTerrain.SlicePack.Blit
+                  && global::DistantTerrain.DistantTerrain.SlicePackMethod(TextureFormat.RGBA32, TextureFormat.ARGB32)
                       == global::DistantTerrain.DistantTerrain.SlicePack.Blit,
-                "DistantTerrain: a differing format is blitted through a RenderTexture where ConvertTexture is refused (every runtime that will not take a Texture2DArray as source)");
+                "DistantTerrain: a differing format is blitted through a RenderTexture, in either direction and on every runtime");
+            // ...and Convert is not merely unreached, it is not expressible: the enum has exactly the
+            // two members the two rows produce, so no later edit can revive the probe by accident.
+            string[] slicePackNames = System.Enum.GetNames(typeof(global::DistantTerrain.DistantTerrain.SlicePack));
+            Check(slicePackNames.Length == 2
+                  && System.Array.IndexOf(slicePackNames, "Copy") >= 0
+                  && System.Array.IndexOf(slicePackNames, "Blit") >= 0,
+                "DistantTerrain: SlicePack is Copy or Blit only - there is no Convert outcome to fall into",
+                string.Join(", ", slicePackNames));
 
             // The mip-count uniform's C# half: the number pushed is the packed arrays' own, floored
             // at 1 so an unpacked/mip-less array clamps the shader's explicit lod to level 0 rather
@@ -1577,24 +1583,24 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // ...and only across the three DIMENSIONS. The seasons are sampled from independent
             // arrays, so one packed RGBA32 beside one packed in its sources' own format is fine;
             // making format part of the cross-season rule would refuse a legitimate Biomes set twice.
-            Check(portCode.Contains("Graphics.ConvertTexture(src[b], record, dst, slice)")
+            Check(portCode.Contains("BlitSlice(src[b], record, dst, slice, scratch);")
                   && portCode.Contains("SystemInfo.copyTextureSupport == UnityEngine.Rendering.CopyTextureSupport.None"),
-                "DistantTerrain: PackSeason converts formats with a GPU blit and only refuses where no blit exists");
+                "DistantTerrain: PackSeason converts formats with a GPU blit and only refuses where no GPU copy exists at all");
             // ...and the blit is chosen per ARCHIVE. `formatsAgree` is false as soon as one of the
             // four disagrees; sending the ones already in the destination format through
             // Graphics.ConvertTexture is a same-format round trip that Metal answers with FALSE, and
             // that refused the entire far terrain under Biomes ("could not convert archive 3 record 0
             // from RGBA32 to RGBA32"). A matching source is a plain slice copy.
-            Check(portCode.Contains("SlicePack method = SlicePackMethod(src[b].format, dstFormat, convertSlicesSupported ?? true);")
+            Check(portCode.Contains("SlicePack method = SlicePackMethod(src[b].format, dstFormat);")
                   && portCode.Contains("if (method == SlicePack.Copy)"),
-                "DistantTerrain: copy-or-convert-or-blit is decided per archive by the pure SlicePackMethod, so a source already in the destination format is never sent through a same-format ConvertTexture");
-            // The fallback itself, and the latch that makes it cost one refused call per SESSION
-            // rather than one per archive. `?? true` is what makes the first slice still try the
-            // cheap path on a driver that would have honoured it.
-            Check(portCode.Contains("convertSlicesSupported = false;")
-                  && portCode.Contains("BlitSlice(src[b], record, dst, slice, scratch);")
-                  && portCode.Contains("scratch = CreateSliceScratch(dst);"),
-                "DistantTerrain: a refused ConvertTexture latches for the session and the slice is blitted through the scratch RenderTexture instead");
+                "DistantTerrain: copy-or-blit is decided per archive by the pure SlicePackMethod, from the two formats and nothing else, so a source already in the destination format is never sent through a converting path");
+            // The converting path itself, and the scratch surface it converts through - created
+            // lazily on the first slice that needs it, so an all-Copy season allocates no render
+            // target at all.
+            Check(portCode.Contains("BlitSlice(src[b], record, dst, slice, scratch);")
+                  && portCode.Contains("scratch = CreateSliceScratch(dst);")
+                  && portCode.Contains("RenderTexture scratch = null;"),
+                "DistantTerrain: a differing slice is blitted through a scratch RenderTexture that is only created when one is needed");
             Check(portCode.Contains("Graphics.Blit(src, scratch, srcSlice, 0);")
                   && portCode.Contains("scratch.GenerateMips();")
                   && portCode.Contains("Graphics.CopyTexture(scratch, 0, dst, dstSlice);"),
@@ -1652,7 +1658,6 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "[DistantTerrain] far terrain ready",
                 "[DistantTerrain] far terrain failed: ",
                 "[DistantTerrain] tileset arrays mismatch: ",
-                "[DistantTerrain] tileset arrays converted: {0} -> {1} ({2})",
                 "[DistantTerrain] tileset arrays blitted: {0} -> {1} ({2}, {3} slices)",
                 "[DistantTerrain] far terrain: pos={0:F1},{1:F1},{2:F1} size={3:F1},{4:F1},{5:F1} heightScale={6:F1} ",
                 "layer={7} stackedCamera mask={8} near={9} far={10} depth={11} targetTexture={12} main.far={13} ",
@@ -1662,6 +1667,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 Check(port.Contains(literal), "DistantTerrain: log literal \"" + literal + "\"");
             Check(startup.Contains("[DistantTerrain] not available: "),
                 "DistantTerrain: log literal \"[DistantTerrain] not available: \"");
+            // And the two literals that must NOT come back. The probe printed a red Unity error
+            // ("Graphics.ConvertTexture does not support a Texture2DArray as source.") once per
+            // Biomes session and a port warning beside it to explain the red line; with no probe
+            // there is nothing to explain, and `tileset arrays converted:` named an outcome that can
+            // no longer happen. Pinned as an ABSENCE because a revived probe would still pass every
+            // other check here.
+            Check(!portCode.Contains("Graphics.ConvertTexture")
+                  && !port.Contains("Graphics.ConvertTexture will not convert array")
+                  && !port.Contains("[DistantTerrain] tileset arrays converted:"),
+                "DistantTerrain: no ConvertTexture call, no warning explaining its red error line, and no `tileset arrays converted:` outcome");
             Check(!port.Contains("[Distant Terrain]") && !startup.Contains("[Distant Terrain]"),
                 "DistantTerrain: one log prefix, so grepping [DistantTerrain] finds every line the port writes");
             // The fifth stage is measured, not just printed: the pack runs near the end of

@@ -704,9 +704,9 @@ from the summer array and applies it to all three), vanilla being always 64x64 w
 counts, so either only bites under an asymmetric replacement pack. FORMAT is deliberately not a
 refusal: World of Daggerfall - Biomes installs a `TextureArray` terrain material provider and
 `GetTerrainTextureArray` then hands back RGBA32 for one climate variant of a season and ARGB32 for
-another, which is legitimate and which the pack converts as it copies (`Graphics.ConvertTexture`,
-same 224 slice blits, destination RGBA32), saying so once per season with
-`[DistantTerrain] tileset arrays converted: RGBA32, ARGB32 -> RGBA32 (winter)`. Refusing it instead
+another, which is legitimate and which the pack converts as it copies (a GPU blit through a
+destination-format `RenderTexture`, destination RGBA32), saying so once per season with
+`[DistantTerrain] tileset arrays blitted: ARGB32 -> RGBA32 (winter, 168 slices)`. Refusing it instead
 stopped the far terrain building at all whenever Biomes was on, which is how the Task 9 simulator run
 found it. A device that reports no copy-texture support at all falls back to the strict same-format
 rule and refuses, as before.
@@ -719,21 +719,20 @@ reason for it in the player console, which is worth writing down because it reti
 reading: **`Graphics.ConvertTexture does not support a Texture2DArray as source.`** That is an API
 precondition, not a driver answer, which is exactly why no `copyTextureSupport` bit predicts it and
 why the same call also returned `false` for the same-format round trip Task 9 fixed.
-The pack therefore carries a third method, chosen per source archive by a pure
-`SlicePackMethod(srcFormat, dstFormat, convertSupported)`: **Copy** when the source is already in the
-destination format, **Convert** when it is not and the driver honours it, and **Blit** when it does
-not - `Graphics.Blit(src, scratch, sourceDepthSlice, 0)` into a `RenderTexture` of the destination
+`ConvertTexture` is therefore not part of this path at all. The method is chosen per source archive
+by a pure `SlicePackMethod(srcFormat, dstFormat)` - two rows, decided by **format alone**, with
+nothing learned at runtime: **Copy** when the source is already in the destination format
+(`Graphics.CopyTexture`, slice to slice), **Blit** when it is not -
+`Graphics.Blit(src, scratch, sourceDepthSlice, 0)` into a `RenderTexture` of the destination
 array's exact graphics format, `GenerateMips()`, then `Graphics.CopyTexture(scratch, 0, dst, slice)`.
 A blit is a *sampler fetch*, so the channel order is decoded on read and re-encoded on write and the
-driver has nothing to refuse. `convertSupported` is what the session has learned rather than a
-capability bit: it starts true, so a runtime that ever grows array-source support gets the one-call
-path for free, and latches false on the first refusal, so the cost of the discovery is one refused
-call per session and not one per archive - plus, on this Unity version, one red
+driver has nothing to refuse. An earlier revision still probed `ConvertTexture` once per session and
+latched the answer, on the theory that a Unity which grew an array-source path should get the cheaper
+call for free; the probe could not succeed on any shipping runtime and it printed a red
 `Graphics.ConvertTexture does not support a Texture2DArray as source` in the console at the first
-world entry with a mixed set, immediately followed by the port's own line explaining it. That is a
-deliberate trade: the alternative is hard-coding "this Unity cannot do it", which silently becomes
-wrong. The blit path says so once per season, and that line is the one to grep for on a Biomes
-install: `[DistantTerrain] tileset arrays blitted: ARGB32 -> RGBA32 (winter, 168 slices)`. The mip
+world entry of every Biomes session, so it is gone and the `SlicePack` enum no longer has a `Convert`
+member to fall into. The blit path says so once per season, and that line is the one to grep for on a
+Biomes install: `[DistantTerrain] tileset arrays blitted: ARGB32 -> RGBA32 (winter, 168 slices)`. The mip
 chain is regenerated from the converted level 0 rather than carried across, which is the same image -
 the sources' own chains are Unity-generated box filters of the same pixels - and it matters because
 the shader picks its tile mip *explicitly* (`UNITY_SAMPLE_TEX2DARRAY_LOD`; array `GRAD` sampling has
