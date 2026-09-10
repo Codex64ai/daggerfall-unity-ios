@@ -64,9 +64,15 @@ namespace RealGrass
     ///
     /// Upstream's detail map was 256x256 for a 128x128 tilemap, i.e. four detail cells per terrain
     /// tile, indexed (tile * 2) and (tile * 2) + 1. At detail resolution 128 the map is 1:1 with
-    /// the tilemap and those four cells fold into one, which is why the indexer ADDS through
-    /// <see cref="RealGrassPort.FoldDetailValue"/> rather than assigning: a cell now covers four
-    /// times the ground, and adding is what keeps grass per square metre the same as upstream.
+    /// the tilemap and those four cells fold into one. The fold is TWO steps, and both are needed:
+    /// the indexer ACCUMULATES the four sub-cell writes through
+    /// <see cref="RealGrassPort.AccumulateSubCell"/> rather than assigning (so the fourth write
+    /// does not erase the first three), and <see cref="FoldToMean"/> then divides every cell by the
+    /// four sub-cells it stands for, once, before the layer goes to the terrain. Averaging - not
+    /// summing - is what keeps grass per square metre the same as upstream: under the coverage
+    /// scatter mode this port forces, a value is coverage of the cell's ground, so a cell four
+    /// times as large carries the mean of the four it replaced. See
+    /// <see cref="RealGrassPort.FoldDetailValue"/>.
     /// </summary>
     public sealed class DetailMap
     {
@@ -76,6 +82,9 @@ namespace RealGrass
         /// <summary>MOBILE: upstream cells that fold into one cell of this map, per axis.</summary>
         public static readonly int Fold = Mathf.Max(1, UpstreamResolution / RealGrassPort.DetailResolution);
 
+        /// <summary>MOBILE: upstream cells behind one cell of this map. 2 x 2 = 4 - the divisor of the mean.</summary>
+        public static readonly int SubCells = Fold * Fold;
+
         /// <summary>MOBILE: the array handed to TerrainData.SetDetailLayer. Never reallocated.</summary>
         public int[,] Cells { get; }
 
@@ -84,22 +93,49 @@ namespace RealGrass
             Cells = new int[RealGrassPort.DetailResolution, RealGrassPort.DetailResolution];
         }
 
+        /// <summary>MOBILE: set once FoldToMean has run; reset by Clear. Keeps the fold idempotent.</summary>
+        bool folded;
+
         /// <summary>MOBILE: what upstream's EmptyMap() allocation cost, for free.</summary>
         internal void Clear()
         {
             System.Array.Clear(Cells, 0, Cells.Length);   // MOBILE: System-qualified - a
             // `using System` here makes every UnityEngine.Random call below ambiguous.
+            folded = false;
         }
 
-        /// <summary>MOBILE: upstream 256-space in, folded cell out.</summary>
+        /// <summary>MOBILE: upstream 256-space in, accumulated cell out (a SUM until FoldToMean).</summary>
         public int this[int y, int x]
         {
             get { return Cells[y / Fold, x / Fold]; }
             set
             {
                 int fy = y / Fold, fx = x / Fold;
-                Cells[fy, fx] = RealGrassPort.FoldDetailValue(Cells[fy, fx], value, RealGrassPort.MaxDetailValue);
+                Cells[fy, fx] = RealGrassPort.AccumulateSubCell(Cells[fy, fx], value);
             }
+        }
+
+        /// <summary>
+        /// MOBILE: the second half of the fold - turn every accumulated sum into the mean of the
+        /// <see cref="SubCells"/> upstream cells behind it, clamped to Unity's scatter ceiling.
+        /// Run once per promotion, after the density pass and before SetDetailLayer; idempotent
+        /// until the next Clear, so a second call cannot average an already-averaged layer.
+        /// </summary>
+        internal void FoldToMean()
+        {
+            if (folded) return;
+            folded = true;
+            int max = RealGrassPort.MaxDetailValue, subCells = SubCells;
+            if (subCells <= 1) return;
+            int[,] cells = Cells;
+            int height = cells.GetLength(0), width = cells.GetLength(1);
+            for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                {
+                    int sum = cells[y, x];
+                    if (sum != 0)
+                        cells[y, x] = RealGrassPort.FoldDetailValue(sum, subCells, max);
+                }
         }
     }
 
@@ -126,9 +162,11 @@ namespace RealGrass
         #region Properties
 
         // Empty layer
-        // MOBILE: still a fresh allocation, because it is handed straight to SetDetailLayer to
-        // blank a terrain and only StopMod does that - once, off the promotion path.
-        public static int[,] Empty { get { return EmptyMap(); } }
+        // MOBILE: cached. Upstream allocated a fresh 256-square map per read; StopMod reads this
+        // once per supported layer per live terrain (up to 49 of them), and SetDetailLayer only
+        // READS the array it is given, so one shared all-zero array serves every blanking write.
+        static int[,] emptyMap;
+        public static int[,] Empty { get { return emptyMap ?? (emptyMap = EmptyMap()); } }
 
         // Layers maps
         // MOBILE: DetailMap, not int[,] - allocated in the constructor, cleared per promotion.
@@ -176,6 +214,21 @@ namespace RealGrass
             if (WaterPlants != null) WaterPlants.Clear();
             if (Rocks != null) Rocks.Clear();
             rocksDensity = GetTerrainDensityPerennial(density.Rocks);
+        }
+
+        /// <summary>
+        /// MOBILE: the second half of the fold, once per promotion. After the density pass each
+        /// cell holds the SUM of the up-to-four upstream sub-cell writes that landed in it; the
+        /// coverage scatter mode this port forces wants their MEAN, so every layer is averaged in
+        /// place here, immediately before RealGrass hands them to TerrainData.SetDetailLayer.
+        /// </summary>
+        public void FoldDetailLayers()
+        {
+            Grass.FoldToMean();
+            if (GrassDetails != null) GrassDetails.FoldToMean();
+            if (GrassAccents != null) GrassAccents.FoldToMean();
+            if (WaterPlants != null) WaterPlants.FoldToMean();
+            if (Rocks != null) Rocks.FoldToMean();
         }
 
         /// <summary>

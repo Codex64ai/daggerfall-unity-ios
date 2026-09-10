@@ -20,8 +20,10 @@ Zero API gaps against our DFU 1.1.1 (checked symbol by symbol).
 1. **Code compiled in**: `Assets/Scripts/Game/Mobile/Ports/RealGrass/` (RealGrass.cs, DensityManager.cs,
    DetailPrototypesManager.cs, Range.cs; `External/RealGrassConsoleCommands.cs` dropped). `[Invoke]` removed; started by
    `MobilePortedMods.StartEnabled` via the 4-arg `StartOne` (`RealGrassPort.Installed` true after the terrain hook subscribed).
-   MOBILE edits: `SetDetailResolution(256, 8)` -> `(128, 16)` (DFU's own patch density, 4x its detail resolution; quarter the
-   resident data, 1/16 the patches); the `int[256,256]` per-layer allocations become cached `int[128,128]` arrays cleared with
+   MOBILE edits: `SetDetailResolution(256, 8)` -> `(128, 16)` - which is DFU's own detail store exactly, since
+   `DaggerfallTerrain` calls `SetDetailResolution(HeightmapDimension = 129, 16)` and Unity resolves that to a 128-square store
+   at 16 per patch (NOT "4x DFU's detail resolution", as this line said before the Task 2 review's I2: quarter the resident data
+   and 1/16 the patches are wins against **upstream's** (256, 8)); the `int[256,256]` per-layer allocations become cached `int[128,128]` arrays cleared with
    `Array.Clear` (no per-promotion allocation); style forced to **Classic** with **Billboard = true** (no FBX prototypes, no
    Standard-shader meshes), Stones off, WaterPlants off, FlyingInsects off, `DetailDistance` default 40 m (dial), `DetailDensity`
    default 0.6 (dial) - both readable from the mod's settings so the player can raise them; `wavingGrassTint` kept.

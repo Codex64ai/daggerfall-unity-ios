@@ -262,8 +262,12 @@ terrain**. Real Grass overrides to `(256, 8)`: 256/8 ⇒ 32 per side, **1,024 pa
 ~16× increase, at *half* Unity's recommended `resolutionPerPatch`. At the shipped
 `TerrainDistance=3` (49 live terrains) that is **~50,176 detail patches to cull every frame**, and
 **~15.3 MB of resident detail-density data**. Dropping to `(128, 8)` quarters the resident data and
-cuts patches to 256 per terrain; going to `(128, 16)` cuts them to 64 — matching DFU's own patch
-density while keeping four times DFU's detail resolution. That is the setting to reach for first.
+cuts patches to 256 per terrain; going to `(128, 16)` cuts them to 64 — which is *exactly* DFU's
+own detail store, not a coarser or a finer one: `DaggerfallTerrain.PromoteTerrainData` calls
+`SetDetailResolution(TerrainSampler.HeightmapDimension = 129, 16)` and Unity resolves that to a
+128-square store at 16 per patch. (An earlier draft of this section claimed `(128, 16)` still kept
+“four times DFU's detail resolution”; it does not — it *matches* DFU. The 4× data / 16× patch wins
+are real, but they are against **upstream's** `(256, 8)`.) That is the setting to reach for first.
 
 **Two field reports, snippet-sourced and therefore unverified** (dfworkshop.net 403s), both of which
 land squarely on this port because we ship *both* mods involved: a thread titled *"Distant Terrain +
@@ -528,8 +532,9 @@ the phone-friendly configuration — and make it opt-in.** Concretely:
    `modsettings.json`: `Style = Classic` (not Full), `Billboard = true` (⇒ `GrassBillboard`, not
    Standard-shaded FBX prototypes), `Stones = Disabled`, `WaterPlants = false`,
    **`SetDetailResolution(128, 16)`** not `(256, 8)` — that quarters the resident detail data *and*
-   brings patches per terrain from 1,024 back to 64, matching DFU's own patch density while still
-   giving four times DFU's detail resolution — `DetailDistance` ~30–40 (not 120),
+   brings patches per terrain from 1,024 back to 64 — which is DFU's own detail store exactly
+   (`SetDetailResolution(129, 16)` ⇒ a 128-square store, 64 patches), not four times its detail
+   resolution as an earlier draft said — `DetailDistance` ~30–40 (not 120),
    `FlyingInsects` off (already the default). Add an iPhone texture-platform override so the
    textures do not import at 2048.
 4. **Two code changes before any device test**: cache the layer arrays and `Array.Clear` them in

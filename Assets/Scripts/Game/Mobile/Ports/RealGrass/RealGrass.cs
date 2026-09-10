@@ -4,8 +4,9 @@
 //
 // MOBILE: the mod is compiled into the app and started by MobilePortedMods, not by DFU's [Invoke]
 // loader, and it runs in ONE configuration - the cheap one: Classic style, billboard prototypes,
-// no stones, no water plants, no fireflies, detail resolution 128 at 16 per patch (DFU's own patch
-// density, four times DFU's detail resolution) instead of upstream's 256/8. See RealGrassPort.
+// no stones, no water plants, no fireflies, detail resolution 128 at 16 per patch - which is
+// exactly the detail store DFU builds for itself, not a finer one - instead of upstream's 256/8.
+// See RealGrassPort.
 //
 // MOBILE: there is no modsettings.json in the iOS bundle (it ships the two Classic textures and
 // nothing else), so mod.GetSettings() has nothing to read and the settings callback is gone. Every
@@ -84,10 +85,13 @@ namespace RealGrass
         #region The forced configuration
 
         /// <summary>
-        /// MOBILE: upstream's <c>SetDetailResolution(256, 8)</c> becomes (128, 16). 16 per patch is
-        /// DFU's own patch density (DaggerfallTerrain.resolutionPerPatch) and Unity's recommended
-        /// value; 128 is still four times DFU's detail resolution. Together they quarter the
-        /// resident detail data and cut detail patches per terrain from 1,024 to 64.
+        /// MOBILE: upstream's <c>SetDetailResolution(256, 8)</c> becomes (128, 16) - which is
+        /// exactly the store DFU already builds for itself, NOT a finer one. DaggerfallTerrain
+        /// calls SetDetailResolution(TerrainSampler.HeightmapDimension = 129, resolutionPerPatch =
+        /// 16) and Unity resolves that to a 128-square detail store at 16 per patch, i.e. 64
+        /// patches (DaggerfallTerrain.cs:269-285, TerrainSampler.cs:96). So this port carries DFU's
+        /// own detail density; the outlier is upstream's (256, 8), against which the port is 16x
+        /// cheaper in detail patches per terrain and 4x cheaper in resident detail data.
         /// </summary>
         public const int DetailResolution = 128;
 
@@ -224,10 +228,32 @@ namespace RealGrass
         }
 
         /// <summary>
+        /// MOBILE: the terrain's detail scatter mode, set EXPLICITLY on every TerrainData this port
+        /// writes details to rather than inherited from whatever a runtime-constructed TerrainData
+        /// happens to be in. DFU builds its terrains with a bare <c>new TerrainData()</c> and
+        /// nothing else in this project ever calls SetDetailScatterMode, so the mode was an
+        /// undocumented engine default that a Unity upgrade - or a TerrainData copy - could move
+        /// under us. The two modes are 16x apart in what a detail-map value MEANS, so that silence
+        /// was not survivable.
+        ///
+        /// CoverageMode: a cell holds 0..255, "how much of this sample's area the detail covers".
+        /// The value is area-normalised, so it carries upstream's per-square-metre intent through
+        /// the drop from upstream's 256-square detail map to this port's 128-square one unchanged
+        /// - which is exactly what <see cref="FoldDetailValue"/> relies on.
+        /// InstanceCountMode: a cell holds an instance count with a ceiling of 16, BELOW upstream's
+        /// own thick density (6..20), so the mod's authored values could not be represented at all.
+        ///
+        /// Set before the first SetDetailLayer of a promotion: switching to InstanceCountMode
+        /// erases existing detail placements.
+        /// </summary>
+        public const DetailScatterMode ForcedScatterMode = DetailScatterMode.CoverageMode;
+
+        /// <summary>
         /// MOBILE: Unity's ceiling on a single detail-map cell, read from
-        /// TerrainData.maxDetailScatterPerRes on the first promotion (it depends on the terrain's
-        /// detail scatter mode, which this port does not change). The fallback is the coverage-mode
-        /// value; nothing here ever gets near it at Classic densities.
+        /// TerrainData.maxDetailScatterPerRes per promotion - after <see cref="ForcedScatterMode"/>
+        /// has been applied, so in practice it is coverage mode's 255. The fallback is that same
+        /// value; nothing here ever gets near it at Classic densities. The memory log line writes
+        /// the mode and this number out, so a Player.log settles it empirically.
         /// </summary>
         public const int FallbackMaxDetailValue = 255;
 
@@ -235,19 +261,45 @@ namespace RealGrass
         public static int MaxDetailValue = FallbackMaxDetailValue;
 
         /// <summary>
-        /// MOBILE pure: the fold. Upstream addressed a 256x256 detail map as (tile * 2 + sub), so
-        /// each of the 128x128 tilemap cells owned four detail cells. At detail resolution 128 the
-        /// map is 1:1 with the tilemap and those four fold into one, so the values ADD rather than
-        /// overwrite - a detail cell now covers four times the ground, and adding is what keeps
-        /// grass per square metre the same as upstream instead of quartering it. Clamped because a
-        /// detail-map cell cannot hold more than Unity's scatter ceiling.
+        /// MOBILE pure: the accumulating half of the fold. Upstream addressed a 256x256 detail map
+        /// as (tile * 2 + sub), so each of the 128x128 tilemap's cells owned four detail cells; at
+        /// detail resolution 128 the map is 1:1 with the tilemap and those four sub-cells land in
+        /// one. They are SUMMED here and averaged by <see cref="FoldDetailValue"/> once the density
+        /// pass has finished writing. Deliberately NOT clamped to the scatter ceiling: clamping a
+        /// partial sum would bias the mean downwards.
         /// </summary>
-        public static int FoldDetailValue(int existing, int added, int max)
+        public static int AccumulateSubCell(int existing, int added)
+        {
+            if (existing < 0) existing = 0;
+            if (added < 0) added = 0;
+            long sum = (long)existing + added;
+            return sum > int.MaxValue ? int.MaxValue : (int)sum;
+        }
+
+        /// <summary>
+        /// MOBILE pure: the fold itself, run once per promotion over the accumulated sums. Under
+        /// <see cref="ForcedScatterMode"/> a detail value is COVERAGE - how much of the cell's
+        /// ground the detail covers - so it is already area-normalised, and a cell that covers four
+        /// times the ground must carry the MEAN of the four upstream sub-cells it replaces, not
+        /// their sum. Summing would have multiplied grass per square metre by four against
+        /// upstream; the mean is parity with upstream, which is what this port is for.
+        ///
+        /// Sub-cells upstream never wrote count as zero, and that is the point: a tile whose grass
+        /// upstream put in one corner covers a quarter of the folded cell, and the mean says so.
+        ///
+        /// Upstream's densities are integers (Random.Range over 2..8 thin, 6..19 thick, 4..7
+        /// desert), so their mean is rounded to the nearest integer, halves up, rather than floored
+        /// - a floor would shave up to three quarters of a unit off every cell, which at a thin
+        /// density of 2 is most of the grass. Clamped to Unity's ceiling
+        /// (<see cref="MaxDetailValue"/>) last; at Classic densities nothing gets near 255.
+        /// </summary>
+        public static int FoldDetailValue(int sum, int subCells, int max)
         {
             if (max < 0) max = 0;
-            long sum = (long)existing + added;
-            if (sum < 0) return 0;
-            return sum > max ? max : (int)sum;
+            if (subCells < 1) subCells = 1;
+            if (sum <= 0) return 0;
+            long mean = ((long)sum + (subCells / 2)) / subCells;
+            return mean > max ? max : (int)mean;
         }
 
         #endregion
@@ -520,8 +572,17 @@ namespace RealGrass
             {
                 terrainData.SetDetailResolution(RealGrassPort.DetailResolution, RealGrassPort.DetailResolutionPerPatch);
             }
+            // MOBILE: the detail scatter mode, set explicitly and only when it differs - once per
+            // TerrainData in practice, then never. It must happen BEFORE the first SetDetailLayer
+            // of this promotion, because switching to InstanceCountMode erases existing detail
+            // placements. What a detail value means depends on this (coverage 0..255 vs an
+            // instance count capped at 16), and DensityManager's fold is written for coverage; see
+            // RealGrassPort.ForcedScatterMode.
+            if (terrainData.detailScatterMode != RealGrassPort.ForcedScatterMode)
+                terrainData.SetDetailScatterMode(RealGrassPort.ForcedScatterMode);
             // MOBILE: Unity's ceiling for one detail-map cell, which DensityManager's fold clamps
-            // to. It depends on the terrain's detail scatter mode, which this port does not change.
+            // to. It follows from the scatter mode just set, so this reads 255 - but it is read,
+            // not assumed, and it is logged.
             RealGrassPort.MaxDetailValue = terrainData.maxDetailScatterPerRes > 0
                 ? terrainData.maxDetailScatterPerRes
                 : RealGrassPort.FallbackMaxDetailValue;
@@ -563,6 +624,11 @@ namespace RealGrass
             // Assign detail prototypes to the terrain
             terrainData.detailPrototypes = detailPrototypesManager.DetailPrototypes;
 
+            // MOBILE: the second half of the fold. The density pass above wrote upstream's four
+            // sub-cells per tile into one cell each, accumulating; coverage semantics want their
+            // MEAN, so this averages every cell in place before the layers go to the terrain.
+            densityManager.FoldDetailLayers();
+
             // Assign detail layers to the terrain
             // MOBILE: .Cells - the layers are DetailMap now (a cached int[128,128] addressed in
             // upstream's 256-space), not a fresh int[256,256] per layer per promotion.
@@ -584,9 +650,12 @@ namespace RealGrass
                 memoryLogged = true;
                 int layers = detailPrototypesManager.DetailPrototypes != null ? detailPrototypesManager.DetailPrototypes.Length : 0;
                 int terrains = RealGrassPort.LiveTerrainCount(TerrainDistance());
-                Debug.Log(string.Format("[RealGrass] detail data ~{0:0.0} MB (res {1}, layers {2}, terrains {3})",
+                // MOBILE: the mode and the ceiling ride along, so a Player.log answers what a
+                // detail value MEANS on the device instead of leaving it to documentation.
+                Debug.Log(string.Format("[RealGrass] detail data ~{0:0.0} MB (res {1}, layers {2}, terrains {3}, scatter {4}/{5})",
                     RealGrassPort.DetailDataMegabytes(RealGrassPort.DetailResolution, layers, terrains),
-                    RealGrassPort.DetailResolution, layers, terrains));
+                    RealGrassPort.DetailResolution, layers, terrains,
+                    terrainData.detailScatterMode, RealGrassPort.MaxDetailValue));
             }
             if (promotions % CounterInterval == 0)
                 Debug.Log("[RealGrass] details on " + promotions + " terrains");

@@ -3423,27 +3423,71 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && global::RealGrass.RealGrassPort.DetailDataMegabytes(0, 1, 49) == 0f,
                 "RealGrass: the memory figure is 0 with nothing to hold");
 
-            // ---- 3. the fold ----
-            // Upstream addressed a 256^2 detail map for a 128^2 tilemap; at detail resolution 128
-            // four of its cells become one, so the values must ADD or grass per square metre would
-            // quarter. The ceiling is Unity's own maxDetailScatterPerRes, read per promotion.
-            Check(global::RealGrass.RealGrassPort.FoldDetailValue(10, 20, 255) == 30,
-                "RealGrass: the fold adds, it does not overwrite");
-            Check(global::RealGrass.RealGrassPort.FoldDetailValue(250, 20, 255) == 255
-                  && global::RealGrass.RealGrassPort.FoldDetailValue(9, 20, 16) == 16,
+            // ---- 3. the scatter mode, and the fold that is written for it ----
+            // A detail-map value means one of two things and the two are 16x apart: under
+            // CoverageMode 0..255 is how much of the cell's ground the detail covers (area
+            // normalised), under InstanceCountMode it is an instance count capped at 16 - below
+            // upstream's own thick density, so upstream's values could not be represented at all.
+            // DFU builds terrains with a bare `new TerrainData()` and nothing else in this project
+            // touches the mode, so the port sets it rather than inheriting an engine default.
+            Check(global::RealGrass.RealGrassPort.ForcedScatterMode == DetailScatterMode.CoverageMode,
+                "RealGrass: the forced scatter mode is CoverageMode - values are coverage, ceiling 255",
+                global::RealGrass.RealGrassPort.ForcedScatterMode.ToString());
+            Check(global::RealGrass.RealGrassPort.ForcedScatterMode != DetailScatterMode.InstanceCountMode,
+                "RealGrass: it is NOT InstanceCountMode, whose 16-per-cell ceiling is below upstream's thick density");
+            // The fold is two steps. Upstream addressed a 256^2 detail map for a 128^2 tilemap; at
+            // detail resolution 128 four of its cells become one, so the four sub-cell writes must
+            // ACCUMULATE (or the last would erase the first three) and the accumulated sum must
+            // then be AVERAGED - because under coverage semantics a cell four times as large
+            // carries the mean of the four it replaced, not their sum. Summing was 4x upstream's
+            // grass per square metre; the mean is parity, which is what this port is for.
+            Check(global::RealGrass.RealGrassPort.AccumulateSubCell(10, 20) == 30,
+                "RealGrass: the accumulator adds, it does not overwrite");
+            Check(global::RealGrass.RealGrassPort.AccumulateSubCell(250, 20) == 270,
+                "RealGrass: the accumulator does NOT clamp - clamping a partial sum would bias the mean down",
+                global::RealGrass.RealGrassPort.AccumulateSubCell(250, 20).ToString());
+            Check(global::RealGrass.RealGrassPort.AccumulateSubCell(0, -5) == 0
+                  && global::RealGrass.RealGrassPort.AccumulateSubCell(-5, 0) == 0,
+                "RealGrass: the accumulator never returns a negative");
+            // The mean, over the four sub-cells a folded cell stands for.
+            Check(global::RealGrass.RealGrassPort.FoldDetailValue(24, 4, 255) == 6
+                  && global::RealGrass.RealGrassPort.FoldDetailValue(80, 4, 255) == 20,
+                "RealGrass: the fold is the MEAN of the four sub-cells - four thick writes of 6 fold to 6, not 24",
+                global::RealGrass.RealGrassPort.FoldDetailValue(24, 4, 255).ToString());
+            // Sub-cells upstream never wrote count as zero: a tile whose grass sat in one corner
+            // covers a quarter of the folded cell, and the mean says so.
+            Check(global::RealGrass.RealGrassPort.FoldDetailValue(20, 4, 255) == 5,
+                "RealGrass: one sub-cell of 20 out of four folds to 5 - partial coverage stays partial",
+                global::RealGrass.RealGrassPort.FoldDetailValue(20, 4, 255).ToString());
+            // Upstream's densities are integers, so the mean is rounded to nearest, halves up -
+            // a floor would shave up to three quarters of a unit off every cell, which at a thin
+            // density of 2 is most of the grass.
+            Check(global::RealGrass.RealGrassPort.FoldDetailValue(6, 4, 255) == 2
+                  && global::RealGrass.RealGrassPort.FoldDetailValue(7, 4, 255) == 2
+                  && global::RealGrass.RealGrassPort.FoldDetailValue(2, 4, 255) == 1,
+                "RealGrass: the mean rounds to the nearest integer, halves up - it does not floor",
+                global::RealGrass.RealGrassPort.FoldDetailValue(6, 4, 255) + "/"
+                  + global::RealGrass.RealGrassPort.FoldDetailValue(7, 4, 255) + "/"
+                  + global::RealGrass.RealGrassPort.FoldDetailValue(2, 4, 255));
+            Check(global::RealGrass.RealGrassPort.FoldDetailValue(4000, 4, 255) == 255
+                  && global::RealGrass.RealGrassPort.FoldDetailValue(200, 4, 16) == 16,
                 "RealGrass: the fold clamps to Unity's detail scatter ceiling, whatever it is");
-            Check(global::RealGrass.RealGrassPort.FoldDetailValue(0, 0, 255) == 0
-                  && global::RealGrass.RealGrassPort.FoldDetailValue(0, -5, 255) == 0
-                  && global::RealGrass.RealGrassPort.FoldDetailValue(5, 3, 0) == 0,
-                "RealGrass: the fold never returns a negative or exceeds a zero ceiling");
-            Check(global::RealGrass.RealGrassPort.MaxDetailValue > 0
-                  && global::RealGrass.RealGrassPort.FallbackMaxDetailValue == 255,
-                "RealGrass: the scatter ceiling starts on the coverage-mode fallback",
+            Check(global::RealGrass.RealGrassPort.FoldDetailValue(0, 4, 255) == 0
+                  && global::RealGrass.RealGrassPort.FoldDetailValue(-5, 4, 255) == 0
+                  && global::RealGrass.RealGrassPort.FoldDetailValue(20, 4, 0) == 0
+                  && global::RealGrass.RealGrassPort.FoldDetailValue(20, 0, 255) == 20,
+                "RealGrass: the fold never returns a negative, respects a zero ceiling, and tolerates a zero divisor");
+            // m3 was tautological (MaxDetailValue is initialised from the fallback). What is worth
+            // asserting is that the fallback IS the ceiling of the mode the port forces.
+            Check(global::RealGrass.RealGrassPort.FallbackMaxDetailValue == 255
+                  && global::RealGrass.RealGrassPort.ForcedScatterMode == DetailScatterMode.CoverageMode,
+                "RealGrass: the fallback ceiling is 255 because the forced mode is the one whose ceiling is 255",
                 global::RealGrass.RealGrassPort.MaxDetailValue.ToString());
             Check(global::RealGrass.DetailMap.UpstreamResolution == 256
-                  && global::RealGrass.DetailMap.Fold == 2,
-                "RealGrass: two upstream cells per axis fold into one detail cell",
-                global::RealGrass.DetailMap.Fold.ToString());
+                  && global::RealGrass.DetailMap.Fold == 2
+                  && global::RealGrass.DetailMap.SubCells == 4,
+                "RealGrass: two upstream cells per axis, four per cell - the divisor of the mean",
+                global::RealGrass.DetailMap.Fold + "/" + global::RealGrass.DetailMap.SubCells);
 
             // The layers themselves: allocated once, cleared per promotion, 128 square, and only
             // the grass layer exists in this configuration. RealGrassOptions defaults to Classic
@@ -3467,15 +3511,37 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             densityManager.InitDetailsLayers();
             Check(ReferenceEquals(grassCells, densityManager.Grass.Cells),
                 "RealGrass: InitDetailsLayers clears the cached array, it does not allocate a new one");
-            // (5, 6) and (5, 7) are two of the four upstream cells of tile (2, 3).
-            densityManager.Grass[5, 6] = 3;
-            densityManager.Grass[5, 7] = 4;
-            Check(densityManager.Grass.Cells[2, 3] == 7 && densityManager.Grass[5, 6] == 7,
-                "RealGrass: upstream's four sub-cell writes land in one cell and sum",
+            int[,] empty0 = global::RealGrass.DensityManager.Empty;
+            // (5, 6) and (5, 7) are two of the four upstream cells of tile (2, 3). Four writes of
+            // 5 must come back as 5 (parity with upstream), and two writes of 5 as 3 (half the
+            // tile's ground covered, rounded up) - so the pair is written with 5s here.
+            densityManager.Grass[5, 6] = 5;
+            densityManager.Grass[5, 7] = 5;
+            Check(densityManager.Grass.Cells[2, 3] == 10 && densityManager.Grass[5, 6] == 10,
+                "RealGrass: upstream's four sub-cell writes land in one cell and accumulate",
+                densityManager.Grass.Cells[2, 3].ToString());
+            densityManager.FoldDetailLayers();
+            Check(densityManager.Grass.Cells[2, 3] == 3,
+                "RealGrass: FoldDetailLayers averages the accumulated sum over the four sub-cells (10 -> 3)",
+                densityManager.Grass.Cells[2, 3].ToString());
+            densityManager.FoldDetailLayers();
+            Check(densityManager.Grass.Cells[2, 3] == 3,
+                "RealGrass: the fold is idempotent - a second call cannot average an averaged layer",
                 densityManager.Grass.Cells[2, 3].ToString());
             densityManager.InitDetailsLayers();
             Check(densityManager.Grass.Cells[2, 3] == 0,
                 "RealGrass: the next promotion starts from a cleared layer");
+            // Parity with upstream, end to end: all four sub-cells of a tile written with the same
+            // thick density come back as that density - not 4x it, which the summing fold gave.
+            densityManager.Grass[8, 10] = 19; densityManager.Grass[8, 11] = 19;
+            densityManager.Grass[9, 10] = 19; densityManager.Grass[9, 11] = 19;
+            densityManager.FoldDetailLayers();
+            Check(densityManager.Grass.Cells[4, 5] == 19,
+                "RealGrass: four sub-cells at upstream's thick density fold to that same density - parity, not 4x",
+                densityManager.Grass.Cells[4, 5].ToString());
+            densityManager.InitDetailsLayers();
+            Check(ReferenceEquals(empty0, global::RealGrass.DensityManager.Empty),
+                "RealGrass: the blanking array is cached, not reallocated per read (StopMod reads it per layer per terrain)");
             int[,] empty = global::RealGrass.DensityManager.Empty;
             Check(empty.GetLength(0) == 128 && empty.GetLength(1) == 128,
                 "RealGrass: the blanking array matches the detail store, so SetDetailLayer accepts it",
@@ -3539,6 +3605,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(CountOccurrences(densitySrc, "new DetailMap()") == 5,
                 "RealGrass: the five layers are allocated once, in the constructor",
                 CountOccurrences(densitySrc, "new DetailMap()") + " allocations");
+            Check(densitySrc.Contains("RealGrassPort.AccumulateSubCell(Cells[fy, fx], value)")
+                  && !densitySrc.Contains("RealGrassPort.FoldDetailValue(Cells[fy, fx]"),
+                "RealGrass: the indexer only accumulates - the averaging is one pass, not one per write");
+            Check(densitySrc.Contains("RealGrassPort.FoldDetailValue(sum, subCells, max)")
+                  && densitySrc.Contains("Grass.FoldToMean()"),
+                "RealGrass: FoldToMean is where the mean is taken, and FoldDetailLayers walks the layers");
+            Check(densitySrc.Contains("emptyMap ?? (emptyMap = EmptyMap())"),
+                "RealGrass: the blanking array is allocated once and cached, not per read");
 
             string grassSrc = StripShaderComments(File.ReadAllText(portDir + "RealGrass.cs"));
             Check(grassSrc.Contains("SetDetailResolution(RealGrassPort.DetailResolution, RealGrassPort.DetailResolutionPerPatch)")
@@ -3546,6 +3620,21 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "RealGrass: the promotion sets (DetailResolution, DetailResolutionPerPatch), never (256, 8)");
             Check(grassSrc.Contains("terrainData.detailWidth != RealGrassPort.DetailResolution"),
                 "RealGrass: SetDetailResolution is skipped when the store is already that shape (it reallocates)");
+            Check(grassSrc.Contains("terrainData.SetDetailScatterMode(RealGrassPort.ForcedScatterMode)")
+                  && grassSrc.Contains("terrainData.detailScatterMode != RealGrassPort.ForcedScatterMode"),
+                "RealGrass: the promotion sets the forced scatter mode explicitly, and only when it differs");
+            // Order matters twice over: switching scatter mode ERASES existing detail placements,
+            // so it has to precede the first SetDetailLayer of the promotion; and the mean can only
+            // be taken once the density pass has finished accumulating, which is also before it.
+            int modeAt = grassSrc.IndexOf("SetDetailScatterMode(", StringComparison.Ordinal);
+            int foldAt = grassSrc.IndexOf("densityManager.FoldDetailLayers()", StringComparison.Ordinal);
+            int layerAt = grassSrc.IndexOf("SetDetailLayer(", StringComparison.Ordinal);
+            Check(modeAt >= 0 && foldAt > modeAt && layerAt > foldAt,
+                "RealGrass: scatter mode, then the fold to the mean, then SetDetailLayer - in that order",
+                modeAt + " < " + foldAt + " < " + layerAt);
+            Check(grassSrc.Contains(", scatter {4}/{5})")
+                  && grassSrc.Contains("terrainData.detailScatterMode, RealGrassPort.MaxDetailValue"),
+                "RealGrass: the memory line writes the scatter mode and the ceiling that was read");
             Check(grassSrc.Contains("[RealGrass] details on ") && grassSrc.Contains("[RealGrass] detail data ~")
                   && grassSrc.Contains("[RealGrass] not available: ")
                   && grassSrc.Contains("[RealGrass] terrain details failed: "),
