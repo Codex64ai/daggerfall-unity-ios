@@ -202,7 +202,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 if (firstUnder.Count > 0) log.AppendLine("[WoDProbe] first under-floor pixels: " + string.Join(" ", firstUnder.ToArray()));
 
                 // ---- the bytes the shader and the travel map actually see ----------------
-                var bytes = Monobelisk.Utility.ToBytes(floats);
+                // MOBILE: (F2) the counting overload - `nonFinite` is how many floats ToBytes had to
+                // substitute a neighbour byte for (NaN / inf / negative). On the Mac this has always
+                // been 0; the device's `holes 14519` is what it exists to attribute.
+                int toBytesNonFinite;
+                var bytes = Monobelisk.Utility.ToBytes(floats, out toBytesNonFinite);
+                log.AppendLine("[WoDProbe] ToBytes substituted (nan/inf/negative) = " + toBytesNonFinite);
                 int byte0 = 0, byteUnder5 = 0;
                 var hist = new int[256];
                 for (int i = 0; i < bytes.Length; i++)

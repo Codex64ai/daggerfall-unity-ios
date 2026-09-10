@@ -1,6 +1,12 @@
 // MOBILE PORT - github.com/drcarademono/wod-terrain @ 9aeb1bcc5de5343ccb7a6b09062559ad871e9d40, Assets/Shaders/TerrainComputer.compute; compiled into the app (Resources.Load), no licence header upstream, private draft only.
 #pragma kernel TerrainComputer
 #pragma kernel TilemapComputer
+// MOBILE: (F1) same reason as MainHeightmapComputer.compute - see the note there. Unity's Metal
+// path compiles with -ffast-math unless this pragma says otherwise, and this shader shares
+// heightSampling.cginc / noises.cginc with the start-up world heightmap, so leaving one of the
+// two on fast-math would make the per-tile terrain disagree with the world heightmap the
+// locations are flattened against. Both kernels run per terrain tile, not per frame.
+#pragma disable_fastmath
 
 float2 terrainPosition, terrainSize, locationPosition, locationSize, worldSize;
 int heightmapResolution, locationCount;
@@ -284,13 +290,28 @@ float2 ClampToLine(float2 p1, float2 p2, float2 pos) {
 #define F_MAX 99999999.9
 
 // MOBILE: (D3) how far below the world heightmap AT THE SAMPLE a location may be flattened before
-// the read that produced it is treated as a collapse rather than a height. 100 units at
-// newHeight 5000. Chosen from the artefact, not by taste: the reported pits are 200-400 units
-// (tile means 0.064-0.11 against a 0.021 flatten floor), and the generator's own largest
-// deliberate location-edge excursion is `transitionHeight`'s min(..., 250.0 / newHeight) further
-// down GetHeightSample - so 100 is comfortably inside what the mod does on purpose and
-// comfortably outside what a collapsed map pixel does by accident.
-#define MAX_LOCATION_SINK (100.0 / newHeight)
+// the read that produced it is treated as a collapse rather than a height. 20 units at
+// newHeight 5000.
+//
+// It was 100 for terrain5 and that was still a visible pit: a player is about 2 units tall, so
+// 100 units is fifty player heights of vertical wall, and the device screenshots still showed
+// one. Measured on the device log at 460,51: the worst flatten target was minFlat 0.0273 (136
+// units) against a tile whose own base was 0.0784 (392 units), so at 100 the max() lifted it to
+// 0.0584 - still 100 units under the ground it sits in. At 20 it lifts to 0.0744.
+//
+// What upstream's own fade would naturally produce, for scale: `w = pow(1 - edgeDist/fadeDist, 2)`
+// smoothstepped over fadeDist = 64..576 vertex units (roughly 0.5 to 4.5 map pixels, i.e. 400 m
+// to 3.6 km of ramp), and `transitionHeight = min(abs(baseHeight - locationHeight), 250/newHeight)`
+// blends up to 125 units of the location/wilderness difference back in over that ring. So a 20-unit
+// residual spread over the fade ring is a 2-5% grade - a slope, not a wall - whereas 100 units is
+// still a step the fade cannot hide. 20 is chosen to be the largest sink that reads as ground.
+//
+// The cost, stated plainly: the guard is a PER-SAMPLE floor, so where the world heightmap itself
+// tilts by more than 20 units across a location the flatten target now follows that tilt 20 units
+// below instead of being perfectly level. A location spans well under one map pixel, so that is a
+// few per cent of grade on a genuinely sloping site - the failure mode becomes "the town floor
+// follows the hillside" instead of "the town sits in a 100-unit pit". Watched for on device.
+#define MAX_LOCATION_SINK (20.0 / newHeight)
 float LocationWeight(float2 pos, float portHeight, out float basemapHeight, out float wildernessWeight) {
     float weight = 0.0;
     float narrowWeight = 0.0;
@@ -670,7 +691,10 @@ int TilemapSample(int2 id, float noise) {
     // MOBILE: initialised - Metal does not zero registers
     int result = DIRT;
 
-    if (pow(noise, 2) < 0.9) {
+    // MOBILE: guarded - iOS Metal fast-math. HLSL pow(x, y) is exp2(y * log2(x)), which is NaN for
+    // any negative x (this noise is a raw SimplePerlin, so it is signed) and -inf * 0 at x == 0.
+    // The square is what was meant and x*x is exact for every input.
+    if (noise * noise < 0.9) {
         result = GRASS;
     }
 

@@ -588,7 +588,14 @@ namespace Monobelisk
                     alteredHeights.GetData(floatHeights, offset, offset, band.rows * WoodsFile.MapWidth);
                 }
 
-                alteredHeightmapBuffer = Utility.ToBytes(floatHeights);
+                // MOBILE: (F2) the counting overload: `nonFinite` is how many of the 500,000 floats
+                // came back NaN, infinite or negative and were replaced with their western
+                // neighbour's byte instead of silently becoming byte 0 (= ocean = a location-sized
+                // pit). It is reported next to `holes` below, so the Player.log distinguishes "the
+                // generator produced garbage on this GPU" from "the generator produced honest
+                // ocean-floor heights inland".
+                int nonFinite;
+                alteredHeightmapBuffer = Utility.ToBytes(floatHeights, out nonFinite);
                 woodsFile.Buffer = alteredHeightmapBuffer;
 
                 baseHeightmap = new Texture2D(WoodsFile.MapWidth, WoodsFile.MapHeight, TextureFormat.ARGB32, false, true);
@@ -597,9 +604,9 @@ namespace Monobelisk
 
                 watch.Stop();
                 // MOBILE: (h) the one-off cost of the whole start-up pass, in Ikram's Player.log.
-                Debug.Log(string.Format("[WoDTerrain] world heightmap {0} ms ({1} bands) holes {2}",
+                Debug.Log(string.Format("[WoDTerrain] world heightmap {0} ms ({1} bands) holes {2} nonfinite {3}",
                     watch.ElapsedMilliseconds, bands.Length,
-                    CountWorldHeightmapHoles(alteredHeightmapBuffer)));
+                    CountWorldHeightmapHoles(alteredHeightmapBuffer), nonFinite));
             }
             finally
             {

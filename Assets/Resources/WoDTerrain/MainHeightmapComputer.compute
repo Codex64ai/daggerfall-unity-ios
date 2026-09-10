@@ -1,5 +1,19 @@
 // MOBILE PORT - github.com/drcarademono/wod-terrain @ 9aeb1bcc5de5343ccb7a6b09062559ad871e9d40, Assets/Shaders/MainHeightmapComputer.compute; compiled into the app (Resources.Load), no licence header upstream, private draft only.
 #pragma kernel CSMain
+// MOBILE: (F1) Unity hands the Metal shader compiler -ffast-math by default (the offline
+// air64 command line in UnityShaderCompiler is "... -fpreserve-invariance {} ..." with
+// -ffast-math in one of the slots); disable_fastmath is the pragma that removes it, and it is
+// in the same recognised-pragma table as `kernel` in 6000.3.23f1. Why it matters here: this
+// kernel is the mod's start-up world heightmap, and the device reported `holes 14519` from it
+// against 459 for the SAME code on macOS Metal - ~3% of the 1000x500 map collapsing to the
+// ocean floor byte on iOS only. -ffast-math implies -ffinite-math-only (the compiler may
+// assume no NaN and no inf, so a NaN that does occur propagates or is folded away
+// arbitrarily), flushes denormals, and licenses reassociation of the fault/turbulence terms in
+// heightSampling.cginc's GetBaseHeight, which is a knife edge:
+//   extraHeight -= subtraction * min(extraHeight + (baseHeight - 115/newHeight), 500/newHeight)
+// Determinism across the two Metal backends is worth far more here than the handful of
+// instructions fast-math saves in a pass that runs ONCE at start-up (21 ms on device).
+#pragma disable_fastmath
 
 float newHeight;
 // MOBILE: (a) first world row of the band being dispatched. The start-up pass now runs as ten row

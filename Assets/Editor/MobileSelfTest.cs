@@ -922,6 +922,63 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(Monobelisk.TerrainComputer.OceanFloorByte == 5 && Monobelisk.TerrainComputer.LandByte == 10
                   && Monobelisk.TerrainComputer.LandNeighboursForHole == 5,
                 "WoDTerrain: the hole census thresholds are the generator's own floor (99/5000 = 5.05/255) and clear land");
+            // MOBILE: (F2) Utility.ToBytes is the ONE conversion the mod's entire start-up world
+            // heightmap passes through - the texture every location's flatten target is read from -
+            // and upstream's `(byte)(uint)(f * 255f)` has no guard at all. NaN arrives as byte 0,
+            // indistinguishable from ocean, so a collapsed map pixel becomes a location-sized pit
+            // in silence; a negative wraps to a mountain; anything over 1 wraps back through 0. The
+            // device reported `holes 14519` of 500,000 map pixels against 459 for the identical code
+            // on macOS Metal, which is what an unguarded NaN looks like from the outside. The
+            // healthy path has to stay byte-identical to upstream or every generated height moves.
+            var healthyFloats = new float[] { 0f, 0.0198f, 0.0667f, 0.5f, 1f };
+            int toByteSubs;
+            var healthyBytes = Monobelisk.Utility.ToBytes(healthyFloats, out toByteSubs);
+            bool byteIdentical = toByteSubs == 0 && healthyBytes.Length == healthyFloats.Length;
+            for (int i = 0; i < healthyFloats.Length; i++)
+                if (healthyBytes[i] != (byte)(uint)(healthyFloats[i] * 255f)) byteIdentical = false;
+            Check(byteIdentical && healthyBytes[0] == 0 && healthyBytes[4] == 255,
+                "WoDTerrain: ToBytes is byte-identical to upstream for in-range heights and substitutes nothing");
+            // A bad float takes the byte of the map pixel immediately to the WEST - WOODS.WLD's
+            // layout is index = x + y * MapWidth, so that is the previous element - rather than the
+            // sea floor, which keeps it inside its own coastline. Every substitution is COUNTED and
+            // the count is logged, because silently repairing the defect being hunted would be worse
+            // than the defect.
+            var badFloats = new float[] { 0.0667f, float.NaN, -0.004f, float.PositiveInfinity, float.NegativeInfinity, 0.08f };
+            var badBytes = Monobelisk.Utility.ToBytes(badFloats, out toByteSubs);
+            byte westByte = (byte)(uint)(0.0667f * 255f);
+            Check(toByteSubs == 4 && badBytes[0] == westByte && badBytes[1] == westByte
+                  && badBytes[2] == westByte && badBytes[3] == westByte && badBytes[4] == westByte
+                  && badBytes[5] == (byte)(uint)(0.08f * 255f),
+                "WoDTerrain: ToBytes replaces nan/inf/negative with the previous valid byte and counts each one");
+            // Nothing lies west of element 0, so its fallback is the generator's own ocean floor
+            // byte: ocean, not a mountain and not a hole.
+            int leadSubs, nullSubs;
+            var leadBytes = Monobelisk.Utility.ToBytes(new float[] { float.NaN, 0.09f }, out leadSubs);
+            Check(leadSubs == 1 && leadBytes[0] == (byte)Monobelisk.TerrainComputer.OceanFloorByte
+                  && Monobelisk.Utility.ToBytes(null, out nullSubs).Length == 0 && nullSubs == 0,
+                "WoDTerrain: a leading bad float falls back to the ocean floor byte, and a null buffer converts to empty");
+            // saturate() is what kept f <= 1 upstream, and -ffast-math is exactly what stops
+            // guaranteeing that it does: (uint)(1.004f * 255f) is 256, which truncates to byte 0 -
+            // the pit again, from the opposite direction.
+            var overBytes = Monobelisk.Utility.ToBytes(new float[] { 1.004f, 2f }, out toByteSubs);
+            Check(toByteSubs == 0 && overBytes[0] == 255 && overBytes[1] == 255,
+                "WoDTerrain: ToBytes clamps above-one heights to 255 instead of wrapping through zero");
+            // MOBILE: (F1) Unity hands the Metal shader compiler -ffast-math unless the shader says
+            // otherwise (the air64 command line in UnityShaderCompiler); `disable_fastmath` is the
+            // pragma that removes it and sits in the same recognised-pragma table as `kernel` in
+            // 6000.3.23f1. BOTH .compute files need it: they share heightSampling.cginc and
+            // noises.cginc, so compiling one with fast-math and one without would make the per-tile
+            // terrain disagree with the world heightmap the locations are flattened against.
+            // Comments are stripped first, so the note that explains the pragma cannot satisfy this.
+            string wodMainCompute = StripShaderComments(File.ReadAllText("Assets/Resources/WoDTerrain/MainHeightmapComputer.compute"));
+            string wodTileCompute = StripShaderComments(File.ReadAllText("Assets/Resources/WoDTerrain/TerrainComputer.compute"));
+            Check(wodMainCompute.Contains("#pragma disable_fastmath") && wodTileCompute.Contains("#pragma disable_fastmath"),
+                "WoDTerrain: both compute shaders are compiled without Metal fast-math");
+            // MOBILE: (D3) 100 units was still a visible pit on the device - a player is about two
+            // units tall, so that was fifty player heights of wall. 20 units spread over the fade
+            // ring (64-576 vertex units) is a 2-5% grade, which reads as ground.
+            Check(wodTileCompute.Contains("#define MAX_LOCATION_SINK (20.0 / newHeight)"),
+                "WoDTerrain: a location may sink at most 20 units below the world heightmap at the sample");
             Check(Monobelisk.InterestingTerrains.Available(true, true) && !Monobelisk.InterestingTerrains.Available(false, true) && !Monobelisk.InterestingTerrains.Available(true, false),
                 "WoDTerrain: needs compute support and both compute shaders");
             Check(Monobelisk.TerrainComputer.StartupBands == 10 && Monobelisk.TerrainComputer.GroupRowsY == 5,

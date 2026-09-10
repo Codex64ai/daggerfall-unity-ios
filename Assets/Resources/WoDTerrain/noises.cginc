@@ -215,7 +215,13 @@ float Perlin2D(float2 P)
 			//	calculate the gradient results
     float4 grad_x = hash_x - 0.49999;
     float4 grad_y = hash_y - 0.49999;
-    float4 grad_results = rsqrt(grad_x * grad_x + grad_y * grad_y) * (grad_x * Pf_Pfmin1.xzxz + grad_y * Pf_Pfmin1.yyww);
+// MOBILE: guarded - iOS Metal fast-math. rsqrt(0) is +inf and the very next multiply is
+// by that same zero gradient, so inf * 0 = NaN for any cell whose hash lands both
+// gradients on 0.49999. -ffast-math also implies -ffinite-math-only, under which the
+// compiler may assume that NaN cannot happen and fold the guard that would have caught
+// it. The floor is 1e-20: no gradient the hash can produce is that small, so this is a
+// no-op on every real sample.
+    float4 grad_results = rsqrt(max(grad_x * grad_x + grad_y * grad_y, 1e-20)) * (grad_x * Pf_Pfmin1.xzxz + grad_y * Pf_Pfmin1.yyww);
 		
 #if 1
 			//	Classic Perlin Interpolation
@@ -257,7 +263,13 @@ float SimplexPerlin2D(float2 P)
 			//	calculate the dotproduct of our 3 corner vectors with 3 random normalized vectors
     float3 grad_x = float3(hash_x.x, v1pos_v1hash.z, hash_x.w) - 0.49999;
     float3 grad_y = float3(hash_y.x, v1pos_v1hash.w, hash_y.w) - 0.49999;
-    float3 grad_results = rsqrt(grad_x * grad_x + grad_y * grad_y) * (grad_x * float3(v0.x, v12.xz) + grad_y * float3(v0.y, v12.yw));
+// MOBILE: guarded - iOS Metal fast-math. rsqrt(0) is +inf and the very next multiply is
+// by that same zero gradient, so inf * 0 = NaN for any cell whose hash lands both
+// gradients on 0.49999. -ffast-math also implies -ffinite-math-only, under which the
+// compiler may assume that NaN cannot happen and fold the guard that would have caught
+// it. The floor is 1e-20: no gradient the hash can produce is that small, so this is a
+// no-op on every real sample.
+    float3 grad_results = rsqrt(max(grad_x * grad_x + grad_y * grad_y, 1e-20)) * (grad_x * float3(v0.x, v12.xz) + grad_y * float3(v0.y, v12.yw));
 		
 			//	Normalization factor to scale the final result to a strict 1.0->-1.0 range
 			//	x = ( sqrt( 0.5 )/sqrt( 0.75 ) ) * 0.5
@@ -386,7 +398,13 @@ float3 PerlinSurflet2D_Deriv(float2 P)
 			//	calculate the gradient results
     float4 grad_x = hash_x - 0.49999;
     float4 grad_y = hash_y - 0.49999;
-    float4 norm = rsqrt(grad_x * grad_x + grad_y * grad_y);
+// MOBILE: guarded - iOS Metal fast-math. rsqrt(0) is +inf and the very next multiply is
+// by that same zero gradient, so inf * 0 = NaN for any cell whose hash lands both
+// gradients on 0.49999. -ffast-math also implies -ffinite-math-only, under which the
+// compiler may assume that NaN cannot happen and fold the guard that would have caught
+// it. The floor is 1e-20: no gradient the hash can produce is that small, so this is a
+// no-op on every real sample.
+    float4 norm = rsqrt(max(grad_x * grad_x + grad_y * grad_y, 1e-20));
     grad_x *= norm;
     grad_y *= norm;
     float4 grad_results = grad_x * Pf_Pfmin1.xzxz + grad_y * Pf_Pfmin1.yyww;
@@ -421,7 +439,13 @@ float3 PerlinSurflet2D_Deriv_Vol(float2 P)
 			//	calculate the gradient results
     float4 grad_x = hash_x - 0.49999;
     float4 grad_y = hash_y - 0.49999;
-    float4 norm = rsqrt(grad_x * grad_x + grad_y * grad_y);
+// MOBILE: guarded - iOS Metal fast-math. rsqrt(0) is +inf and the very next multiply is
+// by that same zero gradient, so inf * 0 = NaN for any cell whose hash lands both
+// gradients on 0.49999. -ffast-math also implies -ffinite-math-only, under which the
+// compiler may assume that NaN cannot happen and fold the guard that would have caught
+// it. The floor is 1e-20: no gradient the hash can produce is that small, so this is a
+// no-op on every real sample.
+    float4 norm = rsqrt(max(grad_x * grad_x + grad_y * grad_y, 1e-20));
     grad_x *= norm;
     grad_y *= norm;
     float4 grad_results = grad_x * Pf_Pfmin1.xzxz + grad_y * Pf_Pfmin1.yyww;
@@ -467,7 +491,13 @@ float3 SimplexPerlin2D_Deriv(float2 P)
 			//	calculate the dotproduct of our 3 corner vectors with 3 random normalized vectors
     float3 grad_x = float3(hash_x.x, v1pos_v1hash.z, hash_x.w) - 0.49999;
     float3 grad_y = float3(hash_y.x, v1pos_v1hash.w, hash_y.w) - 0.49999;
-    float3 norm = rsqrt(grad_x * grad_x + grad_y * grad_y);
+// MOBILE: guarded - iOS Metal fast-math. rsqrt(0) is +inf and the very next multiply is
+// by that same zero gradient, so inf * 0 = NaN for any cell whose hash lands both
+// gradients on 0.49999. -ffast-math also implies -ffinite-math-only, under which the
+// compiler may assume that NaN cannot happen and fold the guard that would have caught
+// it. The floor is 1e-20: no gradient the hash can produce is that small, so this is a
+// no-op on every real sample.
+    float3 norm = rsqrt(max(grad_x * grad_x + grad_y * grad_y, 1e-20));
     grad_x *= norm;
     grad_y *= norm;
     float3 grad_results = grad_x * float3(v0.x, v12.xz) + grad_y * float3(v0.y, v12.yw);
@@ -841,7 +871,11 @@ float SwissMountains(SwissParams p) {
 
 float MountainBaseNoise(SwissParams p) {
     float h = SwissMountains(p);
-    h = saturate(pow(h, 5));
+    // MOBILE: guarded - iOS Metal fast-math. pow() is NaN for a negative base; SwissMountainsGen's
+    // accumulator is non-negative by construction today, but -ffast-math licenses reassociation of
+    // that accumulation, so max() costs nothing and removes the assumption. (Reached from
+    // TerrainComputer's TilemapComputer kernel via MountainBase.)
+    h = saturate(pow(max(h, 0.0), 5));
     h = smoothstep(0.2, 0.8, h);
 
     return h;
@@ -922,7 +956,15 @@ float SwissTime(SwissParams p)
     for (int i = 0; i < p.octaves; i++)
     {
         float3 n = 0.5 * (0 + (p.ridgeOffset - abs(sin(SimplexPerlin2D_Deriv((p.pos + p.offset + p.warp * dsum) * p.frequency)))));
-        n = pow(n, 2);
+        // MOBILE: guarded - iOS Metal fast-math. HLSL pow(x, y) is exp2(y * log2(x)): NaN for a
+        // negative component (which is every component whenever ridgeOffset < abs(sin ...), and
+        // ridgeOffset is an INI uniform - it is 0 for [iqMountain] in the shipped file) and
+        // exp2(2 * -inf) at exactly 0, where -ffast-math's denormal flushing also lands. n*n IS
+        // the square, exactly, for every input. This is the FAULT term: subtraction in
+        // heightSampling.cginc:293 is 1 - SwissTime(...), so a NaN here becomes a full-strength
+        // fault subtraction (Metal's saturate(NaN) is 0) and drives the map pixel to the floor -
+        // the exact signature of `base=0.0000` at 112,161 whose neighbours read 0.0588-0.0627.
+        n = n * n;
         sum += p.amplitude * n.x;
         dsum += p.amplitude * n.yz * -n.x;
         p.frequency *= p.lacunarity;
@@ -948,7 +990,12 @@ float SwissCellNoise(SwissParams p)
         float h = p.ridgeOffset - abs(n.x);
 
         t += a * h;
-        dsum += a * ((n.yz - (1.0 - p.ridgeOffset)) / p.ridgeOffset) * -n.x;
+        // MOBILE: guarded - iOS Metal fast-math. p.ridgeOffset is an INI uniform and is 0 for
+        // [iqMountain] in the shipped interesting_terrains.txt (and for any section whose key is
+        // missing, since the uniform then stays at its zero default), so this is a live /0 -> inf
+        // -> NaN in dsum, which then warps every later octave's sample point. 0.5 for [swissCell],
+        // the section that actually reaches here today, so the guard is a no-op in production.
+        dsum += a * ((n.yz - (1.0 - p.ridgeOffset)) / max(p.ridgeOffset, 1e-6)) * -n.x;
         f *= l;
         a *= p.persistence;
     }
@@ -1018,7 +1065,9 @@ float SwissPlayground(float2 p, int octaves = 8, float frequency = 88.3, float a
     
     
     
-    sum = pow(sum, 5);
+    // MOBILE: guarded - iOS Metal fast-math. pow() of a negative base is NaN and sum here is a
+    // signed noise sum shifted by 0.5, so it can be negative. No callers on any shipped path.
+    sum = pow(max(sum, 0.0), 5);
     sum = lerp(sum, smoothstep(0, 1, sum), -1.0);
 
     sum *= 0.05;
