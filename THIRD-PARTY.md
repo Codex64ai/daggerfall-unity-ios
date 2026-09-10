@@ -519,7 +519,7 @@ fed by a bundle, and the bundle ships only on the private test draft.
 
 | Mod | Author, licence | Source | What is NOT shipped |
 |---|---|---|---|
-| Distant Terrain of the World of Daggerfall | Base: Nystul-the-Magician, **MIT, 2017** (header preserved). WoD-flavour additions: MaoDeVaca (Nexus 1284), **NO LICENCE DECLARED** (permission being sought by Ikram; not in any public release) | Additions: github.com/somestupidgirl/Distant-Terrain-of-the-World-of-Daggerfall @ `d454b30af12c9f22c9ab5ef8ad5dbd9171d1cf1f` - the **only** versioned copy, and it is a vendored drop of upstream `a722b337935dd8a57a913eb413c918c351e68e67`; her own commits add build scripts, which are not used. MIT base: github.com/Nystul-the-Magician/dfunity-mods `DistantTerrain/` @ `fc58546c3eae964babfdfeea51e97a47ba57cdce` | `DistantTerrainFlyMap.cs` (930 lines - a keyboard/mouse/IMGUI free-camera teleporter, and a phone has neither) and `ThirteenthPassageEffect.cs` (144 lines - the "13th Passage" Mysticism teleport spell and its `passage` console command), with the spell registration, the console registration, the fly-map creation and the `KeyCode` settings that drove them. Excluded from the fetch as well: `*.shader`, `*.cginc` (the shader is compiled into the app, rewritten - see below), `*.prefab`, `*.png~`, `DaggerfallBillboardBatchFaded.shader`, and the three `*.bin.txt` blobs (`mapLocationRangeX`, `mapLocationRangeY`, `mapTreeCoverage`) nothing in the runtime reads. The five remaining runtime files (+3,558 lines as ported) are compiled in; the two shader files (+1,081) are compiled into the app; the three `Mountains*.csv` and `daggerfall_deriv_map.png` are the bundle |
+| Distant Terrain of the World of Daggerfall | Base: Nystul-the-Magician, **MIT, 2017** (header preserved). WoD-flavour additions: MaoDeVaca (Nexus 1284), **NO LICENCE DECLARED** (permission being sought by Ikram; not in any public release) | Additions: github.com/somestupidgirl/Distant-Terrain-of-the-World-of-Daggerfall @ `d454b30af12c9f22c9ab5ef8ad5dbd9171d1cf1f` - the **only** versioned copy, and it is a vendored drop of upstream `a722b337935dd8a57a913eb413c918c351e68e67`; her own commits add build scripts, which are not used. MIT base: github.com/Nystul-the-Magician/dfunity-mods `DistantTerrain/` @ `fc58546c3eae964babfdfeea51e97a47ba57cdce` | `DistantTerrainFlyMap.cs` (930 lines - a keyboard/mouse/IMGUI free-camera teleporter, and a phone has neither) and `ThirteenthPassageEffect.cs` (144 lines - the "13th Passage" Mysticism teleport spell and its `passage` console command), with the spell registration, the console registration, the fly-map creation and the `KeyCode` settings that drove them. Excluded from the fetch as well: `*.shader`, `*.cginc` (the shader is compiled into the app, rewritten - see below), `*.prefab`, `*.png~`, `DaggerfallBillboardBatchFaded.shader`, and the three `*.bin.txt` blobs (`mapLocationRangeX`, `mapLocationRangeY`, `mapTreeCoverage`) nothing in the runtime reads. The five remaining runtime files (+3,918 lines as ported) are compiled in; the two shader files (+1,081) are compiled into the app; the three `Mountains*.csv` and `daggerfall_deriv_map.png` are the bundle, fetched into `ModResources/` rather than upstream's `Resources/` (a folder of that name is baked into every player build by Unity, which would ship this pending-licence data in a public IPA) |
 
 The manifest is `distantterrain.dfmod.json`, so the bundle builds as `distantterrain.dfmod`, and the
 launcher entry keys on the manifest `ModTitle`, which is the full
@@ -547,7 +547,8 @@ game is loaded, and it is the reason the port could not simply copy the file. Th
 **three `UNITY_DECLARE_TEX2DARRAY` arrays** instead, one per season, each packed with all four biome
 tilesets' 56 records as slices (`slice = biome * 56 + record`, 224 slices of 64², built from DFU's
 own `TextureReader.GetTerrainTextureArray` so texture-replacement packs are still honoured, packed
-with 224 `Graphics.CopyTexture` slice blits at world entry). **~15 MB** instead of ~270. The atlas
+with 224 `Graphics.CopyTexture` slice blits at world entry, or `Graphics.ConvertTexture` blits
+when the four sources' formats differ - see below). **~15 MB** instead of ~270. The atlas
 cell origin, the 32-texel gutter offset and the atlas-normalised gradients are gone; the tiling
 maths, the slope blend, the snow caps, the woodland dirt, the tree specks, the beacons, the skirt,
 the near-terrain cutout `discard` and the `alpha:fade` transparent queue are upstream's, unchanged.
@@ -688,14 +689,33 @@ world entry of a session and 0 on every one after it. The refusal and failure li
 `[DistantTerrain] not available: <reason>` (the gate: shader unresolved or unsupported, a missing
 CSV, a missing deriv map, or no scene at world entry), `[DistantTerrain] far terrain failed: <ex>`
 (the build threw and was torn down) and `[DistantTerrain] tileset arrays mismatch: ...` - four
-independently-imported source arrays that cannot share one destination, or three PACKED arrays whose
-seasons disagree with each other (the shader derives one mip dimension from the summer array and
-applies it to all three), vanilla being always 64x64 ARGB32 with matching mip counts, so either only
-bites under an asymmetric replacement pack.
+independently-imported source arrays whose SIZE or mip count cannot share one destination, or three
+PACKED arrays whose seasons disagree in size with each other (the shader derives one mip dimension
+from the summer array and applies it to all three), vanilla being always 64x64 with matching mip
+counts, so either only bites under an asymmetric replacement pack. FORMAT is deliberately not a
+refusal: World of Daggerfall - Biomes installs a `TextureArray` terrain material provider and
+`GetTerrainTextureArray` then hands back RGBA32 for one climate variant of a season and ARGB32 for
+another, which is legitimate and which the pack converts as it copies (`Graphics.ConvertTexture`,
+same 224 slice blits, destination RGBA32), saying so once per season with
+`[DistantTerrain] tileset arrays converted: RGBA32, ARGB32 -> RGBA32 (winter)`. Refusing it instead
+stopped the far terrain building at all whenever Biomes was on, which is how the Task 9 simulator run
+found it. A device that reports no copy-texture support at all falls back to the strict same-format
+rule and refuses, as before.
 
 Memory, added up: the three tile arrays ~15 MB, the 1024² RGBA32 terrain-info tilemap 4 MB on the GPU
-and 4 more in the CPU copy it keeps, the deriv map 2 + 2, the 256² skybox render texture and its
-depth buffer under half a megabyte - about **27 MB of texture memory**, plus the far terrain's own
-1025² heightmap in managed floats and a 3.5 MB CSV string parse that happens once at world entry.
-Against the ~270 MB the twelve atlases alone would have cost, which is the whole argument for the
-rewrite.
+(the CPU copy is released at the upload and the staging `Color32[]` dropped with it), the deriv map
+2 + 2, the 256² skybox render texture and its depth buffer under half a megabyte - about **27 MB of
+texture memory**. Against the ~270 MB the twelve atlases alone would have cost, which is the whole
+argument for the rewrite.
+
+**But 27 MB is the texture memory only, and the measured total is roughly double it: ~50 MB steady,
+~80 MB peak at world entry.** The difference is managed and just as real - three 1000² float
+heightmaps (`worldHeights`, `baseWorldHeights`, `preDerivWorldHeights`, 12 MB), the 1000² ocean mask,
+Unity's own 1025² TerrainData heightmap and its LOD pyramid - plus two transients on the world-entry
+frame: the 3.5 MB CSV string split across 32,928 rows, and the 8 MB `GetPixels32` copy of the deriv
+map. Quoting the texture figure alone was how a reader came away with half the number. On a 4 GB
+iPad, beside World of Daggerfall's ~211 MB of textures and WoD Terrain's ~34 MB, all three together
+are about **300 MB of mod memory** on top of DFU's own baseline: comfortable in steady state, with
+the world-entry peak the thing to watch, because Distant Terrain's build lands on the same frame as
+World of Daggerfall's location loading. **Watch memory at world entry with all three WoD mods on** is
+therefore a named item of the device hand-off, not a general caution.

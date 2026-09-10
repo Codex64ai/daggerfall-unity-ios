@@ -604,14 +604,26 @@ dispatch and its 16,641-int blocking readback therefore run per tile and produce
 `getTileData` contract, and a candidate for removal in a later round. It is a real slice of every
 `[WoDTerrain] tile … ms` number, which matters when those numbers are the thing being judged.
 
-### Distant Terrain (World of Daggerfall flavour) support (2026-09-09) — `Game/Mobile/Ports/DistantTerrain/` (new, 5 files, +3,558), `Assets/Shaders/DistantTerrain/` (new, 2 files, +1,081), `Game/Mobile/MobilePortedMods.cs` (+86/-8), `Assets/Editor/{MobileShaderSpike.cs (new, +203),MobileSelfTest.cs (+447/-3),MobileModPackTextureRules.cs (+35/-2),MobileModBuilder.cs (+12/-1),MobileBuildSetup.cs (+11/-1)}`, `Assets/Shaders/RequiredShaderVariants.shadervariants (+7)`, `ProjectSettings/GraphicsSettings.asset (+1)`, `tools/bundled-mods/mods.json (+10)`
+### Distant Terrain (World of Daggerfall flavour) support (2026-09-09) — `Game/Mobile/Ports/DistantTerrain/` (new, 5 files, +3,918), `Assets/Shaders/DistantTerrain/` (new, 2 files, +1,081), `Game/Mobile/MobilePortedMods.cs` (+124/-8), `Game/Mobile/Ports/DynamicSkies/BLBSkybox.cs` (+50/-6), `Assets/Editor/{MobileShaderSpike.cs (new, +292),MobileSelfTest.cs (+708/-3),MobileModPackTextureRules.cs (+35/-2),MobileModBuilder.cs (+12/-1),MobileBuildSetup.cs (+11/-1)}`, `Assets/Shaders/RequiredShaderVariants.shadervariants (+7)`, `ProjectSettings/GraphicsSettings.asset (+1)`, `tools/bundled-mods/{mods.json (+11),fetch.py (+76/-15),test_fetch.py (+61)}`
 Counts are `git diff --numstat 21eeff67f HEAD` (the commit before this feature's first to its last),
 excluding `.meta` files.
 Distant Terrain of the World of Daggerfall compiled in (see THIRD-PARTY.md). **It touches no upstream
-engine *source* file** — not one. Every C# file in the heading is one upstream does not have:
+engine *source* file** — not one; it does edit one already-ported third-party file of ours, which is
+the next paragraph. Every C# file in the heading is one upstream does not have:
 `MobilePortedMods.cs`, `MobileShaderSpike.cs`, `MobileSelfTest.cs`, `MobileModPackTextureRules.cs`,
 `MobileModBuilder.cs` and `MobileBuildSetup.cs` are all this port's own, and
-`Ports/DistantTerrain/` and `Assets/Shaders/DistantTerrain/` are new trees. Everything the feature
+`Ports/DistantTerrain/` and `Assets/Shaders/DistantTerrain/` are new trees.
+
+**One cross-feature touch: `Ports/DynamicSkies/BLBSkybox.cs` (+50/-6).** This feature edited an
+already-shipped mod port, which is exactly the kind of reach this document exists to record. `Init`'s
+branch key moved from `GameObject.Find("DistantTerrain")` to `GameObject.Find("stackedCamera")` — the
+object is `DontDestroyOnLoad` and outlives a teardown that destroyed the camera, so keying on it took
+the wrong branch on precisely the launch with no far terrain — and `LateUpdate` gained a throttled
+re-bind for a stacked camera that turns up after `Init`'s bounded poll gave up. The three
+`[DynamicSkies] clear flags on: …` lines (`player camera`, `stackedCamera`, `stackedCamera (late)`)
+say which of the three ways it went, since they are indistinguishable from outside. Dynamic Skies is
+not upstream DFU, so this adds nothing to the engine-patch totals, but a future rebase of the Dynamic
+Skies port must carry it. Everything the feature
 needed at the engine seam was already there and already patched for the four features before it: the
 ported-mods start-up hook, `MobileShaders.Find` in place of `mod.GetAsset<Shader>`, the pack
 importer, `Mod.LoadAllAssetsFromBundle`, and `StreamingWorld.OnReady` as a public event. **Nothing

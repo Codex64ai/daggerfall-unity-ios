@@ -28,7 +28,7 @@
 
 **Files:** `tools/bundled-mods/mods.json`
 
-**Interfaces:** Produces fetched folder `Assets/Game/Mods/DistantTerrainWoD/` with the manifest, 3 CSV TextAssets, `daggerfall_deriv_map.png` (+meta), `modsettings.json`; no `.cs`, no `.shader`/`.cginc`, no `.prefab`, no `.png~`, none of the three unused `*.bin.txt`. Folder name `DistantTerrainWoD` is the importer-rule key (Task 2). Save the durable upstream copy for Tasks 3-4.
+**Interfaces:** Produces fetched folder `Assets/Game/Mods/DistantTerrainWoD/` with the manifest and, under `ModResources/` (upstream's `Resources/`, renamed by the `rename_dirs` entry option - Unity bakes any folder of that name into every player build, which would ship this pending-licence data in a public IPA), 3 CSV TextAssets, `daggerfall_deriv_map.png` (+meta) and `modsettings.json`; no `.cs`, no `.shader`/`.cginc`, no `.prefab`, no `.png~`, none of the three unused `*.bin.txt`. Folder name `DistantTerrainWoD` is the importer-rule key (Task 2). Save the durable upstream copy for Tasks 3-4.
 
 - [ ] Step 1: entry (adapt to the manifest's real file name; `exclude_globs` are basename globs; `strip_code` strips only `.cs`/`.dll`):
 ```json
@@ -97,13 +97,13 @@ The repo root may not be the mod root (the vendored drop may sit in a subfolder)
 ### Task 6: Fix wave placeholder (controller-driven from reviews) - no fixed content.
 
 ### Task 7: Build the bundle, verify, upload
-Unscoped `ReimportPacks`, full `ApplyAll` -> 51 bundles; `tools/dfmod_inspect.py`: 1 texture **R8 2048x1024** readable, no mips (Task 2's rule: the 5000x2500 greyscale source is clamped to 2048 and imports single-channel), 3 TextAssets + manifest, no shader/script; metas quoted; self-test flips to N/0; backups 51/51; copy to `~/dev/dfu-mods/distant-terrain-wod.dfmod`; upload under that asset name.
+Unscoped `ReimportPacks`, full `ApplyAll` -> 51 bundles; `tools/dfmod_inspect.py`: 1 texture **R8 2048x1024** readable, no mips (Task 2's rule: the 5000x2500 greyscale source is clamped to 2048 and imports single-channel), 5 TextAssets + manifest, no shader/script; metas quoted; self-test flips to N/0; backups 51/51; copy to `~/dev/dfu-mods/distantterrain.dfmod`; upload under that asset name (the bundle's stem comes from the manifest `distantterrain.dfmod.json`, so `distantterrain.dfmod` is what the tester installs and what README-iOS.md must name).
 
 ### Task 8: Docs
-THIRD-PARTY.md (MIT base + unlicensed additions, provenance both commits, the rewrite, the dropped files, the preset, memory, timing lines, not device-verified), UPSTREAM-PATCHES.md (engine touch points: none expected beyond MobilePortedMods/MobileShaders/RequiredShaderVariants/GraphicsSettings pin; rebase risk), README-iOS.md `### Distant Terrain` (one switch, one bundle, what you see, the dials, Dynamic Skies interplay, fog note, timing lines, not device-verified).
+THIRD-PARTY.md (MIT base + unlicensed additions, provenance both commits, the rewrite, the dropped files, the preset, memory, timing lines, not device-verified), UPSTREAM-PATCHES.md (engine touch points: none expected beyond MobilePortedMods/MobileShaders/RequiredShaderVariants/GraphicsSettings pin; rebase risk), README-iOS.md `### Distant Terrain (World of Daggerfall flavour)` (one switch, one bundle, what you see, the dials, Dynamic Skies interplay, fog note, timing lines, not device-verified).
 
 ### Task 9: Simulator verification
-Recipe as Terrain Task 8 (51/51 restore). Launches: default-off; ON at 207,213 -> `[PortedMods] started Distant Terrain`, `[DistantTerrain] far terrain built in ...`, `arrays N MB`, horizon shows distant hills where OFF shows fog/sky (crop), no Metal errors, no `far terrain failed`; + Dynamic Skies + DREAM SKY -> `[DynamicSkies]` takes the stacked-camera branch (grep for `stackedCamera`/its log), sky renders, sun visible (`_SunSize` restored); + WoD Terrain on -> far and near heights consistent at the seam (crop); coast 370,350 with everything on; negative (bundle removed). Timings + memory lines reported.
+Recipe as Terrain Task 8 (51/51 restore). Launches: default-off; ON at 207,213 -> `[PortedMods] started Distant Terrain of the World of Daggerfall`, `[DistantTerrain] far terrain built in ...`, `arrays N MB`, horizon shows distant hills where OFF shows fog/sky (crop), no Metal errors, no `far terrain failed`; + Dynamic Skies + DREAM SKY -> `[DynamicSkies]` takes the stacked-camera branch (grep for `stackedCamera`/its log), sky renders, sun visible (`_SunSize` restored); + WoD Terrain on -> far and near heights consistent at the seam (crop); coast 370,350 with everything on; negative (bundle removed). Timings + memory lines reported.
 
 ### Task 10: Device build
 `DFU-Test-unity6-distant.ipa` per the Terrain Task 9 brief pattern (51/51); the iOS Metal compile of the rewritten shader is the gate (grep `Shader error`, sampler messages); hand-off: enable, look at the horizon, check the seam, thermals over 10 minutes of travel, send Player.log.

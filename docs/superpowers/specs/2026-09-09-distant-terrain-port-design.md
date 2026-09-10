@@ -12,7 +12,7 @@ handles permission. Private draft only (`private_only` + `pending:`), exactly as
 "Distant Terrain of the World of Daggerfall": Nystul's Distant Terrain (MIT) modified by MaoDeVaca. The only versioned
 copy is the vendored drop inside github.com/somestupidgirl/Distant-Terrain-of-the-World-of-Daggerfall @
 d454b30af12c9f22c9ab5ef8ad5dbd9171d1cf1f (upstream drop a722b337935dd8a57a913eb413c918c351e68e67; her own commits add build
-scripts only - not used). Manifest title `Distant Terrain`, same GUID as Nystul's (mutually exclusive with it; Nystul's is
+scripts only - not used). Manifest title `Distant Terrain of the World of Daggerfall`, same GUID as Nystul's (mutually exclusive with it; Nystul's is
 not in our pack). It draws a second, coarse Unity `Terrain` covering the whole province on a stacked camera behind the
 main one (far clip 120,000; main camera forced to 15,000 and clear flags Depth), built at `StreamingWorld.OnReady` from
 the small world heightmap (`WoodsFileReader`, 1000x500 -> 1025^2 terrain data), with: 32,928 WoD mountain-prefab lifts
@@ -68,9 +68,15 @@ already Distant-Terrain-aware (`GameObject.Find("DistantTerrain")` / `"stackedCa
    fog settings is kept (upstream behaviour) but logged once; the visual reconciliation with Dynamic Skies is a device
    tuning item, not a code item in this cycle. `RenderSkyboxWithoutSun`'s `_SunSize` pre/post-render write is kept
    (the BLB skybox has `_SunSize`).
-5. **Launcher entry + preset**: `Distant Terrain` default OFF via `Titles`; no dependency gate (BasicMode covers no-WoD);
-   ships with an iOS low preset in `modsettings.json` defaults: `EnableTreesAndDirt=false`,
-   `HighlightDistantLocations=false`, `BasicMode=false` (WoD is the point), `blendEnd=60000`. Docs say what the dials do.
+5. **Launcher entry + preset**: `Distant Terrain of the World of Daggerfall` default OFF via `Titles`; no dependency gate
+   (BasicMode covers no-WoD). The iOS preset lives in the port's CODE defaults, not in the fetched `modsettings.json`,
+   which is upstream content this port does not patch: `blendEnd=60000` and `BasicMode=false` (WoD is the point) are code
+   defaults. `HighlightDistantLocations` is the case where the two disagree - the bundle ships `true`, and the port still
+   comes up with the beacons OFF, because DFU merges the player's settings file over the bundle's and offers no way to ask
+   which file a value came from, so the bundle's `true` is treated as unset and only a settings file the player actually
+   has on disk can turn them on (probed once at the top of `Init`, before any `GetSettings()` creates one).
+   `EnableTreesAndDirt`'s code default is `true`; it reads false at runtime only because the fetched bundle ships `false`,
+   and that one dial is deliberately left to the bundle. Docs say what the dials do.
 6. **Data pipeline**: mods.json entry `DistantTerrainWoD` (`strip_code`; `private_only`; `pending:` licence naming the MIT
    base + MaoDeVaca; `exclude_globs` for `*.shader`, `*.cginc`, `*.prefab`, `*.png~`, the three unused `*.bin.txt`,
    `DaggerfallBillboardBatchFaded.shader`); importer rule `RawData` extended to folder `DistantTerrainWoD` (the deriv map is `GetPixels32`-read: readable,
@@ -81,8 +87,9 @@ already Distant-Terrain-aware (`GameObject.Find("DistantTerrain")` / `"stackedCa
    GUID 9632a2ad-2ea0-46b6-b9b1-a4dafcca8a9a).
 7. **Failure handling**: Init gated on the shader resolving (`MobileShaders.Find` non-null + `isSupported`) and the three
    CSVs + deriv map present, else `[DistantTerrain] not available: <reason>`; `InitFarTerrain` in try/catch that tears the
-   far terrain and the two cameras down and restores `Camera.main.farClipPlane`/`clearFlags` on failure; `Installed` flag
-   for the launcher's `did not start` line (the 4-arg `StartOne`).
+   far terrain and the two cameras down and restores `Camera.main.farClipPlane`/`clearFlags` on failure; the `Running`
+   flag - not `Installed` - for the launcher's `did not start` line (the 4-arg `StartOne`). `Installed` only turns true on
+   the last line of `InitFarTerrain`, long after `Init` returns, so asking it would report every enabled launch a failure.
 8. **Verification**: self-tests (gate, preset defaults, slice-index maths of the rewrite as a pure function, start-order
    flag); simulator (Metal): far terrain visible on the horizon at 207,213 and at the coast 370,350, with Dynamic Skies on
    (sky clears on the stacked camera - grep the `[DynamicSkies]` lines), WoD Terrain on and off (heights differ), timing
