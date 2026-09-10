@@ -133,6 +133,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestDistantTerrainShader();
             TestDistantTerrainPort();
             TestDistantTerrainSliceBlit();
+            TestRealGrassPort();
             TestModConflictOrder();
             TestPortedModGate();
             TestPortedModOrder();
@@ -3002,6 +3003,270 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && global::LocationLoader.BiomesClimateSwap.ShouldSwap(true, readableMap),
                   "LL: type-5 nature swap needs Biomes running and a readable map");
             UnityEngine.Object.DestroyImmediate(readableMap);
+        }
+
+        /// <summary>
+        /// The Real Grass port: the forced configuration, the cost arithmetic that justifies it,
+        /// the detail-map fold, the availability gate, and the three engine shader pins. This is
+        /// the one ported mod that renders through Unity's own terrain detail path rather than a
+        /// shader of its own, so the pins are the whole insurance against grass that draws nothing.
+        /// </summary>
+        static void TestRealGrassPort()
+        {
+            // ---- 1. the forced configuration ----
+            Check(global::RealGrass.RealGrassPort.DetailResolution == 128
+                  && global::RealGrass.RealGrassPort.DetailResolutionPerPatch == 16,
+                "RealGrass: detail resolution is 128 at 16 per patch, not upstream's 256 at 8",
+                global::RealGrass.RealGrassPort.DetailResolution + "/" + global::RealGrass.RealGrassPort.DetailResolutionPerPatch);
+            Check(global::RealGrass.RealGrassPort.ForcedStyle == global::RealGrass.GrassStyle.Classic
+                  && (int)global::RealGrass.RealGrassPort.ForcedStyle == 0,
+                "RealGrass: style is forced Classic - one grass layer, and the only licence-clean textures");
+            Check(global::RealGrass.RealGrassPort.ForcedBillboard,
+                "RealGrass: billboards are forced on - GrassBillboard, not FBX prototypes on the Standard shader");
+            Check(!global::RealGrass.RealGrassPort.ForcedTerrainStones
+                  && !global::RealGrass.RealGrassPort.ForcedWaterPlants
+                  && !global::RealGrass.RealGrassPort.ForcedFlyingInsects
+                  && !global::RealGrass.RealGrassPort.ForcedTextureOverride,
+                "RealGrass: stones, water plants, fireflies and the loose-file texture override are all forced off");
+            Check(global::RealGrass.RealGrassPort.DefaultDetailDistance == 40f
+                  && global::RealGrass.RealGrassPort.DefaultDetailDensity == 0.6f,
+                "RealGrass: the two dials default to 40 m and 0.6 (upstream shipped 120 and 1.0)");
+            // The dials are FIELDS, not constants: there is no modsettings.json in the bundle, so
+            // nothing reads them from a file today and a later settings hook must be able to move
+            // them without touching the port. They must still start on the defaults.
+            Check(global::RealGrass.RealGrassPort.DetailDistance == global::RealGrass.RealGrassPort.DefaultDetailDistance
+                  && global::RealGrass.RealGrassPort.DetailDensity == global::RealGrass.RealGrassPort.DefaultDetailDensity,
+                "RealGrass: DetailDistance / DetailDensity start on their defaults",
+                global::RealGrass.RealGrassPort.DetailDistance + " / " + global::RealGrass.RealGrassPort.DetailDensity);
+            FieldInfo distanceField = typeof(global::RealGrass.RealGrassPort).GetField("DetailDistance");
+            FieldInfo densityField = typeof(global::RealGrass.RealGrassPort).GetField("DetailDensity");
+            Check(distanceField != null && distanceField.IsStatic && !distanceField.IsLiteral && !distanceField.IsInitOnly
+                  && densityField != null && densityField.IsStatic && !densityField.IsLiteral && !densityField.IsInitOnly,
+                "RealGrass: the two dials are settable public static fields, so a settings hook can come later");
+
+            // ---- 2. the cost arithmetic that justifies the configuration ----
+            Check(global::RealGrass.RealGrassPort.DetailPatchesPerTerrain(128, 16) == 64,
+                "RealGrass: (128, 16) is 64 detail patches per terrain - DFU's own patch density",
+                global::RealGrass.RealGrassPort.DetailPatchesPerTerrain(128, 16).ToString());
+            Check(global::RealGrass.RealGrassPort.DetailPatchesPerTerrain(256, 8) == 1024,
+                "RealGrass: upstream's (256, 8) is 1,024 patches per terrain - the 16x this port drops",
+                global::RealGrass.RealGrassPort.DetailPatchesPerTerrain(256, 8).ToString());
+            Check(global::RealGrass.RealGrassPort.DetailPatchesPerTerrain(
+                      global::RealGrass.RealGrassPort.DetailResolution,
+                      global::RealGrass.RealGrassPort.DetailResolutionPerPatch) == 64,
+                "RealGrass: the constants and the arithmetic agree");
+            Check(global::RealGrass.RealGrassPort.DetailPatchesPerTerrain(0, 16) == 0
+                  && global::RealGrass.RealGrassPort.DetailPatchesPerTerrain(128, 0) == 0,
+                "RealGrass: the patch count tolerates a zero without dividing by it");
+            Check(global::RealGrass.RealGrassPort.LiveTerrainCount(3) == 49
+                  && global::RealGrass.RealGrassPort.LiveTerrainCount(0) == 1
+                  && global::RealGrass.RealGrassPort.LiveTerrainCount(-1) == 0,
+                "RealGrass: TerrainDistance 3 is a 49-terrain ring - the promotion handler's real load");
+            Near(global::RealGrass.RealGrassPort.DetailDataMegabytes(128, 1, 49), 0.766f, 0.01f,
+                "RealGrass: one 128 layer across 49 terrains is ~0.77 MB of resident detail data");
+            Near(global::RealGrass.RealGrassPort.DetailDataMegabytes(256, 5, 49), 15.3f, 0.05f,
+                "RealGrass: upstream's five 256 layers across 49 terrains is ~15.3 MB (the research figure)");
+            Check(global::RealGrass.RealGrassPort.DetailDataMegabytes(128, 0, 49) == 0f
+                  && global::RealGrass.RealGrassPort.DetailDataMegabytes(0, 1, 49) == 0f,
+                "RealGrass: the memory figure is 0 with nothing to hold");
+
+            // ---- 3. the fold ----
+            // Upstream addressed a 256^2 detail map for a 128^2 tilemap; at detail resolution 128
+            // four of its cells become one, so the values must ADD or grass per square metre would
+            // quarter. The ceiling is Unity's own maxDetailScatterPerRes, read per promotion.
+            Check(global::RealGrass.RealGrassPort.FoldDetailValue(10, 20, 255) == 30,
+                "RealGrass: the fold adds, it does not overwrite");
+            Check(global::RealGrass.RealGrassPort.FoldDetailValue(250, 20, 255) == 255
+                  && global::RealGrass.RealGrassPort.FoldDetailValue(9, 20, 16) == 16,
+                "RealGrass: the fold clamps to Unity's detail scatter ceiling, whatever it is");
+            Check(global::RealGrass.RealGrassPort.FoldDetailValue(0, 0, 255) == 0
+                  && global::RealGrass.RealGrassPort.FoldDetailValue(0, -5, 255) == 0
+                  && global::RealGrass.RealGrassPort.FoldDetailValue(5, 3, 0) == 0,
+                "RealGrass: the fold never returns a negative or exceeds a zero ceiling");
+            Check(global::RealGrass.RealGrassPort.MaxDetailValue > 0
+                  && global::RealGrass.RealGrassPort.FallbackMaxDetailValue == 255,
+                "RealGrass: the scatter ceiling starts on the coverage-mode fallback",
+                global::RealGrass.RealGrassPort.MaxDetailValue.ToString());
+            Check(global::RealGrass.DetailMap.UpstreamResolution == 256
+                  && global::RealGrass.DetailMap.Fold == 2,
+                "RealGrass: two upstream cells per axis fold into one detail cell",
+                global::RealGrass.DetailMap.Fold.ToString());
+
+            // The layers themselves: allocated once, cleared per promotion, 128 square, and only
+            // the grass layer exists in this configuration. RealGrassOptions defaults to Classic
+            // with every optional feature off, which is exactly the port's forced configuration.
+            var options = new global::RealGrass.RealGrassOptions();
+            var density = new global::RealGrass.Density()
+            {
+                GrassThick = new global::RealGrass.Range<int>(6, 20),
+                GrassThin = new global::RealGrass.Range<int>(2, 9),
+                WaterPlants = new global::RealGrass.Range<int>(1, 5),
+                DesertPlants = new global::RealGrass.Range<int>(4, 8),
+            };
+            var densityManager = new global::RealGrass.DensityManager(null, options, density);
+            int[,] grassCells = densityManager.Grass.Cells;
+            Check(grassCells.GetLength(0) == 128 && grassCells.GetLength(1) == 128,
+                "RealGrass: a detail layer is a 128x128 int[,], not upstream's 256x256",
+                grassCells.GetLength(0) + "x" + grassCells.GetLength(1));
+            Check(densityManager.GrassDetails == null && densityManager.GrassAccents == null
+                  && densityManager.WaterPlants == null && densityManager.Rocks == null,
+                "RealGrass: Classic with no stones or plants allocates ONE layer, the grass one");
+            densityManager.InitDetailsLayers();
+            Check(ReferenceEquals(grassCells, densityManager.Grass.Cells),
+                "RealGrass: InitDetailsLayers clears the cached array, it does not allocate a new one");
+            // (5, 6) and (5, 7) are two of the four upstream cells of tile (2, 3).
+            densityManager.Grass[5, 6] = 3;
+            densityManager.Grass[5, 7] = 4;
+            Check(densityManager.Grass.Cells[2, 3] == 7 && densityManager.Grass[5, 6] == 7,
+                "RealGrass: upstream's four sub-cell writes land in one cell and sum",
+                densityManager.Grass.Cells[2, 3].ToString());
+            densityManager.InitDetailsLayers();
+            Check(densityManager.Grass.Cells[2, 3] == 0,
+                "RealGrass: the next promotion starts from a cleared layer");
+            int[,] empty = global::RealGrass.DensityManager.Empty;
+            Check(empty.GetLength(0) == 128 && empty.GetLength(1) == 128,
+                "RealGrass: the blanking array matches the detail store, so SetDetailLayer accepts it",
+                empty.GetLength(0) + "x" + empty.GetLength(1));
+
+            // ---- 4. the gate, and inertness ----
+            bool gateOk = true;
+            for (int mask = 0; mask < 4; mask++)
+            {
+                bool shaders = (mask & 1) != 0, texture = (mask & 2) != 0;
+                if (global::RealGrass.RealGrassPort.Available(shaders, texture) != (shaders && texture))
+                    gateOk = false;
+            }
+            Check(gateOk, "RealGrass: Available needs the detail shaders AND a Classic grass texture (all four cases)");
+            Check(!global::RealGrass.RealGrassPort.Installed,
+                "RealGrass: Installed is false until Init runs - nothing in this editor session started it");
+            MethodInfo init = typeof(global::RealGrass.RealGrassPort).GetMethod("Init");
+            Check(init != null && init.IsStatic && init.GetParameters().Length == 1
+                  && init.GetParameters()[0].ParameterType == typeof(InitParams),
+                "RealGrass: Init(InitParams) is the entry point MobilePortedMods calls");
+            Check(init != null && Attribute.GetCustomAttributes(init, typeof(Invoke), false).Length == 0,
+                "RealGrass: no [Invoke] survives - the launcher switch is the only way in");
+            Check(global::RealGrass.RealGrassPort.GrassTextureNames.Length == 2
+                  && global::RealGrass.RealGrassPort.GrassTextureNames[0] == "BrownGrass_tex"
+                  && global::RealGrass.RealGrassPort.GrassTextureNames[1] == "GreenGrass_tex",
+                "RealGrass: the gate asks for exactly the two Classic textures the bundle ships");
+
+            // ---- 5. the sources ----
+            const string portDir = "Assets/Scripts/Game/Mobile/Ports/RealGrass/";
+            string[] portFiles = { "RealGrass.cs", "DensityManager.cs", "DetailPrototypesManager.cs", "Range.cs" };
+            foreach (string file in portFiles)
+            {
+                Check(File.Exists(portDir + file), "RealGrass: " + portDir + file + " exists");
+                if (!File.Exists(portDir + file)) continue;
+                string raw = File.ReadAllText(portDir + file);
+                Check(raw.Contains("License:         MIT License"),
+                    "RealGrass: " + file + " keeps the upstream MIT licence header");
+                Check(raw.Contains("Copyright (c) 2016-2019 Uncanny_Valley, TheLacus"),
+                    "RealGrass: " + file + " names the upstream copyright holders");
+                // Comments stripped: the headers and the MOBILE notes name what was removed on
+                // purpose, and an "it is gone" check a comment can satisfy is worthless.
+                string code = StripShaderComments(raw);
+                Check(!code.Contains("[Invoke("),
+                    "RealGrass: " + file + " carries no [Invoke] attribute");
+                Check(!code.Contains("GetSettings(") && !code.Contains("LoadSettings()")
+                      && !code.Contains("LoadSettingsCallback"),
+                    "RealGrass: " + file + " does not read mod settings - there is no modsettings.json in the bundle");
+                Check(!code.Contains("RegisterCommands"),
+                    "RealGrass: " + file + " has no console commands (External/RealGrassConsoleCommands.cs is not ported)");
+            }
+            Check(!File.Exists(portDir + "RealGrassConsoleCommands.cs")
+                  && !Directory.Exists(portDir + "External"),
+                "RealGrass: the console-command file is not in the port at all");
+
+            string densitySrc = StripShaderComments(File.ReadAllText(portDir + "DensityManager.cs"));
+            Check(densitySrc.Contains("const int size = RealGrassPort.DetailResolution")
+                  && !densitySrc.Contains("const int size = 256") && !densitySrc.Contains("new int[256, 256]"),
+                "RealGrass: no 256-square layer allocation survives in DensityManager");
+            Check(densitySrc.Contains("System.Array.Clear(Cells, 0, Cells.Length)"),
+                "RealGrass: the layers are cleared with Array.Clear, not reallocated per promotion");
+            Check(CountOccurrences(densitySrc, "new DetailMap()") == 5,
+                "RealGrass: the five layers are allocated once, in the constructor",
+                CountOccurrences(densitySrc, "new DetailMap()") + " allocations");
+
+            string grassSrc = StripShaderComments(File.ReadAllText(portDir + "RealGrass.cs"));
+            Check(grassSrc.Contains("SetDetailResolution(RealGrassPort.DetailResolution, RealGrassPort.DetailResolutionPerPatch)")
+                  && !grassSrc.Contains("SetDetailResolution(256, 8)"),
+                "RealGrass: the promotion sets (DetailResolution, DetailResolutionPerPatch), never (256, 8)");
+            Check(grassSrc.Contains("terrainData.detailWidth != RealGrassPort.DetailResolution"),
+                "RealGrass: SetDetailResolution is skipped when the store is already that shape (it reallocates)");
+            Check(grassSrc.Contains("[RealGrass] details on ") && grassSrc.Contains("[RealGrass] detail data ~")
+                  && grassSrc.Contains("[RealGrass] not available: ")
+                  && grassSrc.Contains("[RealGrass] terrain details failed: "),
+                "RealGrass: the four log lines a Player.log is read for are all present");
+            Check(global::RealGrass.RealGrass.CounterInterval == 25,
+                "RealGrass: the counter line is written every 25th promotion",
+                global::RealGrass.RealGrass.CounterInterval.ToString());
+
+            // The Desert branch. Upstream asks mod.GetAsset<Texture2D>("DesertGrass_tex") there, an
+            // asset that exists in NO version of this mod (the desert art is the VMblast
+            // DesertGrass.psd, which this port does not ship), so upstream drew no desert grass in
+            // Billboard style and logged a failed load on every climate change.
+            string protoSrc = StripShaderComments(File.ReadAllText(portDir + "DetailPrototypesManager.cs"));
+            Check(protoSrc.Contains("SetGrass(brownGrass, brownGrass)") && !protoSrc.Contains("SetGrass(desertGrass, desertGrass)"),
+                "RealGrass: Desert draws BrownGrass_tex - upstream's DesertGrass_tex does not exist");
+            // Every ResetColor of the water-plants layer must be inside a WaterPlants test. Asked
+            // by proximity rather than by an exact snippet so that reformatting cannot pass it.
+            const string resetCall = "ResetColor(DetailPrototypes[WaterPlants])";
+            bool resetsGuarded = CountOccurrences(protoSrc, resetCall) > 0;
+            for (int at = protoSrc.IndexOf(resetCall, StringComparison.Ordinal); at >= 0;
+                 at = protoSrc.IndexOf(resetCall, at + resetCall.Length, StringComparison.Ordinal))
+            {
+                int from = Math.Max(0, at - 120);
+                if (!protoSrc.Substring(from, at - from).Contains("options.WaterPlants"))
+                    resetsGuarded = false;
+            }
+            Check(resetsGuarded,
+                "RealGrass: the water-plants colour reset is behind its option (index 0 is the GRASS layer)");
+
+            // ---- 6. the three engine shader pins ----
+            // Real Grass has no shaders of its own: it renders through Unity's stock terrain detail
+            // path. Those shaders are in the Editor's unity_builtin_extra but absent from
+            // libiPhone-lib.a and from the iOS player's default resources, nothing in the project
+            // references them (DFU builds every Terrain at runtime, no scene holds one), so an
+            // IL2CPP build is free to strip them - and stripped, the grass renders as NOTHING, with
+            // no error at all. Hence: named in the port, in the build setup, and in GraphicsSettings.
+            string[] detailShaders = global::RealGrass.RealGrassPort.ShaderNames;
+            Check(detailShaders.Length == 3
+                  && detailShaders[0] == "Hidden/TerrainEngine/Details/Vertexlit"
+                  && detailShaders[1] == "Hidden/TerrainEngine/Details/WavingDoublePass"
+                  && detailShaders[2] == "Hidden/TerrainEngine/Details/BillboardWavingDoublePass",
+                "RealGrass: the three shader names are Unity 6000.3's own (verified against unity_builtin_extra)",
+                string.Join(", ", detailShaders));
+
+            string buildSetup = File.ReadAllText("Assets/Editor/MobileBuildSetup.cs");
+            var pinned = new List<Shader>();
+            var settingsObjects = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/GraphicsSettings.asset");
+            if (settingsObjects != null && settingsObjects.Length > 0)
+            {
+                SerializedProperty list = new SerializedObject(settingsObjects[0]).FindProperty("m_AlwaysIncludedShaders");
+                if (list != null)
+                    for (int i = 0; i < list.arraySize; i++)
+                        pinned.Add(list.GetArrayElementAtIndex(i).objectReferenceValue as Shader);
+            }
+            Check(pinned.Count > 0, "RealGrass: GraphicsSettings' always-included list is readable", pinned.Count + " entries");
+
+            foreach (string name in detailShaders)
+            {
+                Shader shader = Shader.Find(name);
+                Check(shader != null, "RealGrass: " + name + " resolves by name in this Unity version");
+                if (shader != null)
+                    Check(shader.isSupported, "RealGrass: " + name + " compiles for this editor's graphics API");
+                Check(buildSetup.Contains(name),
+                    "RealGrass: " + name + " is in MobileBuildSetup's EnsureAlwaysIncludedShaders list");
+                // The pin itself, by OBJECT: a built-in shader has no project GUID, so the asset
+                // text names it only by a fileID into unity_builtin_extra - a number no test should
+                // hard-code. Comparing the loaded shader is the same question, asked robustly.
+                Check(shader != null && pinned.Contains(shader),
+                    "RealGrass: ApplyIOSSettings pinned " + name + " into GraphicsSettings' always-included list");
+            }
+            // MobileShaders is deliberately NOT extended: these are engine shaders, so there is no
+            // captured copy to prefer and no mod bundle that could shadow them by name.
+            Check(!MobileShaders.Names.Contains(detailShaders[0]),
+                "RealGrass: the engine detail shaders are not in MobileShaders' captured list (they are not mod shaders)");
         }
 
         static global::LocationLoader.LocationPrefab ParseLocationPrefabXml(string xml)

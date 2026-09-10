@@ -256,6 +256,21 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 // MobileShaders.Find and no material in any scene references it, so without the
                 // pin the build strips it and the filter silently never turns on.
                 "Daggerfall/Mobile/CRT",
+                // Unity's own terrain detail shaders, which the Real Grass port renders through -
+                // it has no shaders of its own. Names verified against 6000.3.23f1's
+                // unity_builtin_extra (the only three Hidden/TerrainEngine/Details/* shaders in
+                // it) and against Shader.Find in the self test. They are absent from
+                // libiPhone-lib.a and from the iOS player's default resources, DFU creates every
+                // Terrain at runtime and no scene holds one, so nothing in the project references
+                // them and an IL2CPP build is free to strip them - after which the grass renders
+                // as nothing at all, with no error. An Always-Included entry pins the shader with
+                // all of its variants, which is why these need no .shadervariants entry (and could
+                // not easily have one: a built-in shader has no project GUID to name).
+                // Written out rather than spliced from RealGrassPort.ShaderNames so this list can
+                // be read on its own; the self test asserts the two agree, name for name.
+                "Hidden/TerrainEngine/Details/Vertexlit",
+                "Hidden/TerrainEngine/Details/WavingDoublePass",
+                "Hidden/TerrainEngine/Details/BillboardWavingDoublePass",
             };
 
             var settings = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/GraphicsSettings.asset");
