@@ -30,6 +30,9 @@ Shader "Daggerfall/DistantTerrain/DistantTerrainTilemap" {
 		_TileArrayWinter ("Tile Texture Array Winter", 2DArray) = "" {}
 		_TileArrayRain ("Tile Texture Array Rain", 2DArray) = "" {}
 		_SlicesPerBiome ("Slices per Biome Tileset", Int) = 56
+		// MOBILE: mip levels in those arrays; the tile sample clamps its explicit lod to this - 1.
+		// 1 (no mip chain, level 0 only) is the safe default for a material nothing has bound.
+		_TileArrayMipCount ("Tile Array Mip Count", Int) = 1
 	    _SkyTex("Sky Texture", 2D) = "white" {}
 		_FarTerrainTilemapTex("Tilemap (R)", 2D) = "red" {}
 		_FarTerrainTilesetDim("Tileset Dimension (in tiles)", Int) = 16

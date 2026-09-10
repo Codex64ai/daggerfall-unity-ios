@@ -598,7 +598,15 @@ and a bare-name match would have taken three channels and the mip chain off that
 **The reach dials, and why one of them is derived rather than configured.** `blendEnd` is both the
 stacked camera's far clip plane and the distance at which the far terrain has faded to nothing;
 upstream ships 120,000 and this port defaults to **60,000**, half the reach, because half the world
-is a lot to draw on a phone. `mainCameraFarClipPlane` is **15,000**, upstream's own value, exposed as
+is a lot to draw on a phone. That halving is also the reason a tester can look straight at a working
+far terrain and see nothing: **at a flat vantage the far terrain's whole skyline sits below the near
+world's tree line.** Measured in the simulator at map pixel 300,210, its highest point is +1.3° above
+eye level - 41 pixels of a 3,870,400-pixel frame, which reads as zero and once cost a whole
+diagnostic round on a "the far terrain never draws" finding that was false. It draws. **Look for it
+from a hilltop, or across water or a coast**, where the near ground falls away and there is sky for
+it to occupy; at 300,210 there is not. Lowering `blendEnd` further shortens that skyline again, and
+raising it towards upstream's 120,000 lengthens it - so the dial that costs frames is also the dial
+that decides whether the feature is visible from anywhere but a summit. `mainCameraFarClipPlane` is **15,000**, upstream's own value, exposed as
 a dial rather than changed. The trap is `blendStart`: the shader computes
 `fadeRange = _BlendEnd - _BlendStart + 1`, so halving `blendEnd` alone would leave upstream's
 `blendStart` of 100,000 *above* it, invert the band and fade every far-terrain fragment to alpha
@@ -668,10 +676,11 @@ Dynamic Skies. It is now null-safe, idempotent and logged once
 heavy ...`) so a log reader can see who wrote them, and reconciling the two visually is a **device
 tuning item for a later round, not a code item in this one**.
 
-Not device-verified at the time of writing - and unlike the other four, **nothing here has been
-rendered at all yet**: the far terrain is only ever built inside a running player, so the array pack,
-the timing lines, the teardown and the title-screen behaviour are all first exercised in the
-simulator run. The port carries its own measurement for when it is:
+Not device-verified at the time of writing, but no longer unrendered: the far terrain has been built
+and drawn repeatedly in the **iOS simulator**, including an isolation frame with the near world's
+layers culled away, which is what retired the earlier "it never draws" reading (see the reach dials
+above). What remains unproven is the device - frame time, memory at world entry, and the look of the
+near/far seam on a real screen. The port carries its own measurement for that:
 
 ```
 [DistantTerrain] far terrain built in N ms (heightmap A ms, carve B ms, lifts C ms, tilemap D ms, arrays E ms)
@@ -701,6 +710,40 @@ same 224 slice blits, destination RGBA32), saying so once per season with
 stopped the far terrain building at all whenever Biomes was on, which is how the Task 9 simulator run
 found it. A device that reports no copy-texture support at all falls back to the strict same-format
 rule and refuses, as before.
+
+**And `Graphics.ConvertTexture` does not work on array slices at all.** It returns `false` for a
+genuine ARGB32 -> RGBA32 slice conversion even while `SystemInfo.copyTextureSupport` reports
+`Basic, Copy3D, DifferentTypes, TextureToRT, RTToTexture` - so the capability flags are not the
+question, and gating on them left the Biomes mix refused anyway. The simulator run caught Unity's own
+reason for it in the player console, which is worth writing down because it retires the "Metal quirk"
+reading: **`Graphics.ConvertTexture does not support a Texture2DArray as source.`** That is an API
+precondition, not a driver answer, which is exactly why no `copyTextureSupport` bit predicts it and
+why the same call also returned `false` for the same-format round trip Task 9 fixed.
+The pack therefore carries a third method, chosen per source archive by a pure
+`SlicePackMethod(srcFormat, dstFormat, convertSupported)`: **Copy** when the source is already in the
+destination format, **Convert** when it is not and the driver honours it, and **Blit** when it does
+not - `Graphics.Blit(src, scratch, sourceDepthSlice, 0)` into a `RenderTexture` of the destination
+array's exact graphics format, `GenerateMips()`, then `Graphics.CopyTexture(scratch, 0, dst, slice)`.
+A blit is a *sampler fetch*, so the channel order is decoded on read and re-encoded on write and the
+driver has nothing to refuse. `convertSupported` is what the session has learned rather than a
+capability bit: it starts true, so a runtime that ever grows array-source support gets the one-call
+path for free, and latches false on the first refusal, so the cost of the discovery is one refused
+call per session and not one per archive - plus, on this Unity version, one red
+`Graphics.ConvertTexture does not support a Texture2DArray as source` in the console at the first
+world entry with a mixed set, immediately followed by the port's own line explaining it. That is a
+deliberate trade: the alternative is hard-coding "this Unity cannot do it", which silently becomes
+wrong. The blit path says so once per season, and that line is the one to grep for on a Biomes
+install: `[DistantTerrain] tileset arrays blitted: ARGB32 -> RGBA32 (winter, 168 slices)`. The mip
+chain is regenerated from the converted level 0 rather than carried across, which is the same image -
+the sources' own chains are Unity-generated box filters of the same pixels - and it matters because
+the shader picks its tile mip *explicitly* (`UNITY_SAMPLE_TEX2DARRAY_LOD`; array `GRAD` sampling has
+a long-standing seam bug), and an explicit lod past an array's last level is undefined in HLSL rather
+than clamped. That is also why `_TileArrayMipCount` exists: the C# pushes the packed arrays' real mip
+count and the shader clamps every lod to `_TileArrayMipCount - 1`, so an array with a short chain -
+a replacement pack that ships no mips, or a future fallback that had to drop them - samples level 0
+instead of black. The whole fallback is exercised on a real GPU by the self-test, which blits an
+ARGB32 source slice into an RGBA32 array and reads the result back: slice index, orientation, channel
+order and mip generation are all things only a driver can get wrong.
 
 Memory, added up: the three tile arrays ~15 MB, the 1024² RGBA32 terrain-info tilemap 4 MB on the GPU
 (the CPU copy is released at the upload and the staging `Color32[]` dropped with it), the deriv map

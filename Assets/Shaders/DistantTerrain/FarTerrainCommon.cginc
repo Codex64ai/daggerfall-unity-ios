@@ -65,6 +65,12 @@ UNITY_DECLARE_TEX2DARRAY(_TileArrayWinter);
 UNITY_DECLARE_TEX2DARRAY(_TileArrayRain);
 float4 _TileArraySummer_TexelSize; // .zw = slice width/height in texels; drives mip selection
 int _SlicesPerBiome;               // 56 - records per biome tileset, the slice-block stride
+// MOBILE: mip levels the three arrays carry (they are guaranteed to agree - BuildTileArrays checks
+// it across the seasons). The tile sample below picks its mip level EXPLICITLY, and an explicit lod
+// past an array's last level is undefined - black on some drivers - so this is the ceiling every
+// lod is clamped to. 1 means there is no mip chain at all and only level 0 may be sampled. Pushed
+// from DistantTerrain.TileArrayMipCount; the 1 default is the safe answer for an unbound material.
+int _TileArrayMipCount;
 
 // Array selector. Deliberately the same numbering as _TextureSetSeasonCode.
 #define DT_ARRAY_SUMMER 0
@@ -444,6 +450,12 @@ half4 getColorFromTileArray(Input IN, int arraySel, int biome, int record, float
 	// so in as many words). So turn the clamped gradient into a LOD: lod = log2(texels per pixel).
 	float sliceDim = max(_TileArraySummer_TexelSize.z, _TileArraySummer_TexelSize.w);
 	float lod = log2(max(max(gx, gy) * sliceDim, 1e-6f));
+
+	// MOBILE: and the ceiling. The gradient clamp above caps this at mip 5 of a 64^2 slice's six
+	// levels, which is right for the arrays the pack normally builds - but an array with a shorter
+	// chain (a replacement pack that ships no mips) would be sampled past its last level, which is
+	// undefined rather than clamped in HLSL. _TileArrayMipCount is what the arrays actually have.
+	lod = clamp(lod, 0.0f, (float)max(_TileArrayMipCount - 1, 0));
 
 	float3 uv3 = float3(uv, (float)(biome * _SlicesPerBiome + record));
 

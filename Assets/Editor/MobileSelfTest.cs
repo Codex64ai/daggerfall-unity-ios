@@ -131,6 +131,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestDynamicSkiesPresetTextures();
             TestDistantTerrainShader();
             TestDistantTerrainPort();
+            TestDistantTerrainSliceBlit();
             TestModConflictOrder();
             TestPortedModGate();
             TestPortedModOrder();
@@ -1124,6 +1125,15 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "DistantTerrain: _SlicesPerBiome (56) is the slice-block stride the C# binds");
             Check(cginc.Contains("biome * _SlicesPerBiome + record"),
                 "DistantTerrain: slice index is biome * _SlicesPerBiome + record (matches DistantTerrain.SliceIndex)");
+            // The mip-count contract. The tile sample selects its level EXPLICITLY
+            // (UNITY_SAMPLE_TEX2DARRAY_LOD - array GRAD sampling has a seam bug), and an explicit lod
+            // past an array's last level is undefined in HLSL, not clamped. So the shader must own a
+            // ceiling and the C# must push the packed arrays' real mip count into it: without both
+            // halves an array with a shorter chain than a 64^2 tileset's six levels samples black.
+            Check(cginc.Contains("int _TileArrayMipCount") && src.Contains("_TileArrayMipCount"),
+                "DistantTerrain: _TileArrayMipCount is declared and exposed as a property");
+            Check(cginc.Contains("clamp(lod, 0.0f, (float)max(_TileArrayMipCount - 1, 0))"),
+                "DistantTerrain: every tile-array sample clamps its explicit lod to _TileArrayMipCount - 1");
 
             // The atlas machinery is gone - this is the memory fix, so its absence is the test.
             Check(!cginc.Contains("getColorByTextureAtlasIndex"),
@@ -1204,6 +1214,99 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // tileset compatibility rule, the memory arithmetic, the timing cadence), and source text for
         // the things that only exist at world entry on a device - the log literals a Player.log
         // reader greps for, the teardown, and the TerrainData trim.
+        // The fallback the port converts tile slices through when the driver refuses
+        // Graphics.ConvertTexture on array elements - which Metal does, for a genuine ARGB32 ->
+        // RGBA32 conversion, on the iOS simulator (diag-report §4). Everything else about the pack
+        // is checkable without a GPU; this is not, because the failure modes that matter are all
+        // things only a driver can get wrong: the wrong source slice, a vertically flipped blit, a
+        // channel order carried across instead of converted, a mip chain that never got generated.
+        // So this drives the real helpers on the editor's real GPU (Metal here, the same family as
+        // the device) and reads the result back. Runs only with graphics - the whole suite already
+        // requires that (TestModExtractorRoundTrip decodes a DXT1 fixture by blit).
+        static void TestDistantTerrainSliceBlit()
+        {
+            const int dim = 8;
+            // Two slices, told apart by BLUE, with a red ramp across x and a green ramp up y so a
+            // flip or a transpose cannot pass. Values stay in 64..232: the sampler linearises and
+            // the render target re-encodes under a linear colour space, and the dark end of that
+            // round trip is where 8-bit quantisation bites.
+            Texture2DArray src = new Texture2DArray(dim, dim, 2, TextureFormat.ARGB32, true, false);
+            for (int slice = 0; slice < 2; slice++)
+            {
+                Color32[] px = new Color32[dim * dim];
+                for (int y = 0; y < dim; y++)
+                    for (int x = 0; x < dim; x++)
+                        px[y * dim + x] = new Color32((byte)(64 + 24 * x), (byte)(64 + 24 * y), (byte)(slice == 0 ? 64 : 224), 255);
+                src.SetPixels32(px, slice, 0);
+            }
+            src.Apply(true);
+
+            Texture2DArray dst = new Texture2DArray(dim, dim, 2, TextureFormat.RGBA32, true, false);
+            RenderTexture scratch = global::DistantTerrain.DistantTerrain.CreateSliceScratch(dst);
+            Check(scratch != null && scratch.width == dim && scratch.mipmapCount == dst.mipmapCount,
+                "DistantTerrain: the scratch surface is one slice of the destination array, mip chain included",
+                scratch == null ? "CreateSliceScratch returned null" : scratch.width + "x" + scratch.height + ", " + scratch.mipmapCount + " mips");
+            if (scratch == null)
+            {
+                UnityEngine.Object.DestroyImmediate(src);
+                UnityEngine.Object.DestroyImmediate(dst);
+                return;
+            }
+
+            // Source slice 1 into destination slice 0: if either index were ignored the blue channel
+            // (or the slice read back) gives it away.
+            global::DistantTerrain.DistantTerrain.BlitSlice(src, 1, dst, 0, scratch);
+            global::DistantTerrain.DistantTerrain.DestroySliceScratch(scratch);
+
+            Color32[] mip0 = ReadArraySlice(dst, 0, 0, dim);
+            Check(mip0 != null, "DistantTerrain: the blitted slice can be read back off the GPU");
+            if (mip0 != null)
+            {
+                Func<int, int, Color32> at = (x, y) => mip0[y * dim + x];
+                Check(NearColor(at(0, 0), 64, 64, 224) && NearColor(at(dim - 1, 0), 232, 64, 224)
+                      && NearColor(at(0, dim - 1), 64, 232, 224),
+                    "DistantTerrain: the fallback blit converts ARGB32 -> RGBA32 with the right slice, orientation and channel order",
+                    at(0, 0) + " / " + at(dim - 1, 0) + " / " + at(0, dim - 1));
+            }
+            // ...and the mip chain the blit only wrote level 0 of. An array bound to the far-terrain
+            // shader is sampled at an EXPLICIT lod of up to five, so a chain of black levels is a
+            // black horizon, not a soft one.
+            Color32[] mip1 = ReadArraySlice(dst, 0, 1, dim / 2);
+            Check(mip1 != null && NearColor(mip1[0], 76, 76, 224),
+                "DistantTerrain: GenerateMips filled the scratch surface's chain and it was copied with the slice",
+                mip1 == null ? "mip 1 unreadable" : mip1[0].ToString());
+
+            UnityEngine.Object.DestroyImmediate(src);
+            UnityEngine.Object.DestroyImmediate(dst);
+        }
+
+        /// <summary>Reads one mip level of one Texture2DArray slice back through a RenderTexture.</summary>
+        static Color32[] ReadArraySlice(Texture2DArray array, int slice, int mip, int dim)
+        {
+            RenderTexture rt = new RenderTexture(dim, dim, 0, RenderTextureFormat.ARGB32,
+                array.graphicsFormat == UnityEngine.Experimental.Rendering.GraphicsFormat.R8G8B8A8_SRGB
+                    ? RenderTextureReadWrite.sRGB : RenderTextureReadWrite.Linear);
+            if (!rt.Create()) { UnityEngine.Object.DestroyImmediate(rt); return null; }
+            Graphics.CopyTexture(array, slice, mip, rt, 0, 0);
+            RenderTexture wasActive = RenderTexture.active;
+            RenderTexture.active = rt;
+            Texture2D readback = new Texture2D(dim, dim, TextureFormat.RGBA32, false, false);
+            readback.ReadPixels(new Rect(0, 0, dim, dim), 0, 0);
+            readback.Apply(false);
+            RenderTexture.active = wasActive;
+            Color32[] px = readback.GetPixels32();
+            UnityEngine.Object.DestroyImmediate(readback);
+            rt.Release();
+            UnityEngine.Object.DestroyImmediate(rt);
+            return px;
+        }
+
+        /// <summary>8-bit round trips through a sampler and a render target are near, not exact.</summary>
+        static bool NearColor(Color32 c, int r, int g, int b)
+        {
+            return Math.Abs(c.r - r) <= 10 && Math.Abs(c.g - g) <= 10 && Math.Abs(c.b - b) <= 10;
+        }
+
         static void TestDistantTerrainPort()
         {
             // The slice contract: slice = biome * 56 + record, biome 0 desert / 1 mountain /
@@ -1290,6 +1393,37 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && !global::DistantTerrain.DistantTerrain.TilesetFormatsAgree(null),
                 "DistantTerrain: TilesetFormatsAgree decides whether the pack copies or converts");
 
+            // The per-slice decision, whole truth table. Graphics.ConvertTexture returns FALSE on
+            // array slices even for a genuine ARGB32 -> RGBA32 conversion (diag-report §4; the
+            // simulator console gives Unity's reason, "Graphics.ConvertTexture does not support a
+            // Texture2DArray as source"), so "the formats differ" can no longer mean "convert or
+            // refuse":
+            // a refused conversion falls back to a Blit through a RenderTexture of the destination
+            // format. A source ALREADY in the destination format is a plain copy in every column -
+            // a same-format ConvertTexture is refused too, and that is what cost the whole far
+            // terrain under Biomes before Task 9's fix.
+            Check(global::DistantTerrain.DistantTerrain.SlicePackMethod(TextureFormat.RGBA32, TextureFormat.RGBA32, true)
+                      == global::DistantTerrain.DistantTerrain.SlicePack.Copy
+                  && global::DistantTerrain.DistantTerrain.SlicePackMethod(TextureFormat.RGBA32, TextureFormat.RGBA32, false)
+                      == global::DistantTerrain.DistantTerrain.SlicePack.Copy,
+                "DistantTerrain: a source already in the destination format is copied, whether or not the driver converts");
+            Check(global::DistantTerrain.DistantTerrain.SlicePackMethod(TextureFormat.ARGB32, TextureFormat.RGBA32, true)
+                      == global::DistantTerrain.DistantTerrain.SlicePack.Convert,
+                "DistantTerrain: a differing format is converted where the driver honours ConvertTexture");
+            Check(global::DistantTerrain.DistantTerrain.SlicePackMethod(TextureFormat.ARGB32, TextureFormat.RGBA32, false)
+                      == global::DistantTerrain.DistantTerrain.SlicePack.Blit,
+                "DistantTerrain: a differing format is blitted through a RenderTexture where ConvertTexture is refused (every runtime that will not take a Texture2DArray as source)");
+
+            // The mip-count uniform's C# half: the number pushed is the packed arrays' own, floored
+            // at 1 so an unpacked/mip-less array clamps the shader's explicit lod to level 0 rather
+            // than sampling past the end of the chain.
+            Check(global::DistantTerrain.DistantTerrain.TileArrayMipCount(7) == 7
+                  && global::DistantTerrain.DistantTerrain.TileArrayMipCount(1) == 1
+                  && global::DistantTerrain.DistantTerrain.TileArrayMipCount(0) == 1
+                  && global::DistantTerrain.DistantTerrain.TileArrayMipCount(-3) == 1
+                  && global::DistantTerrain.DistantTerrain.TileArrayMipCount((Texture2DArray)null) == 1,
+                "DistantTerrain: _TileArrayMipCount is the packed arrays' mip count, never below 1");
+
             // The memory the port promised: three 224-slice arrays of 64^2 ARGB32 with mips, ~15 MB
             // against the ~270 MB of twelve 2048^2 atlases the rewrite replaced.
             long oneArray = global::DistantTerrain.DistantTerrain.ArrayBytes(64, 64, 224, 7, 4);
@@ -1354,6 +1488,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "DistantTerrain: all three tile arrays are bound (summer, winter, rain - the shader picks per fragment)");
             Check(port.Contains("SetInt(\"_SlicesPerBiome\", SlicesPerBiome)"),
                 "DistantTerrain: _SlicesPerBiome is pushed from the same constant SliceIndex uses");
+            Check(port.Contains("SetInt(\"_TileArrayMipCount\", TileArrayMipCount(tileArraySummer))"),
+                "DistantTerrain: _TileArrayMipCount is pushed from the packed array itself, not assumed");
             Check(!portCode.Contains("_TileAtlasTex") && !portCode.Contains("GetTerrainTilesetTexture"),
                 "DistantTerrain: the twelve atlas binds and the calls that built them are gone");
             Check(port.Contains("int slice = SliceIndex(b, record);")
@@ -1449,9 +1585,26 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // Graphics.ConvertTexture is a same-format round trip that Metal answers with FALSE, and
             // that refused the entire far terrain under Biomes ("could not convert archive 3 record 0
             // from RGBA32 to RGBA32"). A matching source is a plain slice copy.
-            Check(portCode.Contains("bool convertThisArchive = src[b].format != dstFormat;")
-                  && portCode.Contains("if (!convertThisArchive)"),
-                "DistantTerrain: copy-or-convert is decided per archive, so a source already in the destination format is never sent through a same-format ConvertTexture");
+            Check(portCode.Contains("SlicePack method = SlicePackMethod(src[b].format, dstFormat, convertSlicesSupported ?? true);")
+                  && portCode.Contains("if (method == SlicePack.Copy)"),
+                "DistantTerrain: copy-or-convert-or-blit is decided per archive by the pure SlicePackMethod, so a source already in the destination format is never sent through a same-format ConvertTexture");
+            // The fallback itself, and the latch that makes it cost one refused call per SESSION
+            // rather than one per archive. `?? true` is what makes the first slice still try the
+            // cheap path on a driver that would have honoured it.
+            Check(portCode.Contains("convertSlicesSupported = false;")
+                  && portCode.Contains("BlitSlice(src[b], record, dst, slice, scratch);")
+                  && portCode.Contains("scratch = CreateSliceScratch(dst);"),
+                "DistantTerrain: a refused ConvertTexture latches for the session and the slice is blitted through the scratch RenderTexture instead");
+            Check(portCode.Contains("Graphics.Blit(src, scratch, srcSlice, 0);")
+                  && portCode.Contains("scratch.GenerateMips();")
+                  && portCode.Contains("Graphics.CopyTexture(scratch, 0, dst, dstSlice);"),
+                "DistantTerrain: the fallback is a sampler fetch of the source slice into a destination-format RenderTexture, mips regenerated, copied back whole");
+            Check(portCode.Contains("desc.graphicsFormat = dst.graphicsFormat;")
+                  && portCode.Contains("desc.mipCount = Mathf.Max(1, dst.mipmapCount);"),
+                "DistantTerrain: the scratch surface takes the destination array's exact graphics format and mip chain (CopyTexture demands both)");
+            Check(MethodBody(portCode, "Texture2DArray PackSeason(TextureReader reader, string season, int[] archives)")
+                      .Contains("DestroySliceScratch(scratch);"),
+                "DistantTerrain: the scratch RenderTexture is released whichever way PackSeason leaves");
 
             // The beacons. Upstream shipped HighlightLocations true with RuntimeVisible false (baked
             // but hidden behind the End key); this port drops the hotkey, so the master switch is the
@@ -1500,6 +1653,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "[DistantTerrain] far terrain failed: ",
                 "[DistantTerrain] tileset arrays mismatch: ",
                 "[DistantTerrain] tileset arrays converted: {0} -> {1} ({2})",
+                "[DistantTerrain] tileset arrays blitted: {0} -> {1} ({2}, {3} slices)",
                 "[DistantTerrain] far terrain: pos={0:F1},{1:F1},{2:F1} size={3:F1},{4:F1},{5:F1} heightScale={6:F1} ",
                 "layer={7} stackedCamera mask={8} near={9} far={10} depth={11} targetTexture={12} main.far={13} ",
                 "shader={14} supported={15} material={16} renderer={17} drawHeightmap={18} ",

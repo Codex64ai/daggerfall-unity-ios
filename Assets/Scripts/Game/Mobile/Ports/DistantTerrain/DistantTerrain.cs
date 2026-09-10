@@ -400,6 +400,140 @@ namespace DistantTerrain
             return true;
         }
 
+        /// <summary>
+        /// How one source slice reaches the packed array. See <see cref="SlicePackMethod"/>.
+        /// </summary>
+        public enum SlicePack
+        {
+            /// <summary>Graphics.CopyTexture - the source is already in the destination's format.</summary>
+            Copy,
+            /// <summary>Graphics.ConvertTexture - a format-converting GPU blit, slice to slice.</summary>
+            Convert,
+            /// <summary>Graphics.Blit through a RenderTexture, then CopyTexture - the fallback.</summary>
+            Blit,
+        }
+
+        /// <summary>
+        /// Pure: the decision every slice of the pack goes through.
+        ///
+        /// <para>MOBILE: <c>Graphics.ConvertTexture(Texture2DArray, int, Texture2DArray, int)</c>
+        /// does not work here. It returns <c>false</c> for a genuine ARGB32 -> RGBA32 slice
+        /// conversion - and for a same-format one - even though <c>SystemInfo.copyTextureSupport</c>
+        /// reports <c>Basic, Copy3D, DifferentTypes, TextureToRT, RTToTexture</c>, so the capability
+        /// flags are not the right question. The simulator run of 2026-09-10 caught Unity's own
+        /// reason for the refusal in the player console: <c>"Graphics.ConvertTexture does not support
+        /// a Texture2DArray as source."</c> - an API precondition rather than a Metal quirk, which is
+        /// why no `copyTextureSupport` bit predicts it. With World of Daggerfall - Biomes installed
+        /// (which makes TextureReader hand back RGBA32 for one climate variant of a season and ARGB32
+        /// for another) that refusal cost the whole far terrain. The fallback does the conversion the
+        /// way nothing can refuse: sample the source slice into a RenderTexture of the DESTINATION
+        /// format with <c>Graphics.Blit(src, rt, sourceDepthSlice, 0)</c> - a texture FETCH, so the
+        /// channel order is decoded by the sampler and re-encoded by the ROP - and copy that back
+        /// into the slice.</para>
+        ///
+        /// <para><paramref name="convertSupported"/> is what this session has LEARNED, not a
+        /// capability bit: it starts true (try the cheap path once) and latches false the first time
+        /// a real conversion is refused, so a runtime that ever grows array-source support gets the
+        /// one-call path for free and this one stops asking after a single refusal. The cost of
+        /// keeping the probe is one refused call and one Unity error line per session; the cost of
+        /// dropping it would be a hard-coded assumption about a Unity version.</para>
+        /// </summary>
+        public static SlicePack SlicePackMethod(TextureFormat srcFormat, TextureFormat dstFormat, bool convertSupported)
+        {
+            if (srcFormat == dstFormat)
+                return SlicePack.Copy;      // no conversion needed, and a same-format ConvertTexture is refused anyway
+            return convertSupported ? SlicePack.Convert : SlicePack.Blit;
+        }
+
+        /// <summary>
+        /// MOBILE: false once a genuine slice conversion has been refused; null until one has been
+        /// tried. Session-scoped rather than per-season: the answer is a property of the runtime, so
+        /// the second and third seasons go straight to the blit instead of re-learning it - one
+        /// refused call per session, not one per archive.
+        /// </summary>
+        static bool? convertSlicesSupported = null;
+
+        /// <summary>
+        /// MOBILE: the scratch surface the blit fallback converts through - one slice of the
+        /// destination array, in the destination's exact graphics format (taken from the array
+        /// itself, so gamma/linear colour space is matched rather than guessed) and with the
+        /// destination's mip chain, because <c>Graphics.CopyTexture(rt, 0, dst, slice)</c> copies
+        /// every mip level of an element and demands the two agree on how many there are.
+        /// Null if the driver cannot create it. Public so the self-test can drive the same path.
+        /// </summary>
+        public static RenderTexture CreateSliceScratch(Texture2DArray dst)
+        {
+            if (dst == null) return null;
+
+            RenderTextureDescriptor desc = new RenderTextureDescriptor(dst.width, dst.height);
+            desc.graphicsFormat = dst.graphicsFormat;
+            desc.depthBufferBits = 0;
+            desc.msaaSamples = 1;
+            desc.dimension = UnityEngine.Rendering.TextureDimension.Tex2D;
+            desc.volumeDepth = 1;
+            desc.useMipMap = dst.mipmapCount > 1;
+            // Mips are generated once per slice, after the blit - NOT by the RenderTexture itself:
+            // autoGenerateMips only regenerates when the surface is resolved, which a CopyTexture
+            // out of it does not do.
+            desc.autoGenerateMips = false;
+            desc.mipCount = Mathf.Max(1, dst.mipmapCount);
+
+            RenderTexture rt = new RenderTexture(desc);
+            rt.name = "DistantTerrain tile slice scratch";
+            rt.filterMode = FilterMode.Point;
+            rt.wrapMode = TextureWrapMode.Clamp;
+            if (!rt.Create())
+            {
+                DestroySliceScratch(rt);
+                return null;
+            }
+            return rt;
+        }
+
+        /// <summary>
+        /// MOBILE: one slice through the scratch surface - blit (converts), regenerate the mip chain
+        /// the blit only wrote level 0 of, copy the whole element into the packed array. The mips are
+        /// box-filtered from the CONVERTED level 0 rather than carried across from the source's own
+        /// chain; the sources' chains are themselves Unity-generated box filters of the same pixels
+        /// (TextureReader builds these arrays with Apply(true)), so this is the same image.
+        /// </summary>
+        public static void BlitSlice(Texture2DArray src, int srcSlice, Texture2DArray dst, int dstSlice, RenderTexture scratch)
+        {
+            RenderTexture wasActive = RenderTexture.active;
+            Graphics.Blit(src, scratch, srcSlice, 0);
+            RenderTexture.active = wasActive;
+            if (scratch.useMipMap)
+                scratch.GenerateMips();
+            Graphics.CopyTexture(scratch, 0, dst, dstSlice);
+        }
+
+        /// <summary>
+        /// Pure: the number the shader's <c>_TileArrayMipCount</c> uniform carries - the mip levels
+        /// the packed arrays actually have, never below 1. The shader clamps its computed lod to
+        /// <c>_TileArrayMipCount - 1</c>, so 1 means "sample level 0 only".
+        /// </summary>
+        public static int TileArrayMipCount(int packedMipCount)
+        {
+            return Mathf.Max(1, packedMipCount);
+        }
+
+        /// <summary>The same number, read off the packed array. Null (not yet packed) is 1.</summary>
+        public static int TileArrayMipCount(Texture2DArray packed)
+        {
+            return packed == null ? 1 : TileArrayMipCount(packed.mipmapCount);
+        }
+
+        /// <summary>MOBILE: gives the scratch surface's GPU memory back (edit mode included).</summary>
+        public static void DestroySliceScratch(RenderTexture rt)
+        {
+            if (rt == null) return;
+            rt.Release();
+            if (Application.isPlaying)
+                Destroy(rt);
+            else
+                DestroyImmediate(rt);
+        }
+
         /// <summary>Pure: bytes a texture array of this shape occupies, mip chain included.</summary>
         public static long ArrayBytes(int width, int height, int slices, int mipCount, int bytesPerPixel)
         {
@@ -584,9 +718,11 @@ namespace DistantTerrain
         /// <c>Graphics.CopyTexture(src, record, dst, biome * SlicesPerBiome + record)</c> - a GPU-side
         /// blit that needs only CopyTextureSupport.Basic and works on non-readable textures, so this
         /// is 224 slice copies rather than a GetPixels32 round trip. When the four archives come back
-        /// in different formats (Biomes' TextureArray provider does exactly that) the same 224 blits
-        /// go through <c>Graphics.ConvertTexture</c> instead, which converts as it copies. Returns
-        /// null (reason logged) if an archive does not load or the four cannot share one array.
+        /// in different formats (Biomes' TextureArray provider does exactly that) the slices that
+        /// need converting go through <c>Graphics.ConvertTexture</c> instead, which converts as it
+        /// copies - or, where the driver refuses that (Metal does), through a RenderTexture of the
+        /// destination format. See <see cref="SlicePackMethod"/>. Returns null (reason logged) if an
+        /// archive does not load or the four cannot share one array.
         /// </summary>
         Texture2DArray PackSeason(TextureReader reader, string season, int[] archives)
         {
@@ -633,7 +769,10 @@ namespace DistantTerrain
                 bool formatsAgree = TilesetFormatsAgree(formats);
                 if (!formatsAgree && SystemInfo.copyTextureSupport == UnityEngine.Rendering.CopyTextureSupport.None)
                 {
-                    // No converting blit on this device: back to the strict rule, which refuses.
+                    // No GPU texture copy of any kind on this device - which takes the converting
+                    // blit AND the RenderTexture fallback with it, because the fallback still has to
+                    // CopyTexture the scratch surface back into the slice. Back to the strict rule,
+                    // which refuses.
                     string strictDetail;
                     TilesetsCompatible(widths, heights, formats, mipCounts, out strictDetail);
                     Debug.LogWarning(string.Format(
@@ -655,50 +794,97 @@ namespace DistantTerrain
                 dst.wrapMode = TextureWrapMode.Repeat;
                 dst.anisoLevel = src[0].anisoLevel;
 
-                for (int b = 0; b < archives.Length; b++)
+                // MOBILE: copy-or-convert-or-blit is decided per ARCHIVE, not per season, and the
+                // decision itself is the pure SlicePackMethod above. `formatsAgree` is false as soon
+                // as ONE of the four disagrees, and the code before Task 10 then sent all four -
+                // including the ones already in the destination's format - through
+                // Graphics.ConvertTexture. On Metal (and the iOS simulator in particular) a
+                // same-format ConvertTexture returns FALSE, so a Biomes install refused the whole far
+                // terrain with the self-contradictory line "could not convert archive 3 record 0 from
+                // RGBA32 to RGBA32". A source already in the destination format is a plain slice copy
+                // and must stay one - and a source that genuinely needs converting must not be
+                // refused either, because Metal answers `false` to THAT too (diag-report §4). Hence
+                // the third method: blit the slice through a RenderTexture of the destination format.
+                RenderTexture scratch = null;
+                List<string> blittedFrom = new List<string>();
+                List<string> convertedFrom = new List<string>();
+                int blittedSlices = 0;
+                try
                 {
-                    // MOBILE: copy-or-convert is decided per ARCHIVE, not per season. `formatsAgree`
-                    // is false as soon as ONE of the four disagrees, and the previous code then sent
-                    // all four - including the ones already in the destination's format - through
-                    // Graphics.ConvertTexture. On Metal (and the iOS simulator in particular) a
-                    // same-format ConvertTexture returns FALSE, so a Biomes install refused the
-                    // whole far terrain with the self-contradictory line "could not convert archive 3
-                    // record 0 from RGBA32 to RGBA32". A source already in the destination format is
-                    // a plain slice copy and must stay one; only a genuinely different format needs
-                    // the converting blit.
-                    bool convertThisArchive = src[b].format != dstFormat;
-                    for (int record = 0; record < SlicesPerBiome; record++)
+                    for (int b = 0; b < archives.Length; b++)
                     {
-                        int slice = SliceIndex(b, record);
-                        if (!convertThisArchive)
+                        SlicePack method = SlicePackMethod(src[b].format, dstFormat, convertSlicesSupported ?? true);
+                        string sourceFormatName = src[b].format.ToString();
+                        for (int record = 0; record < SlicesPerBiome; record++)
                         {
-                            Graphics.CopyTexture(src[b], record, dst, slice);
-                        }
-                        else if (!Graphics.ConvertTexture(src[b], record, dst, slice))
-                        {
-                            // The driver refused this pair after all. Refuse the season rather than
-                            // bind an array with holes in it - a half-converted array draws garbage.
-                            Debug.LogWarning(string.Format(
-                                "[DistantTerrain] tileset arrays mismatch: could not convert archive {0} record {1} " +
-                                "from {2} to {3} ({4}; archives {5})",
-                                archives[b], record, (TextureFormat)formats[b], dstFormat, season,
-                                string.Join(", ", System.Array.ConvertAll(archives, a => a.ToString()))));
-                            Destroy(dst);
-                            return null;
+                            int slice = SliceIndex(b, record);
+                            if (method == SlicePack.Copy)
+                            {
+                                Graphics.CopyTexture(src[b], record, dst, slice);
+                                continue;
+                            }
+
+                            if (method == SlicePack.Convert)
+                            {
+                                if (Graphics.ConvertTexture(src[b], record, dst, slice))
+                                {
+                                    convertSlicesSupported = true;
+                                    if (!convertedFrom.Contains(sourceFormatName)) convertedFrom.Add(sourceFormatName);
+                                    continue;
+                                }
+
+                                // Refused. That is not a broken tileset - Unity prints
+                                // "Graphics.ConvertTexture does not support a Texture2DArray as
+                                // source." right before this line - and it is the same answer for
+                                // every remaining slice of the session, so latch it, say so once
+                                // (this line is the one that explains Unity's), and fall through to
+                                // the RenderTexture path for this very record.
+                                Debug.LogWarning(string.Format(
+                                    "[DistantTerrain] tileset arrays: Graphics.ConvertTexture will not convert array " +
+                                    "slices here ({0} -> {1}, archive {2} record {3}); converting through a RenderTexture instead",
+                                    src[b].format, dstFormat, archives[b], record));
+                                convertSlicesSupported = false;
+                                method = SlicePack.Blit;
+                            }
+
+                            if (scratch == null)
+                            {
+                                scratch = CreateSliceScratch(dst);
+                                if (scratch == null)
+                                {
+                                    // Nowhere to convert THROUGH. Refuse the season rather than bind
+                                    // an array with holes in it - a half-packed array draws garbage.
+                                    Debug.LogWarning(string.Format(
+                                        "[DistantTerrain] tileset arrays mismatch: could not convert archive {0} record {1} " +
+                                        "from {2} to {3} ({4}; archives {5}; no {6} render target for the fallback blit)",
+                                        archives[b], record, (TextureFormat)formats[b], dstFormat, season,
+                                        string.Join(", ", System.Array.ConvertAll(archives, a => a.ToString())),
+                                        dst.graphicsFormat));
+                                    Destroy(dst);
+                                    return null;
+                                }
+                            }
+
+                            BlitSlice(src[b], record, dst, slice, scratch);
+                            blittedSlices++;
+                            if (!blittedFrom.Contains(sourceFormatName)) blittedFrom.Add(sourceFormatName);
                         }
                     }
                 }
-
-                if (!formatsAgree)
+                finally
                 {
-                    var distinct = new System.Collections.Generic.List<string>();
-                    for (int b = 0; b < formats.Length; b++)
-                    {
-                        string name = ((TextureFormat)formats[b]).ToString();
-                        if (!distinct.Contains(name)) distinct.Add(name);
-                    }
+                    DestroySliceScratch(scratch);
+                }
+
+                if (convertedFrom.Count > 0)
+                {
                     Debug.Log(string.Format("[DistantTerrain] tileset arrays converted: {0} -> {1} ({2})",
-                        string.Join(", ", distinct.ToArray()), dstFormat, season));
+                        string.Join(", ", convertedFrom.ToArray()), dstFormat, season));
+                }
+                if (blittedSlices > 0)
+                {
+                    Debug.Log(string.Format("[DistantTerrain] tileset arrays blitted: {0} -> {1} ({2}, {3} slices)",
+                        string.Join(", ", blittedFrom.ToArray()), dstFormat, season, blittedSlices));
                 }
 
                 return dst;
@@ -2827,6 +3013,15 @@ namespace DistantTerrain
             terrainMaterial.SetTexture("_TileArrayWinter", tileArrayWinter);
             terrainMaterial.SetTexture("_TileArrayRain", tileArrayRain);
             terrainMaterial.SetInt("_SlicesPerBiome", SlicesPerBiome);
+            // MOBILE: the lod ceiling. The shader selects the tile mip EXPLICITLY
+            // (UNITY_SAMPLE_TEX2DARRAY_LOD, because array GRAD sampling has a long-standing seam
+            // bug), and an explicit lod above an array's last level is undefined - black on some
+            // drivers. Every path that can produce an array with a shorter mip chain than the six
+            // levels a 64^2 tileset carries has to be covered by one number, so the number is the
+            // packed arrays' own mip count: a replacement pack that ships mip-less tilesets, and the
+            // RenderTexture fallback if it is ever made to drop mips, both land here. The three
+            // arrays are guaranteed to agree by the cross-season check in BuildTileArrays.
+            terrainMaterial.SetInt("_TileArrayMipCount", TileArrayMipCount(tileArraySummer));
 
             // Snow-cap feature toggle + the per-region treatment table (colour tint + snow mode).
             // Code-only tuning hooks; pushed once here (they never change). The world-Y snow line
