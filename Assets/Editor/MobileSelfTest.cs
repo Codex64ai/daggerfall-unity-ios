@@ -1689,8 +1689,15 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             string tickBody = MethodBody(native, "static void Tick()");
             Check(tickBody.Contains("if (creationFailed)"),
                 "MobileCRT native: Tick bails on the latch instead of re-attempting the allocation every frame");
-            Check(tickBody.Contains("creationFailed = false;") && tickBody.Contains("creationFailed = true;"),
-                "MobileCRT native: Tick clears the latch when the filter goes off and re-raises it after a failed re-allocation");
+            // Placement, not just presence. "Tick mentions both" would pass for an edit that moved the
+            // clear OUT of the !wanted branch - which is exactly the edit that resurrects the
+            // deadlock: after a latched failure the path never becomes active, so Stop() never runs,
+            // and the !wanted branch is the only thing left that can clear the latch. MethodBody
+            // brace-matches from the `if (!wanted)` onwards, so this reads the branch body itself.
+            Check(MethodBody(tickBody, "if (!wanted)").Contains("creationFailed = false;"),
+                "MobileCRT native: Tick clears the latch INSIDE the !wanted branch, so a toggle-off retries");
+            Check(tickBody.Contains("creationFailed = true;"),
+                "MobileCRT native: Tick re-raises the latch after a failed re-allocation");
             Check(MethodBody(native, "static void Stop()").Contains("creationFailed = false;"),
                 "MobileCRT native: Stop clears the latch, so switching the filter off and on retries once");
             Check(CountOccurrences(native, "Debug.LogWarning") == 1,
@@ -1706,6 +1713,20 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             string resolveBody = MethodBody(native, "static RetroPresentation ResolvePresenter()");
             Check(resolveBody.Contains("presenterStateSaved = false;") && resolveBody.Contains("presenterSourceWasAt = null;"),
                 "MobileCRT native: re-resolving the presenter drops the state saved for the old one");
+
+            // The sky rig is resolved the SAME way and once. GameManager's tolerant accessor is
+            // FindObjectOfType: uncached, and blind to the sky rig Dynamic Skies deactivates - so a
+            // per-frame call there is a full-scene scan that can never succeed. The cost is
+            // invisible to any behavioural assertion, which is why it is pinned as source text.
+            string routeBody = MethodBody(native, "static void RouteSkyCamera(RenderTexture to)");
+            Check(!routeBody.Contains("GetMonoBehaviour"),
+                "MobileCRT native: RouteSkyCamera does not resolve the sky rig with GetMonoBehaviour (uncached FindObjectOfType, per frame)");
+            Check(routeBody.Contains("Resources.FindObjectsOfTypeAll<DaggerfallSky>()") && routeBody.Contains("gameObject.scene.IsValid()"),
+                "MobileCRT native: RouteSkyCamera sees the INACTIVE sky rig Dynamic Skies leaves behind, and only scene objects");
+            Check(routeBody.Contains("!skyRigSearched"),
+                "MobileCRT native: the sky rig search runs once per scene, not every frame it finds nothing");
+            Check(resolveBody.Contains("skyRigSearched = false;"),
+                "MobileCRT native: re-resolving the presenter clears the sky rig search latch, so a new scene looks again");
 
             // Camera.allCameras is documented as all ENABLED cameras, and a camera holding this
             // target while disabled is exactly the one that would keep a dangling reference.

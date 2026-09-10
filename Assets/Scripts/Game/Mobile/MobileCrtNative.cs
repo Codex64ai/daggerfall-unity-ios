@@ -75,7 +75,12 @@ namespace DaggerfallWorkshop.Game.Mobile
         // jetsam kill. One attempt, one warning, then silence until the filter is switched off and on.
         static bool creationFailed;
 
+        // Resolved once and cached, not per frame - see RouteSkyCamera. skyRigSearched is what
+        // makes "this scene has no reachable sky rig" cost ONE search rather than one per frame;
+        // ResolvePresenter clears it on the scene change that is the only thing able to change
+        // the answer.
         static DaggerfallSky skyRig;
+        static bool skyRigSearched;
 
         static RetroPresentation presenter;
         static Camera presenterCamera;
@@ -389,14 +394,35 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (!GameManager.HasInstance)
                 return;
 
-            // Cached, and resolved through the NON-throwing overload. GameManager.SkyRig uses
-            // GetMonoBehaviour<DaggerfallSky>() with errorIfNotFound defaulted to true, which logs
-            // an error and THROWS when there is no sky rig; every other GameManager accessor this
-            // path uses is the tolerant one, and this is a per-frame call on a path the player can
-            // switch on at any moment. Unity's == sees a destroyed rig as null, so a scene change
-            // re-resolves rather than sticking to a corpse.
-            if (skyRig == null)
-                skyRig = GameManager.GetMonoBehaviour<DaggerfallSky>(false);
+            // Resolved ONCE, exactly the way ResolvePresenter resolves its own target, and for the
+            // same two reasons. GameManager.SkyRig is out because it uses the errorIfNotFound
+            // overload, which logs an error and THROWS when there is no sky rig - and this is a
+            // per-frame call on a path the player can switch on at any moment. Its tolerant sibling
+            // GetMonoBehaviour<DaggerfallSky>(false) is out too: it is FindObjectOfType, which
+            // caches nothing AND skips INACTIVE GameObjects, while Dynamic Skies deactivates the
+            // classic sky rig permanently (BLBSkybox does dfSky.SetActive(false) and never puts it
+            // back). Under that mod - a shipping configuration - the search can never succeed, so it
+            // would scan the whole loaded object set every frame the filter is on with retro off,
+            // and never early-exit, because there is nothing to find.
+            //
+            // FindObjectsOfTypeAll is the fallback that DOES see the deactivated rig; the scene
+            // check is what keeps it off the DaggerfallSky components living in loaded prefab
+            // ASSETS. skyRigSearched then bounds the whole thing to one search per scene: without
+            // it, "no rig anywhere" would still be a full scan per frame. Unity's == sees a
+            // destroyed rig as null, and ResolvePresenter clears the latch on the same scene change
+            // that destroyed it, so this re-resolves rather than sticking to a corpse.
+            if (skyRig == null && !skyRigSearched)
+            {
+                skyRigSearched = true;
+                foreach (DaggerfallSky candidate in Resources.FindObjectsOfTypeAll<DaggerfallSky>())
+                {
+                    if (candidate != null && candidate.gameObject.scene.IsValid())
+                    {
+                        skyRig = candidate;
+                        break;
+                    }
+                }
+            }
 
             if (skyRig == null || skyRig.SkyCamera == null)
                 return;
@@ -425,6 +451,13 @@ namespace DaggerfallWorkshop.Game.Mobile
             presenterStateSaved = false;
             presenterSourceWasAt = null;
             presenterDepthWas = 0f;
+
+            // The sky rig is cached per scene the same way, and a scene change is the only event
+            // that can change what a search would find - so its "already searched" latch is dropped
+            // here too, with the rest of the per-scene state. Without this, a scene whose search
+            // found nothing would never look again in the new one.
+            skyRig = null;
+            skyRigSearched = false;
 
             if (GameManager.HasInstance)
                 presenter = GameManager.Instance.RetroPresenter;
