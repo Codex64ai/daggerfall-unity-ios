@@ -218,6 +218,21 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             ios.maxTextureSize = 4096;
             importer.SetPlatformTextureSettings(ios);
         }
+
+        // MOBILE: without this override Unity uses the default version 0 forever, so the import
+        // result of every mod-pack texture is cached against a hash that does NOT change when the
+        // rules above do. Every rule change since this class was written - RawData, LinearData,
+        // R8 for single-channel maps, the 2048 clamp, NoMips - therefore needed someone to remember
+        // to force a reimport by hand, and MobileModBuilder.ApplyAll does not force pack folders
+        // (Task 4 recorded exactly that trap: "ApplyAll does not force-reimport pack folders -> run
+        // unscoped ReimportPacks first"). A silently stale texture in a bundle is the worst class of
+        // bug this port has: it looks right in the Editor and is wrong on the device.
+        //
+        // MobileModTextureImporter below has carried the same one-liner from the start; this is the
+        // sibling that was missing it. Bump the number whenever OnPreprocessTexture above changes
+        // behaviour. Going from the implicit 0 to 1 costs ONE reimport of the textures these
+        // postprocessors apply to, on the next Editor run.
+        public override uint GetVersion() { return 1; }
     }
 
     /// <summary>

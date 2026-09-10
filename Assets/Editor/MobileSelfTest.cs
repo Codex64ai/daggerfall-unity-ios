@@ -4331,6 +4331,17 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "PackTextureRules: every raw-data and linear-data mod name is a mods.json entry name",
                 unpinned.Length > 0 ? "not in mods.json: " + string.Join(", ", unpinned)
                                     : pinnedRules.Length + " names, " + modPins.Length + "B of pins");
+            // MOBILE: an AssetPostprocessor whose GetVersion() never changes has its import results
+            // cached against a hash that does not know the rules moved. Every rule change above -
+            // RawData, LinearData, R8, the 2048 clamp, NoMips - therefore relied on someone forcing a
+            // reimport by hand, and ApplyAll does not force pack folders. A silently stale texture in
+            // a bundle looks right in the Editor and is wrong on the device, which is the worst
+            // failure mode this pipeline has. Both pack postprocessors must therefore override it.
+            Check(new MobileModPackTextureImporter().GetVersion() >= 1
+                  && new MobileModTextureImporter().GetVersion() >= 1,
+                "PackTextureRules: both texture postprocessors version their rules, so a rule change reimports",
+                "pack " + new MobileModPackTextureImporter().GetVersion()
+                + ", pilot " + new MobileModTextureImporter().GetVersion());
         }
 
         /// <summary>
