@@ -81,6 +81,22 @@ namespace Monobelisk
         /// <summary>MOBILE: (I1) see LocationPositions.</summary>
         public static readonly Vector4[] LocationSizes = new Vector4[LocationBufferSize];
 
+        // MOBILE: (D1) the "first tile's locations" diagnostic fires once for the session, not once per
+        // MOBILE: tile - Cleanup() puts it back so a second Init in the same process logs again.
+        private static bool loggedFirstTileLocations;
+
+        /// <summary>
+        /// MOBILE: (D1) the LOWEST height any of this tile's locations will be flattened to, and which
+        /// one it was. This is the single number that separates the two ways a location can become a
+        /// pit: near zero means the world heightmap read at that rect's centre came back empty (the
+        /// heightmap is wrong), while a healthy value next to a pit on screen means the rect itself is
+        /// in the wrong place. Recorded per tile in DispatchAndProcess and printed by the sampler.
+        /// </summary>
+        public float minLocationFlattenHeight;
+
+        /// <summary>MOBILE: (D1) see minLocationFlattenHeight.</summary>
+        public int minLocationFlattenIndex;
+
         /// <summary>
         /// MOBILE: (I1) fills the first locations.Count entries of pos and size and returns that count,
         /// touching no index at or beyond it - the tail is left exactly as the previous tile left it,
@@ -97,6 +113,102 @@ namespace Monobelisk
                 size[i] = new Vector4(r.size.x, r.size.y);
             }
             return count;
+        }
+
+        /// <summary>
+        /// MOBILE: (D1) true for a tile whose readback cannot be a real landscape. max &lt;= 0.021 is the
+        /// whole tile sitting at or under the two floors this generator clamps to - BASEHEIGHT_MIN /
+        /// TERRAIN_HEIGHT (100 / 5000 = 0.02, HeightmapComputation's max()) and the 0.021 that
+        /// GetHeightSample gives a location it cannot find a height for - i.e. a pit at ocean level
+        /// rather than terrain. Open water in the Iliac Bay genuinely reads that way and will be
+        /// reported too; "min=0.0200 max=0.0200 locations=0" is how an honest ocean tile looks and the
+        /// line says enough to tell the two apart. A NaN is a dispatch that produced garbage; a range
+        /// over 0.9 is 4,500 units of relief inside one 129x129 tile, which nothing here can produce.
+        /// Pure, so the self-test pins each arm rather than leaving them to a log line nobody has seen
+        /// fire yet.
+        /// </summary>
+        public static bool IsSuspectTile(float min, float max, int nan)
+        {
+            if (nan > 0)
+                return true;
+            if (max <= LocationFloor)
+                return true;
+            if ((max - min) > 0.9f)
+                return true;
+
+            // MOBILE: (D1) there is deliberately NO "steep step" arm. A healthy simulator run of the
+            // very map pixels this bug was reported at (460,51 and its 48 neighbours, .superpowers/
+            // sdd/2026-09-10-terrain-pits/player-sim460.log) measures maxStep 0.06-0.12 on 89 tiles out
+            // of 92 - 300 to 600 units between adjacent samples - because this generator's beach and
+            // location transitions really are that abrupt at 129 samples per map pixel. A threshold
+            // that fires on 97% of healthy tiles proves nothing, so maxStep is REPORTED and not judged.
+            // What settles the device log is not a heuristic: the sampler prints one line per tile, the
+            // simulator baseline above prints the same line for the same tiles from the same inputs
+            // (locations 46 at 460,51 in both), and the two are read side by side.
+            return false;
+        }
+
+        /// <summary>
+        /// MOBILE: (D1) the height a sample sits at when this generator has given up on it:
+        /// BASEHEIGHT_MIN / TERRAIN_HEIGHT = 100 / 5000, HeightmapComputation's max() floor
+        /// (TerrainComputer.compute:565), plus a float epsilon. 100 units is under OceanElevation
+        /// 100.01, i.e. sea floor.
+        /// </summary>
+        public const float PitFloor = 0.0201f;
+
+        /// <summary>
+        /// MOBILE: (D1) the floor GetHeightSample gives a LOCATION it could not find a height for -
+        /// regLocationHeight's max(..., 0.021) and portLocationHeight, TerrainComputer.compute:517-518.
+        /// 105 units: just above the sea, which is what a location-sized pit's floor reads as.
+        /// </summary>
+        public const float LocationFloor = 0.021f;
+
+        /// <summary>
+        /// MOBILE: (D1)(D2) the normalised 0-1 height the mod's OWN altered world heightmap holds for one
+        /// map pixel, or -1 when there is no such heightmap (the start-up pass never ran) or the pixel is
+        /// off the map. This is the same number the shader's mapPixelHeights texture reports for that
+        /// pixel: InitializeWoodsFileHeightmap writes CSMain's saturate()d height x 255 into
+        /// alteredHeightmapBuffer (Utility.ToBytes), ToBasemap copies exactly those bytes into
+        /// baseHeightmap, and WOODS.WLD's own layout is index = x + y * MapWidth. So a tile's "base" in
+        /// the diagnostics below and the height a failed tile is filled with are both in the same scale
+        /// as every neighbour's samples - which is the whole point.
+        /// </summary>
+        public static float WorldHeightmapSample(byte[] altered, int mapPixelX, int mapPixelY)
+        {
+            if (altered == null)
+                return -1f;
+            if (mapPixelX < 0 || mapPixelX >= WoodsFile.MapWidth || mapPixelY < 0 || mapPixelY >= WoodsFile.MapHeight)
+                return -1f;
+
+            int i = mapPixelX + mapPixelY * WoodsFile.MapWidth;
+            if (i >= altered.Length)
+                return -1f;
+
+            return altered[i] / 255f;
+        }
+
+        /// <summary>
+        /// MOBILE: (D1) the height LocationWeight flattens one location TO, computed on the CPU exactly
+        /// as TerrainComputer.compute:296-302 computes it on the GPU: floor the rect, take its centre,
+        /// divide by terrainSize * (TERRAIN_X, TERRAIN_Y), saturate, add the same uvOffset, sample
+        /// mapPixelHeights bilinearly. If the pits are locations flattened to ocean level then this
+        /// number is near zero for the rects that made them, and that is the one reading that separates
+        /// "the world heightmap is wrong" from "the location rects are wrong". Returns -1 with no
+        /// heightmap. Not on the per-tile path - the diagnostics call it once per session.
+        /// </summary>
+        public static float LocationFlattenHeight(Vector4 locationPosition, Vector4 locationSize)
+        {
+            if (baseHeightmap == null)
+                return -1f;
+
+            float cx = Mathf.Floor(locationPosition.x) + Mathf.Floor(locationSize.x) * 0.5f;
+            float cy = Mathf.Floor(locationPosition.y) + Mathf.Floor(locationSize.y) * 0.5f;
+            float tSize = Utility.GetTerrainVertexSize();
+
+            float u = Mathf.Clamp01(cx / (tSize * 999f)) + (-1.5f / 999f);
+            float v = Mathf.Clamp01(cy / (tSize * 499f)) + (0.5f / 499f);
+
+            return baseHeightmap.GetPixelBilinear(u, v).r;
         }
 
         /// <summary>
@@ -479,6 +591,8 @@ namespace Monobelisk
 
         public static void Cleanup()
         {
+            loggedFirstTileLocations = false;    // MOBILE: (D1)
+
             // MOBILE: (b)(c) release the location buffer only if it was ever created, and destroy the two
             // MOBILE: held ComputeShader clones - they are the leak the per-tile Instantiate used to be.
             if (locationHeightDataBuffer != null)
@@ -570,6 +684,44 @@ namespace Monobelisk
             // MOBILE: two statics are always passed at their full 1089 length and locationCount carries
             // MOBILE: the real count, which is the only thing the shader loops on.
             locationCount = FillLocationArrays(locations, LocationPositions, LocationSizes);
+
+            // MOBILE: (D1) once per session, for the first tile that has any: the rects the shader is
+            // MOBILE: about to flatten, and the height it will flatten them TO. LocationWeight samples
+            // MOBILE: mapPixelHeights at each rect's CENTRE (TerrainComputer.compute:301-302) and
+            // MOBILE: GetHeightSample then lerps the whole rect towards it, so a flatten height near
+            // MOBILE: zero IS a location-sized pit at ocean level - and a rect whose min is nowhere
+            // MOBILE: near this tile says the rects, not the heightmap, are what went wrong. Three
+            // MOBILE: lines for the life of the session; nothing here runs per tile.
+            // MOBILE: (D1) the lowest flatten height on this tile, computed once per tile - up to 1,089
+            // MOBILE: but in practice 45-70 bilinear reads of a 1000x500 texture, against a dispatch
+            // MOBILE: that costs milliseconds. It is what the sampler prints as minFlat=.
+            minLocationFlattenHeight = -1f;
+            minLocationFlattenIndex = -1;
+            for (int i = 0; i < locationCount; i++)
+            {
+                float f = LocationFlattenHeight(LocationPositions[i], LocationSizes[i]);
+                if (f < 0f)
+                    continue;
+                if (minLocationFlattenIndex < 0 || f < minLocationFlattenHeight)
+                {
+                    minLocationFlattenHeight = f;
+                    minLocationFlattenIndex = i;
+                }
+            }
+
+            if (!loggedFirstTileLocations && locationCount > 0)
+            {
+                loggedFirstTileLocations = true;
+                for (int i = 0; i < locationCount && i < 3; i++)
+                {
+                    Debug.Log(string.Format(
+                        "[WoDTerrain] tile {0},{1} location {2} rect min=({3:F1},{4:F1}) size=({5:F1},{6:F1}) flattenHeight={7:F4}",
+                        mapData.mapPixelX, mapData.mapPixelY, i,
+                        LocationPositions[i].x, LocationPositions[i].y,
+                        LocationSizes[i].x, LocationSizes[i].y,
+                        LocationFlattenHeight(LocationPositions[i], LocationSizes[i])));
+                }
+            }
 
             cs.SetVector("terrainPosition", terrainPosition);
             cs.SetVector("terrainSize", terrainSize);

@@ -866,6 +866,38 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // report a count of nothing.
             Check(Monobelisk.TerrainComputer.FillLocationArrays(new System.Collections.Generic.List<Rect>(), fillPos, fillSize) == 0,
                 "WoDTerrain: a tile with no locations reports count 0 without a shorter array");
+            // MOBILE: (D1) the three arms of the per-tile suspicion test, each pinned separately. A
+            // healthy 129x129 tile is roughly 0.02-0.30 normalised, so the healthy case must NOT fire or
+            // the log fills with noise; each failure shape must, or a device log settles nothing.
+            Check(!Monobelisk.TerrainComputer.IsSuspectTile(0.021f, 0.184f, 0),
+                "WoDTerrain: a normal tile - shoreline, mountainside and all - is not reported as suspect");
+            Check(Monobelisk.TerrainComputer.IsSuspectTile(0.02f, 0.02f, 0)
+                  && Monobelisk.TerrainComputer.IsSuspectTile(0.0205f, 0.021f, 0),
+                "WoDTerrain: a tile pinned at either ocean-level floor (0.02, 0.021) is suspect");
+            Check(Monobelisk.TerrainComputer.IsSuspectTile(0.02f, 0.19f, 1),
+                "WoDTerrain: a single NaN sample makes a tile suspect");
+            Check(Monobelisk.TerrainComputer.IsSuspectTile(0.01f, 0.95f, 0),
+                "WoDTerrain: 4,500 units of relief inside one tile is suspect");
+            // The measured simulator baseline says a healthy tile of THIS generator routinely steps
+            // 0.06-0.12 between adjacent samples (89 tiles of 92 at the reported map pixels), so a
+            // "vertical wall" arm would fire on 97% of healthy terrain. maxStep is printed, never judged.
+            Check(!Monobelisk.TerrainComputer.IsSuspectTile(0.0200f, 0.1306f, 0),
+                "WoDTerrain: the measured healthy tile 462,53 (min .02 max .1306 step .1105) is not suspect");
+            Check(Mathf.Approximately(Monobelisk.TerrainComputer.PitFloor, 0.0201f)
+                  && Mathf.Approximately(Monobelisk.TerrainComputer.LocationFloor, 0.021f),
+                "WoDTerrain: the two floors are the shader's own - 100/5000 and the 0.021 location floor");
+            // (D1)(D2) WOODS.WLD's layout is index = x + y * MapWidth and the altered buffer holds
+            // saturate()d heights x 255, so this must be byte/255 for the pixel asked for - the number
+            // both the "base=" diagnostic and the flat fallback are built on - and -1, never an
+            // exception and never a wrong pixel, for anything off the map or absent.
+            var alteredWorld = new byte[DaggerfallConnect.Arena2.WoodsFile.MapWidth * DaggerfallConnect.Arena2.WoodsFile.MapHeight];
+            alteredWorld[460 + 51 * DaggerfallConnect.Arena2.WoodsFile.MapWidth] = 51;
+            Check(Mathf.Approximately(Monobelisk.TerrainComputer.WorldHeightmapSample(alteredWorld, 460, 51), 51f / 255f)
+                  && Monobelisk.TerrainComputer.WorldHeightmapSample(alteredWorld, 461, 51) == 0f
+                  && Monobelisk.TerrainComputer.WorldHeightmapSample(null, 460, 51) < 0f
+                  && Monobelisk.TerrainComputer.WorldHeightmapSample(alteredWorld, -1, 51) < 0f
+                  && Monobelisk.TerrainComputer.WorldHeightmapSample(alteredWorld, 460, DaggerfallConnect.Arena2.WoodsFile.MapHeight) < 0f,
+                "WoDTerrain: the world heightmap sample is byte/255 at x + y * MapWidth, and -1 off the map");
             Check(Monobelisk.InterestingTerrains.Available(true, true) && !Monobelisk.InterestingTerrains.Available(false, true) && !Monobelisk.InterestingTerrains.Available(true, false),
                 "WoDTerrain: needs compute support and both compute shaders");
             Check(Monobelisk.TerrainComputer.StartupBands == 10 && Monobelisk.TerrainComputer.GroupRowsY == 5,
