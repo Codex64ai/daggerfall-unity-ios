@@ -100,8 +100,11 @@ namespace WorldOfDaggerfall
                 case (int)Climates.Mountain:
                     // MOBILE: null-guarded. This is the only unguarded dereference the port had, and it
                     // runs inside DaggerfallTerrain.PromoteTerrainData with no try/catch of its own, so a
-                    // throw here breaks terrain promotion repeatedly and silently. No GPS (or no region
-                    // name) now falls through to the unmodified groundArchive instead.
+                    // throw here breaks terrain promotion repeatedly and silently. What the guard buys is
+                    // a null CurrentRegionName falling through to the unmodified groundArchive; it cannot
+                    // cover a missing GPS, because GameManager.Instance never returns null (it builds one)
+                    // and the PlayerGPS getter throws rather than returning null when the player object is
+                    // not there - the ?. operators below are belt-and-braces, not the working guard.
                     if (IsHammerfellRegion(GameManager.Instance?.PlayerGPS?.CurrentRegionName))
                     {
                         groundArchive = isWinter ? 103 : 104; // Special winter handling for Hammerfell Mountains

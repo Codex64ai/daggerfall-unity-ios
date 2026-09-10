@@ -790,15 +790,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "Biomes: an atlas with no records is not a usable atlas");
             UnityEngine.Object.DestroyImmediate(scratch);
             // The terrain provider's Mountain case gives Hammerfell its own ground archive, and the
-            // region name it tests comes off a GameManager chain that does not exist at the title or in
-            // this editor run - so null must fall through to the unmodified archive rather than throw
-            // inside DaggerfallTerrain.PromoteTerrainData, which has no try/catch of its own.
+            // region name it tests can be null before the player has a position - so null must fall
+            // through to the unmodified archive rather than throw inside DaggerfallTerrain.
+            // PromoteTerrainData, which has no try/catch of its own. A missing GPS is a different
+            // story and is not covered here: GameManager.PlayerGPS throws instead of returning null.
             Check(WorldOfDaggerfall.WODTerrainMaterialProvider.IsHammerfellRegion("Alik'r Desert"),
                 "Biomes: Alik'r Desert is a Hammerfell mountain region");
             Check(!WorldOfDaggerfall.WODTerrainMaterialProvider.IsHammerfellRegion("Daggerfall"),
                 "Biomes: Daggerfall is not a Hammerfell mountain region");
             Check(!WorldOfDaggerfall.WODTerrainMaterialProvider.IsHammerfellRegion(null),
-                "Biomes: a missing region name is not a Hammerfell mountain region (no GPS, no throw)");
+                "Biomes: a missing region name is not a Hammerfell mountain region (no throw)");
         }
 
         // World of Daggerfall - Terrain: the GPU terrain sampler, compiled in with its compute shaders

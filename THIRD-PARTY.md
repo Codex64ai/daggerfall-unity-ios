@@ -291,8 +291,11 @@ started this session (`MobilePortedMods.BiomesRunning`) and the map is readable;
 `[Biomes] swapped N type-5 nature flats to archive 10030 in <block name>`. The block name is on that
 line for a reason worth knowing when reading a log: identical counts repeating (22 four times, 7 four
 times, in the run that prompted it) are innocent when the block names differ - that is one WoD prefab
-placed at several map pixels. The signature of a genuine double swap, which would double a flat's
-scale a second time, is **the same block name repeated with the same count**.
+placed at several map pixels. One block name repeated with *different* counts is innocent too: a block
+whose terrain was not ready part-way down its flat list is deferred whole (`[Biomes] terrain not ready
+for ...; type-5 nature swap deferred to the next terrain update`), logs the flats it did swap, and logs
+the remainder when the retry re-walks it. The signature of a genuine double swap, which would double a
+flat's scale a second time, is **the same block name repeated with the same count**.
 
 Not device-verified at the time of writing. Unlike WoD this mod places no objects - it changes which
 textures existing ones use - so the performance question is narrower, but the nature swap does run on
