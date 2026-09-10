@@ -453,8 +453,9 @@ namespace DaggerfallWorkshop.Game.Mobile
             // leaves persistence to the caller by design, and AddToggle does the same when its key
             // is null - which is why those are the two helpers used here.
             AddNote(c, ref y, rowW,
-                "Picture. Retro mode renders the world at 320x200 or 640x400 with the VGA palette; " +
-                "the CRT filter needs it on. Its four sliders are in pause > options > Game Effects > CRT Filter.");
+                "Picture. Retro mode renders the world at 320x200 or 640x400 with the VGA palette. " +
+                "The CRT filter works with retro mode on or off. Its sliders are in " +
+                "pause > options > Game Effects > CRT Filter.");
 
             AddChoice(c, ref y, rowW, rowH, "Retro mode",
                 new[] { "Off", "320x200", "640x400" },

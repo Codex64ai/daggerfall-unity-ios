@@ -16,6 +16,7 @@ CRTCurvature=0.08
 CRTScanlines=0.35
 CRTMask=0.25
 CRTVignette=0.25
+CRTScanlineCount=480
 VSync=True
 TargetFrameRate=0
 Fullscreen=True

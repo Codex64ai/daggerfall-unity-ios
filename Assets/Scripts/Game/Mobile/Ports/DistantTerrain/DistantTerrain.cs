@@ -2091,7 +2091,15 @@ namespace DistantTerrain
                 }
             }
 
-            if (DaggerfallUnity.Settings.RetroRenderingMode != lastRetroMode)
+            // MOBILE: the stacked camera has to render into whatever Camera.main is rendering into,
+            // or the far terrain is drawn somewhere the frame buffer never shows. Upstream's poll
+            // (the retro-mode setting) was a proxy for that, and it is no longer a complete one:
+            // the CRT filter's non-retro path (MobileCrtNative) also puts Camera.main on a render
+            // target, and it can be switched on and off from the settings panel mid-play without
+            // RetroRenderingMode changing at all. Polling the target itself covers both, and covers
+            // the retro case more exactly - it is what SetUpCameras copies.
+            if (DaggerfallUnity.Settings.RetroRenderingMode != lastRetroMode
+                || (stackedCamera != null && Camera.main != null && stackedCamera.targetTexture != Camera.main.targetTexture))
             {
                 SetUpCameras();
                 lastRetroMode = DaggerfallUnity.Settings.RetroRenderingMode;

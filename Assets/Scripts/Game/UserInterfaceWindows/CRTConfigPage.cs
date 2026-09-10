@@ -3,19 +3,27 @@
 //
 // MOBILE: the in-game page for the CRT presentation filter (Assets/Shaders/Mobile/MobileCRT.shader),
 // a fourth Game Effects page sitting next to Retro Mode - which is where a player will look for
-// it, because the filter does nothing at all while retro mode is off (RetroPresentation has no
-// presenter to hook then, so MobileCrt.Active is false).
+// it, since the two shape the same picture. It is no longer TIED to retro mode: the filter runs
+// over the 320x200 raster with retro mode on and over the full-resolution world with it off
+// (MobileCrtNative), so this page's toggle means the same thing in both.
+//
+// The scanline-count slider is shown only with retro mode OFF, and that is not a tidiness
+// decision: in retro mode the count is the source raster's own height (200 / 400, or 154 / 308
+// under a docked large HUD) and any other number beats against it as moire. There is nothing to
+// choose there, so offering a choice would only offer a way to make it worse.
 //
 // This file lives with DFU's other config pages rather than in Assets/Scripts/Game/Mobile/ because
 // GameEffectsConfigWindow discovers nothing: a page is a class in this namespace that the window
 // constructs by name. It is still ours, hence the port's header.
 //
-// There is nothing to deploy. RetroPresentation.OnRenderImage reads all five settings every frame
+// There is nothing to deploy. RetroPresentation.OnRenderImage reads all six settings every frame
 // and clamps them again at the point of use, so a slider moves the picture while it is dragged;
-// GameEffectsConfigWindow.OnPop is what writes settings.ini.
+// GameEffectsConfigWindow.OnPop is what writes settings.ini. The enable toggle needs no deploy
+// either: MobileCrtNative polls it in LateUpdate and builds or frees its render target there.
 //
-// The slider ranges ARE the settings loader's clamps (0..MobileCrt.MaxCurvature and three 0..1),
-// so the UI cannot ask for a value the loader would refuse on the next launch. DFU's float slider
+// The slider ranges ARE the settings loader's clamps (0..MobileCrt.MaxCurvature, three 0..1, and
+// MobileCrt.Min..MaxScanlineCount), so the UI cannot ask for a value the loader would refuse on
+// the next launch. DFU's float slider
 // indicator carries one decimal digit, which makes curvature a four-step 0.0 / 0.1 / 0.2 / 0.3
 // control - coarser than the 0.08 default, so the default is reachable only through the page's own
 // "set page defaults" button. That is the widget, not a choice.
@@ -36,12 +44,14 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
         // carries the English reversion it should fall back to. GetLocalizedText would return the
         // lookup-error string instead.
         const string titleReversion = "CRT Filter";
-        const string tipReversion = "Curved tube, scanlines and phosphor grille over the world. " +
-                                    "Needs retro mode on. The HUD stays sharp on purpose, and " +
-                                    "curvature crops the edges of the view.";
+        const string tipReversion = "Curved tube, scanlines and phosphor grille over the world, " +
+                                    "with retro mode on or off. The HUD stays sharp on purpose, " +
+                                    "and curvature crops the edges of the view.";
 
         Checkbox enableCheckbox;
         HorizontalSlider curvatureSlider;
+        HorizontalSlider scanlineCountSlider;
+        TextLabel scanlineCountLabel;
         HorizontalSlider scanlinesSlider;
         HorizontalSlider maskSlider;
         HorizontalSlider vignetteSlider;
@@ -109,6 +119,26 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
             vignetteSlider.SetIndicator(0f, 1f, DaggerfallUnity.Settings.CRTVignette);
             StyleIndicator(vignetteSlider);
 
+            // Scanline count, retro mode OFF only. The slider's range IS the loader's clamp
+            // (MobileCrt.Min/MaxScanlineCount), and the count passed to AddSlider is the width of
+            // that range, which is the base class's convention for a numeric slider: it becomes
+            // DisplayUnits, so totalUnits ends up twice the range and the thumb is half the track -
+            // grabbable by a thumb, which a 1/1100th-width thumb would not be.
+            scanlineCountSlider = AddSlider(parent,
+                TextManager.Instance.GetLocalizedTextWithReversion(key + "ScanlineCount", reversion: "Scanline count"),
+                MobileCrt.MaxScanlineCount - MobileCrt.MinScanlineCount, ref pos);
+            // AddSlider appends the label and then the slider, in that order, and does not return
+            // the label - so this is where it is. The `as` is what keeps the guess honest: if the
+            // base class ever stops doing that, this is null and the slider loses its show/hide
+            // partner, rather than hiding whatever component happened to land in that slot.
+            scanlineCountLabel = parent.Components.Count >= 2
+                ? parent.Components[parent.Components.Count - 2] as TextLabel
+                : null;
+            scanlineCountSlider.OnScroll += ScanlineCountSlider_OnScroll;
+            scanlineCountSlider.SetIndicator(MobileCrt.MinScanlineCount, MobileCrt.MaxScanlineCount,
+                MobileCrt.ClampScanlineCount(DaggerfallUnity.Settings.CRTScanlineCount));
+            StyleIndicator(scanlineCountSlider);
+
             ReadSettings();
         }
 
@@ -120,6 +150,16 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
             scanlinesSlider.Value = Mathf.RoundToInt(DaggerfallUnity.Settings.CRTScanlines * 10);
             maskSlider.Value = Mathf.RoundToInt(DaggerfallUnity.Settings.CRTMask * 10);
             vignetteSlider.Value = Mathf.RoundToInt(DaggerfallUnity.Settings.CRTVignette * 10);
+            scanlineCountSlider.Value = MobileCrt.ClampScanlineCount(DaggerfallUnity.Settings.CRTScanlineCount);
+
+            // Shown only with retro mode off - see the note at the top of the file. ReadSettings is
+            // what GameEffectsConfigWindow calls when the window is pushed, so the slider appears or
+            // goes the next time the page is opened after retro mode changes.
+            bool nativePath = DaggerfallUnity.Settings.RetroRenderingMode == 0;
+            scanlineCountSlider.Enabled = nativePath;
+            if (scanlineCountLabel != null)
+                scanlineCountLabel.Enabled = nativePath;
+
             reading = false;
         }
 
@@ -139,6 +179,7 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
             DaggerfallUnity.Settings.CRTScanlines = 0.35f;
             DaggerfallUnity.Settings.CRTMask = 0.25f;
             DaggerfallUnity.Settings.CRTVignette = 0.25f;
+            DaggerfallUnity.Settings.CRTScanlineCount = MobileCrt.DefaultScanlineCount;
         }
 
         private void EnableCheckbox_OnToggleState()
@@ -179,6 +220,16 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
                 return;
 
             DaggerfallUnity.Settings.CRTVignette = MobileCrt.Clamp01(vignetteSlider.ScrollIndex / 10f);
+        }
+
+        private void ScanlineCountSlider_OnScroll()
+        {
+            if (reading)
+                return;
+
+            // Value, not ScrollIndex: this slider does not start at zero, and Value is
+            // ScrollIndex + MinScanlineCount.
+            DaggerfallUnity.Settings.CRTScanlineCount = MobileCrt.ClampScanlineCount(scanlineCountSlider.Value);
         }
     }
 }

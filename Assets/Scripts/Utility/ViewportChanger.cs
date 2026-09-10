@@ -39,7 +39,14 @@ namespace DaggerfallWorkshop.Utility
                 return;
 
             // Offload when using retro aspect correction
-            if (isRetroPresenter && DaggerfallUnity.Settings.RetroModeAspectCorrection != 0)
+            // MOBILE: `&& RetroRenderingMode != 0`. Aspect correction is a RETRO setting - it
+            // pillarboxes or stretches a 320x200 raster into a 4:3 or 16:10 shape - and until the
+            // CRT filter learned to run with retro mode off, this branch could only ever be reached
+            // with retro mode on, because the presenter's GameObject was switched off otherwise. It
+            // is reachable now, and squeezing a native 16:9 render into a 4:3 box because a retro
+            // setting was left switched on is not what anyone asked for.
+            if (isRetroPresenter && DaggerfallUnity.Settings.RetroModeAspectCorrection != 0
+                && DaggerfallUnity.Settings.RetroRenderingMode != 0)
             {
                 SetRetroAspectViewport();
                 return;
@@ -79,7 +86,12 @@ namespace DaggerfallWorkshop.Utility
                 // Handle retro rendering mode
                 // Camera viewport does not work with render textures so need to adjust output to appropriately size render target instead
                 // Then retro presentation needs to use correct screen viewport area, not main camera
-                if (DaggerfallUnity.Settings.RetroRenderingMode != 0 && !isRetroPresenter)
+                // MOBILE: `|| MobileCrtNative.Active` - the CRT filter's non-retro path puts the
+                // main camera on a render target too, so the same rule applies to it: full rect on
+                // the camera, and the viewport expressed as the size of the target instead.
+                // UpdateRenderTarget is what re-sizes that target, and this is the call that tells
+                // it the docked large HUD has changed the viewport.
+                if ((DaggerfallUnity.Settings.RetroRenderingMode != 0 || Game.Mobile.MobileCrtNative.Active) && !isRetroPresenter)
                 {
                     camera.rect = standardViewportRect;
                     GameManager.Instance.RetroRenderer.UpdateRenderTarget();

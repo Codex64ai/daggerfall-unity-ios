@@ -375,9 +375,14 @@ namespace DaggerfallWorkshop.Utility
             retroMode = DaggerfallUnity.Settings.RetroRenderingMode;
             UpdateRenderTarget();
             UpdateDepthProcessMaterial();
+            // MOBILE: `|| MobileCrtNative.Active` - with retro mode off and the CRT filter on the
+            // presenter is still the thing that draws the world to the screen, so switching retro
+            // mode off must not switch it off, and the sky camera must keep its target texture.
+            // MobileCrtNative re-establishes both on its next LateUpdate either way; doing it here
+            // as well is what keeps the frame in which retro mode changes from flashing.
             if (retroPresenter)
-                retroPresenter.gameObject.SetActive(retroMode != 0);
-            if (sky && sky.SkyCamera && retroMode == 0)
+                retroPresenter.gameObject.SetActive(retroMode != 0 || Game.Mobile.MobileCrtNative.Active);
+            if (sky && sky.SkyCamera && retroMode == 0 && !Game.Mobile.MobileCrtNative.Active)
                 sky.SkyCamera.targetTexture = null;
         }
 
@@ -416,6 +421,15 @@ namespace DaggerfallWorkshop.Utility
             // Disable retro target texture when retro mode disabled
             if (DaggerfallUnity.Settings.RetroRenderingMode == 0)
             {
+                // MOBILE: ... unless the CRT filter is running the native path, which owns
+                // Camera.main's target texture while it does. ViewportChanger calls this method
+                // whenever the docked large HUD changes the viewport, so without this the target
+                // would be pulled out from under the filter and the screen would go black for a
+                // frame - or stay black, since nothing else would put it back until the next
+                // retro-mode deploy.
+                if (Game.Mobile.MobileCrtNative.ReassertTarget())
+                    return;
+
                 GameManager.Instance.MainCamera.targetTexture = null;
                 return;
             }

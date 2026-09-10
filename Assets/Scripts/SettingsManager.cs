@@ -169,6 +169,10 @@ namespace DaggerfallWorkshop
         public float CRTScanlines { get; set; }
         public float CRTMask { get; set; }
         public float CRTVignette { get; set; }
+        // MOBILE: the non-retro path's scanline count. In retro mode the count is the source
+        // raster's own height and there is nothing to choose; with retro mode off the source IS the
+        // screen and no count is "correct", so it becomes the player's.
+        public int CRTScanlineCount { get; set; }
         public bool VSync { get; set; }
         public int TargetFrameRate { get; set; }
         public bool Fullscreen { get; set; }
@@ -431,6 +435,7 @@ namespace DaggerfallWorkshop
             CRTScanlines = GetFloat(sectionVideo, "CRTScanlines", 0f, 1f);
             CRTMask = GetFloat(sectionVideo, "CRTMask", 0f, 1f);
             CRTVignette = GetFloat(sectionVideo, "CRTVignette", 0f, 1f);
+            CRTScanlineCount = GetInt(sectionVideo, "CRTScanlineCount", 100, 1200);
             VSync = GetBool(sectionVideo, "VSync");
             TargetFrameRate = GetInt(sectionVideo, "TargetFrameRate", 0, 300);
             Fullscreen = GetBool(sectionVideo, "Fullscreen");
@@ -636,6 +641,7 @@ namespace DaggerfallWorkshop
             SetFloat(sectionVideo, "CRTScanlines", CRTScanlines);
             SetFloat(sectionVideo, "CRTMask", CRTMask);
             SetFloat(sectionVideo, "CRTVignette", CRTVignette);
+            SetInt(sectionVideo, "CRTScanlineCount", CRTScanlineCount);
             SetBool(sectionVideo, "VSync", VSync);
             SetInt(sectionVideo, "TargetFrameRate", TargetFrameRate);
             SetBool(sectionVideo, "Fullscreen", Fullscreen);

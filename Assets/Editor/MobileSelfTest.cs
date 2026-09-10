@@ -1343,8 +1343,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // Three kinds of check, because the failure modes are of three kinds.
         //
         // 1. The pure rules (MobileCrt), called for real. The scanline count is the one that
-        //    matters visually: it must come from the SOURCE raster (200 or 400 lines, from
-        //    RetroRenderingMode) and never from device pixels, or a high-DPI panel moires.
+        //    matters visually: with retro mode ON it must come from the SOURCE raster (200 or 400
+        //    lines, or 154 / 308 under a docked large HUD) and never from device pixels, or a
+        //    high-DPI panel moires; with retro mode OFF there is no raster and it comes from the
+        //    player's CRTScanlineCount, clamped.
         // 2. The shader as an asset: present, compiles, ONE texture fetch in the cheap tier, and
         //    pinned three ways (Always-Included list, the preloaded variant collection, the
         //    resulting GraphicsSettings entry) because it is resolved by name at runtime and
@@ -1361,14 +1363,28 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobileCrt.Clamp01(-1f) == 0f && MobileCrt.Clamp01(0.5f) == 0.5f && MobileCrt.Clamp01(2f) == 1f,
                 "MobileCRT: Clamp01 clamps both ends and passes the middle through",
                 MobileCrt.Clamp01(-1f) + " / " + MobileCrt.Clamp01(0.5f) + " / " + MobileCrt.Clamp01(2f));
-            Check(MobileCrt.ScanlineCount(1) == 200, "MobileCRT: 320x200 retro mode draws 200 scanlines",
-                MobileCrt.ScanlineCount(1).ToString());
-            Check(MobileCrt.ScanlineCount(2) == 400, "MobileCRT: 640x400 retro mode draws 400 scanlines",
-                MobileCrt.ScanlineCount(2).ToString());
-            // Mode 0 never reaches the shader (Active is false there), but the count must still be
-            // a usable raster rather than 0: a zero would collapse the scanline phase to a constant.
-            Check(MobileCrt.ScanlineCount(0) == 200, "MobileCRT: retro off still reports a usable scanline count",
-                MobileCrt.ScanlineCount(0).ToString());
+            const int nativeCount = MobileCrt.DefaultScanlineCount;
+            Check(MobileCrt.ScanlineCount(1, nativeCount) == 200, "MobileCRT: 320x200 retro mode draws 200 scanlines",
+                MobileCrt.ScanlineCount(1, nativeCount).ToString());
+            Check(MobileCrt.ScanlineCount(2, nativeCount) == 400, "MobileCRT: 640x400 retro mode draws 400 scanlines",
+                MobileCrt.ScanlineCount(2, nativeCount).ToString());
+            // Retro mode 0 is the NATIVE path now, and the setting is what it draws - the raster is
+            // the screen, so no other number is more correct than the player's.
+            Check(MobileCrt.ScanlineCount(0, nativeCount) == nativeCount,
+                "MobileCRT: with retro mode off the scanline count is the CRTScanlineCount setting",
+                MobileCrt.ScanlineCount(0, nativeCount).ToString());
+            Check(MobileCrt.ScanlineCount(0, 0) == MobileCrt.MinScanlineCount
+                  && MobileCrt.ScanlineCount(0, 99999) == MobileCrt.MaxScanlineCount,
+                "MobileCRT: the native scanline count is clamped at the point of use, not just on load",
+                MobileCrt.ScanlineCount(0, 0) + " / " + MobileCrt.ScanlineCount(0, 99999));
+            Check(MobileCrt.ClampScanlineCount(-5) == MobileCrt.MinScanlineCount
+                  && MobileCrt.ClampScanlineCount(480) == 480
+                  && MobileCrt.ClampScanlineCount(5000) == MobileCrt.MaxScanlineCount,
+                "MobileCRT: ClampScanlineCount clamps both ends and passes the middle through");
+            Check(MobileCrt.MinScanlineCount == 100 && MobileCrt.MaxScanlineCount == 1200
+                  && MobileCrt.DefaultScanlineCount == 480,
+                "MobileCRT: the scanline-count range is 100..1200 with a 480-line default",
+                MobileCrt.MinScanlineCount + ".." + MobileCrt.MaxScanlineCount + " default " + MobileCrt.DefaultScanlineCount);
 
             // The count must come from the SOURCE raster's own height, not from the retro mode:
             // with LargeHUD + LargeHUDDocked, RetroRenderer.UpdateRenderTarget points the camera at
@@ -1377,18 +1393,24 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // raster beats against it at |200-154| = 46 cycles down the screen - the exact moire the
             // shader exists to avoid. ScanlineCountFor is the pure form; a raster height of 0 (no
             // renderer yet, headless) falls back to the mode's nominal count.
-            Check(MobileCrt.ScanlineCountFor(154, 1) == 154,
+            Check(MobileCrt.ScanlineCountFor(154, 1, nativeCount) == 154,
                 "MobileCRT: a docked large HUD's 320x154 raster draws 154 scanlines",
-                MobileCrt.ScanlineCountFor(154, 1).ToString());
-            Check(MobileCrt.ScanlineCountFor(308, 2) == 308,
+                MobileCrt.ScanlineCountFor(154, 1, nativeCount).ToString());
+            Check(MobileCrt.ScanlineCountFor(308, 2, nativeCount) == 308,
                 "MobileCRT: a docked large HUD's 640x308 raster draws 308 scanlines",
-                MobileCrt.ScanlineCountFor(308, 2).ToString());
-            Check(MobileCrt.ScanlineCountFor(200, 1) == 200 && MobileCrt.ScanlineCountFor(400, 2) == 400,
+                MobileCrt.ScanlineCountFor(308, 2, nativeCount).ToString());
+            Check(MobileCrt.ScanlineCountFor(200, 1, nativeCount) == 200 && MobileCrt.ScanlineCountFor(400, 2, nativeCount) == 400,
                 "MobileCRT: an undocked raster draws its own 200 / 400 lines");
-            Check(MobileCrt.ScanlineCountFor(0, 1) == 200 && MobileCrt.ScanlineCountFor(0, 2) == 400
-                  && MobileCrt.ScanlineCountFor(-1, 2) == 400,
+            Check(MobileCrt.ScanlineCountFor(0, 1, nativeCount) == 200 && MobileCrt.ScanlineCountFor(0, 2, nativeCount) == 400
+                  && MobileCrt.ScanlineCountFor(-1, 2, nativeCount) == 400,
                 "MobileCRT: no live raster falls back to the retro mode's nominal count",
-                MobileCrt.ScanlineCountFor(0, 1) + " / " + MobileCrt.ScanlineCountFor(0, 2));
+                MobileCrt.ScanlineCountFor(0, 1, nativeCount) + " / " + MobileCrt.ScanlineCountFor(0, 2, nativeCount));
+            // And the native path ignores whatever raster happens to be lying around: RetroRenderer's
+            // texture is not cleared the instant retro mode goes off, so a stale 200 must not leak
+            // into the full-resolution picture.
+            Check(MobileCrt.ScanlineCountFor(200, 0, nativeCount) == nativeCount,
+                "MobileCRT: with retro mode off a stale retro raster does not set the count",
+                MobileCrt.ScanlineCountFor(200, 0, nativeCount).ToString());
             // The editor has no GameManager, so the live path is the fallback here - what matters is
             // that it does not throw and does not answer zero.
             Check(MobileCrt.LiveRasterHeight == 0,
@@ -1403,7 +1425,57 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                         Check(MobileCrt.Active(enabled, mode, materialOk) == expected,
                             string.Format("MobileCRT: Active(enabled={0}, retroMode={1}, materialOk={2}) is {3}",
                                 enabled, mode, materialOk, expected));
+
+                        // The two predicates partition the on-states: exactly one of them is true
+                        // whenever the filter is on and the shader is present, and neither is ever
+                        // true otherwise. That is the whole "works in both pictures, never twice"
+                        // guarantee, and it is one line to state.
+                        bool nativeExpected = enabled && mode == 0 && materialOk;
+                        Check(MobileCrt.NativeActive(enabled, mode, materialOk) == nativeExpected,
+                            string.Format("MobileCRT: NativeActive(enabled={0}, retroMode={1}, materialOk={2}) is {3}",
+                                enabled, mode, materialOk, nativeExpected));
+                        Check(!(MobileCrt.Active(enabled, mode, materialOk) && MobileCrt.NativeActive(enabled, mode, materialOk)),
+                            string.Format("MobileCRT: the retro and native paths are exclusive (enabled={0}, retroMode={1}, materialOk={2})",
+                                enabled, mode, materialOk));
+                        Check((MobileCrt.Active(enabled, mode, materialOk) || MobileCrt.NativeActive(enabled, mode, materialOk))
+                              == (enabled && materialOk),
+                            string.Format("MobileCRT: one path or the other runs whenever the filter is on (enabled={0}, retroMode={1}, materialOk={2})",
+                                enabled, mode, materialOk));
                     }
+
+            // ---- 1b. the native path's viewport maths ----
+            // The docked large HUD is the case the whole design turns on: the world's viewport is the
+            // screen minus the HUD strip, the render target has to be exactly that many pixels, and
+            // the presenter blits it back into exactly that rect. DockedViewportRect is DFU's own
+            // rule (ViewportChanger.Update) in a form that can be checked without a scene.
+            Rect undocked = MobileCrt.DockedViewportRect(1640f, 0f);
+            Check(undocked == new Rect(0f, 0f, 1f, 1f),
+                "MobileCRT native: no docked HUD leaves the whole screen as the viewport", undocked.ToString());
+            Rect docked = MobileCrt.DockedViewportRect(1000f, 250f);
+            Check(Mathf.Approximately(docked.y, 0.25f) && Mathf.Approximately(docked.height, 0.75f)
+                  && Mathf.Approximately(docked.x, 0f) && Mathf.Approximately(docked.width, 1f),
+                "MobileCRT native: a 250-of-1000-row docked HUD leaves the top 75% as the viewport", docked.ToString());
+            // Degenerate inputs come from real frames: Screen.height reports 0 for a frame or two on
+            // an iOS rotation, and the HUD's ScreenHeight is 0 until the HUD has been laid out.
+            Check(MobileCrt.DockedViewportRect(0f, 100f) == new Rect(0f, 0f, 1f, 1f)
+                  && MobileCrt.DockedViewportRect(1000f, 1000f) == new Rect(0f, 0f, 1f, 1f)
+                  && MobileCrt.DockedViewportRect(1000f, 2000f) == new Rect(0f, 0f, 1f, 1f)
+                  && MobileCrt.DockedViewportRect(1000f, -5f) == new Rect(0f, 0f, 1f, 1f),
+                "MobileCRT native: a zero screen or an over-tall HUD yields the full viewport, never an empty or inverted one");
+
+            Vector2Int size = MobileCrt.NativeTargetSize(2360, 1230);
+            Check(size.x == 2360 && size.y == 1230,
+                "MobileCRT native: the render target is the presenting camera's own pixel rect", size.ToString());
+            Check(MobileCrt.NativeTargetSize(0, 0) == new Vector2Int(1, 1)
+                  && MobileCrt.NativeTargetSize(-4, -4) == new Vector2Int(1, 1),
+                "MobileCRT native: a zero or negative viewport clamps to 1x1 (a 0-sized RenderTexture throws)");
+            Check(MobileCrt.NativeTargetSize(99999, 99999) == new Vector2Int(8192, 8192),
+                "MobileCRT native: an absurd viewport clamps to 8192 rather than trying to allocate it");
+            // The price of the feature, stated as a number so it cannot drift silently: RGBA8 colour
+            // plus a 32-bit depth surface. 2732x2048 is the 12.9" iPad Pro.
+            Check(MobileCrt.NativeTargetBytes(2732, 2048) == 2732L * 2048L * 8L,
+                "MobileCRT native: the target costs 8 bytes a pixel (RGBA8 colour + 32-bit depth)",
+                (MobileCrt.NativeTargetBytes(2732, 2048) / (1024 * 1024)) + " MB at 2732x2048");
 
             // ---- 2. the shader ----
             const string shaderName = "Daggerfall/Mobile/CRT";
@@ -1521,12 +1593,68 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "MobileCRT hook: the plain blit survives as the off path");
             Check(presenter.Contains("MobileCrt.Active("),
                 "MobileCRT hook: the material path is gated by MobileCrt.Active");
-            Check(presenter.Contains("MobileShaders.Find(MobileCrt.ShaderName)"),
-                "MobileCRT hook: the material is built from MobileShaders.Find, not a raw Shader.Find");
+            Check(presenter.Contains("MobileCrt.Material"),
+                "MobileCRT hook: the material comes from MobileCrt, which resolves it through MobileShaders");
             // "Shader.Find(" is not a substring of "MobileShaders.Find(" - the plural puts
             // "Shaders." before ".Find" - so this really does catch a raw lookup.
             Check(!presenter.Contains("Shader.Find("),
                 "MobileCRT hook: no raw Shader.Find survives");
+            string rules = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileCrt.cs"));
+            Check(rules.Contains("MobileShaders.Find(ShaderName)"),
+                "MobileCRT hook: MobileCrt resolves the shader through MobileShaders, not a raw Shader.Find");
+            Check(!rules.Contains(" Shader.Find("),
+                "MobileCRT hook: no raw Shader.Find in MobileCrt either");
+
+            // ---- the hook, non-retro half ----
+            // The retro-off path is four small edits spread over three upstream files plus one port
+            // file, and each of them is silently survivable: take theirs on any one and the build
+            // still compiles, with a black screen, a stretched picture, or a vanished far terrain
+            // instead of an error. Source text is the only guard, as above.
+            Check(presenter.Contains("MobileCrtNative.Active"),
+                "MobileCRT native hook: the presenter presents when the native path is running, not only in retro mode");
+            string renderer = StripShaderComments(File.ReadAllText("Assets/Scripts/Utility/RetroRenderer.cs"));
+            Check(renderer.Contains("Game.Mobile.MobileCrtNative.ReassertTarget()"),
+                "MobileCRT native hook: UpdateRenderTarget leaves Camera.main's target alone while the native path owns it");
+            Check(renderer.Contains("retroPresenter.gameObject.SetActive(retroMode != 0 || Game.Mobile.MobileCrtNative.Active)"),
+                "MobileCRT native hook: switching retro mode off does not switch the presenter off under the native path");
+            Check(renderer.Contains("retroMode == 0 && !Game.Mobile.MobileCrtNative.Active"),
+                "MobileCRT native hook: the classic sky camera keeps its target texture under the native path");
+            string viewport = StripShaderComments(File.ReadAllText("Assets/Scripts/Utility/ViewportChanger.cs"));
+            Check(viewport.Contains("|| Game.Mobile.MobileCrtNative.Active) && !isRetroPresenter"),
+                "MobileCRT native hook: the main camera takes a full rect and a resized target under the native path");
+            Check(viewport.Contains("&& DaggerfallUnity.Settings.RetroRenderingMode != 0"),
+                "MobileCRT native hook: retro aspect correction stays a retro-mode-only viewport");
+            string distant = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/Ports/DistantTerrain/DistantTerrain.cs"));
+            Check(distant.Contains("stackedCamera.targetTexture != Camera.main.targetTexture"),
+                "MobileCRT native hook: Distant Terrain re-stacks when Camera.main's target changes, not only when retro mode does");
+
+            // MobileCrtNative itself: the API the four hooks above call, and the two invariants that
+            // keep it from becoming a leak - it owns exactly one render texture and releases it.
+            Type nativeType = typeof(MobileCrt).Assembly.GetType("DaggerfallWorkshop.Game.Mobile.MobileCrtNative");
+            Check(nativeType != null, "MobileCRT native: MobileCrtNative exists");
+            if (nativeType != null)
+            {
+                foreach (string member in new[] { "Active", "Target", "Wanted" })
+                    Check(nativeType.GetProperty(member, BindingFlags.Public | BindingFlags.Static) != null,
+                        "MobileCRT native: MobileCrtNative." + member + " is a public static property");
+                Check(nativeType.GetMethod("ReassertTarget", BindingFlags.Public | BindingFlags.Static) != null,
+                    "MobileCRT native: MobileCrtNative.ReassertTarget is callable from RetroRenderer");
+                // Nothing has run, so it must answer "off" without a game and without throwing.
+                var activeProp = nativeType.GetProperty("Active", BindingFlags.Public | BindingFlags.Static);
+                var targetProp = nativeType.GetProperty("Target", BindingFlags.Public | BindingFlags.Static);
+                Check(activeProp != null && (bool)activeProp.GetValue(null, null) == false,
+                    "MobileCRT native: the native path is off with no running game");
+                Check(targetProp != null && targetProp.GetValue(null, null) == null,
+                    "MobileCRT native: no render target is allocated with no running game");
+            }
+            string native = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileCrtNative.cs"));
+            Check(native.Contains("target.Release()") && native.Contains("Object.Destroy(target)"),
+                "MobileCRT native: the render target is released AND destroyed, not just dropped");
+            Check(CountOccurrences(native, "new RenderTexture(") == 1,
+                "MobileCRT native: exactly one render texture is ever created",
+                CountOccurrences(native, "new RenderTexture(") + " of 1");
+            Check(native.Contains("RuntimeInitializeOnLoadMethod"),
+                "MobileCRT native: the driver installs itself, with no scene edit to lose on a rebuild");
 
             // ---- 3. the settings table ----
             string settingsSrc = File.ReadAllText("Assets/Scripts/SettingsManager.cs");
@@ -1539,6 +1667,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "CRTScanlines = GetFloat(sectionVideo, \"CRTScanlines\", 0f, 1f);",
                 "CRTMask = GetFloat(sectionVideo, \"CRTMask\", 0f, 1f);",
                 "CRTVignette = GetFloat(sectionVideo, \"CRTVignette\", 0f, 1f);",
+                "CRTScanlineCount = GetInt(sectionVideo, \"CRTScanlineCount\", 100, 1200);",
             };
             foreach (string line in loadLines)
                 Check(settingsSrc.Contains(line), "MobileCRT settings: LoadSettings reads `" + line.Trim() + "`");
@@ -1549,6 +1678,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "SetFloat(sectionVideo, \"CRTScanlines\", CRTScanlines);",
                 "SetFloat(sectionVideo, \"CRTMask\", CRTMask);",
                 "SetFloat(sectionVideo, \"CRTVignette\", CRTVignette);",
+                "SetInt(sectionVideo, \"CRTScanlineCount\", CRTScanlineCount);",
             };
             foreach (string line in saveLines)
                 Check(settingsSrc.Contains(line), "MobileCRT settings: SaveSettings writes `" + line.Trim() + "`");
@@ -1561,6 +1691,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 new[] { "CRTScanlines", "0.35" },
                 new[] { "CRTMask", "0.25" },
                 new[] { "CRTVignette", "0.25" },
+                new[] { "CRTScanlineCount", "480" },
                 // The iOS default the research asked for: shift 1 is an 8 MB LUT and ~850 ms to
                 // build on a desktop; shift 2 is 1 MB and "slightly less crisp".
                 new[] { "PalettizationLUTShift", "2" },
@@ -1579,10 +1710,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(live != null, "MobileCRT settings: the live SettingsManager loads");
             if (live != null)
             {
-                foreach (string name in new[] { "CRTFilter", "CRTCurvature", "CRTScanlines", "CRTMask", "CRTVignette" })
+                foreach (string name in new[] { "CRTFilter", "CRTCurvature", "CRTScanlines", "CRTMask", "CRTVignette", "CRTScanlineCount" })
                 {
                     var prop = typeof(SettingsManager).GetProperty(name);
-                    Type want = name == "CRTFilter" ? typeof(bool) : typeof(float);
+                    Type want = name == "CRTFilter" ? typeof(bool)
+                              : name == "CRTScanlineCount" ? typeof(int) : typeof(float);
                     Check(prop != null && prop.PropertyType == want,
                         "MobileCRT settings: SettingsManager exposes " + name + " as " + want.Name,
                         prop == null ? "property missing" : "is " + prop.PropertyType.Name);
@@ -1607,6 +1739,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                         new object[] { "PalettizationLUTShift", "9", 3, 1, 3 },
                         new object[] { "PostProcessingInRetroMode", "-1", 0, 0, 4 },
                         new object[] { "PostProcessingInRetroMode", "7", 4, 0, 4 },
+                        new object[] { "CRTScanlineCount", "0", 100, 100, 1200 },
+                        new object[] { "CRTScanlineCount", "99999", 1200, 100, 1200 },
                     };
                     foreach (object[] c in intCases)
                     {
@@ -2014,7 +2148,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 // One toggle and four sliders, and the sliders' ranges must be the loader's clamps -
                 // a slider that can write 5.0 into CRTMask makes the clamp the only thing standing
                 // between the ini and a black screen.
-                foreach (string setting in new[] { "CRTFilter", "CRTCurvature", "CRTScanlines", "CRTMask", "CRTVignette" })
+                foreach (string setting in new[] { "CRTFilter", "CRTCurvature", "CRTScanlines", "CRTMask", "CRTVignette", "CRTScanlineCount" })
                     Check(page.Contains("DaggerfallUnity.Settings." + setting),
                         "MobileCRT UI: the page drives DaggerfallUnity.Settings." + setting);
                 Check(page.Contains("SetIndicator(0f, MobileCrt.MaxCurvature,"),
@@ -2022,10 +2156,23 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 Check(CountOccurrences(page, "SetIndicator(0f, 1f,") == 3,
                     "MobileCRT UI: the three amplitude sliders run 0..1, the loader's clamp",
                     CountOccurrences(page, "SetIndicator(0f, 1f,") + " of 3");
+                Check(page.Contains("SetIndicator(MobileCrt.MinScanlineCount, MobileCrt.MaxScanlineCount,"),
+                    "MobileCRT UI: the scanline-count slider's range is MobileCrt.Min..MaxScanlineCount, the loader's clamp");
+                // The count is meaningless in retro mode (the raster sets it there and any other
+                // number moires), so the slider is only shown on the path where it does something.
+                Check(page.Contains("DaggerfallUnity.Settings.RetroRenderingMode == 0")
+                      && page.Contains("scanlineCountSlider.Enabled = nativePath"),
+                    "MobileCRT UI: the scanline-count slider is shown only with retro mode off");
                 // Two things a player cannot discover by looking, so the tip has to say them.
                 Check(page.Contains("HUD stays sharp"), "MobileCRT UI: the tip text says the HUD stays sharp on purpose");
                 Check(page.Contains("crops the edges"), "MobileCRT UI: the tip text says curvature crops the edges");
-                Check(page.Contains("Needs retro mode"), "MobileCRT UI: the tip text says retro mode is required");
+                // ... and one thing that USED to be true and is not any more. The page said "Needs
+                // retro mode on" while the filter was retro-only; leaving that line in place would
+                // now be a lie that sends a player to switch on a picture mode they did not want.
+                Check(!page.Contains("Needs retro mode"),
+                    "MobileCRT UI: the tip text no longer claims the filter needs retro mode");
+                Check(page.Contains("with retro mode on or off"),
+                    "MobileCRT UI: the tip text says the filter works in both pictures");
             }
 
             const string panelPath = "Assets/Scripts/Game/Mobile/MobileSettingsPanel.cs";
@@ -2033,6 +2180,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(panel.Contains("\"Retro mode\""), "MobileCRT UI: the settings panel has a Retro mode row");
             Check(panel.Contains("\"Aspect\""), "MobileCRT UI: the settings panel has an Aspect row");
             Check(panel.Contains("\"CRT filter\""), "MobileCRT UI: the settings panel has a CRT filter row");
+            Check(!panel.Contains("the CRT filter needs it on"),
+                "MobileCRT UI: the settings panel no longer tells the player the filter needs retro mode");
+            Check(panel.Contains("works with retro mode on or off"),
+                "MobileCRT UI: the settings panel says the filter works in both pictures");
             foreach (string setting in new[] { "RetroRenderingMode", "RetroModeAspectCorrection", "CRTFilter" })
                 Check(panel.Contains("DaggerfallUnity.Settings." + setting),
                     "MobileCRT UI: the settings panel row writes DaggerfallUnity.Settings." + setting);
