@@ -5,11 +5,11 @@
 // MOBILE: the one structural change in this file. Upstream allocated a fresh int[256,256] per
 // detail layer on EVERY terrain promotion - 256 KB of zeroed managed array per layer, up to five
 // layers, thrown away each time, on the ring of terrains a map-pixel crossing promotes. Each layer
-// is now a DetailMap: one int[128,128] allocated at construction, cleared with Array.Clear, and
-// addressed in upstream's 256-space so that none of the ~200 density write sites below had to be
-// touched or re-derived. See DetailMap and RealGrassPort.FoldDetailValue for what the fold does to
-// the values - it converts upstream's instance counts into the coverage values that place the same
-// number of billboards under this port's scatter mode.
+// is now a DetailMap: one int[RealGrassPort.DetailResolution, ...] allocated at construction and
+// cleared with Array.Clear, addressed in upstream's 256-space so that none of the ~200 density
+// write sites below had to be touched or re-derived. The VALUES are upstream's own instance counts,
+// unconverted: the port writes them into a 256-square store under InstanceCountMode, which is
+// upstream's own resolution and upstream's own denomination. See RealGrassPort.ForcedScatterMode.
 
 // Project:         Real Grass for Daggerfall Unity
 // Web Site:        http://forums.dfworkshop.net/viewtopic.php?f=14&t=17
@@ -63,18 +63,20 @@ namespace RealGrass
     /// upstream's 256-space while backing a <see cref="RealGrassPort.DetailResolution"/>-square
     /// array - so every write site in this file reads exactly as upstream wrote it.
     ///
-    /// Upstream's detail map was 256x256 for a 128x128 tilemap, i.e. four detail cells per terrain
-    /// tile, indexed (tile * 2) and (tile * 2) + 1. At detail resolution 128 the map is 1:1 with
-    /// the tilemap and those four cells fold into one. The fold is TWO steps, and both are needed:
-    /// the indexer ACCUMULATES the four sub-cell writes through
-    /// <see cref="RealGrassPort.AccumulateSubCell"/> rather than assigning (so the fourth write
-    /// does not erase the first three), and <see cref="FoldToCoverage"/> then turns every
-    /// accumulated total into the coverage value that buys that many billboards, once, before the
-    /// layer goes to the terrain. The total is the right input because upstream's numbers are
-    /// INSTANCE COUNTS per sub-cell and counts add; the conversion to coverage is what makes them
-    /// mean the same thing under this port's scatter mode. See
-    /// <see cref="RealGrassPort.CoverageValueForInstances"/> and
-    /// <see cref="RealGrassPort.FoldDetailValue"/>.
+    /// Upstream's detail map is 256x256 for a 128x128 tilemap, i.e. four detail cells per terrain
+    /// tile, indexed (tile * 2) and (tile * 2) + 1. At DetailResolution 256 that is this map, cell
+    /// for cell: <see cref="Fold"/> is 1, every upstream write lands in its own cell, and the value
+    /// stored is upstream's own instance count. The indexer still goes through
+    /// <see cref="RealGrassPort.AccumulateSubCell"/> and the layer is still swept by
+    /// <see cref="FoldToScatterValues"/> before it goes to the terrain, but at Fold 1 the first
+    /// adds to nothing and the second only applies Unity's per-cell ceiling.
+    ///
+    /// Both steps exist because DetailResolution is a constant someone may want to move. Drop it to
+    /// 128 and Fold becomes 2: four sub-cell writes land in one cell, so the indexer must ACCUMULATE
+    /// (or the fourth write would erase the first three) and the total is what the cell owes. That
+    /// configuration is NOT shipped and should not be without reading
+    /// <see cref="RealGrassPort.DetailResolution"/> first: an instance-count cell holds at most 16,
+    /// and a folded thick tile owes 24..76, so every grass cell would clamp to the same value.
     /// </summary>
     public sealed class DetailMap
     {
@@ -96,7 +98,7 @@ namespace RealGrass
             Cells = new int[RealGrassPort.DetailResolution, RealGrassPort.DetailResolution];
         }
 
-        /// <summary>MOBILE: set once FoldToCoverage has run; reset by Clear. Keeps the fold idempotent.</summary>
+        /// <summary>MOBILE: set once FoldToScatterValues has run; reset by Clear. Keeps the fold idempotent.</summary>
         bool folded;
 
         /// <summary>MOBILE: what upstream's EmptyMap() allocation cost, for free.</summary>
@@ -107,7 +109,7 @@ namespace RealGrass
             folded = false;
         }
 
-        /// <summary>MOBILE: upstream 256-space in, accumulated cell out (a SUM until FoldToCoverage).</summary>
+        /// <summary>MOBILE: upstream 256-space in, cell out. At Fold 1 this is upstream's own cell.</summary>
         public int this[int y, int x]
         {
             get { return Cells[y / Fold, x / Fold]; }
@@ -119,26 +121,26 @@ namespace RealGrass
         }
 
         /// <summary>
-        /// MOBILE: the second half of the fold - turn every accumulated instance count into the
-        /// coverage value that places that many billboards on this cell's ground, clamped to
-        /// Unity's scatter ceiling. Run once per promotion, after the density pass and before
-        /// SetDetailLayer; idempotent until the next Clear, so a second call cannot re-convert an
-        /// already-converted layer (which would square the error).
+        /// MOBILE: the second half of the fold - bring every cell inside Unity's per-cell scatter
+        /// ceiling, which under InstanceCountMode is 16. Run once per promotion, after the density
+        /// pass and before SetDetailLayer; idempotent until the next Clear. Unity would clamp these
+        /// values itself inside SetDetailLayer, so this is not what makes the placement correct -
+        /// it is what makes the array this port holds say what the terrain will actually store, so
+        /// a test or a probe reading Cells reads the truth.
         /// </summary>
-        internal void FoldToCoverage()
+        internal void FoldToScatterValues()
         {
             if (folded) return;
             folded = true;
             int max = RealGrassPort.MaxDetailValue;
-            float cellArea = RealGrassPort.DetailCellAreaM2, meanWidth = RealGrassPort.MeanPrototypeWidth;
             int[,] cells = Cells;
             int height = cells.GetLength(0), width = cells.GetLength(1);
             for (int y = 0; y < height; y++)
                 for (int x = 0; x < width; x++)
                 {
-                    int sum = cells[y, x];
-                    if (sum != 0)
-                        cells[y, x] = RealGrassPort.FoldDetailValue(sum, cellArea, meanWidth, max);
+                    int value = cells[y, x];
+                    if (value > max)
+                        cells[y, x] = RealGrassPort.FoldDetailValue(value, max);
                 }
         }
     }
@@ -222,18 +224,17 @@ namespace RealGrass
 
         /// <summary>
         /// MOBILE: the second half of the fold, once per promotion. After the density pass each
-        /// cell holds the SUM of the up-to-four upstream sub-cell writes that landed in it, which
-        /// is upstream's instance count for the ground that cell covers; the coverage scatter mode
-        /// this port forces denominates in coverage instead, so every layer is converted in place
-        /// here, immediately before RealGrass hands them to TerrainData.SetDetailLayer.
+        /// cell holds upstream's instance count for the ground it covers; this brings every layer
+        /// inside Unity's per-cell scatter ceiling in place, immediately before RealGrass hands
+        /// them to TerrainData.SetDetailLayer. See DetailMap.FoldToScatterValues.
         /// </summary>
         public void FoldDetailLayers()
         {
-            Grass.FoldToCoverage();
-            if (GrassDetails != null) GrassDetails.FoldToCoverage();
-            if (GrassAccents != null) GrassAccents.FoldToCoverage();
-            if (WaterPlants != null) WaterPlants.FoldToCoverage();
-            if (Rocks != null) Rocks.FoldToCoverage();
+            Grass.FoldToScatterValues();
+            if (GrassDetails != null) GrassDetails.FoldToScatterValues();
+            if (GrassAccents != null) GrassAccents.FoldToScatterValues();
+            if (WaterPlants != null) WaterPlants.FoldToScatterValues();
+            if (Rocks != null) Rocks.FoldToScatterValues();
         }
 
         /// <summary>
@@ -989,8 +990,9 @@ namespace RealGrass
 
         #region Static Methods
 
-        // MOBILE: the detail store is RealGrassPort.DetailResolution square now, not 256, so a
-        // blanking array of the old size would not fit the region SetDetailLayer is given.
+        // MOBILE: sized from RealGrassPort.DetailResolution rather than upstream's literal 256, so
+        // a blanking array always fits the region SetDetailLayer is given. They agree today - the
+        // port is back on upstream's resolution - and the constant is what keeps them agreeing.
         private static int[,] EmptyMap(bool isValid = true)
         {
             const int size = RealGrassPort.DetailResolution;
