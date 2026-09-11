@@ -128,6 +128,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestMobileCRTRender();
             TestMobileCRTSettingsEndToEnd();
             TestMobileCRTUI();
+            TestDebugStartCommands();
             TestWODBiomesPort();
             TestBiomesClimateKey();
             TestWoDTerrainPort();
@@ -732,6 +733,93 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     return source.Substring(open, i - open + 1);
             }
             return "";
+        }
+
+        // The simulator's only hand on the settings panel. debug-newchar.txt is how a headless
+        // simulator run drives the app, and `set` is what lets it reproduce a LIVE settings change -
+        // the transition the 2026-09-10 CRT/retro device bug only happens on. The parser is the part
+        // with arithmetic in it, and a mis-parsed schedule is silent: the run simply never switches
+        // anything and the screenshots all show the same picture.
+        static void TestDebugStartCommands()
+        {
+            int x, y;
+            List<KeyValuePair<float, string>> sets;
+
+            // The command the file has always carried still works, and still works with the new
+            // lines around it.
+            List<string> errors = MobileDebugStart.ParseCommands("pixel 207 213\n", out x, out y, out sets);
+            Check(x == 207 && y == 213 && sets.Count == 0 && errors.Count == 0,
+                "DebugStart: `pixel 207 213` alone still parses", x + "," + y + " sets=" + sets.Count);
+
+            errors = MobileDebugStart.ParseCommands("", out x, out y, out sets);
+            Check(x == -1 && y == -1 && sets.Count == 0 && errors.Count == 0,
+                "DebugStart: an empty command file asks for nothing and reports no error");
+
+            // Explicit times, in the order written.
+            errors = MobileDebugStart.ParseCommands(
+                "pixel 207 213\nset 20 RetroRenderingMode 1\nset 40 RetroRenderingMode 0\n",
+                out x, out y, out sets);
+            Check(x == 207 && y == 213 && errors.Count == 0 && sets.Count == 2,
+                "DebugStart: two `set` lines and a `pixel` line parse together", "sets=" + sets.Count + " errors=" + errors.Count);
+            Check(sets.Count == 2 && Mathf.Approximately(sets[0].Key, 20f) && sets[0].Value == "RetroRenderingMode 1",
+                "DebugStart: `set 20 RetroRenderingMode 1` is scheduled at world+20s",
+                sets.Count == 2 ? sets[0].Key + " " + sets[0].Value : "missing");
+            Check(sets.Count == 2 && Mathf.Approximately(sets[1].Key, 40f) && sets[1].Value == "RetroRenderingMode 0",
+                "DebugStart: `set 40 RetroRenderingMode 0` is scheduled at world+40s",
+                sets.Count == 2 ? sets[1].Key + " " + sets[1].Value : "missing");
+
+            // No time given: spaced by DefaultSetSpacing from the world and from each other, so a
+            // toggle sequence can be written without arithmetic.
+            errors = MobileDebugStart.ParseCommands(
+                "set RetroRenderingMode 1\nset RetroRenderingMode 0\nset RetroRenderingMode 2\n",
+                out x, out y, out sets);
+            Check(errors.Count == 0 && sets.Count == 3
+                  && Mathf.Approximately(sets[0].Key, MobileDebugStart.DefaultSetSpacing)
+                  && Mathf.Approximately(sets[1].Key, MobileDebugStart.DefaultSetSpacing * 2f)
+                  && Mathf.Approximately(sets[2].Key, MobileDebugStart.DefaultSetSpacing * 3f),
+                "DebugStart: `set` lines with no time are spaced by DefaultSetSpacing",
+                sets.Count == 3 ? sets[0].Key + "/" + sets[1].Key + "/" + sets[2].Key : "sets=" + sets.Count);
+
+            // A time may be mixed in; later untimed lines carry on from it rather than from zero.
+            errors = MobileDebugStart.ParseCommands(
+                "set 30 RetroRenderingMode 1\nset RetroRenderingMode 0\n", out x, out y, out sets);
+            Check(errors.Count == 0 && sets.Count == 2
+                  && Mathf.Approximately(sets[0].Key, 30f)
+                  && Mathf.Approximately(sets[1].Key, 30f + MobileDebugStart.DefaultSetSpacing),
+                "DebugStart: an untimed `set` follows the previous one, not the start of the run",
+                sets.Count == 2 ? sets[0].Key + "/" + sets[1].Key : "sets=" + sets.Count);
+
+            // Bool and comment handling: a settings property is not always an int, and a commented
+            // line must not be read as a command.
+            errors = MobileDebugStart.ParseCommands(
+                "# a comment\n\nset 10 CRTFilter False\n", out x, out y, out sets);
+            Check(errors.Count == 0 && sets.Count == 1 && sets[0].Value == "CRTFilter False",
+                "DebugStart: blank lines and # comments are skipped, and a non-numeric value survives",
+                "sets=" + sets.Count + " errors=" + errors.Count);
+
+            // Nonsense is REPORTED rather than ignored: a typo in the file that silently did nothing
+            // is how a reproduction run wastes a whole simulator launch.
+            errors = MobileDebugStart.ParseCommands("set\nwibble\nset OnlyOneWord\n", out x, out y, out sets);
+            Check(sets.Count == 0 && errors.Count == 3,
+                "DebugStart: unparseable lines are collected as errors, not dropped",
+                "sets=" + sets.Count + " errors=" + errors.Count);
+
+            // The runtime half, pinned as source text: ApplySetting must go through the SAME deploy
+            // the settings panel uses, or a `set RetroRenderingMode 1` would change the ini and
+            // nothing else, and the transition under test would never run.
+            string dbg = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileDebugStart.cs"));
+            Check(dbg.Contains("DeployCoreGameEffectSettings(CoreGameEffectSettingsGroups.RetroMode)"),
+                "DebugStart: a retro `set` is deployed the way MobileSettingsPanel deploys it");
+            Check(dbg.Contains("typeof(SettingsManager).GetProperty(name"),
+                "DebugStart: `set` writes the settings property by reflection, so any of them can be driven");
+            Check(dbg.Contains("MobileContentPath.Active"),
+                "DebugStart: the whole hook is still gated on the iOS content path and the command file");
+            // The file's own documentation, and README-iOS's: both go stale silently. Read from the
+            // RAW text, not `dbg`: the header is a comment, and `dbg` has had its comments stripped.
+            Check(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileDebugStart.cs").Contains("set [<seconds>] <Name> <value>"),
+                "DebugStart: the file documents the `set` syntax in its header");
+            Check(File.ReadAllText("README-iOS.md").Contains("set [<seconds>] <Name> <value>"),
+                "DebugStart: README-iOS documents the `set` syntax in its debug section");
         }
 
         // The World of Daggerfall - Biomes port is compiled in but inert: MobilePortedMods starts it
@@ -1743,6 +1831,83 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             string placeMarker = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/UserInterface/HUDPlaceMarker.cs"));
             Check(placeMarker.Contains("mainCamera.targetTexture != null ? largeHUDHeight / LocalScale.y : 0f"),
                 "MobileCRT native hook: HUDPlaceMarker's retro-off labels take the docked HUD offset under the native path");
+
+            // ---- 2b. one owner of Camera.main per frame (device bug, 2026-09-10) ----
+            // "retro mode is broke when I switch the resolution ... I can switch it back but world
+            // breaks" - switching retro mode ON with the filter already running left the native
+            // path's teardown to run afterwards, and it handed the docked large HUD's PARTIAL
+            // viewport rect to a camera retro mode had just pointed at the 320x200 retro texture.
+            // The world was drawn into four fifths of that texture while Distant Terrain's stacked
+            // camera filled all of it. Five edits, none of them reachable from an Editor run.
+
+            // The rule itself, as a pure function: a camera rendering into ANY render texture takes
+            // the whole rect, whoever owns the texture.
+            Check(MobileCrt.MainCameraRect(1, false, 1668f, 397f) == new Rect(0f, 0f, 1f, 1f)
+                  && MobileCrt.MainCameraRect(2, false, 1668f, 397f) == new Rect(0f, 0f, 1f, 1f),
+                "MobileCRT native: retro mode's render texture takes the full camera rect, docked HUD or not",
+                MobileCrt.MainCameraRect(1, false, 1668f, 397f).ToString());
+            Check(MobileCrt.MainCameraRect(0, true, 1668f, 397f) == new Rect(0f, 0f, 1f, 1f),
+                "MobileCRT native: the filter's own render texture takes the full camera rect too",
+                MobileCrt.MainCameraRect(0, true, 1668f, 397f).ToString());
+            Rect backbuffer = MobileCrt.MainCameraRect(0, false, 1000f, 250f);
+            Check(Mathf.Approximately(backbuffer.y, 0.25f) && Mathf.Approximately(backbuffer.height, 0.75f),
+                "MobileCRT native: with no render texture the docked HUD's viewport rect comes back",
+                backbuffer.ToString());
+            Check(MobileCrt.MainCameraRect(0, false, 1000f, 0f) == new Rect(0f, 0f, 1f, 1f),
+                "MobileCRT native: with no render texture and no docked HUD the rect is the whole screen");
+
+            // Edit 1 - the teardown restores the viewport rect ONLY when retro mode is not the one
+            // taking the camera over. Pinned in the owning method: "the file mentions the setting"
+            // would pass for the broken version, which read it nowhere near here.
+            string stopBody = MethodBody(native, "static void Stop()");
+            Check(stopBody.Contains("if (DaggerfallUnity.Settings.RetroRenderingMode == 0)")
+                  && stopBody.Contains("RestoreMainCameraRect();"),
+                "MobileCRT native: Stop gives the docked viewport rect back only when retro mode is NOT taking the camera");
+            Check(MethodBody(native, "static void RestoreMainCameraRect()").Contains("MobileCrt.MainCameraRect("),
+                "MobileCRT native: RestoreMainCameraRect uses the shared rule rather than a second copy of it");
+
+            // Edit 2 - cameras stacked on our target follow Camera.main to its NEW target. Handing
+            // them null while retro mode was taking over put Distant Terrain's far-terrain camera on
+            // the backbuffer for a frame.
+            Check(releaseBody.Contains("other.targetTexture = successor;") && !releaseBody.Contains("other.targetTexture = null;"),
+                "MobileCRT native: Release hands the stacked cameras Camera.main's new target, not null");
+            Check(releaseBody.IndexOf("successor = main.targetTexture", StringComparison.Ordinal)
+                  < releaseBody.IndexOf("main.targetTexture = null", StringComparison.Ordinal),
+                "MobileCRT native: the successor target is read BEFORE the main camera's own is cleared");
+
+            // Edit 3 - the handover happens inside the frame that changed the setting, and AFTER
+            // UpdateRenderTarget has installed (or dropped) retro mode's target, so Release can see
+            // what the camera moved to. Execution order, not merely presence.
+            Check(nativeType != null && nativeType.GetMethod("Deploy", BindingFlags.Public | BindingFlags.Static) != null,
+                "MobileCRT native: MobileCrtNative.Deploy is callable from RetroRenderer");
+            string updateSettingsBody = MethodBody(renderer, "public void UpdateSettings()");
+            Check(updateSettingsBody.Contains("Game.Mobile.MobileCrtNative.Deploy();"),
+                "MobileCRT native hook: UpdateSettings deploys the native path in the frame the setting changed");
+            Check(updateSettingsBody.IndexOf("UpdateRenderTarget();", StringComparison.Ordinal)
+                  < updateSettingsBody.IndexOf("MobileCrtNative.Deploy();", StringComparison.Ordinal),
+                "MobileCRT native hook: the deploy runs AFTER UpdateRenderTarget, so the teardown can see the camera's new target");
+            Check(updateSettingsBody.IndexOf("retroPresenter.gameObject.SetActive", StringComparison.Ordinal)
+                  < updateSettingsBody.IndexOf("MobileCrtNative.Deploy();", StringComparison.Ordinal),
+                "MobileCRT native hook: the deploy runs last, so it has the final word on the presenter");
+
+            // Edit 4 - UpdateRenderTarget asserts the full rect in the same statement block that
+            // installs the retro target, so the two never arrive a frame apart. Without it the
+            // squashed frame is still drawn once, from inside the settings-panel callback.
+            string updateTargetBody = MethodBody(renderer, "public void UpdateRenderTarget()");
+            Check(updateTargetBody.Contains("MainCamera.rect = fullViewportRect"),
+                "MobileCRT native hook: UpdateRenderTarget gives the camera a full rect with the retro target");
+            Check(updateTargetBody.IndexOf("MainCamera.rect = fullViewportRect", StringComparison.Ordinal)
+                  < updateTargetBody.IndexOf("MainCamera.targetTexture = RetroTexture", StringComparison.Ordinal),
+                "MobileCRT native hook: ...before the target is attached, not after");
+
+            // Edit 5 - ViewportChanger corrects a camera whose rect no longer matches its mode.
+            // Upstream's early-out remembers only the rect it was ASKED for, so a mode change that
+            // does not change the request (which is every retro-mode toggle) never re-applied.
+            string setViewportBody = MethodBody(viewport, "void SetViewport(Rect rect)");
+            Check(setViewportBody.Contains("camera.rect == wanted"),
+                "MobileCRT native hook: SetViewport re-applies when the camera's actual rect disagrees with its mode");
+            Check(setViewportBody.Contains("rect == lastViewportRect && camera.rect == wanted"),
+                "MobileCRT native hook: ...and still early-outs when both agree, so there is no per-frame cost");
 
             // ---- 3. the settings table ----
             string settingsSrc = File.ReadAllText("Assets/Scripts/SettingsManager.cs");

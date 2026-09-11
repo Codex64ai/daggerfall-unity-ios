@@ -564,9 +564,40 @@ replace flats or terrain work without any import flag.
 **Hands-free start for bug reports.** Put an empty file named `debug-newchar.txt` in the app's
 `Documents` folder and launch: the title menu is skipped, a new character starts outdoors, quest
 greetings are dismissed, and every custom model and the first vanilla meshes get one line in
-`Player.log` describing their materials (shader, texture, format). A first line of
-`pixel X Y` (for example `pixel 207 213`, Daggerfall city) teleports there and adds a
-`LOCATION` summary of every renderer in the town. Delete the file to play normally.
+`Player.log` describing their materials (shader, texture, format). Delete the file to play normally.
+
+The file is read line by line, and two commands are recognised:
+
+| Line | What it does |
+|---|---|
+| `pixel <X> <Y>` | teleport there once the world is up (`pixel 207 213` is Daggerfall city) and add a `LOCATION` summary of every renderer in the town |
+| `set [<seconds>] <Name> <value>` | write `DaggerfallUnity.Settings.<Name>` that many seconds after the world finishes loading, then deploy it the way the in-game settings panel does |
+
+Blank lines and lines beginning with `#` are ignored; anything else is reported as an
+unrecognised line in `Player.log` rather than silently dropped.
+
+`set` exists because some bugs only happen on the **transition** between two settings, and a build
+launched with the setting already in place never executes one. `<seconds>` may be left out, in which
+case the command fires five seconds after the previous one (the first, five seconds after the
+world). So this file reproduces a live retro-mode switch with the CRT filter on, twice, and screenshots
+can be taken between the steps:
+
+```
+pixel 207 213
+set 20 RetroRenderingMode 1
+set 40 RetroRenderingMode 0
+```
+
+Every `set` writes a `[DebugStart] cams ...` line before it, after it, and on each of the next three
+frames: every enabled camera's render target, viewport rect, pixel size, depth and clear flags, plus
+the retro presenter's active state and source. That readout is what tells a broken world apart from a
+broken transition.
+
+The value is converted to the property's own type, so `set CRTFilter False` and
+`set 10 CRTScanlineCount 240` both work; `1` and `0` are accepted for a bool as well as `True` and
+`False`. Retro-mode and aspect-correction changes are deployed through
+`DeployCoreGameEffectSettings`, exactly as `MobileSettingsPanel` deploys them - anything else is
+simply stored and saved, which is all the panel does for the rest.
 
 ### Converting a desktop `.dfmod`
 

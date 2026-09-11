@@ -7,12 +7,39 @@
 // app skips the title menu, starts a new character outdoors, and writes one line per custom
 // model (and the first vanilla meshes) describing its materials - shader, texture, format - to
 // the log MobileLog mirrors into Documents/Player.log. Inert without the file.
+//
+// THE COMMAND FILE. debug-newchar.txt is read line by line; an empty file still does the
+// hands-free start. Commands:
+//
+//   pixel <X> <Y>                     teleport to that map pixel once the world is up (207 213 =
+//                                     Daggerfall city). Unchanged; still recognised anywhere in
+//                                     the file.
+//   set [<seconds>] <Name> <value>    write DaggerfallUnity.Settings.<Name> by reflection <seconds>
+//                                     after the world finishes loading, then deploy it exactly the
+//                                     way the in-game settings panel does. <seconds> may be left
+//                                     out, in which case the command fires five seconds after the
+//                                     previous one (the first, five seconds after the world).
+//
+// WHY `set` EXISTS. Some bugs only happen on the TRANSITION between two settings - the CRT
+// filter's native render target handing Camera.main back to retro mode is the one this was
+// written for (device report, 2026-09-10: "retro mode is broke when I switch the resolution ...
+// I can switch it back but world breaks"). A build launched with the setting already in place
+// never executes that transition, and there is no way to tap the settings panel from a headless
+// simulator run. This drives the same code path the panel's own callbacks drive - the property
+// setter, SaveSettings, and DeployCoreGameEffectSettings for the retro group - on a timer, so a
+// simulator launch can reproduce a live switch and screenshot both sides of it.
+//
+// Every `set` logs a camera/presenter snapshot before and after, and again on each of the next
+// three frames, because the failures in this area are one-frame ordering failures between two
+// components that both want to own Camera.main.targetTexture.
 
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using UnityEngine;
 using DaggerfallWorkshop.Game.Utility;
+using DaggerfallWorkshop.Utility;
 
 namespace DaggerfallWorkshop.Game.Mobile
 {
@@ -21,7 +48,91 @@ namespace DaggerfallWorkshop.Game.Mobile
         public const string FileName = "debug-newchar.txt";
         public static bool Active { get; private set; }
         static readonly HashSet<string> audited = new HashSet<string>();
-        static int targetX = -1, targetY = -1;   // "pixel X Y" on the file's first line teleports there once in the world
+        static int targetX = -1, targetY = -1;   // "pixel X Y" in the command file teleports there once in the world
+
+        /// <summary>One scheduled `set` line: a settings property written <see cref="at"/> seconds
+        /// after the world finished loading.</summary>
+        class SetCommand
+        {
+            public float at;
+            public string name;
+            public string value;
+            public bool fired;
+        }
+
+        static readonly List<SetCommand> setCommands = new List<SetCommand>();
+
+        /// <summary>Time.realtimeSinceStartup at which the world finished loading; the `set`
+        /// schedule is measured from here. Negative until then.</summary>
+        static float worldReadyAt = -1f;
+
+        /// <summary>Frames still owed a camera snapshot after the last `set`.</summary>
+        static int snapshotsOwed;
+
+        /// <summary>The gap used for a `set` line that did not name its own time.</summary>
+        public const float DefaultSetSpacing = 5f;
+
+        /// <summary>
+        /// Parses the command file's text into the teleport target and the `set` schedule. Split out
+        /// from <see cref="Hook"/> so the self-test can exercise it without a Documents folder: the
+        /// schedule is the part with arithmetic in it, and a mis-parsed delay silently turns a
+        /// reproduction run into a run that never switches anything.
+        /// </summary>
+        public static List<string> ParseCommands(string text, out int pixelX, out int pixelY,
+                                                 out List<KeyValuePair<float, string>> sets)
+        {
+            pixelX = -1;
+            pixelY = -1;
+            sets = new List<KeyValuePair<float, string>>();
+            List<string> errors = new List<string>();
+            float previous = 0f;
+
+            if (text == null)
+                return errors;
+
+            foreach (string rawLine in text.Split('\n'))
+            {
+                string line = rawLine.Trim();
+                if (line.Length == 0 || line[0] == '#')
+                    continue;
+
+                string[] w = line.Split(new[] { ' ', '\t', '\r' }, System.StringSplitOptions.RemoveEmptyEntries);
+                if (w.Length == 0)
+                    continue;
+
+                if (w[0] == "pixel" && w.Length >= 3)
+                {
+                    int x, y;
+                    if (int.TryParse(w[1], out x) && int.TryParse(w[2], out y)) { pixelX = x; pixelY = y; }
+                    else errors.Add(line);
+                    continue;
+                }
+
+                if (w[0] == "set")
+                {
+                    // `set <seconds> <Name> <value>` or `set <Name> <value>`. The time is optional
+                    // because a two-step reproduction reads better without arithmetic in it, and it
+                    // is recognised by being a number - a settings property never is.
+                    int i = 1;
+                    float at;
+                    if (w.Length >= 4 && float.TryParse(w[1], System.Globalization.NumberStyles.Float,
+                                                       System.Globalization.CultureInfo.InvariantCulture, out at))
+                        i = 2;
+                    else
+                        at = previous + DefaultSetSpacing;
+
+                    if (w.Length < i + 2) { errors.Add(line); continue; }
+
+                    previous = at;
+                    sets.Add(new KeyValuePair<float, string>(at, w[i] + " " + w[i + 1]));
+                    continue;
+                }
+
+                errors.Add(line);
+            }
+
+            return errors;
+        }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Hook()
@@ -34,10 +145,18 @@ namespace DaggerfallWorkshop.Game.Mobile
             Active = true;
             try
             {
-                string[] words = File.ReadAllText(file).Split(new[] { ' ', '\n', '\r', '\t' }, System.StringSplitOptions.RemoveEmptyEntries);
-                if (words.Length >= 3 && words[0] == "pixel") { targetX = int.Parse(words[1]); targetY = int.Parse(words[2]); }
+                List<KeyValuePair<float, string>> sets;
+                List<string> errors = ParseCommands(File.ReadAllText(file), out targetX, out targetY, out sets);
+                foreach (KeyValuePair<float, string> s in sets)
+                {
+                    string[] nv = s.Value.Split(' ');
+                    setCommands.Add(new SetCommand { at = s.Key, name = nv[0], value = nv[1] });
+                    Debug.Log(string.Format("[DebugStart] scheduled: set {0} = {1} at world+{2:0.0}s", nv[0], nv[1], s.Key));
+                }
+                foreach (string bad in errors)
+                    Debug.LogWarning("[DebugStart] unrecognised command line: " + bad);
             }
-            catch (System.Exception) { }
+            catch (System.Exception ex) { Debug.LogWarning("[DebugStart] command file: " + ex.Message); }
             Debug.Log(string.Format("[DebugStart] {0} present: new character outdoors + material audit. gfx={1} astc6x6={2} copyTexture={3}",
                 FileName, SystemInfo.graphicsDeviceType, SystemInfo.SupportsTextureFormat(TextureFormat.ASTC_6x6), SystemInfo.copyTextureSupport));
             var go = new GameObject("MobileDebugStart");
@@ -48,6 +167,145 @@ namespace DaggerfallWorkshop.Game.Mobile
             Serialization.SaveLoadManager.OnStartLoad += (saveData) => Debug.Log("[DebugStart] OnStartLoad\n" + System.Environment.StackTrace);
         }
 
+        /// <summary>
+        /// Fires the scheduled `set` commands. Called every frame once the world is up.
+        /// </summary>
+        static void RunSetCommands()
+        {
+            if (snapshotsOwed > 0)
+            {
+                snapshotsOwed--;
+                LogCameras("after+" + (3 - snapshotsOwed));
+            }
+
+            if (worldReadyAt < 0f)
+                return;
+
+            float t = Time.realtimeSinceStartup - worldReadyAt;
+            foreach (SetCommand c in setCommands)
+            {
+                if (c.fired || t < c.at)
+                    continue;
+                c.fired = true;
+                LogCameras("before set " + c.name + "=" + c.value);
+                ApplySetting(c.name, c.value);
+                LogCameras("after set " + c.name + "=" + c.value);
+                snapshotsOwed = 3;
+                return;     // one per frame: two settings changing in the same frame is not what a player does
+            }
+        }
+
+        /// <summary>
+        /// Writes one DaggerfallUnity.Settings property by reflection and then deploys it the way
+        /// the in-game panel does. The deploy half matters as much as the write: RetroRenderingMode
+        /// is not read per frame by anything, it is pushed into RetroRenderer by
+        /// DeployCoreGameEffectSettings, and MobileSettingsPanel's own callback is exactly
+        /// "set the property, SaveSettings, deploy the RetroMode group".
+        /// </summary>
+        static void ApplySetting(string name, string value)
+        {
+            try
+            {
+                SettingsManager settings = DaggerfallUnity.Settings;
+                PropertyInfo prop = typeof(SettingsManager).GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
+                if (prop == null || !prop.CanWrite)
+                {
+                    Debug.LogWarning("[DebugStart] set: no writable setting named '" + name + "'");
+                    return;
+                }
+
+                object parsed;
+                if (prop.PropertyType == typeof(bool))
+                {
+                    // "1"/"0" as well as "True"/"false": a settings file writes the words, a person
+                    // driving a reproduction writes the digits.
+                    bool b;
+                    if (value == "1") b = true;
+                    else if (value == "0") b = false;
+                    else if (!bool.TryParse(value, out b)) { Debug.LogWarning("[DebugStart] set: '" + value + "' is not a bool"); return; }
+                    parsed = b;
+                }
+                else
+                {
+                    parsed = System.Convert.ChangeType(value, prop.PropertyType, System.Globalization.CultureInfo.InvariantCulture);
+                }
+
+                object before = prop.GetValue(settings);
+                prop.SetValue(settings, parsed);
+                Debug.Log(string.Format("[DebugStart] set {0}: {1} -> {2}", name, before, prop.GetValue(settings)));
+
+                settings.SaveSettings();
+
+                // The two retro properties own the main camera's render target and the aspect
+                // viewport, so they have to be deployed, not merely stored - MobileSettingsPanel
+                // and RetroModeConfigPage both do this and nothing else. Everything else in the
+                // panel is read where it is used, so storing it is the whole of the change.
+                if (name == "RetroRenderingMode" || name == "RetroModeAspectCorrection")
+                {
+                    if (GameManager.HasInstance && GameManager.Instance.StartGameBehaviour != null)
+                        GameManager.Instance.StartGameBehaviour.DeployCoreGameEffectSettings(CoreGameEffectSettingsGroups.RetroMode);
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning("[DebugStart] set " + name + " = " + value + " threw: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Who owns what, this frame: every enabled camera's render target, viewport rect and depth,
+        /// plus the retro presenter's active state and source. This is the readout that tells a
+        /// screenshot of a broken world apart from a screenshot of a broken transition.
+        /// </summary>
+        static void LogCameras(string when)
+        {
+            var sb = new StringBuilder();
+            sb.Append("[DebugStart] cams ").Append(when).Append(": retro=").Append(DaggerfallUnity.Settings.RetroRenderingMode)
+              .Append(" crt=").Append(DaggerfallUnity.Settings.CRTFilter)
+              .Append(" native=").Append(MobileCrtNative.Active)
+              .Append(" screen=").Append(Screen.width).Append('x').Append(Screen.height);
+
+            Camera main = Camera.main;
+            foreach (Camera cam in Camera.allCameras)
+            {
+                if (cam == null)
+                    continue;
+                sb.Append(" [").Append(cam.name).Append(cam == main ? "*" : "")
+                  .Append(" d=").Append(cam.depth)
+                  .Append(" rect=").Append(Fmt(cam.rect))
+                  .Append(" px=").Append((int)cam.pixelWidth).Append('x').Append((int)cam.pixelHeight)
+                  .Append(" tgt=").Append(Name(cam.targetTexture))
+                  .Append(" clear=").Append(cam.clearFlags)
+                  .Append(']');
+            }
+
+            RetroPresentation presenter = GameManager.HasInstance ? GameManager.Instance.RetroPresenter : null;
+            if (presenter == null)
+                foreach (RetroPresentation p in Resources.FindObjectsOfTypeAll<RetroPresentation>())
+                    if (p != null && p.gameObject.scene.IsValid()) { presenter = p; break; }
+
+            sb.Append(" presenter=").Append(presenter == null ? "none"
+                : (presenter.gameObject.activeInHierarchy ? "on" : "off") + " src=" + Name(presenter.RetroPresentationSource));
+
+            RetroRenderer rr = GameManager.HasInstance ? GameManager.Instance.RetroRenderer : null;
+            if (rr != null)
+                sb.Append(" retroTex=").Append(Name(rr.RetroTexture)).Append(" presTarget=").Append(Name(rr.RetroPresentationTarget));
+            sb.Append(" crtTarget=").Append(Name(MobileCrtNative.Target));
+
+            Debug.Log(sb.ToString());
+        }
+
+        static string Fmt(Rect r)
+        {
+            return string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "({0:0.###},{1:0.###},{2:0.###},{3:0.###})", r.x, r.y, r.width, r.height);
+        }
+
+        static string Name(Texture t)
+        {
+            return t == null ? "null" : t.name + " " + t.width + "x" + t.height;
+        }
+
         class Driver : MonoBehaviour
         {
             float readyAt = -1f, teleportedAt = -1f;
@@ -55,7 +313,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             void Update()
             {
-                if (done) return;
+                if (done) { RunSetCommands(); return; }
                 if (popped) { AfterStart(); return; }
                 var dfu = DaggerfallUnity.Instance;
                 if (dfu == null || !dfu.IsReady) return;
@@ -131,10 +389,11 @@ namespace DaggerfallWorkshop.Game.Mobile
                 var loc = sw.CurrentPlayerLocationObject;
                 if (loc == null)
                 {
-                    if (Time.realtimeSinceStartup - teleportedAt > 60f) { done = true; Debug.Log("[DebugStart] no location object after 60 s at pixel " + gm.PlayerGPS.CurrentMapPixel.X + "," + gm.PlayerGPS.CurrentMapPixel.Y); }
+                    if (Time.realtimeSinceStartup - teleportedAt > 60f) { done = true; worldReadyAt = Time.realtimeSinceStartup; Debug.Log("[DebugStart] no location object after 60 s at pixel " + gm.PlayerGPS.CurrentMapPixel.X + "," + gm.PlayerGPS.CurrentMapPixel.Y); }
                     return;
                 }
                 done = true;
+                worldReadyAt = Time.realtimeSinceStartup;
                 LogRenderState("at location");
                 try { AuditLocation(loc.gameObject, gm.PlayerGPS.HasCurrentLocation ? gm.PlayerGPS.CurrentLocation.Name : "?"); }
                 catch (System.Exception ex) { Debug.LogError("[DebugStart] location audit threw: " + ex); }

@@ -44,6 +44,18 @@
 // one full-screen blit, which is the same blit the retro path already pays. There is no second copy
 // of the frame and no grab pass.
 //
+// ONE OWNER OF Camera.main PER FRAME. Retro mode and this path both want the main camera's
+// targetTexture and both have an opinion about its viewport rect, and the player can move the
+// ownership between them at any moment from the settings panel. The rule is: whenever
+// RetroRenderingMode != 0 retro mode owns the camera, otherwise this path does while the filter is
+// on. It is enforced at the one place ownership moves - RetroRenderer.UpdateSettings, which calls
+// Deploy() at its end so the handover finishes inside the frame that changed the setting - and
+// Tick's own `if (!wanted) Stop()` is then only the fallback for a change that did not come through
+// there. The teardown correspondingly restores only what it still owns: the docked viewport rect
+// goes back on the camera only when retro mode is NOT the one taking over (a camera rendering into
+// a render texture must have a full rect), and cameras stacked on our target are handed the
+// camera's NEW target rather than null.
+//
 // KNOWN EDGES, recorded rather than hidden:
 //  - Screen-space maths that assumed "retro off means no target texture" was off by the docked HUD's
 //    height while this path runs. Both sites - PlayerActivate's cursor ray and HUDPlaceMarker's
@@ -140,6 +152,22 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (main.targetTexture != target)
                 main.targetTexture = target;
             return true;
+        }
+
+        /// <summary>
+        /// Runs one frame of this path NOW instead of waiting for the next LateUpdate.
+        /// RetroRenderer.UpdateSettings calls it at the end of a live retro-mode change, which is
+        /// the only moment the ownership of Camera.main's render target moves between the two
+        /// components. Doing the handover inside the frame that changed the setting is what makes
+        /// the two directions symmetrical: retro mode ON tears this path down after the retro target
+        /// is installed (so <see cref="Release"/> can hand the stacked cameras straight over to it),
+        /// and retro mode OFF builds it back up in the same frame the retro target is dropped,
+        /// instead of leaving one frame in which Camera.main renders to the backbuffer with the
+        /// presenter switched off. Idempotent - it is the same call LateUpdate makes.
+        /// </summary>
+        public static void Deploy()
+        {
+            Tick();
         }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
@@ -290,11 +318,21 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (target == null)
                 return;
 
-            if (GameManager.HasInstance && GameManager.Instance.MainCamera != null
-                && GameManager.Instance.MainCamera.targetTexture == target)
-                GameManager.Instance.MainCamera.targetTexture = null;
+            // WHERE THE STACKED CAMERAS GO NEXT. Whatever Camera.main is rendering into now that
+            // this path is finished with it - null when the filter was simply switched off, and
+            // retro mode's own render texture when retro mode has just taken the camera over.
+            // Handing them null in the second case is what put Distant Terrain's far-terrain camera
+            // on the BACKBUFFER for a frame while the world went to the retro texture. Read before
+            // the main camera's own target is cleared below, or the successor is always null.
+            RenderTexture successor = null;
+            Camera main = GameManager.HasInstance ? GameManager.Instance.MainCamera : null;
+            if (main != null && main.targetTexture != target)
+                successor = main.targetTexture;
 
-            RouteSkyCamera(null);
+            if (main != null && main.targetTexture == target)
+                main.targetTexture = null;
+
+            RouteSkyCamera(successor);
 
             // Every OTHER camera that was pointed here too. This is not defensive
             // over-engineering: Distant Terrain copies Camera.main.targetTexture onto its stacked
@@ -311,7 +349,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             foreach (Camera other in Resources.FindObjectsOfTypeAll<Camera>())
             {
                 if (other != null && other.targetTexture == target && other.gameObject.scene.IsValid())
-                    other.targetTexture = null;
+                    other.targetTexture = successor;
             }
 
             target.Release();
@@ -340,7 +378,23 @@ namespace DaggerfallWorkshop.Game.Mobile
                 presenter.gameObject.SetActive(DaggerfallUnity.Settings.RetroRenderingMode != 0);
             }
 
-            RestoreMainCameraRect();
+            // ...but NOT when retro mode is what took the camera away. THIS IS THE 2026-09-10 DEVICE
+            // BUG ("retro mode is broke when I switch the resolution ... I can switch it back but
+            // world breaks"). Switching retro mode on runs RetroRenderer.UpdateSettings inside the
+            // panel's callback, which points Camera.main at the 320x200/640x400 retro texture; this
+            // teardown then ran and handed that camera the docked large HUD's PARTIAL viewport rect,
+            // which is the one combination DFU's own comment says does not work ("Camera viewport
+            // does not work with render textures"). The world was drawn into the top four fifths of
+            // the retro texture while Distant Terrain's stacked camera kept drawing the far terrain
+            // and its sea plane into all of it, and the two no longer lined up: sky filling the tube,
+            // the horizon in the wrong place, a flat blue wedge across the foreground.
+            //
+            // With retro mode on, a FULL rect is what the camera needs, and a full rect is exactly
+            // what it already has, because this path has been asserting one every frame. So the fix
+            // is to leave it alone: the docked viewport belongs to the size of the render target
+            // now, which is RetroRenderer's business.
+            if (DaggerfallUnity.Settings.RetroRenderingMode == 0)
+                RestoreMainCameraRect();
 
             presenterStateSaved = false;
 
@@ -367,7 +421,10 @@ namespace DaggerfallWorkshop.Game.Mobile
                 && DaggerfallUI.HasInstance && DaggerfallUI.Instance.DaggerfallHUD != null)
                 hud = DaggerfallUI.Instance.DaggerfallHUD.LargeHUD.ScreenHeight;
 
-            Rect rect = MobileCrt.DockedViewportRect(Screen.height, hud);
+            // `false` for nativeActive: this runs from Stop(), which has already cleared it, and the
+            // caller has already established that retro mode is not the new owner. The shared rule
+            // lives in MobileCrt so the self-test can pin it without a scene.
+            Rect rect = MobileCrt.MainCameraRect(DaggerfallUnity.Settings.RetroRenderingMode, false, Screen.height, hud);
             if (GameManager.Instance.MainCamera.rect != rect)
                 GameManager.Instance.MainCamera.rect = rect;
         }

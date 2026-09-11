@@ -384,6 +384,17 @@ namespace DaggerfallWorkshop.Utility
                 retroPresenter.gameObject.SetActive(retroMode != 0 || Game.Mobile.MobileCrtNative.Active);
             if (sky && sky.SkyCamera && retroMode == 0 && !Game.Mobile.MobileCrtNative.Active)
                 sky.SkyCamera.targetTexture = null;
+
+            // MOBILE: and now hand the main camera's render target over, in THIS frame. This method
+            // is the only thing that moves ownership of Camera.main.targetTexture between retro mode
+            // and the CRT filter's native path, and it is called from a settings-panel callback in
+            // the middle of Update. Left to its own LateUpdate, MobileCrtNative tore its path down
+            // AFTER the retro target was already installed and after Distant Terrain had polled -
+            // one frame of two components disagreeing about who owns the camera, and (before the
+            // rect fix in MobileCrtNative.Stop) a docked viewport rect left on a camera that was by
+            // then rendering into the retro texture. Deploying here makes the swap atomic in both
+            // directions and costs one extra Tick per settings change.
+            Game.Mobile.MobileCrtNative.Deploy();
         }
 
         public void UpdateDepthProcessMaterial()
@@ -416,6 +427,11 @@ namespace DaggerfallWorkshop.Utility
             }
         }
 
+        // MOBILE: the rect a camera rendering into a render texture must carry. Held here as a
+        // readonly field rather than built per call, because UpdateRenderTarget runs on every
+        // viewport change.
+        static readonly Rect fullViewportRect = new Rect(0, 0, 1, 1);
+
         public void UpdateRenderTarget()
         {
             // Disable retro target texture when retro mode disabled
@@ -433,6 +449,16 @@ namespace DaggerfallWorkshop.Utility
                 GameManager.Instance.MainCamera.targetTexture = null;
                 return;
             }
+
+            // MOBILE: and the camera takes the WHOLE rect for as long as it renders into one of
+            // these textures - the line above this one is DFU's own statement of why. ViewportChanger
+            // would get there on its next Update, but "next Update" is a frame of the world squashed
+            // into a fraction of the retro raster while the far-terrain camera fills all of it, and
+            // that frame is visible: this method is called from a settings-panel callback, in the
+            // middle of the Update the player's tap arrived in. Asserting it here makes the retro
+            // target and the rect that matches it arrive together.
+            if (GameManager.Instance.MainCamera.rect != fullViewportRect)
+                GameManager.Instance.MainCamera.rect = fullViewportRect;
 
             // Unity viewport rect does not work with target render textures
             // Need to set new target with custom size when using a docked large HUD

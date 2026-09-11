@@ -76,33 +76,45 @@ namespace DaggerfallWorkshop.Utility
 
         void SetViewport(Rect rect)
         {
-            // Do nothing if viewport rect hasn't changed
-            if (rect == lastViewportRect)
+            if (!camera)
                 return;
 
-            // Set viewport rect to camera
-            if (camera)
-            {
-                // Handle retro rendering mode
-                // Camera viewport does not work with render textures so need to adjust output to appropriately size render target instead
-                // Then retro presentation needs to use correct screen viewport area, not main camera
-                // MOBILE: `|| MobileCrtNative.Active` - the CRT filter's non-retro path puts the
-                // main camera on a render target too, so the same rule applies to it: full rect on
-                // the camera, and the viewport expressed as the size of the target instead.
-                // UpdateRenderTarget is what re-sizes that target, and this is the call that tells
-                // it the docked large HUD has changed the viewport.
-                if ((DaggerfallUnity.Settings.RetroRenderingMode != 0 || Game.Mobile.MobileCrtNative.Active) && !isRetroPresenter)
-                {
-                    camera.rect = standardViewportRect;
-                    GameManager.Instance.RetroRenderer.UpdateRenderTarget();
-                }
-                else
-                {
-                    camera.rect = rect;
-                }
+            // Handle retro rendering mode
+            // Camera viewport does not work with render textures so need to adjust output to appropriately size render target instead
+            // Then retro presentation needs to use correct screen viewport area, not main camera
+            // MOBILE: `|| MobileCrtNative.Active` - the CRT filter's non-retro path puts the
+            // main camera on a render target too, so the same rule applies to it: full rect on
+            // the camera, and the viewport expressed as the size of the target instead.
+            // UpdateRenderTarget is what re-sizes that target, and this is the call that tells
+            // it the docked large HUD has changed the viewport.
+            bool ontoRenderTarget = (DaggerfallUnity.Settings.RetroRenderingMode != 0 || Game.Mobile.MobileCrtNative.Active) && !isRetroPresenter;
+            Rect wanted = ontoRenderTarget ? standardViewportRect : rect;
 
-                lastViewportRect = rect;
+            // Do nothing if viewport rect hasn't changed
+            // MOBILE: ...and the camera is in fact showing the rect this mode calls for. Upstream's
+            // early-out remembers the rect it was ASKED for, never the one it applied, so once the
+            // docked large HUD's rect had been recorded the camera was never corrected again unless
+            // the HUD's height changed. Switching the render target on or off does not change the
+            // requested rect at all - it changes which of the two branches below is right - so the
+            // camera could be left on a full rect with nothing to render into (the world drawn over
+            // the docked HUD when retro mode is switched off), or on a partial rect with a render
+            // texture attached, which is the combination the comment above says does not work.
+            // Comparing the camera's actual rect makes this self-correcting on any mode change,
+            // whoever caused it, and still costs nothing per frame once the two agree.
+            if (rect == lastViewportRect && camera.rect == wanted)
+                return;
+
+            if (ontoRenderTarget)
+            {
+                camera.rect = standardViewportRect;
+                GameManager.Instance.RetroRenderer.UpdateRenderTarget();
             }
+            else
+            {
+                camera.rect = rect;
+            }
+
+            lastViewportRect = rect;
         }
 
         void SetRetroAspectViewport()

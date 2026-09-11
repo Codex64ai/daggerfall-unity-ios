@@ -219,6 +219,30 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         /// <summary>
+        /// The viewport rect Camera.main must carry, given who owns its render target this frame.
+        ///
+        /// A camera that renders into a render texture needs the WHOLE rect: "Camera viewport does
+        /// not work with render textures" is DFU's own comment, and both texture paths - retro mode
+        /// and this filter's native path - express the docked large HUD by shortening the target
+        /// instead. A camera that renders straight to the backbuffer needs the docked rect, because
+        /// there the viewport is the only thing keeping the world off the HUD.
+        ///
+        /// The 2026-09-10 device bug was this rule being broken for one configuration and then never
+        /// re-checked: switching retro mode ON while the filter's native path was running let the
+        /// path's teardown put the docked rect on a camera that retro mode had just pointed at the
+        /// 320x200 retro texture. The world went into the top four fifths of that texture while
+        /// Distant Terrain's stacked camera kept filling all of it, and the two pictures no longer
+        /// agreed about where the horizon was.
+        /// </summary>
+        public static Rect MainCameraRect(int retroMode, bool nativeActive, float screenHeight, float hudScreenHeight)
+        {
+            if (retroMode != 0 || nativeActive)
+                return new Rect(0f, 0f, 1f, 1f);
+
+            return DockedViewportRect(screenHeight, hudScreenHeight);
+        }
+
+        /// <summary>
         /// The size of the native path's render target, given the presenting camera's own pixel
         /// rect. It is deliberately NOT derived from Screen.height and the HUD height a second
         /// time: the target has to match the rectangle it will be blitted into to the pixel, or
