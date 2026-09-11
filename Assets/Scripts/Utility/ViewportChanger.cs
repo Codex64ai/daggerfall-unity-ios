@@ -166,6 +166,10 @@ namespace DaggerfallWorkshop.Utility
             // After adjusting output viewport pillarbox bars won't be cleared automatically
             // Use camera with -1 depth covering entire viewport to clear black first
             // This camera renders nothing, just clears screen black before custom viewport drawn centred in screen
+            // MOBILE (NIT-5, review 2026-09-11): upstream never switches this back off, so leaving
+            // retro mode with aspect correction on strands an active depth -1 clear camera. Harmless
+            // under the native CRT path (the presenter draws over it) and untouched here, but it is
+            // the reason a "black bars that will not go away" report should look at this object.
             if (retroClearerCamera && !retroClearerCamera.gameObject.activeSelf)
                 retroClearerCamera.gameObject.SetActive(true);
 

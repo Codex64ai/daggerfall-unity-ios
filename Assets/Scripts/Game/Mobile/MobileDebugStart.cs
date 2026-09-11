@@ -32,6 +32,15 @@
 // Every `set` logs a camera/presenter snapshot before and after, and again on each of the next
 // three frames, because the failures in this area are one-frame ordering failures between two
 // components that both want to own Camera.main.targetTexture.
+//
+// TEST APP ONLY. Everything below that touches the device - the hook, the driver, the `set`
+// schedule and the reflection write - is inside #if DFU_IOS_TESTAPP, a define MobileBuildSetup
+// adds only when DFU_IOS_TESTAPP=1 built the app (and removes otherwise). MobileContentPath.Active
+// is `UNITY_IOS && !UNITY_EDITOR`, i.e. TRUE in a release build too, and debug-newchar.txt lives in
+// the same Documents folder the port tells players to drop arena2 into - so the runtime gate alone
+// would ship a surface that writes any SettingsManager property by reflection and saves it. The two
+// members left outside the gate are the pure parser (which the editor self-test exercises) and
+// Audit (which other files call, and which is inert while Active is false).
 
 using System.Collections.Generic;
 using System.IO;
@@ -48,6 +57,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         public const string FileName = "debug-newchar.txt";
         public static bool Active { get; private set; }
         static readonly HashSet<string> audited = new HashSet<string>();
+#if DFU_IOS_TESTAPP
         static int targetX = -1, targetY = -1;   // "pixel X Y" in the command file teleports there once in the world
 
         /// <summary>One scheduled `set` line: a settings property written <see cref="at"/> seconds
@@ -68,6 +78,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         /// <summary>Frames still owed a camera snapshot after the last `set`.</summary>
         static int snapshotsOwed;
+#endif
 
         /// <summary>The gap used for a `set` line that did not name its own time.</summary>
         public const float DefaultSetSpacing = 5f;
@@ -123,6 +134,14 @@ namespace DaggerfallWorkshop.Game.Mobile
 
                     if (w.Length < i + 2) { errors.Add(line); continue; }
 
+                    // NIT-4 (review 2026-09-11): a three-word `set` whose second word is a number
+                    // is a time with its value missing, not a settings property called "1.5". Report
+                    // it rather than letting it reach ApplySetting as a name nothing can resolve.
+                    float unused;
+                    if (i == 1 && float.TryParse(w[1], System.Globalization.NumberStyles.Float,
+                                                 System.Globalization.CultureInfo.InvariantCulture, out unused))
+                    { errors.Add(line); continue; }
+
                     previous = at;
                     sets.Add(new KeyValuePair<float, string>(at, w[i] + " " + w[i + 1]));
                     continue;
@@ -134,6 +153,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             return errors;
         }
 
+#if DFU_IOS_TESTAPP
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Hook()
         {
@@ -186,10 +206,21 @@ namespace DaggerfallWorkshop.Game.Mobile
             {
                 if (c.fired || t < c.at)
                     continue;
+                // NIT-3 (review 2026-09-11): fired is set AFTER the work, and the work is wrapped -
+                // LogCameras sits outside ApplySetting's own try, so a throw there used to consume
+                // the command and leave the run silently doing nothing. Set after the catch rather
+                // than in it, so a persistent throw cannot retry every frame either.
+                try
+                {
+                    LogCameras("before set " + c.name + "=" + c.value);
+                    ApplySetting(c.name, c.value);
+                    LogCameras("after set " + c.name + "=" + c.value);
+                }
+                catch (System.Exception ex)
+                {
+                    Debug.LogWarning("[DebugStart] set " + c.name + "=" + c.value + " threw: " + ex.Message);
+                }
                 c.fired = true;
-                LogCameras("before set " + c.name + "=" + c.value);
-                ApplySetting(c.name, c.value);
-                LogCameras("after set " + c.name + "=" + c.value);
                 snapshotsOwed = 3;
                 return;     // one per frame: two settings changing in the same frame is not what a player does
             }
@@ -459,6 +490,8 @@ namespace DaggerfallWorkshop.Game.Mobile
             int shown = 0;
             foreach (var kv in untextured) { if (shown++ >= 25) break; Debug.Log("[DebugStart]   untextured x" + kv.Value + " " + kv.Key); }
         }
+
+#endif
 
         /// <summary>One log line per distinct model describing every material slot.</summary>
         public static void Audit(string label, GameObject go, int cap)

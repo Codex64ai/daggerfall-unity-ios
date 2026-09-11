@@ -36,6 +36,20 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         const string testProductName = "DFU Test";
 
         /// <summary>
+        /// The test app's own scripting define. <c>#if DFU_IOS_TESTAPP</c> is what keeps the
+        /// device-side debug surface out of a shipping binary: MobileDebugStart's hands-free
+        /// start and its `set` command, which writes ANY SettingsManager property by reflection
+        /// and persists it. Documents/ is the file-sharing folder players are told to drop arena2
+        /// into, so the command file that arms it is reachable to anyone with the release app -
+        /// which is why the gate is a compile-time one and not another runtime check.
+        ///
+        /// Written from the env var so DFU_IOS_TESTAPP=1 stays the single switch, and written in
+        /// BOTH directions for the same reason the bundle id is: a define left behind in
+        /// ProjectSettings would put the debug surface in the next ordinary build.
+        /// </summary>
+        const string testAppDefine = "DFU_IOS_TESTAPP";
+
+        /// <summary>
         /// True when DFU_IOS_TESTAPP=1. Builds a separate app rather than replacing the
         /// playable one.
         ///
@@ -112,6 +126,30 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                            " (was " + (before ? "disabled" : "enabled") + ")");
         }
 
+        /// <summary>
+        /// Adds or removes <see cref="testAppDefine"/> from the iOS scripting define symbols,
+        /// leaving every other define alone. Logs the resulting list, because a define is exactly
+        /// the kind of setting that is invisible until the thing it gates is missing.
+        /// </summary>
+        static void SetTestAppDefine(bool testApp, System.Text.StringBuilder log)
+        {
+            UnityEditor.Build.NamedBuildTarget target = UnityEditor.Build.NamedBuildTarget.iOS;
+            string current = PlayerSettings.GetScriptingDefineSymbols(target) ?? string.Empty;
+            List<string> symbols = current
+                .Split(new[] { ';', ',', ' ' }, System.StringSplitOptions.RemoveEmptyEntries)
+                .Select(sym => sym.Trim())
+                .Where(sym => sym.Length > 0 && sym != testAppDefine)
+                .ToList();
+            if (testApp)
+                symbols.Add(testAppDefine);
+            string wanted = string.Join(";", symbols);
+            if (wanted != current)
+                PlayerSettings.SetScriptingDefineSymbols(target, wanted);
+            log.AppendLine("  test-app define    = " + (testApp ? testAppDefine + " DEFINED (device debug surface compiled in)"
+                                                                : testAppDefine + " absent (device debug surface compiled OUT)") +
+                           "\n  iOS defines        = " + (wanted.Length == 0 ? "<none>" : wanted));
+        }
+
         [MenuItem("Tools/Daggerfall Mobile/Apply iOS Player Settings")]
         public static void ApplyIOSSettings()
         {
@@ -131,6 +169,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 ? "  app identity           = " + testBundleId + " / " + testProductName +
                   "   (SEPARATE TEST APP - own container, own arena2, own saves)"
                 : "  app identity           = " + releaseBundleId + " / " + releaseProductName);
+
+            // Same policy as the identity, and for the same reason: applied in both directions so
+            // an ordinary build cannot inherit the test build's debug surface. BuildIOS passes the
+            // define to the player compilation as well - see the note there.
+            SetTestAppDefine(testApp, log);
 
             // --- scripting / stripping -------------------------------------------
             PlayerSettings.SetScriptingBackend(BuildTargetGroup.iOS, ScriptingImplementation.IL2CPP);
@@ -376,8 +419,20 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 options = devBuild
                     ? BuildOptions.Development | BuildOptions.AllowDebugging
                     : BuildOptions.None,
+                // The test app's debug surface, handed straight to the PLAYER script compilation.
+                // ApplyIOSSettings has already written the same define into ProjectSettings, but a
+                // define set in one batchmode session has been seen not to reach the next session's
+                // player compilation (see MobileHudBuilder's controller-probe note) - and a build
+                // that silently compiled the gate OUT would look exactly like a working one. This
+                // is passed in the same session that compiles, so it cannot be missed; it is empty
+                // for a release build, which therefore cannot pick it up.
+                extraScriptingDefines = IsTestApp ? new[] { testAppDefine } : null,
             };
             Debug.Log("[MobileBuildSetup] build flavour = " + (devBuild ? "DEVELOPMENT" : "RELEASE"));
+            Debug.Log("[MobileBuildSetup] extra scripting defines = " +
+                      (opts.extraScriptingDefines == null || opts.extraScriptingDefines.Length == 0
+                          ? "<none>"
+                          : string.Join(";", opts.extraScriptingDefines)));
 
             UnityEditor.Build.Reporting.BuildReport report = BuildPipeline.BuildPlayer(opts);
             UnityEditor.Build.Reporting.BuildSummary summary = report.summary;

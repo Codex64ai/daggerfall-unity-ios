@@ -184,6 +184,33 @@ namespace RealGrass
         public static float DetailDensity = DefaultDetailDensity;
 
         /// <summary>
+        /// MOBILE: the device-class line, in MB of system memory. Below it a device gets
+        /// <see cref="SmallDeviceDetailDistance"/> instead of <see cref="DefaultDetailDistance"/>.
+        /// 6 GB is where Apple's current line sits: the 4 GB iPhone 12/13/SE and the 4 GB base
+        /// iPads are under it, the 6 GB iPhone 15 Pro and every M-series iPad are over.
+        /// </summary>
+        public const int SmallDeviceMemoryMb = 6144;
+
+        /// <summary>
+        /// MOBILE: 70 m for a small device. Half the drawn grass of 100 m, because the drawn area
+        /// goes as the square of the radius - pi*70^2 / pi*100^2 = 0.49.
+        /// </summary>
+        public const float SmallDeviceDetailDistance = 70f;
+
+        /// <summary>
+        /// MOBILE pure: the detail draw radius this device class should default to. The iOS build
+        /// ships to iPhone as well as iPad (MobileBuildSetup sets iOSTargetDevice.iPhoneAndiPad),
+        /// so the same 100 m disc would otherwise be asked of a 4 GB phone and an M4 iPad alike,
+        /// and this is the quadratic dial - the one place where a device class is worth branching
+        /// on. An unknown or unreported memory size (0 or negative) takes the SMALL value: the
+        /// cheap answer is the safe one when the device cannot be identified.
+        /// </summary>
+        public static float DefaultDetailDistanceFor(int systemMemoryMb)
+        {
+            return systemMemoryMb >= SmallDeviceMemoryMb ? DefaultDetailDistance : SmallDeviceDetailDistance;
+        }
+
+        /// <summary>
         /// MOBILE: the third dial, and it is a QualitySettings global rather than a terrain one.
         /// <c>QualitySettings.softVegetation</c> decides whether Unity's terrain detail pass draws
         /// with a blended alpha edge or an alpha-tested cutout; it changes no placement and no
@@ -204,6 +231,38 @@ namespace RealGrass
 
         /// <summary>MOBILE: see DefaultSoftVegetation.</summary>
         public static bool SoftVegetation = DefaultSoftVegetation;
+
+        /// <summary>
+        /// MOBILE: QualitySettings.softVegetation as Init found it, so StopMod can put it back.
+        /// Runtime writes to QualitySettings are not persisted into the player's
+        /// QualitySettings.asset, so there is no cross-launch leak to fix here - this is the
+        /// symmetry, for the next port that draws a detail layer and would otherwise inherit a
+        /// global this one turned on and walked away from.
+        /// </summary>
+        static bool softVegetationWas;
+
+        /// <summary>MOBILE: true once <see cref="CaptureSoftVegetation"/> has run, so a second
+        /// Init cannot overwrite the original value with this port's own.</summary>
+        static bool softVegetationCaptured;
+
+        /// <summary>MOBILE: remember the quality level's own value. Called by Init, before the
+        /// first <see cref="ApplySoftVegetation"/>.</summary>
+        public static void CaptureSoftVegetation()
+        {
+            if (softVegetationCaptured)
+                return;
+            softVegetationCaptured = true;
+            softVegetationWas = QualitySettings.softVegetation;
+        }
+
+        /// <summary>MOBILE: give it back. Called by StopMod, alongside the layer blanking.</summary>
+        public static void RestoreSoftVegetation()
+        {
+            if (!softVegetationCaptured)
+                return;
+            softVegetationCaptured = false;
+            QualitySettings.softVegetation = softVegetationWas;
+        }
 
         /// <summary>
         /// MOBILE: set Unity's soft-vegetation flag if this port wants it and the quality level has
@@ -602,8 +661,18 @@ namespace RealGrass
             // MOBILE: the blended blade edge, on. iOS runs quality level 2, whose softVegetation
             // is 0; upstream's desktop default is level 3, whose is 1. AddTerrainDetails re-asserts
             // it per promotion because SetQualityLevel would take it back. See
-            // RealGrassPort.SoftVegetation.
+            // RealGrassPort.SoftVegetation. Captured first, so StopMod can hand the global back.
+            CaptureSoftVegetation();
             ApplySoftVegetation();
+
+            // MOBILE: the device-class guard on the quadratic dial. The drawn area goes as the
+            // square of DetailDistance and the iOS build ships to iPhone as well as iPad
+            // (MobileBuildSetup: iOSTargetDevice.iPhoneAndiPad), so a 4 GB phone would otherwise be
+            // asked for the same 100 m disc as an M4 iPad. Only while the dial is still on its
+            // default, so a later settings hook keeps the last word; what it chose and the memory
+            // it chose from are both in the [RealGrass] detail data line.
+            if (DetailDistance == DefaultDetailDistance)
+                DetailDistance = DefaultDetailDistanceFor(SystemInfo.systemMemorySize);
 
             GameObject go = new GameObject(mod != null && !string.IsNullOrEmpty(mod.Title) ? mod.Title : "Real Grass");
             RealGrass component = go.AddComponent<RealGrass>();
@@ -815,8 +884,8 @@ namespace RealGrass
             if (terrainData.detailScatterMode != RealGrassPort.ForcedScatterMode)
                 terrainData.SetDetailScatterMode(RealGrassPort.ForcedScatterMode);
             // MOBILE: Unity's ceiling for one detail-map cell, which DensityManager's fold clamps
-            // to. It follows from the scatter mode just set, so this reads 255 - but it is read,
-            // not assumed, and it is logged.
+            // to. It follows from the scatter mode just set, so under InstanceCountMode this reads
+            // 16 (coverage's would be 255) - but it is read, not assumed, and it is logged.
             RealGrassPort.MaxDetailValue = terrainData.maxDetailScatterPerRes > 0
                 ? terrainData.maxDetailScatterPerRes
                 : RealGrassPort.FallbackMaxDetailValue;
@@ -918,14 +987,16 @@ namespace RealGrass
                 // metre - instead of leaving any of it to documentation. The target is upstream's
                 // thick mean cell; upstream's own figure is 1.17/m2.
                 Debug.Log(string.Format(
-                    "[RealGrass] detail data ~{0:0.0} MB (res {1}, layers {2}, terrains {3}, scatter {4}/{5}, density {6:0.00}, distance {7:0} m, soft veg {8}, target {9:0.00} inst/m2)",
+                    "[RealGrass] detail data ~{0:0.0} MB (res {1}, layers {2}, terrains {3}, scatter {4}/{5}, density {6:0.00}, distance {7:0} m [device {10} MB -> class default {11:0} m], soft veg {8}, target {9:0.00} inst/m2)",
                     RealGrassPort.DetailDataMegabytes(RealGrassPort.DetailResolution, layers, terrains),
                     RealGrassPort.DetailResolution, layers, terrains,
                     terrainData.detailScatterMode, RealGrassPort.MaxDetailValue,
                     terrain.detailObjectDensity, terrain.detailObjectDistance,
                     QualitySettings.softVegetation,
                     RealGrassPort.TargetInstancesPerSquareMetre(
-                        RealGrassPort.DetailCellAreaM2, RealGrassPort.MaxDetailValue)));
+                        RealGrassPort.DetailCellAreaM2, RealGrassPort.MaxDetailValue),
+                    SystemInfo.systemMemorySize,
+                    RealGrassPort.DefaultDetailDistanceFor(SystemInfo.systemMemorySize)));
             }
             if (promotions % CounterInterval == 0)
                 Debug.Log("[RealGrass] details on " + promotions + " terrains");
@@ -996,6 +1067,12 @@ namespace RealGrass
                     terrainData.detailPrototypes = null;
                 }
             }
+
+            // MOBILE: and the one global this port writes goes back with them. Init turned
+            // QualitySettings.softVegetation on over the quality level's own 0; leaving it on after
+            // the layers are blank is a global set by a mod that is no longer running. See
+            // RealGrassPort.CaptureSoftVegetation.
+            RealGrassPort.RestoreSoftVegetation();
 
             Debug.Log("[RealGrass] disabled; unsubscribed from terrain promotion");
         }

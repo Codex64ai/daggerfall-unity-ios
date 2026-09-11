@@ -86,8 +86,9 @@ namespace RealGrass
         /// <summary>MOBILE: upstream cells that fold into one cell of this map, per axis.</summary>
         public static readonly int Fold = Mathf.Max(1, UpstreamResolution / RealGrassPort.DetailResolution);
 
-        /// <summary>MOBILE: upstream cells behind one cell of this map. 2 x 2 = 4 - the number of
-        /// upstream sub-cell counts that add up into one cell's instance total.</summary>
+        /// <summary>MOBILE: upstream cells behind one cell of this map - Fold x Fold, i.e. how many
+        /// upstream sub-cell counts add up into one cell's instance total. 1 as shipped (256 maps
+        /// cell for cell); 4 if DetailResolution is ever dropped to 128.</summary>
         public static readonly int SubCells = Fold * Fold;
 
         /// <summary>MOBILE: the array handed to TerrainData.SetDetailLayer. Never reallocated.</summary>
@@ -971,21 +972,25 @@ namespace RealGrass
         /// </summary>
         /// <param name="density"> The total grass density.</param>
         /// <param name="seasonalChance">Chance that details layers are populated in range 0-1.</param>
-        private void SetGrassDensity(int x, int y, int density, float seasonalChance = 0)
+        // MOBILE (NIT-7, review 2026-09-11): upstream named these (x, y) and wrote Grass[x, y],
+        // while every caller passes (y * 2 ..., x * 2 ...) and DetailMap's indexer is [y, x] - two
+        // transpositions that cancel, and a trap for the next reader. Renamed to what they are; no
+        // behaviour change, the same array elements are written.
+        private void SetGrassDensity(int detailY, int detailX, int density, float seasonalChance = 0)
         {
             if (realisticGrass)
             {
                 // Accents are small tufts that add variety to grass
                 if (density > 1 && Random.value > 0.7f)
-                    density -= (GrassAccents[x, y] = Random.Range(0, density));
+                    density -= (GrassAccents[detailY, detailX] = Random.Range(0, density));
 
                 // Details are tall flowers whose density is affected by season
                 if (seasonalChance > 0 && Random.value < Mathf.Lerp(0, 0.25f, seasonalChance))
-                    density -= (GrassDetails[x, y] = Random.Range(0, density));
+                    density -= (GrassDetails[detailY, detailX] = Random.Range(0, density));
             }
 
             // Main grass layer
-            Grass[x, y] = density;
+            Grass[detailY, detailX] = density;
         }
 
         #region Static Methods

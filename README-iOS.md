@@ -566,6 +566,13 @@ replace flats or terrain work without any import flag.
 greetings are dismissed, and every custom model and the first vanilla meshes get one line in
 `Player.log` describing their materials (shader, texture, format). Delete the file to play normally.
 
+**Test builds only.** All of it — the hands-free start and the `set` command below — is compiled in
+only when the app was built with `DFU_IOS_TESTAPP=1` (`MobileBuildSetup` adds the `DFU_IOS_TESTAPP`
+scripting define, and removes it for an ordinary build). `set` writes *any* `SettingsManager`
+property by reflection and saves it, and `Documents` is the same folder players are told to drop
+`arena2` into, so the command file must not be able to arm anything in a shipping binary. In a
+release build `debug-newchar.txt` is simply ignored.
+
 The file is read line by line, and two commands are recognised:
 
 | Line | What it does |

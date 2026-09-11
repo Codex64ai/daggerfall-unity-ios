@@ -735,6 +735,22 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             return "";
         }
 
+        /// <summary>
+        /// True when `needle` appears inside a `#if DFU_IOS_TESTAPP` region: the nearest directive
+        /// above it is the `#if` rather than an `#endif`. A plain Contains("#if DFU_IOS_TESTAPP")
+        /// would pass for a file that opened the gate somewhere and left the debug surface outside
+        /// it, which is precisely the mistake worth catching.
+        /// </summary>
+        static bool InsideTestAppGate(string source, string needle)
+        {
+            int at = source.IndexOf(needle, StringComparison.Ordinal);
+            if (at < 0) return false;
+            int open = source.LastIndexOf("#if DFU_IOS_TESTAPP", at, StringComparison.Ordinal);
+            if (open < 0) return false;
+            int close = source.LastIndexOf("#endif", at, StringComparison.Ordinal);
+            return close < open;
+        }
+
         // The simulator's only hand on the settings panel. debug-newchar.txt is how a headless
         // simulator run drives the app, and `set` is what lets it reproduce a LIVE settings change -
         // the transition the 2026-09-10 CRT/retro device bug only happens on. The parser is the part
@@ -804,6 +820,20 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "DebugStart: unparseable lines are collected as errors, not dropped",
                 "sets=" + sets.Count + " errors=" + errors.Count);
 
+            // NIT-4 (review 2026-09-11): `set 1.5 Foo` is a TIMED line with its value missing, not a
+            // settings property called "1.5". It used to reach ApplySetting and report "no writable
+            // setting named '1.5'" from inside the run instead of landing in errors, where the
+            // command file can be fixed before a simulator launch is spent on it.
+            errors = MobileDebugStart.ParseCommands("set 1.5 RetroRenderingMode\n", out x, out y, out sets);
+            Check(sets.Count == 0 && errors.Count == 1,
+                "DebugStart: `set <time> <Name>` with no value is a malformed line, not a setting called \"1.5\"",
+                "sets=" + sets.Count + " errors=" + errors.Count);
+            // And the shape it must not break: a genuine untimed two-word `set` still parses.
+            errors = MobileDebugStart.ParseCommands("set CRTFilter 1\n", out x, out y, out sets);
+            Check(sets.Count == 1 && errors.Count == 0 && sets[0].Value == "CRTFilter 1",
+                "DebugStart: and an untimed `set <Name> <value>` is untouched by that check",
+                "sets=" + sets.Count + " errors=" + errors.Count);
+
             // The runtime half, pinned as source text: ApplySetting must go through the SAME deploy
             // the settings panel uses, or a `set RetroRenderingMode 1` would change the ini and
             // nothing else, and the transition under test would never run.
@@ -814,6 +844,51 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "DebugStart: `set` writes the settings property by reflection, so any of them can be driven");
             Check(dbg.Contains("MobileContentPath.Active"),
                 "DebugStart: the whole hook is still gated on the iOS content path and the command file");
+
+            // SF-1 (review 2026-09-11): and that runtime gate is not enough on its own.
+            // MobileContentPath.Active is `UNITY_IOS && !UNITY_EDITOR` - TRUE in a RELEASE build -
+            // and debug-newchar.txt sits in the same Documents folder players are told to drop
+            // arena2 into. So the hook, the driver and the reflection write are compiled in only
+            // for the test app. Checked positionally, not by Contains: a file that opens the gate
+            // somewhere and leaves `set` outside it would pass a Contains.
+            Check(InsideTestAppGate(dbg, "static void Hook()"),
+                "DebugStart: the RuntimeInitializeOnLoadMethod hook is compiled into the TEST APP only (#if DFU_IOS_TESTAPP)");
+            Check(InsideTestAppGate(dbg, "static void RunSetCommands()")
+                  && InsideTestAppGate(dbg, "static void ApplySetting(string name, string value)")
+                  && InsideTestAppGate(dbg, "static void LogCameras(string when)"),
+                "DebugStart: the `set` schedule, the reflection write and the camera dump are inside the same gate");
+            Check(InsideTestAppGate(dbg, "class Driver : MonoBehaviour"),
+                "DebugStart: so is the driver that runs them");
+            // ParseCommands and Audit are deliberately OUTSIDE it: the first is a pure function this
+            // very test exercises (the editor has no DFU_IOS_TESTAPP), the second is called from
+            // GameObjectHelper and MeshReplacement and is inert while Active is false.
+            Check(!InsideTestAppGate(dbg, "public static List<string> ParseCommands(")
+                  && !InsideTestAppGate(dbg, "public static void Audit(string label"),
+                "DebugStart: the pure parser and Audit stay outside the gate - the editor and the other call sites need them");
+
+            // The define has to be WRITTEN by the build, in both directions, or the gate is a
+            // comment. It is set in ProjectSettings by ApplyIOSSettings and passed again to the
+            // player script compilation by BuildIOS, because a define written in one batchmode
+            // session has been seen not to reach the next one's player compilation.
+            string setupSrc = StripShaderComments(File.ReadAllText("Assets/Editor/MobileBuildSetup.cs"));
+            Check(setupSrc.Contains("const string testAppDefine = \"DFU_IOS_TESTAPP\"")
+                  && setupSrc.Contains("SetTestAppDefine(testApp, log)"),
+                "DebugStart: MobileBuildSetup writes DFU_IOS_TESTAPP for the test app and removes it otherwise");
+            Check(setupSrc.Contains("PlayerSettings.SetScriptingDefineSymbols(target, wanted)")
+                  && setupSrc.Contains("extraScriptingDefines = IsTestApp ? new[] { testAppDefine } : null"),
+                "DebugStart: the define goes into ProjectSettings AND into the player build's own compilation");
+            Check(MethodBody(setupSrc, "static void SetTestAppDefine(bool testApp, System.Text.StringBuilder log)")
+                      .Contains("sym != testAppDefine"),
+                "DebugStart: removing it leaves every other iOS define alone");
+
+            // NIT-3 (review 2026-09-11): a throw in LogCameras used to consume the command - fired
+            // was set before the work and LogCameras sits outside ApplySetting's own try. The run
+            // then silently did nothing, which is the failure the parser tests exist to prevent.
+            string runBody = MethodBody(dbg, "static void RunSetCommands()");
+            Check(runBody.IndexOf("ApplySetting(c.name, c.value)", StringComparison.Ordinal)
+                      < runBody.IndexOf("c.fired = true;", StringComparison.Ordinal)
+                  && runBody.Contains("catch (System.Exception ex)"),
+                "DebugStart: a `set` is marked fired AFTER the work, and the whole of it is wrapped");
             // The file's own documentation, and README-iOS's: both go stale silently. Read from the
             // RAW text, not `dbg`: the header is a comment, and `dbg` has had its comments stripped.
             Check(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileDebugStart.cs").Contains("set [<seconds>] <Name> <value>"),
@@ -1855,6 +1930,31 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 backbuffer.ToString());
             Check(MobileCrt.MainCameraRect(0, false, 1000f, 0f) == new Rect(0f, 0f, 1f, 1f),
                 "MobileCRT native: with no render texture and no docked HUD the rect is the whole screen");
+
+            // SF-2 (review 2026-09-11): the same rule as a MATRIX, because the four points above
+            // test the answers this port happens to use and the invariant is stronger than that:
+            // a camera with a targetTexture ALWAYS has a full rect, and only a backbuffer camera
+            // under a docked HUD has a partial one. `retroMode != 0 || nativeActive` is exactly
+            // "somebody has attached a render texture this frame". Twelve assertions, no scene,
+            // and they survive a refactor of the five call sites in a way a source-text pin does
+            // not - which is what the device bug was: the rule held in the function and one call
+            // site did something else.
+            const float matrixScreen = 1000f;
+            foreach (int matrixRetro in new[] { 0, 1, 2 })
+                foreach (bool matrixNative in new[] { false, true })
+                    foreach (float matrixHud in new[] { 0f, 250f })
+                    {
+                        bool ontoTexture = matrixRetro != 0 || matrixNative;
+                        Rect want = ontoTexture || matrixHud <= 0f
+                            ? new Rect(0f, 0f, 1f, 1f)
+                            : new Rect(0f, 0.25f, 1f, 0.75f);
+                        Rect got = MobileCrt.MainCameraRect(matrixRetro, matrixNative, matrixScreen, matrixHud);
+                        Check(Mathf.Approximately(got.x, want.x) && Mathf.Approximately(got.y, want.y)
+                              && Mathf.Approximately(got.width, want.width) && Mathf.Approximately(got.height, want.height),
+                            "MobileCRT native: retro " + matrixRetro + " / native " + matrixNative + " / HUD " + matrixHud + " px -> "
+                            + (ontoTexture ? "a render texture, so the FULL rect" : "the backbuffer, so the docked rect"),
+                            got + " wanted " + want);
+                    }
 
             // Edit 1 - the teardown restores the viewport rect ONLY when retro mode is not the one
             // taking the camera over. Pinned in the owning method: "the file mentions the setting"
@@ -3958,8 +4058,34 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && global::RealGrass.RealGrassPort.DefaultDetailDensity == 1f,
                 "RealGrass: the dials default to 100 m and density 1.0 (upstream 120 and 1.0; the shipped build had 40 and 0.6)",
                 global::RealGrass.RealGrassPort.DefaultDetailDistance + " / " + global::RealGrass.RealGrassPort.DefaultDetailDensity);
-            Check(global::RealGrass.RealGrassPort.DefaultDetailDistance <= 100f,
-                "RealGrass: and the distance stays inside the 100 m mobile clamp, whatever upstream's slider allows");
+            // SF-5 (review 2026-09-11) and NIT-10: the old `DefaultDetailDistance <= 100f` here read
+            // as a guard and guarded nothing - it restated the line above it. The real guard is the
+            // device-class one, because the drawn area goes as the SQUARE of this dial and the iOS
+            // build ships to iPhone as well as iPad, where the x11.5 rise in drawn billboards has
+            // never been measured.
+            Check(global::RealGrass.RealGrassPort.SmallDeviceMemoryMb == 6144
+                  && global::RealGrass.RealGrassPort.SmallDeviceDetailDistance == 70f,
+                "RealGrass: the device-class line is 6 GB of system memory, and below it the radius is 70 m",
+                global::RealGrass.RealGrassPort.SmallDeviceMemoryMb + " MB / "
+                + global::RealGrass.RealGrassPort.SmallDeviceDetailDistance + " m");
+            Check(global::RealGrass.RealGrassPort.DefaultDetailDistanceFor(4096) == 70f
+                  && global::RealGrass.RealGrassPort.DefaultDetailDistanceFor(6143) == 70f,
+                "RealGrass: a 4 GB phone (and anything under the line) defaults to 70 m",
+                global::RealGrass.RealGrassPort.DefaultDetailDistanceFor(4096).ToString());
+            Check(global::RealGrass.RealGrassPort.DefaultDetailDistanceFor(6144) == 100f
+                  && global::RealGrass.RealGrassPort.DefaultDetailDistanceFor(16384) == 100f,
+                "RealGrass: 6 GB and up - an iPhone 15 Pro, an M4 iPad - keeps the full 100 m",
+                global::RealGrass.RealGrassPort.DefaultDetailDistanceFor(16384).ToString());
+            Check(global::RealGrass.RealGrassPort.DefaultDetailDistanceFor(0) == 70f
+                  && global::RealGrass.RealGrassPort.DefaultDetailDistanceFor(-1) == 70f,
+                "RealGrass: a device that reports no memory size takes the CHEAP default, not the expensive one",
+                global::RealGrass.RealGrassPort.DefaultDetailDistanceFor(0).ToString());
+            // Half the grass, and the arithmetic that says so: pi*70^2 / pi*100^2 = 0.49.
+            Near((global::RealGrass.RealGrassPort.SmallDeviceDetailDistance
+                  * global::RealGrass.RealGrassPort.SmallDeviceDetailDistance)
+                 / (global::RealGrass.RealGrassPort.DefaultDetailDistance
+                    * global::RealGrass.RealGrassPort.DefaultDetailDistance), 0.49f, 0.005f,
+                "RealGrass: 70 m draws 49 % of the area 100 m does - the dial is quadratic, which is why it is the one worth branching on");
             // The third dial is a QualitySettings global, not a terrain one: iOS runs quality level
             // 2, whose softVegetation is 0, while DFU's desktop default is level 3, whose is 1. It
             // changes no count and no placement - only whether a blade's alpha edge is blended or
@@ -3973,6 +4099,26 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             MethodInfo applySoft = typeof(global::RealGrass.RealGrassPort).GetMethod("ApplySoftVegetation");
             Check(applySoft != null && applySoft.IsStatic && applySoft.GetParameters().Length == 0,
                 "RealGrass: ApplySoftVegetation is the one place that writes it");
+            // SF-4 (review 2026-09-11): and the one place that gives it back. Runtime writes to
+            // QualitySettings are not persisted into a player's QualitySettings.asset, so there is
+            // no cross-launch leak to fix - this is symmetry, for the next port that draws a detail
+            // layer and would otherwise inherit a global this one turned on and walked away from.
+            MethodInfo captureSoft = typeof(global::RealGrass.RealGrassPort).GetMethod("CaptureSoftVegetation");
+            MethodInfo restoreSoft = typeof(global::RealGrass.RealGrassPort).GetMethod("RestoreSoftVegetation");
+            Check(captureSoft != null && captureSoft.IsStatic && captureSoft.GetParameters().Length == 0
+                  && restoreSoft != null && restoreSoft.IsStatic && restoreSoft.GetParameters().Length == 0,
+                "RealGrass: softVegetation is captured before it is written and restored when the mod stops");
+            // Deliberately NOT exercised end to end on the live global: writing
+            // QualitySettings.softVegetation in the EDITOR dirties ProjectSettings/QualitySettings
+            // .asset, and Unity 6 rewrites that whole file into its current serialization the moment
+            // it is dirtied - a 300-line diff out of a test run, on every run. The behaviour is
+            // pinned instead by the capture-before-write ORDER and the StopMod call below, which are
+            // the two ways it can actually be got wrong.
+            string portSrcForSoft = StripShaderComments(File.ReadAllText(
+                "Assets/Scripts/Game/Mobile/Ports/RealGrass/RealGrass.cs"));
+            Check(MethodBody(portSrcForSoft, "public static void CaptureSoftVegetation()").Contains("if (softVegetationCaptured)")
+                  && MethodBody(portSrcForSoft, "public static void RestoreSoftVegetation()").Contains("QualitySettings.softVegetation = softVegetationWas;"),
+                "RealGrass: a second Init cannot capture the value this port itself set, and Restore writes the captured one back");
             // The dials are FIELDS, not constants: there is no modsettings.json in the bundle, so
             // nothing reads them from a file today and a later settings hook must be able to move
             // them without touching the port. They must still start on the defaults.
@@ -4290,7 +4436,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(modeAt >= 0 && foldAt > modeAt && layerAt > foldAt,
                 "RealGrass: scatter mode, then the fold to the scatter ceiling, then SetDetailLayer - in that order",
                 modeAt + " < " + foldAt + " < " + layerAt);
-            Check(grassSrc.Contains(", scatter {4}/{5}, density {6:0.00}, distance {7:0} m, soft veg {8}, target {9:0.00} inst/m2)")
+            Check(grassSrc.Contains(", scatter {4}/{5}, density {6:0.00}, distance {7:0} m [device {10} MB -> class default {11:0} m], soft veg {8}, target {9:0.00} inst/m2)")
                   && grassSrc.Contains("terrainData.detailScatterMode, RealGrassPort.MaxDetailValue")
                   && grassSrc.Contains("terrain.detailObjectDensity, terrain.detailObjectDistance"),
                 "RealGrass: the memory line writes the mode, the ceiling that was read, and the two dials AS THE TERRAIN GOT THEM");
@@ -4313,6 +4459,27 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(softAt >= 0 && softAt < layerAt,
                 "RealGrass: and the promotion re-asserts it before the layers go to the terrain",
                 softAt + " < " + layerAt);
+            // SF-4: Init captures BEFORE the first write, and StopMod restores alongside the
+            // blanking. Order, not presence: a capture after ApplySoftVegetation would remember the
+            // value this port just set and "restore" the global to true for ever.
+            int captureAt = grassSrc.IndexOf("CaptureSoftVegetation();", StringComparison.Ordinal);
+            int firstApplyAt = grassSrc.IndexOf("ApplySoftVegetation();", StringComparison.Ordinal);
+            Check(captureAt >= 0 && firstApplyAt >= 0 && captureAt < firstApplyAt,
+                "RealGrass: Init remembers the quality level's softVegetation BEFORE it writes its own",
+                captureAt + " < " + firstApplyAt);
+            Check(MethodBody(grassSrc, "private void StopMod()").Contains("RealGrassPort.RestoreSoftVegetation();"),
+                "RealGrass: StopMod hands softVegetation back, next to the layer blanking");
+            // SF-5: the device-class guard runs in Init, before StartPort reads the dials into the
+            // options - and the memory it read is in the log line, so a Player.log says WHY it chose
+            // what it chose rather than leaving the reader to infer it from the number.
+            int guardAt = grassSrc.IndexOf("DefaultDetailDistanceFor(SystemInfo.systemMemorySize)", StringComparison.Ordinal);
+            int startPortAt = grassSrc.IndexOf("component.StartPort();", StringComparison.Ordinal);
+            Check(guardAt >= 0 && startPortAt >= 0 && guardAt < startPortAt,
+                "RealGrass: the device-class guard sets the distance before StartPort reads the dials",
+                guardAt + " < " + startPortAt);
+            Check(grassSrc.Contains("device {10} MB -> class default {11:0} m")
+                  && grassSrc.Contains("SystemInfo.systemMemorySize,"),
+                "RealGrass: and the detail-data line states the device memory and the distance that class defaults to");
             Check(grassSrc.Contains("[RealGrass] details on ") && grassSrc.Contains("[RealGrass] detail data ~")
                   && grassSrc.Contains("[RealGrass] not available: ")
                   && grassSrc.Contains("[RealGrass] terrain details failed: "),
