@@ -4554,6 +4554,57 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // captured copy to prefer and no mod bundle that could shadow them by name.
             Check(!MobileShaders.Names.Contains(detailShaders[0]),
                 "RealGrass: the engine detail shaders are not in MobileShaders' captured list (they are not mod shaders)");
+
+            // ---- 7. the TerrainData template: the reason any of this draws at all ----
+            // Measured in the iOS player on 2026-09-13, four terrains side by side in one frame,
+            // identical prototypes and identical layers: the two whose TerrainData was
+            // Instantiate()d from a serialized asset drew grass; the two built with
+            // `new TerrainData()` drew NONE - not a thinner field, nothing. That is Unity's own
+            // issue 10753 ("Terrain Detail objects are not rendered in the build when the Terrain
+            // is generated at runtime"), and it is why this port could report readable textures, a
+            // populated atlas, upstream's instance counts and thousands of correctly placed
+            // instances from Unity's own ComputeDetailInstanceTransforms while the device drew bare
+            // ground. Every check below guards one link of that fix, because the failure mode is
+            // silent everywhere it matters: the Editor renders the details either way.
+            Check(DaggerfallWorkshop.Game.Mobile.MobileTerrainData.TemplateResourceName == "MobileTerrainDataTemplate",
+                "TerrainData: the template's Resources name is MobileTerrainDataTemplate",
+                DaggerfallWorkshop.Game.Mobile.MobileTerrainData.TemplateResourceName);
+            const string templatePath = "Assets/Resources/MobileTerrainDataTemplate.asset";
+            Check(File.Exists(templatePath),
+                "TerrainData: the template asset is in the project (Resources/, so it is in every build)");
+            var templateData = AssetDatabase.LoadAssetAtPath<TerrainData>(templatePath);
+            Check(templateData != null,
+                "TerrainData: the template asset loads as a TerrainData");
+            if (templateData != null)
+                Check(templateData.detailPrototypes != null && templateData.detailPrototypes.Length >= 1
+                      && !templateData.detailPrototypes[0].usePrototypeMesh
+                      && templateData.detailPrototypes[0].renderMode == DetailRenderMode.GrassBillboard,
+                    "TerrainData: the template carries a grass-billboard detail prototype (the shape the fix was measured with)",
+                    templateData.detailPrototypes == null ? "null" : templateData.detailPrototypes.Length + " prototypes");
+            // Create() must hand back a CLONE, never the template itself - DFU writes heights, size
+            // and detail resolution into whatever it gets, and writing those into the asset would
+            // dirty it on every terrain promotion in the Editor.
+            TerrainData made = DaggerfallWorkshop.Game.Mobile.MobileTerrainData.Create();
+            Check(made != null && !ReferenceEquals(made, templateData),
+                "TerrainData: Create() returns an instantiated copy, not the template asset itself");
+            Check(DaggerfallWorkshop.Game.Mobile.MobileTerrainData.TemplateUsed
+                  && !DaggerfallWorkshop.Game.Mobile.MobileTerrainData.TemplateMissing,
+                "TerrainData: Create() found the template (a miss falls back to new TerrainData(), which draws no details in a player)");
+            if (made != null) UnityEngine.Object.DestroyImmediate(made);
+            // And the call site. DFU's PromoteTerrainData is the one place a world TerrainData is
+            // born; a `new TerrainData()` there is the whole bug, so it is asserted absent by text.
+            string dfTerrainSrc = File.Exists("Assets/Scripts/Terrain/DaggerfallTerrain.cs")
+                ? StripShaderComments(File.ReadAllText("Assets/Scripts/Terrain/DaggerfallTerrain.cs")) : "";
+            Check(dfTerrainSrc.Contains("DaggerfallWorkshop.Game.Mobile.MobileTerrainData.Create()"),
+                "TerrainData: DaggerfallTerrain.PromoteTerrainData builds its TerrainData through MobileTerrainData.Create");
+            Check(!dfTerrainSrc.Contains("new TerrainData()"),
+                "TerrainData: no `new TerrainData()` survives in DaggerfallTerrain (it renders no details in a player)");
+            // The template is generated as well as committed, so a clone that lost the asset gets
+            // it back on the next ApplyAll instead of shipping a build with no terrain details.
+            string buildSetupSrc = File.ReadAllText("Assets/Editor/MobileBuildSetup.cs");
+            Check(buildSetupSrc.Contains("public static void EnsureTerrainDataTemplate()")
+                  && MethodBody(buildSetupSrc, "public static void ApplyAll()").Contains("EnsureTerrainDataTemplate();"),
+                "TerrainData: ApplyAll regenerates the template if it is missing");
         }
 
         static global::LocationLoader.LocationPrefab ParseLocationPrefabXml(string xml)

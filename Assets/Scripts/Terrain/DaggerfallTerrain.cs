@@ -278,7 +278,11 @@ namespace DaggerfallWorkshop
 
                 // Setup terrain data
                 // Must set terrainData.heightmapResolution before size (thanks Nystul!)
-                TerrainData terrainData = new TerrainData();
+                // MOBILE: instantiated from a serialized template, not `new TerrainData()`. A
+                // runtime-constructed TerrainData renders NO terrain details in a player build -
+                // Unity issue 10753 - which is why Real Grass drew no grass on device while every
+                // number in its Player.log read correct. See Mobile/MobileTerrainData.cs.
+                TerrainData terrainData = DaggerfallWorkshop.Game.Mobile.MobileTerrainData.Create();
                 terrainData.name = "TerrainData";
                 terrainData.heightmapResolution = heightmapDimension;
                 terrainData.size = new Vector3(terrainSize, dfUnity.TerrainSampler.MaxTerrainHeight, terrainSize);

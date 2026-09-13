@@ -628,6 +628,55 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         }
 
         /// <summary>
+        /// MOBILE: create Assets/Resources/MobileTerrainDataTemplate.asset if it is missing.
+        ///
+        /// Every world terrain is <c>Object.Instantiate</c>d from this asset instead of being
+        /// built with <c>new TerrainData()</c>, because a runtime-constructed TerrainData renders
+        /// no terrain details at all in a player build (Unity issue 10753) - measured in the iOS
+        /// player, four terrains in one frame: the two instantiated from an asset drew grass, the
+        /// two constructed at runtime drew none. See Assets/Scripts/Game/Mobile/MobileTerrainData.cs.
+        ///
+        /// The contents are deliberately minimal - a 33-sample heightmap and one grass-billboard
+        /// detail prototype - because everything a terrain actually uses is overwritten at runtime
+        /// by DaggerfallTerrain.PromoteTerrainData and by whatever draws details. What matters is
+        /// only that the object was DESERIALIZED rather than constructed.
+        /// </summary>
+        public static void EnsureTerrainDataTemplate()
+        {
+            const string dir = "Assets/Resources";
+            string path = dir + "/" + DaggerfallWorkshop.Game.Mobile.MobileTerrainData.TemplateResourceName + ".asset";
+            if (File.Exists(path))
+            {
+                Debug.Log("[MobileBuildSetup] terrain data template present at " + path);
+                return;
+            }
+            if (!Directory.Exists(dir))
+                Directory.CreateDirectory(dir);
+
+            var template = new TerrainData();
+            template.name = DaggerfallWorkshop.Game.Mobile.MobileTerrainData.TemplateResourceName;
+            template.heightmapResolution = 33;
+            template.size = new Vector3(32f, 1f, 32f);
+            template.SetDetailResolution(32, 8);
+            var grass = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Resources/BlankAlbedoTexture.png");
+            template.detailPrototypes = new[]
+            {
+                new DetailPrototype
+                {
+                    prototypeTexture = grass,
+                    usePrototypeMesh = false,
+                    renderMode = DetailRenderMode.GrassBillboard,
+                    minWidth = 1f, maxWidth = 1f, minHeight = 1f, maxHeight = 1f,
+                    noiseSpread = 0.4f, healthyColor = Color.white, dryColor = Color.white
+                }
+            };
+            AssetDatabase.CreateAsset(template, path);
+            AssetDatabase.SaveAssets();
+            Debug.Log("[MobileBuildSetup] created terrain data template " + path
+                + " (prototype texture " + (grass != null ? grass.name : "NULL") + ")");
+        }
+
+        /// <summary>
         /// Build the bundled MIT mods (tools/bundled-mods/fetch.py puts their sources under
         /// Assets/Game/Mods/) into iOS AssetBundles in the shipped Mods folder, each with its
         /// LICENSE beside it. Part of ApplyAll; also its own -executeMethod for iteration:
@@ -691,6 +740,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         public static void ApplyAll()
         {
             ApplyIOSSettings();
+
+            // MOBILE: the TerrainData template every world terrain is instantiated from. Created
+            // here rather than only committed, so a clone that lost the asset gets it back instead
+            // of shipping a build with no terrain details at all. See Mobile/MobileTerrainData.cs.
+            EnsureTerrainDataTemplate();
 
             // Bundled MIT mods first: they are plain asset bundles and independent of the scene.
             BuildBundledMods();

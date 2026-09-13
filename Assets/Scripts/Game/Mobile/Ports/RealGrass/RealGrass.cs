@@ -711,6 +711,10 @@ namespace RealGrass
         int promotions;
         bool memoryLogged;
 
+        // MOBILE: the render diagnostic below is written once per session, on the first promoted
+        // terrain whose grass layer actually holds instances. See LogRenderDiagnostics.
+        bool renderDiagLogged;
+
         // MOBILE: every 25th promotion. At TerrainDistance 3 a map-pixel crossing promotes a ring
         // of about 7 terrains, so this is roughly one line per four crossings.
         public const int CounterInterval = 25;
@@ -974,6 +978,16 @@ namespace RealGrass
             // would otherwise happen to invalidate it. Same precedent: MeshReplacement.cs:257-260.
             terrain.Flush();
 
+            // MOBILE: the "there is no grass on the device" diagnostic. Everything the port can
+            // check on its own already reads OK in a Player.log - the textures are readable, the
+            // layers are written, the counts are upstream's - and grass still did not appear, so
+            // this states the rest of the render path from the LIVE terrain: what the terrain was
+            // given, what Unity read back out of it, what the prototypes are, whether Unity built
+            // its detail atlas, and which camera could draw them. Once per session, and only for a
+            // terrain that actually owes instances, so an empty winter terrain cannot spend it.
+            if (!renderDiagLogged)
+                renderDiagLogged = LogRenderDiagnostics(terrain, terrainData);
+
             // MOBILE: the two lines a Player.log is read for.
             promotions++;
             if (!memoryLogged)
@@ -1017,6 +1031,185 @@ namespace RealGrass
         {
             StreamingWorld world = GameManager.Instance != null ? GameManager.Instance.StreamingWorld : null;
             return world != null ? world.TerrainDistance : 3;
+        }
+
+        /// <summary>
+        /// MOBILE: one block of lines describing the whole terrain-detail render path, from the
+        /// live terrain this promotion just finished writing. Returns true when it wrote them.
+        ///
+        /// It exists because every cheap question already answered "fine" while the device drew
+        /// nothing: the prototype textures are readable RGBA32 (the [RealGrass] prototype line),
+        /// the layers carry upstream's counts (the detail data line), the three engine shaders
+        /// resolve and are supported (the gate). What is NOT visible from any of those is whether
+        /// Unity built its "Terrain Detail Atlas" out of those prototypes, what it read back out of
+        /// the detail store, and whether the camera that draws the world can see the terrain's
+        /// layer at all - so all three are here, next to the numbers they have to agree with.
+        /// </summary>
+        bool LogRenderDiagnostics(Terrain terrain, TerrainData terrainData)
+        {
+            try
+            {
+                if (terrain == null || terrainData == null)
+                    return false;
+
+                // The readback: what UNITY holds, not what this port wrote. SetDetailLayer can
+                // clamp or drop values, and a terrain whose store was reallocated after the write
+                // reads back zero - which would look identical, from a log, to grass that draws.
+                int w = terrainData.detailWidth, h = terrainData.detailHeight;
+                int[,] back = terrainData.GetDetailLayer(0, 0, w, h, 0);
+                long sum = 0; int nonzero = 0, max = 0;
+                for (int y = 0; y < h; y++)
+                    for (int x = 0; x < w; x++)
+                    {
+                        int v = back[y, x];
+                        if (v <= 0) continue;
+                        sum += v; nonzero++;
+                        if (v > max) max = v;
+                    }
+                if (nonzero == 0)
+                    return false;   // not this terrain's turn - say nothing and stay armed
+
+                Camera cam = Camera.main;
+                int layer = terrain.gameObject.layer;
+                Debug.Log(string.Format(
+                    "[RealGrass] render: terrain '{0}' enabled={1} active={2} layer={3} foliage={4} dist={5:0} dens={6:0.00} trees={7:0} store {8}x{9}/{10} {11} max/cell {12} readback sum={13} nonzero={14} peak={15} activeTerrains={16}",
+                    terrain.name, terrain.enabled, terrain.gameObject.activeInHierarchy, layer,
+                    terrain.drawTreesAndFoliage, terrain.detailObjectDistance, terrain.detailObjectDensity,
+                    terrain.treeDistance, w, h, terrainData.detailResolutionPerPatch,
+                    terrainData.detailScatterMode, terrainData.maxDetailScatterPerRes,
+                    sum, nonzero, max, Terrain.activeTerrains != null ? Terrain.activeTerrains.Length : -1,
+                    terrain.transform.position, terrainData.size, Time.realtimeSinceStartup));
+
+                DetailPrototype[] protos = terrainData.detailPrototypes;
+                Debug.Log("[RealGrass] render: prototypes=" + (protos != null ? protos.Length : 0)
+                    + " waving tint=" + terrainData.wavingGrassTint + " strength=" + terrainData.wavingGrassStrength
+                    + " amount=" + terrainData.wavingGrassAmount + " speed=" + terrainData.wavingGrassSpeed);
+                for (int i = 0; protos != null && i < protos.Length; i++)
+                {
+                    DetailPrototype p = protos[i];
+                    Texture2D tex = p.prototypeTexture;
+                    Debug.Log(string.Format(
+                        "[RealGrass] render: proto{0} mode={1} useMesh={2} mesh={3} tex={4} w={5:0.00}..{6:0.00} h={7:0.00}..{8:0.00} noise={9:0.00} healthy={10} dry={11}",
+                        i, p.renderMode, p.usePrototypeMesh,
+                        p.prototype != null ? p.prototype.name : "null",
+                        tex != null ? tex.name + " " + tex.width + "x" + tex.height + " " + tex.format
+                            + " readable=" + tex.isReadable + " mips=" + tex.mipmapCount : "NULL",
+                        p.minWidth, p.maxWidth, p.minHeight, p.maxHeight, p.noiseSpread,
+                        p.healthyColor, p.dryColor));
+                }
+
+                // The atlas. Unity packs every non-instanced detail prototype into a texture it
+                // names "Terrain Detail Atlas" and draws the whole detail pass from it; a runtime
+                // TerrainData has none until something rebuilds it, and an atlas that is missing -
+                // or built from unreadable pixels - draws exactly nothing, with no managed error.
+                int atlases = 0;
+                string atlasDetail = "";
+                foreach (Texture t in Resources.FindObjectsOfTypeAll<Texture>())
+                {
+                    if (t == null || t.name == null || t.name.IndexOf("Detail Atlas", StringComparison.Ordinal) < 0)
+                        continue;
+                    atlases++;
+                    if (atlases <= 4)
+                        atlasDetail += " [" + t.name + " " + t.width + "x" + t.height
+                            + " " + (t is Texture2D ? ((Texture2D)t).format.ToString() : t.GetType().Name) + "]";
+                }
+                Debug.Log("[RealGrass] render: detail atlases=" + atlases + atlasDetail);
+
+                // Is the atlas Unity built actually a picture of grass, or a transparent sheet? It
+                // is not readable, so the only way to ask is to blit it through the GPU and read
+                // the copy back. An atlas of nothing looks exactly like grass that does not draw.
+                foreach (Texture t in Resources.FindObjectsOfTypeAll<Texture>())
+                {
+                    if (t == null || t.name == null || t.name.IndexOf("Detail Atlas", StringComparison.Ordinal) < 0)
+                        continue;
+                    if (t.width <= 0 || t.width > 2048 || t.height > 2048) continue;
+                    RenderTexture rt = RenderTexture.GetTemporary(t.width, t.height, 0, RenderTextureFormat.ARGB32);
+                    RenderTexture prev = RenderTexture.active;
+                    Graphics.Blit(t, rt);
+                    RenderTexture.active = rt;
+                    var copy = new Texture2D(t.width, t.height, TextureFormat.RGBA32, false);
+                    copy.ReadPixels(new Rect(0, 0, t.width, t.height), 0, 0);
+                    copy.Apply(false, false);
+                    RenderTexture.active = prev;
+                    Color32[] px = copy.GetPixels32();
+                    int opaque = 0; long rSum = 0, gSum = 0, bSum = 0;
+                    foreach (Color32 c in px)
+                    {
+                        if (c.a > 16) opaque++;
+                        rSum += c.r; gSum += c.g; bSum += c.b;
+                    }
+                    Debug.Log("[RealGrass] render: atlas '" + t.name + "' " + t.width + "x" + t.height
+                        + " opaque=" + opaque + "/" + px.Length
+                        + " meanRGB=" + (rSum / px.Length) + "," + (gSum / px.Length) + "," + (bSum / px.Length));
+                    UnityEngine.Object.DestroyImmediate(copy);
+                    RenderTexture.ReleaseTemporary(rt);
+                    break;
+                }
+
+                // What Unity itself would place. ComputeDetailInstanceTransforms returns the exact
+                // instances the detail renderer draws for one patch, so it separates "the data is
+                // wrong" from "the data is right and nothing draws it" - the one question no other
+                // line here can answer.
+                int perPatch = terrainData.detailResolutionPerPatch;
+                int patches = perPatch > 0 ? w / perPatch : 0;
+                int bestX = -1, bestY = -1, bestSum = 0;
+                for (int py = 0; py < patches; py++)
+                    for (int px2 = 0; px2 < patches; px2++)
+                    {
+                        int psum = 0;
+                        for (int y = py * perPatch; y < (py + 1) * perPatch; y++)
+                            for (int x = px2 * perPatch; x < (px2 + 1) * perPatch; x++)
+                                psum += back[y, x];
+                        if (psum > bestSum) { bestSum = psum; bestX = px2; bestY = py; }
+                    }
+                if (bestX >= 0)
+                {
+                    Bounds bounds;
+                    var xforms = terrainData.ComputeDetailInstanceTransforms(bestX, bestY, 0,
+                        terrain.detailObjectDensity, out bounds);
+                    string first = "";
+                    for (int i = 0; xforms != null && i < xforms.Length && i < 2; i++)
+                        first += " [" + xforms[i].posX.ToString("0.00") + "," + xforms[i].posY.ToString("0.00")
+                            + "," + xforms[i].posZ.ToString("0.00") + " scaleXZ=" + xforms[i].scaleXZ.ToString("0.00")
+                            + " scaleY=" + xforms[i].scaleY.ToString("0.00") + " rotY=" + xforms[i].rotationY.ToString("0.00") + "]";
+                    Debug.Log("[RealGrass] render: patch " + bestX + "," + bestY + " cellSum=" + bestSum
+                        + " ComputeDetailInstanceTransforms=" + (xforms == null ? -1 : xforms.Length)
+                        + " bounds=" + bounds + first);
+                }
+
+                foreach (string name in RealGrassPort.ShaderNames)
+                {
+                    Shader sh = Shader.Find(name);
+                    Debug.Log("[RealGrass] render: shader " + name + " found=" + (sh != null)
+                        + (sh == null ? "" : " supported=" + sh.isSupported + " passes=" + sh.passCount
+                            + " queue=" + sh.renderQueue));
+                }
+
+                Debug.Log(string.Format(
+                    "[RealGrass] render: camera={0} pos={1} mask=0x{2:X} sees layer {3}={4} far={5:0} path={6} cameras={7} | quality {8} '{9}' softVeg={10} lodBias={11:0.00} overrides={12} detailDensityScale={13:0.00} detailDistance={14:0} | gfx={15} instancing={16} shaderLevel={17} | terrainMat={18}",
+                    cam == null ? "NULL" : cam.name,
+                    cam == null ? Vector3.zero : cam.transform.position,
+                    cam == null ? 0 : cam.cullingMask, layer,
+                    cam != null && (cam.cullingMask & (1 << layer)) != 0,
+                    cam == null ? 0f : cam.farClipPlane,
+                    cam == null ? "-" : cam.actualRenderingPath.ToString(),
+                    Camera.allCamerasCount,
+                    QualitySettings.GetQualityLevel(),
+                    QualitySettings.names[QualitySettings.GetQualityLevel()],
+                    QualitySettings.softVegetation, QualitySettings.lodBias,
+                    QualitySettings.terrainQualityOverrides, QualitySettings.terrainDetailDensityScale,
+                    QualitySettings.terrainDetailDistance,
+                    SystemInfo.graphicsDeviceType, SystemInfo.supportsInstancing, SystemInfo.graphicsShaderLevel,
+                    terrain.materialTemplate == null ? "NULL"
+                        : terrain.materialTemplate.name + "/" + (terrain.materialTemplate.shader == null ? "no shader"
+                            : terrain.materialTemplate.shader.name + " supported=" + terrain.materialTemplate.shader.isSupported)));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.Log("[RealGrass] render: diagnostic failed: " + ex.GetType().Name + ": " + ex.Message);
+                return true;
+            }
         }
 
         /// <summary>
