@@ -242,6 +242,67 @@ namespace RealGrass
         public static float DetailDensity = DefaultDetailDensity;
 
         /// <summary>
+        /// MOBILE: 0.3, where Unity's TerrainData default is 0.5. <c>wavingGrassSpeed</c> is the
+        /// rate of the wave that runs through a Grass-mode detail layer - the only one of the three
+        /// wind values that sets how FAST the motion is rather than how big it is. Upstream sets
+        /// none of them: it writes <c>wavingGrassTint</c> and leaves speed, strength and amount on
+        /// the engine defaults, which is defensible on a desktop where grass is a strip across a
+        /// wide screen, and not on a tablet held at arm's length where it fills the lower half of
+        /// the frame. The one nit on the device-verified Full-style build (2026-09-13) was exactly
+        /// this - the grass "sways in the wind a little too quickly" - so the rate comes down to
+        /// 60 % of the default and this is the dial to move if it is still wrong.
+        /// </summary>
+        public const float DefaultWindSpeed = 0.3f;
+
+        /// <summary>
+        /// MOBILE: 0.4, where Unity's TerrainData default is 0.5. <c>wavingGrassStrength</c> is how
+        /// far a blade leans at the peak of the wave. Slowing the wave without softening it trades
+        /// one wrong reading for another - a slow wave at full lean reads as a heavy swell rather
+        /// than wind - so the lean comes down with it, by less: the complaint was about rate, and
+        /// this is the value that keeps the grass looking like it is being moved by something.
+        /// </summary>
+        public const float DefaultWindStrength = 0.4f;
+
+        /// <summary>
+        /// MOBILE: 0.5 - Unity's own default, deliberately unchanged. <c>wavingGrassAmount</c> is
+        /// how much of the layer the wave takes hold of, and nothing about the device round said it
+        /// was wrong. It is here as a dial rather than a hidden engine default so that all three
+        /// values this port now writes are named, logged and movable from one place; a later
+        /// settings hook that finds the sway still wrong should not have to discover that two of
+        /// the three are code and the third is whatever Unity happened to construct.
+        /// </summary>
+        public const float DefaultWindAmount = 0.5f;
+
+        /// <summary>
+        /// MOBILE: the three wind dials, as fields rather than constants, for the same reason
+        /// DetailDistance and DetailDensity are - there is no modsettings.json in the bundle, so a
+        /// settings hook (or a console command) has to be able to move them later without touching
+        /// the port. Read on every terrain promotion, through <see cref="ClampWind"/>, so a change
+        /// takes effect on the next terrain rather than the next launch.
+        /// </summary>
+        public static float WindSpeed = DefaultWindSpeed;
+
+        /// <summary>MOBILE: see WindSpeed.</summary>
+        public static float WindStrength = DefaultWindStrength;
+
+        /// <summary>MOBILE: see WindSpeed.</summary>
+        public static float WindAmount = DefaultWindAmount;
+
+        /// <summary>
+        /// MOBILE: the 0..1 clamp every wind dial goes through on its way to the TerrainData. The
+        /// three are public settable fields, so the thing that writes them next may well be a
+        /// slider or a parsed string, and neither a 5 nor a -1 should reach the engine unchecked.
+        /// A NaN takes 0 rather than falling through: every comparison against a NaN is false, so a
+        /// bare clamp would pass it straight to Unity.
+        /// </summary>
+        public static float ClampWind(float value)
+        {
+            if (float.IsNaN(value))
+                return 0f;
+            return value < 0f ? 0f : (value > 1f ? 1f : value);
+        }
+
+        /// <summary>
         /// MOBILE: the device-class line, in MB of system memory. Below it a device gets
         /// <see cref="SmallDeviceDetailDistance"/> instead of <see cref="DefaultDetailDistance"/>.
         /// 6 GB is where Apple's current line sits: the 4 GB iPhone 12/13/SE and the 4 GB base
@@ -979,6 +1040,16 @@ namespace RealGrass
             // would silently take the blended blade edge back. See RealGrassPort.SoftVegetation.
             RealGrassPort.ApplySoftVegetation();
             terrainData.wavingGrassTint = Color.gray;
+            // MOBILE: the wind, which upstream never touched - it set the tint above and left
+            // wavingGrassSpeed / Strength / Amount on Unity's TerrainData defaults of 0.5. Ikram's
+            // device verdict on the Full style was that the sway is a little too quick, so the port
+            // slows the wave and softens the lean (see RealGrassPort.DefaultWindSpeed). Written
+            // here, per promotion, beside the tint: StreamingWorld pools and reuses TerrainData, so
+            // this is the one place that is guaranteed to run for every terrain that ever carries
+            // grass, and a dial moved at runtime lands on the next terrain promoted.
+            terrainData.wavingGrassSpeed = RealGrassPort.ClampWind(RealGrassPort.WindSpeed);
+            terrainData.wavingGrassStrength = RealGrassPort.ClampWind(RealGrassPort.WindStrength);
+            terrainData.wavingGrassAmount = RealGrassPort.ClampWind(RealGrassPort.WindAmount);
             Terrain terrain = daggerTerrain.gameObject.GetComponent<Terrain>();
             terrain.detailObjectDistance = options.DetailObjectDistance;
             terrain.detailObjectDensity = options.DetailObjectDensity;
@@ -1076,7 +1147,7 @@ namespace RealGrass
                 // metre - instead of leaving any of it to documentation. The target is upstream's
                 // thick mean cell; upstream's own figure is 1.17/m2.
                 Debug.Log(string.Format(
-                    "[RealGrass] detail data ~{0:0.0} MB (res {1}, layers {2} [{12}], style {13}/{14}, terrains {3}, scatter {4}/{5}, density {6:0.00}, distance {7:0} m [device {10} MB -> class default {11:0} m], soft veg {8}, target {9:0.00} inst/m2)",
+                    "[RealGrass] detail data ~{0:0.0} MB (res {1}, layers {2} [{12}], style {13}/{14}, terrains {3}, scatter {4}/{5}, density {6:0.00}, distance {7:0} m [device {10} MB -> class default {11:0} m], soft veg {8}, target {9:0.00} inst/m2, wind speed {15:0.00} strength {16:0.00} amount {17:0.00})",
                     RealGrassPort.DetailDataMegabytes(RealGrassPort.DetailResolution, layers, terrains),
                     RealGrassPort.DetailResolution, layers, terrains,
                     terrainData.detailScatterMode, RealGrassPort.MaxDetailValue,
@@ -1090,7 +1161,13 @@ namespace RealGrass
                     // follows from. Three layers with two of them empty is a different bug from
                     // three layers drawing, and the count alone cannot tell them apart.
                     densityManager.DescribeLayerCounts(),
-                    RealGrassPort.ForcedStyle, RealGrassPort.ForcedRenderMode));
+                    RealGrassPort.ForcedStyle, RealGrassPort.ForcedRenderMode,
+                    // MOBILE: the wind AS APPLIED - read back off the TerrainData, not off the
+                    // dials, so the line says what the terrain is actually waving at rather than
+                    // what it was asked for. Unity's defaults are 0.5/0.5/0.5 and upstream left
+                    // them there; a log that reads 0.50 here is a port that failed to write them.
+                    terrainData.wavingGrassSpeed, terrainData.wavingGrassStrength,
+                    terrainData.wavingGrassAmount));
             }
             if (promotions % CounterInterval == 0)
                 Debug.Log("[RealGrass] details on " + promotions + " terrains");

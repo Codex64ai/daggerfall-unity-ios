@@ -4162,6 +4162,78 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && densityField != null && densityField.IsStatic && !densityField.IsLiteral && !densityField.IsInitOnly,
                 "RealGrass: the two dials are settable public static fields, so a settings hook can come later");
 
+            // ---- 1b. the wind ----
+            // Upstream writes wavingGrassTint and nothing else, so speed, strength and amount stay
+            // on Unity's TerrainData defaults of 0.5/0.5/0.5 - which is how the first device-
+            // verified Full-style build shipped, and Ikram's one nit on it was that the grass
+            // "sways in the wind a little too quickly". Speed is the rate dial and comes down the
+            // furthest; strength (the lean at the peak of the wave) comes down with it so a slow
+            // wave does not read as a heavy swell; amount is left on the engine default because
+            // nothing said the coverage was wrong - it is a named dial, not a changed one.
+            Check(global::RealGrass.RealGrassPort.DefaultWindSpeed == 0.3f
+                  && global::RealGrass.RealGrassPort.DefaultWindStrength == 0.4f
+                  && global::RealGrass.RealGrassPort.DefaultWindAmount == 0.5f,
+                "RealGrass: the wind defaults to speed 0.3 / strength 0.4 / amount 0.5 (Unity's TerrainData default is 0.5 for all three)",
+                global::RealGrass.RealGrassPort.DefaultWindSpeed + " / "
+                + global::RealGrass.RealGrassPort.DefaultWindStrength + " / "
+                + global::RealGrass.RealGrassPort.DefaultWindAmount);
+            Check(global::RealGrass.RealGrassPort.DefaultWindSpeed < 0.5f
+                  && global::RealGrass.RealGrassPort.DefaultWindStrength < 0.5f
+                  && global::RealGrass.RealGrassPort.DefaultWindAmount == 0.5f,
+                "RealGrass: slower and gentler than the engine default, and only in the two values the device complaint was about");
+            Check(global::RealGrass.RealGrassPort.WindSpeed == global::RealGrass.RealGrassPort.DefaultWindSpeed
+                  && global::RealGrass.RealGrassPort.WindStrength == global::RealGrass.RealGrassPort.DefaultWindStrength
+                  && global::RealGrass.RealGrassPort.WindAmount == global::RealGrass.RealGrassPort.DefaultWindAmount,
+                "RealGrass: WindSpeed / WindStrength / WindAmount start on their defaults",
+                global::RealGrass.RealGrassPort.WindSpeed + " / "
+                + global::RealGrass.RealGrassPort.WindStrength + " / "
+                + global::RealGrass.RealGrassPort.WindAmount);
+            FieldInfo windSpeedField = typeof(global::RealGrass.RealGrassPort).GetField("WindSpeed");
+            FieldInfo windStrengthField = typeof(global::RealGrass.RealGrassPort).GetField("WindStrength");
+            FieldInfo windAmountField = typeof(global::RealGrass.RealGrassPort).GetField("WindAmount");
+            Check(windSpeedField != null && windSpeedField.IsStatic && !windSpeedField.IsLiteral && !windSpeedField.IsInitOnly
+                  && windStrengthField != null && windStrengthField.IsStatic && !windStrengthField.IsLiteral && !windStrengthField.IsInitOnly
+                  && windAmountField != null && windAmountField.IsStatic && !windAmountField.IsLiteral && !windAmountField.IsInitOnly,
+                "RealGrass: the three wind dials are settable public static fields too");
+            // The clamp is the reason they can be public fields at all: the next thing to write one
+            // is plausibly a slider or a parsed string, and neither 5 nor -1 belongs in a
+            // TerrainData. NaN is the case a bare Mathf.Clamp01 gets wrong - every comparison
+            // against a NaN is false, so it falls straight through the clamp and into the engine.
+            Check(global::RealGrass.RealGrassPort.ClampWind(0.3f) == 0.3f
+                  && global::RealGrass.RealGrassPort.ClampWind(0f) == 0f
+                  && global::RealGrass.RealGrassPort.ClampWind(1f) == 1f,
+                "RealGrass: ClampWind passes a value already inside 0..1 through untouched");
+            Check(global::RealGrass.RealGrassPort.ClampWind(5f) == 1f
+                  && global::RealGrass.RealGrassPort.ClampWind(-1f) == 0f
+                  && global::RealGrass.RealGrassPort.ClampWind(float.PositiveInfinity) == 1f
+                  && global::RealGrass.RealGrassPort.ClampWind(float.NegativeInfinity) == 0f,
+                "RealGrass: ClampWind clamps out of range to 0..1, infinities included",
+                global::RealGrass.RealGrassPort.ClampWind(5f) + " / "
+                + global::RealGrass.RealGrassPort.ClampWind(-1f));
+            Check(global::RealGrass.RealGrassPort.ClampWind(float.NaN) == 0f,
+                "RealGrass: ClampWind sends a NaN to 0 rather than letting it fall through the comparisons",
+                global::RealGrass.RealGrassPort.ClampWind(float.NaN).ToString());
+            Check(global::RealGrass.RealGrassPort.ClampWind(global::RealGrass.RealGrassPort.DefaultWindSpeed) == global::RealGrass.RealGrassPort.DefaultWindSpeed
+                  && global::RealGrass.RealGrassPort.ClampWind(global::RealGrass.RealGrassPort.DefaultWindStrength) == global::RealGrass.RealGrassPort.DefaultWindStrength
+                  && global::RealGrass.RealGrassPort.ClampWind(global::RealGrass.RealGrassPort.DefaultWindAmount) == global::RealGrass.RealGrassPort.DefaultWindAmount,
+                "RealGrass: the shipped defaults survive their own clamp - the dials are what the terrain gets");
+            // And they have to be written where the tint is: StreamingWorld pools and reuses
+            // TerrainData, so terrain promotion is the one place guaranteed to run for every
+            // terrain that ever carries grass. Written anywhere else - Init, say - a recycled
+            // TerrainData would wave at whatever the last owner left on it.
+            string portSrcForWind = StripShaderComments(File.ReadAllText(
+                "Assets/Scripts/Game/Mobile/Ports/RealGrass/RealGrass.cs"));
+            string addDetails = MethodBody(portSrcForWind,
+                "private void AddTerrainDetails(DaggerfallTerrain daggerTerrain, TerrainData terrainData)");
+            Check(addDetails.Contains("terrainData.wavingGrassTint = Color.gray;")
+                  && addDetails.Contains("terrainData.wavingGrassSpeed = RealGrassPort.ClampWind(RealGrassPort.WindSpeed);")
+                  && addDetails.Contains("terrainData.wavingGrassStrength = RealGrassPort.ClampWind(RealGrassPort.WindStrength);")
+                  && addDetails.Contains("terrainData.wavingGrassAmount = RealGrassPort.ClampWind(RealGrassPort.WindAmount);"),
+                "RealGrass: all three go onto the TerrainData in terrain promotion, beside the tint, through the clamp");
+            Check(portSrcForWind.Contains("wind speed {15:0.00} strength {16:0.00} amount {17:0.00}")
+                  && addDetails.Contains("terrainData.wavingGrassSpeed, terrainData.wavingGrassStrength"),
+                "RealGrass: the detail data line reports the wind AS APPLIED, read back off the TerrainData");
+
             // ---- 2. the cost arithmetic that justifies the configuration ----
             Check(global::RealGrass.RealGrassPort.DetailPatchesPerTerrain(256, 16) == 256,
                 "RealGrass: (256, 16) is 256 detail patches per terrain",
@@ -4490,7 +4562,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(modeAt >= 0 && foldAt > modeAt && layerAt > foldAt,
                 "RealGrass: scatter mode, then the fold to the scatter ceiling, then SetDetailLayer - in that order",
                 modeAt + " < " + foldAt + " < " + layerAt);
-            Check(grassSrc.Contains("layers {2} [{12}], style {13}/{14}, terrains {3}, scatter {4}/{5}, density {6:0.00}, distance {7:0} m [device {10} MB -> class default {11:0} m], soft veg {8}, target {9:0.00} inst/m2)")
+            Check(grassSrc.Contains("layers {2} [{12}], style {13}/{14}, terrains {3}, scatter {4}/{5}, density {6:0.00}, distance {7:0} m [device {10} MB -> class default {11:0} m], soft veg {8}, target {9:0.00} inst/m2, wind speed {15:0.00} strength {16:0.00} amount {17:0.00})")
                   && grassSrc.Contains("densityManager.DescribeLayerCounts()")
                   && grassSrc.Contains("terrainData.detailScatterMode, RealGrassPort.MaxDetailValue")
                   && grassSrc.Contains("terrain.detailObjectDensity, terrain.detailObjectDistance"),
