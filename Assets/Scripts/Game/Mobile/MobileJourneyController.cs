@@ -171,6 +171,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         public bool FollowingRoad { get { return route != null && routeStep < route.Count; } }
+
+        // PASSING THROUGH IS NOT A VISIT. See the region of the same name at the bottom of this
+        // file: the map id of the last place the journey actually stopped or settled at, so a
+        // settlement the journey chose to spend time in reads as visited and every hamlet the road
+        // merely runs through does not.
+        int stoppedAtMapId = -1;
+
         bool nightHandled;              // this night's stop already decided
         bool travellingOnToInn;         // inn mode, dark, no town yet: stop at the next one
         bool resumeAfterRestQueued;     // the camp rest screen closed; pick the journey up
@@ -316,6 +323,15 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             GameManager.Instance.PauseGame(false);
         }
+
+#if DFU_IOS_TESTAPP
+        /// <summary>
+        /// TEST APP ONLY. Turns the pass-through gate off, so one binary can be measured before and after them on the
+        /// same route, with no build-to-build variance in the comparison. Driven by `journeyfix 0`
+        /// in debug-newchar.txt; defaults on, and the whole switch is compiled out of a release.
+        /// </summary>
+        public static bool DebugJourneyFixes = true;
+#endif
 
         /// <summary>
         /// Measure how fast the player is ACTUALLY moving, in world units per real second.
@@ -486,6 +502,30 @@ namespace DaggerfallWorkshop.Game.Mobile
             return HasInstance && Instance.Resume();
         }
 
+#if DFU_IOS_TESTAPP
+        /// <summary>
+        /// TEST APP ONLY. Start a journey to a map pixel without the travel map and popup, so a
+        /// scripted run can drive one (MobileDebugStart's `journey X Y`). Cautious and inn mode,
+        /// which is what the popup defaults to and what puts the route on the roads - the road is
+        /// the case that matters here, because it is the road that walks through every hamlet.
+        /// </summary>
+        public static bool DebugBeginJourneyTo(int mapPixelX, int mapPixelY)
+        {
+            if (!HasInstance)
+                return false;
+
+            MobileJourneyController journey = Instance;
+            if (!journey.StoreDestination(new DFPosition(mapPixelX, mapPixelY)))
+                return false;
+
+            JourneyModeEnabled = true;
+            journey.SpeedCautious = true;
+            journey.SleepModeInn = true;
+            journey.TimeCompression = DefaultTimeCompression;
+            return journey.Resume();
+        }
+#endif
+
         bool StoreDestination(DFPosition endPos)
         {
             if (endPos == null || IsTravelling)
@@ -506,6 +546,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             destinationSummary = summary;
             destinationName = location.Name;
             destinationValid = true;
+            stoppedAtMapId = -1;        // a new journey carries no memory of where the last one stopped
             return true;
         }
 
@@ -758,7 +799,10 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             // Pinned in the destination's own pixel - against its city wall, typically (device
             // report: Burgwall). That IS arrival: the player is at the gates.
-            if (gps != null && gps.HasCurrentLocation && gps.CurrentMapID == destinationSummary.ID)
+            // MapSummary.MapID, not .ID - CurrentMapID is the unmasked MapTableData.MapId and .ID is
+            // that masked with 0x000fffff, so this never matched and being blocked at the
+            // destination's own walls was treated as a town to be crossed rather than as arrival.
+            if (gps != null && gps.HasCurrentLocation && gps.CurrentMapID == destinationSummary.MapID)
             {
                 Debug.Log("[Journey] blocked at the destination's walls - counting it as arrival");
                 Stop(JourneyEnd.Arrived);
@@ -767,7 +811,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             // In a town the block is a building, and the journey is only passing through:
             // cross to the far side rather than leaving the player against a wall.
-            if (gps != null && gps.HasCurrentLocation && gps.CurrentMapID != destinationSummary.ID &&
+            if (gps != null && gps.HasCurrentLocation && gps.CurrentMapID != destinationSummary.MapID &&
                 IsSettlement(gps.CurrentLocationType) && PassThroughSettlement(gps.CurrentMapPixel))
                 return;
 
@@ -1042,7 +1086,11 @@ namespace DaggerfallWorkshop.Game.Mobile
             int mapId = gps.CurrentMapID;
 
             // The destination itself is arrival, not a place to be asked about.
-            if (mapId == destinationSummary.ID || offeredPlaces.Contains(mapId))
+            // MapSummary.MapID, not .ID: PlayerGPS.CurrentMapID is the FULL MapTableData.MapId and
+            // MapSummary.ID is that masked with 0x000fffff, so comparing the two never matched and
+            // the journey offered to stop at the town it was walking to. Seen in the simulator run:
+            // "You are passing Warlech. Stop here?" at Warlech, the destination.
+            if (mapId == destinationSummary.MapID || offeredPlaces.Contains(mapId))
                 return false;
 
             if (!IsSettlement(gps.CurrentLocationType))
@@ -1225,6 +1273,10 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         void SpendNightAtInn(string townName)
         {
+            // A night in this town's inn is a visit even though the journey never stops: Stop() is
+            // not called on this path, so the pass-through gate has to be cleared here instead.
+            CountAsVisit();
+
             restingForJourney = true;          // the clock jumps to dawn below; see StatusEffectsPausedFor
             PlayerEntity player = GameManager.Instance.PlayerEntity;
             int cost = InnCost();
@@ -1493,6 +1545,10 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public void Stop(JourneyEnd reason)
         {
+            // Wherever the journey ends, the player is THERE now - a settlement it stops in is a
+            // visit, not a pass-through, and any quest entry held back on the way in is taken.
+            CountAsVisit();
+
             if (reason != JourneyEnd.Resting)
                 restingForJourney = false;
             RestoreNormalTime();
@@ -1527,6 +1583,78 @@ namespace DaggerfallWorkshop.Game.Mobile
             // Interrupted deliberately keeps the destination, so the travel map can offer to
             // resume rather than making the player pick the same place again.
         }
+
+        #endregion
+
+        #region Passing through
+
+        /// <summary>
+        /// PURE. Is the settlement the player is standing in merely being passed through?
+        ///
+        /// A journey walks the road, and the road runs through every hamlet between here and
+        /// there. The quest engine reads each of those as an arrival, so packs that greet the
+        /// player on "when pc enters hamlet" fire at all of them - reported from the device as
+        /// message boxes "nonstop" while travelling. Vanilla fast travel never enters the towns it
+        /// flies over; this is the same rule for a journey that is genuinely walking past.
+        ///
+        /// Four conditions, all of which must hold for it to be a pass-through:
+        ///   pilotActive          - the autopilot is driving. Walking or riding by hand is a visit.
+        ///   inLocationRect       - there is a settlement to be passing through at all.
+        ///   !locationIsDestination - arriving where you were going is the opposite of passing by.
+        ///   !stoppedHere         - the journey chose to spend time here (the player accepted the
+        ///                          "stop here?" offer, an encounter ended it, or it took a room
+        ///                          for the night). Inn nights and camps are visits.
+        /// </summary>
+        public static bool PassingThrough(bool pilotActive, bool inLocationRect,
+                                          bool locationIsDestination, bool stoppedHere)
+        {
+            return pilotActive && inLocationRect && !locationIsDestination && !stoppedHere;
+        }
+
+        /// <summary>
+        /// <see cref="PassingThrough"/> asked of the live game. The quest engine's location
+        /// enter/exit trigger (Questing/Actions/WhenPcEntersExits.cs) is the only caller; nothing
+        /// else in the engine changes behaviour for a journey, so PlayerGPS still raises its own
+        /// enter/exit events for every settlement and everything keyed on them - ambient town
+        /// sound, the HUD place marker, map discovery, guild hall reveal, the "You are entering"
+        /// text - behaves exactly as it does on foot.
+        /// </summary>
+        public static bool PassingThroughNow()
+        {
+#if DFU_IOS_TESTAPP
+            if (!DebugJourneyFixes)
+                return false;       // measuring the old behaviour: every settlement counts as a visit
+#endif
+            if (!HasInstance || !GameManager.HasInstance)
+                return false;
+
+            MobileJourneyController journey = Instance;
+            PlayerGPS gps = GameManager.Instance.PlayerGPS;
+            if (gps == null)
+                return false;
+
+            // MapSummary.MapID, not .ID - see CheckPassingPlace: CurrentMapID is the unmasked id.
+            int mapId = gps.HasCurrentLocation ? gps.CurrentMapID : -1;
+            bool isDestination = journey.destinationValid && mapId != -1 && mapId == journey.destinationSummary.MapID;
+            bool stoppedHere = mapId != -1 && mapId == journey.stoppedAtMapId;
+
+            return PassingThrough(MobileJourneyPilot.Active, gps.IsPlayerInLocationRect,
+                                  isDestination, stoppedHere);
+        }
+
+        /// <summary>
+        /// The journey has stopped, or settled for the night, where the player is standing: this
+        /// place is a visit from now on. Held quest entries are taken on the next quest tick.
+        /// </summary>
+        void CountAsVisit()
+        {
+            PlayerGPS gps = GameManager.HasInstance ? GameManager.Instance.PlayerGPS : null;
+            stoppedAtMapId = (gps != null && gps.HasCurrentLocation) ? gps.CurrentMapID : -1;
+        }
+
+        #endregion
+
+        #region Save state
 
         void OnSaveLoaded(SaveData_v1 saveData)
         {

@@ -1099,3 +1099,50 @@ self-test's object-identity check in the Editor rather than by a black patch of 
 The port also reads `StreamingWorld.TerrainDistance` (for the live-terrain count in its memory line)
 and `terrainData.maxDetailScatterPerRes`; neither is load-bearing — the first falls back to DFU's
 shipped 3, and the second only sets the clamp ceiling.
+
+### Passing through a settlement on autopilot is not a visit (2026-09-13) — `Assets/Scripts/Game/Questing/Actions/WhenPcEntersExits.cs` (+56/-6)
+
+**One engine file, one class.** Real travel walks the road, and a road route runs *through* every
+hamlet between the start and the destination. The quest engine's `when pc enters <type>` /
+`when pc exits <type>` trigger reads each of those as an arrival, so quest packs keyed on it fire at
+all of them: Cliffworms' *Town Greetings of the Iliac Bay* greets the player at every settlement type
+once a day, and Jay_H's *Random Little Quests* re-arms its event timer on `when pc enters
+city|hamlet|village` and then fires a `say` one to four game-minutes later. Under 20x time
+compression that is a message box every few real seconds. Reported from the device as pop-ups
+"nonstop" during a journey.
+
+Vanilla fast travel never enters the towns it flies over. The patch restores that rule for a journey
+that is genuinely walking past:
+
+* `WhenPcEntersExits` gains one field, `heldLocationType`. Its `OnEnterLocationRect` handler asks
+  `MobileJourneyController.PassingThroughNow()`; when that is true the entry is **held** instead of
+  written into `currentLocationType`, so `HasEnteredTarget()` stays false.
+* `CheckTrigger` calls `PromoteHeldEntry()` first. The moment the gate stops being true — the journey
+  stopped here, or it turns out to be the destination — the held entry is written for real and the
+  trigger fires normally. A place the journey *actually* stops at greets the player exactly as it
+  always did.
+* `OnExitLocationRect` drops a still-held entry and returns without touching `previousLocationType`.
+  Entry and exit are therefore symmetric: **a pass-through produces neither**.
+* `SaveData_v1` carries `heldLocationType` so a save taken mid-pass-through restores consistently
+  (a reload ends the journey, so the held entry is promoted on the next quest tick, which is right —
+  the player really is standing in that town now).
+
+The gate itself is pure and lives in the port:
+`MobileJourneyController.PassingThrough(pilotActive, inLocationRect, locationIsDestination,
+stoppedHere)` — true only when the autopilot is driving, there is a location rect, it is not the
+destination, and the journey has not stopped here. `stoppedHere` is fed by `CountAsVisit()`, called
+from the single `Stop()` exit path and from `SpendNightAtInn()` (an inn night is a visit even though
+the journey never stops on that path). Manual walking and riding are untouched — `pilotActive` is
+false.
+
+**`PlayerGPS` is deliberately NOT patched.** `PlayerLocationRectCheck()` still discovers the location
+and still raises `OnEnterLocationRect` / `OnExitLocationRect` for every settlement the journey passes,
+so everything else keyed on them behaves as it does on foot: `AmbientEffectsPlayer` town sound,
+`HUDPlaceMarker`, `PlayerEnterExit`, `PlayerEntity`, the Thieves Guild and Dark Brotherhood guild-hall
+reveal, and the "You have arrived"/place HUD text. Only the quest engine's reading of "entered"
+changes, which is the smallest surface that fixes the report. A self-test pin asserts `PlayerGPS.cs`
+contains no `PassingThrough`, so the blast radius cannot quietly grow.
+
+*Rebase risk: LOW.* One class, three methods, all additive; upstream changes to `WhenPcEntersExits`
+would conflict textually rather than semantically. If the gate call were lost in a merge the only
+consequence is the old behaviour returning, which the device test catches immediately.

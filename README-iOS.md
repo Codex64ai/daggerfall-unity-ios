@@ -573,12 +573,20 @@ property by reflection and saves it, and `Documents` is the same folder players 
 `arena2` into, so the command file must not be able to arm anything in a shipping binary. In a
 release build `debug-newchar.txt` is simply ignored.
 
-The file is read line by line, and two commands are recognised:
+The file is read line by line, and four commands are recognised:
 
 | Line | What it does |
 |---|---|
 | `pixel <X> <Y>` | teleport there once the world is up (`pixel 207 213` is Daggerfall city) and add a `LOCATION` summary of every renderer in the town |
 | `set [<seconds>] <Name> <value>` | write `DaggerfallUnity.Settings.<Name>` that many seconds after the world finishes loading, then deploy it the way the in-game settings panel does |
+| `journey <X> <Y>` | five seconds after the world settles, start Real travel's autopilot to that map pixel (cautious, inn mode, so the route follows roads) exactly as accepting the travel popup would |
+| `journeyfix <0\|1>` | turn the journey/quest-popup fixes (pass-through gate, hold under an open window) off or on for this run, so before and after box counts come off the same binary |
+
+A test-app build also writes one `MSGBOX` line to `Player.log` for every message box that reaches
+the top of the UI stack, with the box's first text row, whether a journey was running, and the map
+pixel and settlement it appeared at. Counting pop-ups during a journey is the measurement for
+"quest pop-ups appear nonstop while travelling", and a count read off a screen recording is not a
+count.
 
 Blank lines and lines beginning with `#` are ignored; anything else is reported as an
 unrecognised line in `Player.log` rather than silently dropped.

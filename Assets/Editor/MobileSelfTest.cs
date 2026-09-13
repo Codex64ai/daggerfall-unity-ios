@@ -93,6 +93,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestJourneyLocationHold();
             TestJourneySeaRoute();
             TestJourneyStatusEffectPause();
+            TestJourneyPassThrough();
             TestRouteRule();
             TestNightDecision();
             TestPassThroughGeometry();
@@ -5518,6 +5519,85 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// Active flag; with no journey running it must be off, so desktop and vanilla travel are
         /// untouched.
         /// </summary>
+        /// <summary>
+        /// PASSING THROUGH IS NOT A VISIT: the pure gate's truth table, and source pins on the
+        /// engine sites that consult it. The behaviour cannot be run headlessly - it needs a
+        /// PlayerGPS, a pilot and a quest machine - so the pins are what stop the wiring being
+        /// removed by a later edit while the truth table still passes.
+        /// </summary>
+        static void TestJourneyPassThrough()
+        {
+            var P = new Func<bool, bool, bool, bool, bool>(MobileJourneyController.PassingThrough);
+
+            Check(P(true, true, false, false),
+                  "pass-through: driving past a hamlet that is not the destination is not a visit");
+            Check(!P(false, true, false, false),
+                  "pass-through: walking in by hand is always a visit");
+            Check(!P(true, false, false, false),
+                  "pass-through: no location rect, nothing to pass through");
+            Check(!P(true, true, true, false),
+                  "pass-through: the destination is an arrival, not a pass-through");
+            Check(!P(true, true, false, true),
+                  "pass-through: a settlement the journey stops at (inn night, camp, interrupt) is a visit");
+            Check(!P(false, false, false, false) && !P(false, true, true, true),
+                  "pass-through: with no pilot the answer is never true");
+
+            // Live form must be safe to call from the quest engine with no journey in existence.
+            Check(!MobileJourneyController.PassingThroughNow(),
+                  "pass-through: the live gate is false in the editor, where no journey exists");
+
+            // ENGINE SITE 1 - the only quest-engine change. Both handlers and the promote step.
+            string enters = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Questing/Actions/WhenPcEntersExits.cs"));
+            Check(enters.Contains("heldLocationType"),
+                  "pass-through: WhenPcEntersExits holds a pass-through entry rather than taking it");
+            Check(enters.Contains("PromoteHeldEntry();"),
+                  "pass-through: WhenPcEntersExits promotes a held entry from CheckTrigger");
+            Check(enters.Contains("Mobile.MobileJourneyController.PassingThroughNow()"),
+                  "pass-through: WhenPcEntersExits consults the journey gate");
+            Check(System.Text.RegularExpressions.Regex.IsMatch(enters,
+                      @"PlayerGPS_OnExitLocationRect\(\)\s*\{\s*if \(heldLocationType != DFRegion\.LocationTypes\.None\)"),
+                  "pass-through: enter and exit are symmetric - a held entry produces no exit");
+
+            // ENGINE SITE COUNT. PlayerGPS is deliberately untouched, so ambient sound, the HUD
+            // place marker, discovery and the guild hall reveal all still see every settlement.
+            string gps = StripShaderComments(File.ReadAllText("Assets/Scripts/Internal/PlayerGPS.cs"));
+            Check(!gps.Contains("PassingThrough"),
+                  "pass-through: PlayerGPS still raises its own enter/exit events for every settlement");
+
+            // The journey side: stopping anywhere, and a night at an inn, count the place as a visit.
+            string journey = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileJourneyController.cs"));
+            Check(journey.Contains("void CountAsVisit()") && journey.Contains("stoppedAtMapId"),
+                  "pass-through: the controller remembers where the journey stopped");
+            // PlayerGPS.CurrentMapID is the unmasked MapTableData.MapId; MapSummary.ID is masked
+            // with 0x000fffff. Comparing the two never matches, so the destination read as somewhere
+            // the journey was merely passing ("You are passing Warlech. Stop here?" at Warlech).
+            Check(System.Text.RegularExpressions.Regex.Matches(journey, @"destinationSummary\.ID\b").Count == 1 &&
+                  System.Text.RegularExpressions.Regex.Matches(journey, @"destinationSummary\.MapID\b").Count == 4,
+                  "pass-through: the destination is matched on the unmasked MapID at every site that asks");
+            Check(System.Text.RegularExpressions.Regex.IsMatch(journey,
+                      @"public void Stop\(JourneyEnd reason\)\s*\{\s*CountAsVisit\(\);"),
+                  "pass-through: every journey exit path counts the place it ended at as a visit");
+            Check(System.Text.RegularExpressions.Regex.IsMatch(journey,
+                      @"void SpendNightAtInn\(string townName\)\s*\{\s*CountAsVisit\(\);"),
+                  "pass-through: a night at an inn is a visit even though the journey never stops");
+            Check(journey.Contains("DebugBeginJourneyTo") && journey.Contains("#if DFU_IOS_TESTAPP"),
+                  "pass-through: the scripted journey entry point is test-app only");
+            Check(System.Text.RegularExpressions.Regex.IsMatch(journey,
+                      @"#if DFU_IOS_TESTAPP\s*public static bool DebugJourneyFixes = true;\s*#endif"),
+                  "pass-through: the before/after switch defaults on and compiles out of a release");
+
+            // The debug harness that measures it.
+            string dbg = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileDebugStart.cs"));
+            Check(dbg.Contains("w[0] == \"journey\"") && dbg.Contains("MSGBOX"),
+                  "pass-through: debug-newchar.txt understands `journey X Y` and logs every message box");
+            Check(File.ReadAllText("README-iOS.md").Contains("journey <X> <Y>"),
+                  "pass-through: README-iOS documents the journey debug command");
+
+            // UPSTREAM-PATCHES must name the engine file that was touched.
+            Check(File.ReadAllText("UPSTREAM-PATCHES.md").Contains("WhenPcEntersExits.cs"),
+                  "pass-through: UPSTREAM-PATCHES lists the quest-engine site");
+        }
+
         static void TestJourneyStatusEffectPause()
         {
             Check(!MobileJourneyPilot.Active, "status pause: no journey is running in the editor");

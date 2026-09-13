@@ -30,6 +30,22 @@ namespace DaggerfallWorkshop.Game.Questing.Actions
         DFRegion.LocationTypes currentLocationType = DFRegion.LocationTypes.None;
         DFRegion.LocationTypes previousLocationType = DFRegion.LocationTypes.None;
 
+        // MOBILE: PASSING THROUGH IS NOT A VISIT.
+        // The iOS port walks journeys instead of teleporting them (MobileJourneyController), and a
+        // road route runs THROUGH every hamlet between here and there. Left alone, each of those
+        // counts as an entry, so packs keyed on "when pc enters hamlet" (Town Greetings of the
+        // Iliac Bay, Jay_H's Random Little Quests) fire at every one and the player is buried in
+        // message boxes - reported from the device as pop-ups "nonstop" during a journey.
+        //
+        // Vanilla fast travel never enters the towns it flies over, and this restores that: while
+        // the autopilot is driving and the settlement is not the destination, the entry is HELD
+        // rather than taken. Held, not dropped - the moment the journey stops there (the player
+        // accepts the "stop here?" offer, an encounter ends it, or it takes a room for the night)
+        // the gate clears and the held entry is taken for real, so a place the journey actually
+        // stops at greets the player normally. A held entry that is never taken produces no exit
+        // either, which keeps enter/exit symmetric: a pass-through produces neither.
+        DFRegion.LocationTypes heldLocationType = DFRegion.LocationTypes.None;
+
         public override string Pattern
         {
             get { return @"when pc (?<enters>enters) (?<exteriorType>\w+)|when pc (?<exits>exits) (?<exteriorType>\w+)"; }
@@ -83,11 +99,29 @@ namespace DaggerfallWorkshop.Game.Questing.Actions
 
         public override bool CheckTrigger(Task caller)
         {
+            // MOBILE: a held pass-through entry becomes a real one as soon as the journey stops here.
+            PromoteHeldEntry();
+
             // Has player entered or exited a target location
             if (HasEnteredTarget() || HasExitedTarget())
                 return true;
 
             return false;
+        }
+
+        // MOBILE: see heldLocationType. Takes the held entry once the journey is no longer merely
+        // passing through this settlement - it stopped, or it was the destination all along.
+        void PromoteHeldEntry()
+        {
+            if (heldLocationType == DFRegion.LocationTypes.None)
+                return;
+
+            if (Mobile.MobileJourneyController.PassingThroughNow())
+                return;
+
+            previousLocationType = currentLocationType;
+            currentLocationType = heldLocationType;
+            heldLocationType = DFRegion.LocationTypes.None;
         }
 
         public override void Dispose()
@@ -158,15 +192,31 @@ namespace DaggerfallWorkshop.Game.Questing.Actions
 
         private void PlayerGPS_OnEnterLocationRect(DFLocation location)
         {
+            DFRegion.LocationTypes entered = location.Loaded
+                ? location.MapTableData.LocationType
+                : DFRegion.LocationTypes.None;
+
+            // MOBILE: hold the entry while the journey is only passing through (see heldLocationType).
+            if (entered != DFRegion.LocationTypes.None && Mobile.MobileJourneyController.PassingThroughNow())
+            {
+                heldLocationType = entered;
+                return;
+            }
+
+            heldLocationType = DFRegion.LocationTypes.None;
             previousLocationType = currentLocationType;
-            if (location.Loaded)
-                currentLocationType = location.MapTableData.LocationType;
-            else
-                currentLocationType = DFRegion.LocationTypes.None;
+            currentLocationType = entered;
         }
 
         private void PlayerGPS_OnExitLocationRect()
         {
+            // MOBILE: an entry that was never taken has no exit to report either.
+            if (heldLocationType != DFRegion.LocationTypes.None)
+            {
+                heldLocationType = DFRegion.LocationTypes.None;
+                return;
+            }
+
             previousLocationType = currentLocationType;
             currentLocationType = DFRegion.LocationTypes.None;
         }
@@ -193,6 +243,7 @@ namespace DaggerfallWorkshop.Game.Questing.Actions
             public int indexExteriorType;
             public DFRegion.LocationTypes currentLocationType;
             public DFRegion.LocationTypes previousLocationType;
+            public DFRegion.LocationTypes heldLocationType;     // MOBILE: see the field
         }
 
         public override object GetSaveData()
@@ -203,6 +254,7 @@ namespace DaggerfallWorkshop.Game.Questing.Actions
             data.indexExteriorType = indexExteriorType;
             data.currentLocationType = currentLocationType;
             data.previousLocationType = previousLocationType;
+            data.heldLocationType = heldLocationType;           // MOBILE
 
             return data;
         }
@@ -218,6 +270,7 @@ namespace DaggerfallWorkshop.Game.Questing.Actions
             indexExteriorType = data.indexExteriorType;
             currentLocationType = data.currentLocationType;
             previousLocationType = data.previousLocationType;
+            heldLocationType = data.heldLocationType;           // MOBILE
 
             // Register events when restoring action
             RegisterEvents();

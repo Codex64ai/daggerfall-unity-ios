@@ -56,9 +56,19 @@ namespace DaggerfallWorkshop.Game.Mobile
     {
         public const string FileName = "debug-newchar.txt";
         public static bool Active { get; private set; }
+
+        /// <summary>`journeyfix 0|1` from the command file: -1 means the line was not present.</summary>
+        public static int journeyFix = -1;
         static readonly HashSet<string> audited = new HashSet<string>();
 #if DFU_IOS_TESTAPP
         static int targetX = -1, targetY = -1;   // "pixel X Y" in the command file teleports there once in the world
+        static int journeyX = -1, journeyY = -1; // "journey X Y" starts the real-travel autopilot to that map pixel
+        static bool journeyStarted;
+        static bool boxLoggerInstalled;
+        static readonly HashSet<object> loggedBoxes = new HashSet<object>();
+        static DaggerfallWorkshop.Game.UserInterfaceWindows.DaggerfallMessageBox pendingBox;
+        static float pendingBoxAt;
+        static int boxesSeen;
 
         /// <summary>One scheduled `set` line: a settings property written <see cref="at"/> seconds
         /// after the world finished loading.</summary>
@@ -92,8 +102,23 @@ namespace DaggerfallWorkshop.Game.Mobile
         public static List<string> ParseCommands(string text, out int pixelX, out int pixelY,
                                                  out List<KeyValuePair<float, string>> sets)
         {
+            int jx, jy;
+            return ParseCommands(text, out pixelX, out pixelY, out sets, out jx, out jy);
+        }
+
+        /// <summary>
+        /// As above, plus the `journey X Y` destination. Separate overload rather than a fifth out
+        /// parameter on the original so existing callers (and their tests) are untouched.
+        /// </summary>
+        public static List<string> ParseCommands(string text, out int pixelX, out int pixelY,
+                                                 out List<KeyValuePair<float, string>> sets,
+                                                 out int toX, out int toY)
+        {
             pixelX = -1;
             pixelY = -1;
+            toX = -1;
+            toY = -1;
+            journeyFix = -1;
             sets = new List<KeyValuePair<float, string>>();
             List<string> errors = new List<string>();
             float previous = 0f;
@@ -115,6 +140,26 @@ namespace DaggerfallWorkshop.Game.Mobile
                 {
                     int x, y;
                     if (int.TryParse(w[1], out x) && int.TryParse(w[2], out y)) { pixelX = x; pixelY = y; }
+                    else errors.Add(line);
+                    continue;
+                }
+
+                // `journeyfix 0|1` - turn the journey/quest-popup fixes off or on for this run, so
+                // the before and after box counts come off the SAME binary on the same route.
+                if (w[0] == "journeyfix" && w.Length >= 2)
+                {
+                    if (w[1] == "0" || w[1] == "1") journeyFix = w[1] == "1" ? 1 : 0;
+                    else errors.Add(line);
+                    continue;
+                }
+
+                // `journey X Y` - start Real travel's autopilot to that map pixel once the world is
+                // up. There is no other scripted way into a journey (it begins from a tap on the
+                // travel popup), and the pass-through rules cannot be driven from the self test.
+                if (w[0] == "journey" && w.Length >= 3)
+                {
+                    int x, y;
+                    if (int.TryParse(w[1], out x) && int.TryParse(w[2], out y)) { toX = x; toY = y; }
                     else errors.Add(line);
                     continue;
                 }
@@ -166,7 +211,15 @@ namespace DaggerfallWorkshop.Game.Mobile
             try
             {
                 List<KeyValuePair<float, string>> sets;
-                List<string> errors = ParseCommands(File.ReadAllText(file), out targetX, out targetY, out sets);
+                List<string> errors = ParseCommands(File.ReadAllText(file), out targetX, out targetY, out sets,
+                                                    out journeyX, out journeyY);
+                if (journeyX >= 0)
+                    Debug.Log(string.Format("[DebugStart] scheduled: journey to map pixel {0},{1}", journeyX, journeyY));
+                if (journeyFix >= 0)
+                {
+                    MobileJourneyController.DebugJourneyFixes = journeyFix == 1;
+                    Debug.Log("[DebugStart] journey/quest-popup fixes " + (journeyFix == 1 ? "ON" : "OFF (measuring the old behaviour)"));
+                }
                 foreach (KeyValuePair<float, string> s in sets)
                 {
                     string[] nv = s.Value.Split(' ');
@@ -192,6 +245,12 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         static void RunSetCommands()
         {
+            LogMessageBoxes();
+            AnswerPendingBox();
+            CloseRestWindow();
+            StartScheduledJourney();
+            ReportJourneyEnd();
+
             if (snapshotsOwed > 0)
             {
                 snapshotsOwed--;
@@ -281,6 +340,219 @@ namespace DaggerfallWorkshop.Game.Mobile
             {
                 Debug.LogWarning("[DebugStart] set " + name + " = " + value + " threw: " + ex.Message);
             }
+        }
+
+        /// <summary>
+        /// One line per message box the moment it reaches the top of the UI stack, with its first
+        /// text row. Counting boxes is the whole measurement for "quest pop-ups appear nonstop
+        /// during a journey", and a count read off a screen recording is not a count.
+        /// </summary>
+        static void LogMessageBoxes()
+        {
+            // DaggerfallUI does not exist at AfterSceneLoad, so this is retried every frame from
+            // the driver until it takes. Installed once, for the life of the run.
+            if (boxLoggerInstalled || !DaggerfallUI.HasInstance || DaggerfallUI.UIManager == null)
+                return;
+            boxLoggerInstalled = true;
+
+            DaggerfallUI.UIManager.OnWindowChange += (sender, e) =>
+            {
+                var box = DaggerfallUI.UIManager.TopWindow as DaggerfallWorkshop.Game.UserInterfaceWindows.DaggerfallMessageBox;
+                if (box == null || !loggedBoxes.Add(box))
+                    return;
+
+                string first = "?";
+                try
+                {
+                    FieldInfo f = typeof(DaggerfallWorkshop.Game.UserInterfaceWindows.DaggerfallMessageBox)
+                        .GetField("label", BindingFlags.NonPublic | BindingFlags.Instance);
+                    var mftl = f != null ? f.GetValue(box) as DaggerfallWorkshop.Game.UserInterface.MultiFormatTextLabel : null;
+                    if (mftl != null && mftl.TextLabels != null && mftl.TextLabels.Count > 0)
+                        foreach (var tl in mftl.TextLabels)
+                            if (tl != null && !string.IsNullOrEmpty(tl.Text)) { first = tl.Text; break; }
+                }
+                catch (System.Exception ex) { first = "<" + ex.GetType().Name + ">"; }
+
+                var gm = GameManager.HasInstance ? GameManager.Instance : null;
+                var gps = gm != null ? gm.PlayerGPS : null;
+                boxesSeen++;
+                Debug.Log(string.Format("[DebugStart] MSGBOX #{0} travelling={1} pixel={2},{3} loc='{4}' inRect={5} text=\"{6}\"",
+                    boxesSeen, MobileJourneyPilot.Active,
+                    gps != null ? gps.CurrentMapPixel.X : -1, gps != null ? gps.CurrentMapPixel.Y : -1,
+                    gps != null && gps.HasCurrentLocation ? gps.CurrentLocation.Name : "-",
+                    gps != null && gps.IsPlayerInLocationRect, first));
+
+                // A scripted journey has no finger to dismiss boxes with, and one unanswered
+                // prompt stops the run dead (measured: the journey never left its first map pixel).
+                // Only while a `journey` line is driving the run.
+                if (journeyX >= 0)
+                {
+                    pendingBox = box;
+                    pendingBoxAt = Time.realtimeSinceStartup;
+                }
+            };
+        }
+
+        /// <summary>
+        /// Answers the logged box a moment later: its default button if it has one (that is what
+        /// Return does), otherwise the last button added, otherwise just closes it. Unscaled time,
+        /// because the game is paused under the box.
+        /// </summary>
+        static void AnswerPendingBox()
+        {
+            if (pendingBox == null || Time.realtimeSinceStartup - pendingBoxAt < 1f)
+                return;
+
+            var box = pendingBox;
+            pendingBox = null;
+            try
+            {
+                if (DaggerfallUI.UIManager.TopWindow != box)
+                    return;
+
+                var def = box.GetDefaultButton();
+                if (def == null)
+                {
+                    FieldInfo bf = typeof(DaggerfallWorkshop.Game.UserInterfaceWindows.DaggerfallMessageBox)
+                        .GetField("buttons", BindingFlags.NonPublic | BindingFlags.Instance);
+                    var list = bf != null ? bf.GetValue(box) as List<DaggerfallWorkshop.Game.UserInterface.Button> : null;
+                    if (list != null && list.Count > 0)
+                        def = list[list.Count - 1];
+                }
+
+                if (def != null)
+                {
+                    def.TriggerMouseClick();
+                    Debug.Log("[DebugStart] MSGBOX answered with its default button");
+                }
+                else
+                {
+                    box.CloseWindow();
+                    Debug.Log("[DebugStart] MSGBOX closed");
+                }
+            }
+            catch (System.Exception ex) { Debug.Log("[DebugStart] MSGBOX answer threw: " + ex.Message); }
+        }
+
+        static float restWindowSeenAt = -1f;
+
+        /// <summary>
+        /// Closes the camp rest screen a moment after it appears. A journey that meets nightfall in
+        /// the open stops and puts Daggerfall's Rest screen up, and a scripted run has no one to
+        /// answer it - measured as 15 restarts all spent camping on the same map pixel. Closing it
+        /// resumes the journey; the night is already marked handled, so it travels on rather than
+        /// camping again on the next frame.
+        /// </summary>
+        static void CloseRestWindow()
+        {
+            if (journeyX < 0 || !DaggerfallUI.HasInstance || DaggerfallUI.UIManager == null)
+                return;
+
+            var top = DaggerfallUI.UIManager.TopWindow as DaggerfallWorkshop.Game.UserInterfaceWindows.DaggerfallRestWindow;
+            if (top == null) { restWindowSeenAt = -1f; return; }
+            if (restWindowSeenAt < 0f) { restWindowSeenAt = Time.realtimeSinceStartup; return; }
+            if (Time.realtimeSinceStartup - restWindowSeenAt < 1.5f) return;
+
+            restWindowSeenAt = -1f;
+            RefillPlayer();
+            top.CloseWindow();
+            Debug.Log("[DebugStart] closed the camp rest screen; the journey travels on");
+        }
+
+        /// <summary>
+        /// Puts the player back on their feet. A scripted journey never eats, drinks or sleeps, so
+        /// vitals run down and the journey camps - and closing the camp screen without resting just
+        /// camps again on the next frame. Test scaffolding: applied identically before and after,
+        /// and only where the run would otherwise deadlock.
+        /// </summary>
+        static void RefillPlayer()
+        {
+            var p = GameManager.HasInstance ? GameManager.Instance.PlayerEntity : null;
+            if (p == null)
+                return;
+            p.CurrentHealth = p.MaxHealth;
+            p.CurrentFatigue = p.MaxFatigue;
+            p.CurrentMagicka = p.MaxMagicka;
+            if (DaggerfallUnity.Instance.WorldTime != null)
+                p.LastTimePlayerAteOrDrankAtTavern = DaggerfallUnity.Instance.WorldTime.Now.ToClassicDaggerfallTime();
+        }
+
+        /// <summary>Starts the `journey X Y` autopilot once, a few seconds after the world settles.</summary>
+        static void StartScheduledJourney()
+        {
+            if (journeyStarted || journeyX < 0 || worldReadyAt < 0f)
+                return;
+            if (Time.realtimeSinceStartup - worldReadyAt < 5f)
+                return;
+
+            journeyStarted = true;
+            bool began = MobileJourneyController.DebugBeginJourneyTo(journeyX, journeyY);
+            Debug.Log(string.Format("[DebugStart] journey to {0},{1}: {2}", journeyX, journeyY,
+                began ? "under way" : "REFUSED"));
+        }
+
+        static bool journeyEndReported;
+        static int journeyRestarts;
+        static float journeyStoppedAt;
+        const int maxJourneyRestarts = 40;
+
+        /// <summary>
+        /// A journey stops for encounters, vitals and quest foes, and on this route a
+        /// Random Little Quests foe stopped it in the first minute. A player would tap resume, so
+        /// the run does too - up to a cap - and only reports the journey over when it reaches the
+        /// destination or runs out of restarts. Each stop and restart is a log line.
+        /// </summary>
+        static void ReportJourneyEnd()
+        {
+            if (!journeyStarted || journeyEndReported || MobileJourneyPilot.Active)
+            {
+                journeyStoppedAt = -1f;
+                return;
+            }
+            if (Time.realtimeSinceStartup - worldReadyAt < 8f)
+                return;
+
+            var gps = GameManager.HasInstance ? GameManager.Instance.PlayerGPS : null;
+            int px = gps != null ? gps.CurrentMapPixel.X : -1;
+            int py = gps != null ? gps.CurrentMapPixel.Y : -1;
+            string loc = gps != null && gps.HasCurrentLocation ? gps.CurrentLocation.Name : "-";
+
+            if (journeyStoppedAt < 0f)
+            {
+                journeyStoppedAt = Time.realtimeSinceStartup;
+                Debug.Log(string.Format("[DebugStart] journey stopped at pixel {0},{1} loc='{2}' boxes={3}",
+                    px, py, loc, boxesSeen));
+                return;
+            }
+
+            bool arrived = px == journeyX && py == journeyY;
+            if (arrived || journeyRestarts >= maxJourneyRestarts)
+            {
+                journeyEndReported = true;
+                Debug.Log(string.Format("[DebugStart] JOURNEY ENDED {0} at pixel {1},{2} loc='{3}' boxes={4} restarts={5}",
+                    arrived ? "ARRIVED" : "GAVE UP", px, py, loc, boxesSeen, journeyRestarts));
+                return;
+            }
+
+            // Give the world a moment to settle (and any foe to wander off) before resuming.
+            if (Time.realtimeSinceStartup - journeyStoppedAt < 6f)
+                return;
+
+            // Clear whatever stopped it. A quest foe standing where the journey begins stops it on
+            // the frame it starts, forever (measured: 15 restarts without leaving Daggerfall), and
+            // a scripted run has no sword. Test scaffolding, applied identically before and after.
+            int killed = 0;
+            foreach (DaggerfallEnemy e in Object.FindObjectsByType<DaggerfallEnemy>(FindObjectsSortMode.None))
+                if (e != null) { Object.Destroy(e.gameObject); killed++; }
+            if (killed > 0)
+                Debug.Log("[DebugStart] cleared " + killed + " nearby enemies before resuming");
+
+            RefillPlayer();
+            journeyRestarts++;
+            bool again = MobileJourneyController.DebugBeginJourneyTo(journeyX, journeyY);
+            Debug.Log(string.Format("[DebugStart] journey restart {0}/{1} from {2},{3}: {4}",
+                journeyRestarts, maxJourneyRestarts, px, py, again ? "under way" : "REFUSED"));
+            journeyStoppedAt = again ? -1f : Time.realtimeSinceStartup;
         }
 
         /// <summary>
