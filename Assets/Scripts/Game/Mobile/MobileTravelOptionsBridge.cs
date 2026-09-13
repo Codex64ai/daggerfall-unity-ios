@@ -40,9 +40,17 @@ namespace DaggerfallWorkshop.Game.Mobile
                 case "showMessage":
                     if (data is string && !string.IsNullOrEmpty((string)data)) journey.Hud((string)data);
                     return true;
-                case "isPathFollowing":
                 case "isFollowingRoad":
                     if (callback != null) callback(message, journey.Active && journey.FollowingRoad);
+                    return true;
+                case "isPathFollowing":
+                    // Upstream this means "travelling with NO destination chosen" - Travel Options'
+                    // free path-following mode, where you simply follow the road you are on. A
+                    // journey here always has a destination, so the honest answer is always false.
+                    // C&C only reads it when isFollowingRoad is false (Hunting.HuntingRound,
+                    // ClimateCalories' extra fatigue drain), and this port has no mode in which
+                    // that pair could differ, so saying so plainly changes no behaviour.
+                    if (callback != null) callback(message, false);
                     return true;
             }
             return false;

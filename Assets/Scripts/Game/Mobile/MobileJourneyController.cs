@@ -324,9 +324,23 @@ namespace DaggerfallWorkshop.Game.Mobile
             GameManager.Instance.PauseGame(false);
         }
 
+        /// <summary>
+        /// Is a real window - a quest pop-up, a Climates &amp; Calories box, the travel map - still
+        /// pausing the game after ReleaseStalePause has had its say? Then the journey holds.
+        /// </summary>
+        static bool HoldUnderOpenWindow()
+        {
+#if DFU_IOS_TESTAPP
+            if (!DebugJourneyFixes)
+                return false;
+#endif
+            return GameManager.IsGamePaused;
+        }
+
 #if DFU_IOS_TESTAPP
         /// <summary>
-        /// TEST APP ONLY. Turns the pass-through gate off, so one binary can be measured before and after them on the
+        /// TEST APP ONLY. Turns BOTH journey/quest-popup fixes off - the pass-through gate and the
+        /// hold under an open window - so one binary can be measured before and after them on the
         /// same route, with no build-to-build variance in the comparison. Driven by `journeyfix 0`
         /// in debug-newchar.txt; defaults on, and the whole switch is compiled out of a release.
         /// </summary>
@@ -886,6 +900,25 @@ namespace DaggerfallWorkshop.Game.Mobile
             // message box - silently resets travel to 1x. Setting it once at departure is not
             // enough. Same reasoning as re-asserting mouse look in the pilot.
             ReleaseStalePause();
+
+            // A JOURNEY DOES NOT ADVANCE UNDER SOMEONE ELSE'S WINDOW.
+            // ReleaseStalePause above has already undone any pause that no visible window is
+            // asking for, so if the game is still paused here something real is on top of the
+            // travel bar - a quest pop-up, a Climates & Calories prompt, the travel map. The
+            // journey holds still for it, and that matters twice over:
+            //
+            //   - Time scale. This loop used to re-assert 20x on the very next frame, which
+            //     un-paused the world underneath the box: the player kept walking (at 20x) while
+            //     reading, and walked into the next hamlet, and the next box.
+            //   - Decisions. CheckVitals / CheckPassingPlace / CheckNightfall below would
+            //     otherwise stack a second message box on top of the one being read.
+            //
+            // Both resume on the frame after the box closes: RemoveWindow leaves the stack at
+            // [HUD, travel bar] without unpausing (it only unpauses at one window), ReleaseStalePause
+            // undoes that, and the next line puts the speed back. Nothing has to know which kind of
+            // box it was - a say, a yes/no prompt, or a C&C box all resume the same way.
+            if (HoldUnderOpenWindow())
+                return;
 
             int target = SustainableCompression();
             if (!Mathf.Approximately(Time.timeScale, target))

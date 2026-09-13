@@ -94,6 +94,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestJourneySeaRoute();
             TestJourneyStatusEffectPause();
             TestJourneyPassThrough();
+            TestJourneyResumesAfterBoxes();
             TestRouteRule();
             TestNightDecision();
             TestPassThroughGeometry();
@@ -3686,6 +3687,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(got is bool && (bool)got, "bridge: isFollowingRoad true on a road while travelling");
             j.FollowingRoad = false; got = null; MobileTravelOptionsBridge.Handle("isPathFollowing", null, (m, d) => got = d, j);
             Check(got is bool && !(bool)got, "bridge: isPathFollowing false off road");
+            // Upstream isPathFollowing means "travelling with no destination chosen"; a journey here
+            // always has one, so the answer is false even while following a road.
+            j.FollowingRoad = true; got = null; MobileTravelOptionsBridge.Handle("isPathFollowing", null, (m, d) => got = d, j);
+            Check(got is bool && !(bool)got, "bridge: isPathFollowing false on a road too - a journey always has a destination");
             bool called = false;
             Check(!MobileTravelOptionsBridge.Handle("somethingElse", null, (m, d) => called = true, j) && !called, "bridge: unknown message ignored, no callback");
         }
@@ -5596,6 +5601,53 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // UPSTREAM-PATCHES must name the engine file that was touched.
             Check(File.ReadAllText("UPSTREAM-PATCHES.md").Contains("WhenPcEntersExits.cs"),
                   "pass-through: UPSTREAM-PATCHES lists the quest-engine site");
+        }
+
+        /// <summary>
+        /// RESUME AFTER ANY BOX. A journey lives on the UI stack as [HUD, travel bar], and
+        /// UserInterfaceManager.RemoveWindow only unpauses when the stack is down to one window -
+        /// so popping a quest `say`, a yes/no prompt or a Climates &amp; Calories box leaves the game
+        /// paused with the bar still showing. ReleaseStalePause undoes exactly that, and the
+        /// controller must NOT re-assert the travel speed while a real window is still on top.
+        /// Source pins: the behaviour needs a UI stack and cannot be run headlessly.
+        /// </summary>
+        static void TestJourneyResumesAfterBoxes()
+        {
+            const string QUOTE = "\"";
+            const string RX_OPEN = "\\(\"TravelOptions\", \"";
+            string journey = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileJourneyController.cs"));
+
+            Check(System.Text.RegularExpressions.Regex.IsMatch(journey,
+                      @"void ReleaseStalePause\(\)[\s\S]{0,600}?TopWindow != window\)\s*return;\s*GameManager\.Instance\.PauseGame\(false\);"),
+                  "resume: a pause nothing visible is asking for is released only when the travel bar is on top");
+            Check(System.Text.RegularExpressions.Regex.IsMatch(journey,
+                      @"ReleaseStalePause\(\);\s*if \(HoldUnderOpenWindow\(\)\)\s*return;"),
+                  "resume: the journey holds still under a box instead of re-asserting 20x behind it");
+            Check(System.Text.RegularExpressions.Regex.IsMatch(journey,
+                      @"static bool HoldUnderOpenWindow\(\)[\s\S]{0,300}?return GameManager\.IsGamePaused;"),
+                  "resume: the hold is exactly 'the game is still paused by something visible'");
+            Check(journey.IndexOf("if (HoldUnderOpenWindow())") <
+                  journey.IndexOf("if (CheckVitals())"),
+                  "resume: no journey decision can stack a second box on top of the one being read");
+
+            // Window stack: the bar itself never pauses, or nothing behind it would ever run.
+            string window = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileJourneyWindow.cs"));
+            Check(window.Contains("pauseWhileOpened = false;"),
+                  "resume: the travel bar does not pause the game");
+
+            // Climates & Calories: every TravelOptions request the port answers, and nothing else.
+            string cc = string.Concat(Directory.GetFiles("Assets/Scripts/Game/Mobile/Ports/ClimatesCalories", "*.cs")
+                                               .Select(f => File.ReadAllText(f)));
+            var asked = new SortedSet<string>();
+            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(
+                         cc, "SendModMessage" + RX_OPEN + "(?<msg>\\w+)" + "\""))
+                asked.Add(m.Groups["msg"].Value);
+            string bridge = File.ReadAllText("Assets/Scripts/Game/Mobile/MobileTravelOptionsBridge.cs");
+            foreach (string msg in asked)
+                Check(bridge.Contains("case " + QUOTE + msg + QUOTE + ":"),
+                      "C&C interop: the journey bridge answers '" + msg + "'");
+            Check(asked.Count == 6,
+                  "C&C interop: six distinct TravelOptions messages are sent", string.Join(",", asked.ToArray()));
         }
 
         static void TestJourneyStatusEffectPause()
