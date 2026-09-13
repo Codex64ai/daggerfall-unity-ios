@@ -4040,11 +4040,41 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && global::RealGrass.RealGrassPort.DetailResolutionPerPatch == 16,
                 "RealGrass: detail resolution is upstream's own 256, at DFU's 16 per patch (upstream ran 8)",
                 global::RealGrass.RealGrassPort.DetailResolution + "/" + global::RealGrass.RealGrassPort.DetailResolutionPerPatch);
-            Check(global::RealGrass.RealGrassPort.ForcedStyle == global::RealGrass.GrassStyle.Classic
-                  && (int)global::RealGrass.RealGrassPort.ForcedStyle == 0,
-                "RealGrass: style is forced Classic - one grass layer, and the only licence-clean textures");
-            Check(global::RealGrass.RealGrassPort.ForcedBillboard,
-                "RealGrass: billboards are forced on - GrassBillboard, not FBX prototypes on the Standard shader");
+            // The style is upstream's own default and the reason the port exists to be looked at:
+            // Full is Mixed|2 - the Mixed bit adds the flower and tuft layers, the 2 bit points the
+            // grass layer at upstream's realistic Grass_tex instead of the Classic billboards.
+            Check(global::RealGrass.RealGrassPort.ForcedStyle == global::RealGrass.GrassStyle.Full
+                  && (int)global::RealGrass.RealGrassPort.ForcedStyle == 3,
+                "RealGrass: style is forced Full - upstream's realistic grass plus the flower and tuft layers",
+                ((int)global::RealGrass.RealGrassPort.ForcedStyle).ToString());
+            Check((global::RealGrass.RealGrassPort.ForcedStyle & global::RealGrass.GrassStyle.Mixed) == global::RealGrass.GrassStyle.Mixed,
+                "RealGrass: and Full carries the Mixed bit, which is what allocates the two extra layers");
+            // Texture prototypes in Grass mode: waving cross-quads on WavingDoublePass. NOT
+            // GrassBillboard (camera-facing stickers, the Classic look) and NOT prototype meshes
+            // (upstream's FBX, whose materials are on the Standard shader - not pinned for iOS).
+            Check(global::RealGrass.RealGrassPort.ForcedRenderMode == DetailRenderMode.Grass,
+                "RealGrass: the render mode is Grass - waving cross-quads, not camera-facing billboards",
+                global::RealGrass.RealGrassPort.ForcedRenderMode.ToString());
+            Check(!global::RealGrass.RealGrassPort.ForcedPrototypeMesh,
+                "RealGrass: prototype meshes stay off - the bundle ships no prefab and no Standard-shader material");
+            // The flower and tuft textures are FIXED, not re-rolled per promotion as upstream does:
+            // Unity builds one detail atlas per distinct prototype-texture set, so upstream's roll
+            // leaves a 49-terrain ring holding up to 4x2 atlases at once.
+            Check(global::RealGrass.RealGrassPort.ForcedGrassDetailIndex == 0
+                  && global::RealGrass.RealGrassPort.ForcedGrassAccentIndex == 1,
+                "RealGrass: the flower and tuft textures are fixed indices, so the session builds one detail atlas",
+                global::RealGrass.RealGrassPort.ForcedGrassDetailIndex + "/"
+                + global::RealGrass.RealGrassPort.ForcedGrassAccentIndex);
+            Check(global::RealGrass.DetailPrototypesManager.ForcedDetailName == "GrassDetails_01"
+                  && global::RealGrass.DetailPrototypesManager.ForcedAccentName == "GrassDetails_06",
+                "RealGrass: those indices name GrassDetails_01 (tan seed heads) and GrassDetails_06 (green tufts)",
+                global::RealGrass.DetailPrototypesManager.ForcedDetailName + " / "
+                + global::RealGrass.DetailPrototypesManager.ForcedAccentName);
+            string protoSrcRoll = StripShaderComments(File.ReadAllText(
+                "Assets/Scripts/Game/Mobile/Ports/RealGrass/DetailPrototypesManager.cs"));
+            Check(MethodBody(protoSrcRoll, "private void RefreshGrassDetails()").Contains("RealGrassPort.ForcedGrassDetailIndex")
+                  && !MethodBody(protoSrcRoll, "private void RefreshGrassDetails()").Contains("Random.Range"),
+                "RealGrass: no Random.Range survives in RefreshGrassDetails (it ran once per terrain promotion)");
             Check(!global::RealGrass.RealGrassPort.ForcedTerrainStones
                   && !global::RealGrass.RealGrassPort.ForcedWaterPlants
                   && !global::RealGrass.RealGrassPort.ForcedFlyingInsects
@@ -4275,7 +4305,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // Allocated once, cleared per promotion, 256 square, and only the grass layer exists in
             // this configuration. RealGrassOptions defaults to Classic with every optional feature
             // off, which is exactly the port's forced configuration.
-            var options = new global::RealGrass.RealGrassOptions();
+            var options = new global::RealGrass.RealGrassOptions()
+            {
+                GrassStyle = global::RealGrass.RealGrassPort.ForcedStyle,
+            };
             var density = new global::RealGrass.Density()
             {
                 GrassThick = new global::RealGrass.Range<int>(6, 20),
@@ -4288,9 +4321,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(grassCells.GetLength(0) == 256 && grassCells.GetLength(1) == 256,
                 "RealGrass: a detail layer is a 256x256 int[,] - upstream's shape, allocated once instead of per promotion",
                 grassCells.GetLength(0) + "x" + grassCells.GetLength(1));
-            Check(densityManager.GrassDetails == null && densityManager.GrassAccents == null
-                  && densityManager.WaterPlants == null && densityManager.Rocks == null,
-                "RealGrass: Classic with no stones or plants allocates ONE layer, the grass one");
+            Check(densityManager.GrassDetails != null && densityManager.GrassAccents != null,
+                "RealGrass: Full allocates the flower and tuft layers too - three int[256,256], once, not per promotion");
+            Check(densityManager.WaterPlants == null && densityManager.Rocks == null,
+                "RealGrass: and no water-plant or stone layer - both features stay off");
+            Check(densityManager.GrassDetails.Cells.GetLength(0) == 256
+                  && densityManager.GrassAccents.Cells.GetLength(1) == 256,
+                "RealGrass: the two extra layers are the same 256-square shape as the grass layer");
+            Check(global::RealGrass.DensityManager.TotalInstances(densityManager.Grass) == 0
+                  && global::RealGrass.DensityManager.TotalInstances(null) == 0,
+                "RealGrass: the per-layer instance total reads 0 on a cleared layer and tolerates a null one");
             densityManager.InitDetailsLayers();
             Check(ReferenceEquals(grassCells, densityManager.Grass.Cells),
                 "RealGrass: InitDetailsLayers clears the cached array, it does not allocate a new one");
@@ -4363,10 +4403,24 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "RealGrass: Init(InitParams) is the entry point MobilePortedMods calls");
             Check(init != null && Attribute.GetCustomAttributes(init, typeof(Invoke), false).Length == 0,
                 "RealGrass: no [Invoke] survives - the launcher switch is the only way in");
-            Check(global::RealGrass.RealGrassPort.GrassTextureNames.Length == 2
-                  && global::RealGrass.RealGrassPort.GrassTextureNames[0] == "BrownGrass_tex"
-                  && global::RealGrass.RealGrassPort.GrassTextureNames[1] == "GreenGrass_tex",
-                "RealGrass: the gate asks for exactly the two Classic textures the bundle ships");
+            // The gate asks for every texture the forced configuration can load, and for nothing
+            // it cannot: a null prototypeTexture contributes nothing to the detail atlas and draws
+            // nothing, so a bundle missing one of these has to decline rather than draw a hole.
+            Check(global::RealGrass.RealGrassPort.GrassTextureNames.Length == 4
+                  && global::RealGrass.RealGrassPort.GrassTextureNames[0] == "Grass_tex"
+                  && global::RealGrass.RealGrassPort.GrassTextureNames[1] == "GrassDetails_01"
+                  && global::RealGrass.RealGrassPort.GrassTextureNames[2] == "GrassDetails_06"
+                  && global::RealGrass.RealGrassPort.GrassTextureNames[3] == "BrownGrass_tex",
+                "RealGrass: the gate asks for the four textures the Full configuration loads",
+                string.Join(", ", global::RealGrass.RealGrassPort.GrassTextureNames));
+            Check(System.Array.IndexOf(global::RealGrass.RealGrassPort.GrassTextureNames,
+                      global::RealGrass.DetailPrototypesManager.ForcedDetailName) >= 0
+                  && System.Array.IndexOf(global::RealGrass.RealGrassPort.GrassTextureNames,
+                      global::RealGrass.DetailPrototypesManager.ForcedAccentName) >= 0,
+                "RealGrass: the two fixed flower/tuft names are in the gate list, so the gate and the loader cannot drift");
+            Check(global::RealGrass.RealGrassPort.SpareTextureNames.Length == 1
+                  && global::RealGrass.RealGrassPort.SpareTextureNames[0] == "GreenGrass_tex",
+                "RealGrass: GreenGrass_tex ships but is not gated - nothing in Full style loads it");
 
             // ---- 5. the sources ----
             const string portDir = "Assets/Scripts/Game/Mobile/Ports/RealGrass/";
@@ -4436,7 +4490,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(modeAt >= 0 && foldAt > modeAt && layerAt > foldAt,
                 "RealGrass: scatter mode, then the fold to the scatter ceiling, then SetDetailLayer - in that order",
                 modeAt + " < " + foldAt + " < " + layerAt);
-            Check(grassSrc.Contains(", scatter {4}/{5}, density {6:0.00}, distance {7:0} m [device {10} MB -> class default {11:0} m], soft veg {8}, target {9:0.00} inst/m2)")
+            Check(grassSrc.Contains("layers {2} [{12}], style {13}/{14}, terrains {3}, scatter {4}/{5}, density {6:0.00}, distance {7:0} m [device {10} MB -> class default {11:0} m], soft veg {8}, target {9:0.00} inst/m2)")
+                  && grassSrc.Contains("densityManager.DescribeLayerCounts()")
                   && grassSrc.Contains("terrainData.detailScatterMode, RealGrassPort.MaxDetailValue")
                   && grassSrc.Contains("terrain.detailObjectDensity, terrain.detailObjectDistance"),
                 "RealGrass: the memory line writes the mode, the ceiling that was read, and the two dials AS THE TERRAIN GOT THEM");
@@ -6131,8 +6186,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // MOBILE: Real Grass's two Classic billboards - the only two textures in that bundle, and the
         // two that reach DetailPrototype.prototypeTexture. See TestPackTextureRules for why they are
         // raw data and why the import is asserted against the assets rather than only against the rule.
+        // MOBILE: every texture in the Real Grass bundle - the three VMblast realistic ones the
+        // Full style draws (Grass_tex, and the GrassDetails_01 flower and GrassDetails_06 tuft
+        // layers) and the two Classic billboards (BrownGrass_tex is the Desert fallback,
+        // GreenGrass_tex the Classic one). All five reach DetailPrototype.prototypeTexture on some
+        // path, so all five must import readable and uncompressed; see TestPackTextureRules.
         static readonly string[] RealGrassBillboards =
         {
+            "Assets/Game/Mods/RealGrass/Textures/Grass_tex.psd",
+            "Assets/Game/Mods/RealGrass/Textures/GrassDetails_01.psd",
+            "Assets/Game/Mods/RealGrass/Textures/GrassDetails_06.psd",
             "Assets/Game/Mods/RealGrass/Textures/GreenGrass_tex.png",
             "Assets/Game/Mods/RealGrass/Textures/BrownGrass_tex.png",
         };
@@ -6226,6 +6289,34 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 Check(!MobileModPackTextureRules.NoMips(grassTex) && !MobileModPackTextureRules.SingleChannel(grassTex),
                     "PackTextureRules: the Real Grass billboard " + Path.GetFileName(grassTex)
                     + " keeps its mip chain and all four channels (it is drawn, not CPU-read-once)");
+            // MOBILE: and the size clamp, which for this mod is not a memory nicety but the size of
+            // Unity's terrain detail ATLAS - every non-instanced prototype is packed into one, and
+            // the whole detail pass is drawn from it. Measured on 6000.3.23f1 with this port's
+            // three layers: 256-clamped sources give a 512x512 atlas (2.7 MB), 512-clamped ones
+            // 1024x512 (5.5 MB), upstream's own sizes 2048x1024 (21.8 MB). 256 is also exactly the
+            // size of upstream's own Classic billboards.
+            Check(MobileModPackTextureRules.RealGrassMaxTextureSize == 256,
+                "PackTextureRules: Real Grass textures import at 256 - the 2.7 MB detail atlas, not the 21.8 MB one",
+                MobileModPackTextureRules.RealGrassMaxTextureSize.ToString());
+            foreach (string grassTex in RealGrassBillboards)
+                Check(MobileModPackTextureRules.MaxTextureSize(grassTex) == 256,
+                    "PackTextureRules: " + Path.GetFileName(grassTex) + " imports at 256");
+            Check(MobileModPackTextureRules.MaxTextureSize(DistantDerivMap) == 2048
+                  && MobileModPackTextureRules.MaxTextureSize("Assets/Game/Mods/WorldOfDaggerfallBiomes/Assets/Maps/climate_map.png") == 2048
+                  && MobileModPackTextureRules.DefaultMaxTextureSize == 2048,
+                "PackTextureRules: every other raw-data texture keeps the 2048 clamp (the deriv map's carve depends on it)",
+                MobileModPackTextureRules.MaxTextureSize(DistantDerivMap).ToString());
+            string modBuilderSrc = File.ReadAllText("Assets/Editor/MobileModBuilder.cs");
+            Check(modBuilderSrc.Contains("int maxSize = MobileModPackTextureRules.MaxTextureSize(path);")
+                  && modBuilderSrc.Contains("raw.maxTextureSize = maxSize;")
+                  && !modBuilderSrc.Contains("raw.maxTextureSize = 2048;"),
+                "PackTextureRules: the raw-data importer reads the per-mod clamp, it does not hard-code 2048");
+            // And the non-default clamp goes on the editor platform too, so the imported asset the
+            // checks below read IS the shipped one - but only when it differs, because the
+            // pixel-read maps must keep the editor resolution their colour key and carve assume.
+            Check(modBuilderSrc.Contains("if (maxSize != MobileModPackTextureRules.DefaultMaxTextureSize)")
+                  && modBuilderSrc.Contains("importer.maxTextureSize = maxSize;"),
+                "PackTextureRules: a non-default clamp is applied to the editor platform as well, a default one is not");
             // MOBILE: the assumption the R8 override rests on. Texture2D.GetPixels32 documents a
             // limited format list; if R8 did not survive it, the carve would read zeros and every
             // far-terrain cell would become ocean. Cheaper to pin here than to find out on a device.
@@ -6332,6 +6423,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                         : "format " + grassIos.format + " (" + (int)grassIos.format + "), overridden " + grassIos.overridden);
                 Check(grassImporter != null && grassImporter.isReadable,
                     "PackTextureRules: " + Path.GetFileName(grassTex) + "'s importer keeps Read/Write on (the bundled copy is the one that matters)");
+                // The imported SIZE, which is what the detail atlas is built to. The .meta records
+                // the limit; only the asset says what came out of it.
+                Check(grassIos != null && grassIos.maxTextureSize == MobileModPackTextureRules.RealGrassMaxTextureSize,
+                    "PackTextureRules: " + Path.GetFileName(grassTex) + "'s iOS override clamps to "
+                    + MobileModPackTextureRules.RealGrassMaxTextureSize,
+                    grassIos == null ? "no importer" : grassIos.maxTextureSize.ToString());
+                Check(grassTexture.width <= MobileModPackTextureRules.RealGrassMaxTextureSize
+                      && grassTexture.height <= MobileModPackTextureRules.RealGrassMaxTextureSize,
+                    "PackTextureRules: " + Path.GetFileName(grassTex) + " imported at "
+                    + grassTexture.width + "x" + grassTexture.height + " (upstream ships it larger)");
             }
             // MOBILE: and the reason the literal above says ModResources/. Unity packs the contents of
             // every folder named `Resources` under Assets/ into every player build - no reference

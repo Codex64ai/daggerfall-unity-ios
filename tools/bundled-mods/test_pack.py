@@ -117,6 +117,63 @@ class PendingLicence(unittest.TestCase):
         self.assertEqual(pack.check_bundles(self.cfg(private_only=True), self.dir), [])
 
 
+class RealGrassIsPrivateOnly(unittest.TestCase):
+    """The SHIPPED entry, not a synthetic one. Real Grass's bundle now carries three of VMblast's
+    textures, whose only permission is "authorized for this project only", so the thing that keeps
+    it off the public pack has to be asserted against tools/bundled-mods/mods.json itself: a rename,
+    a dropped private_only or a rewritten licence string would otherwise put project-scoped art into
+    a public download with nothing to say so."""
+
+    VMBLAST = ("Use of these textures is authorized for this project only "
+               "[RealGrass for Daggerfall Unity].")
+
+    def setUp(self):
+        import json
+        with open(os.path.join(os.path.dirname(__file__), "mods.json"), encoding="utf-8") as fh:
+            self.cfg = json.load(fh)
+        self.entry = next(m for m in self.cfg["mods"] if m["name"] == "RealGrass")
+
+    def test_entry_is_private_only_with_a_pending_licence(self):
+        self.assertTrue(self.entry.get("private_only"))
+        self.assertTrue(str(self.entry.get("licence", "")).startswith("pending:"))
+
+    def test_bundle_is_not_a_pack_member(self):
+        self.assertNotIn("realgrass", pack.stems(self.cfg))
+        self.assertTrue(pack.excluded_from_pack(self.entry))
+
+    def test_dropping_private_only_is_a_hard_problem(self):
+        public = {"dest_root": self.cfg["dest_root"],
+                  "mods": [dict(self.entry, private_only=False)]}
+        d = tempfile.mkdtemp()
+        os.makedirs(os.path.join(d, "Licenses"))
+        open(os.path.join(d, "realgrass.dfmod"), "w").close()
+        open(os.path.join(d, "Licenses", "realgrass-LICENSE.txt"), "w").close()
+        probs = pack.check_bundles(public, d)
+        self.assertTrue(any("pending licence" in p and "RealGrass" in p for p in probs), probs)
+
+    def test_licence_quotes_vmblast_verbatim_and_says_private_draft_only(self):
+        lic = self.entry["licence"]
+        self.assertIn(self.VMBLAST, lic)
+        self.assertIn("private test draft", lic)
+        self.assertIn("never in the public mod pack", lic)
+
+    def test_shipped_files_are_the_five_the_port_loads(self):
+        import json
+        with open(os.path.join(os.path.dirname(__file__), self.entry["manifest_override"]),
+                  encoding="utf-8") as fh:
+            files = json.load(fh)["Files"]
+        self.assertEqual([os.path.basename(f) for f in files],
+                         ["Grass_tex.psd", "GrassDetails_01.psd", "GrassDetails_06.psd",
+                          "BrownGrass_tex.png", "GreenGrass_tex.png"])
+
+    def test_the_other_vmblast_textures_and_every_mesh_are_excluded(self):
+        globs = self.entry["exclude_globs"]
+        for g in ("*.fbx", "*.prefab", "*.mat", "*.cs", "Fireflies*", "Rock*.png",
+                  "DesertGrass.psd", "GrassDetails_02.psd", "GrassDetails_03.psd",
+                  "GrassDetails_04.psd", "GrassDetails_05.psd"):
+            self.assertIn(g, globs)
+
+
 class Readme(unittest.TestCase):
     def test_lists_every_mod_with_its_title(self):
         txt = pack.readme_text(CFG, {"jobsofthethievesguild": "Jobs of the Thieves Guild"})

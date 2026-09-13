@@ -125,6 +125,43 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         }
 
         /// <summary>
+        /// MOBILE: the iOS import ceiling for a pack texture's longest side. 2048 everywhere except
+        /// Real Grass, whose textures are Unity terrain DETAIL PROTOTYPES: every non-instanced
+        /// prototype is packed into one "Terrain Detail Atlas" and the whole detail pass is drawn
+        /// from that atlas, so these sizes decide a resident GPU texture as well as their own.
+        ///
+        /// Measured on 6000.3.23f1 with this port's three-layer Full configuration (grass +
+        /// flowers + tufts), one atlas per distinct prototype-texture set:
+        ///
+        ///   sources 256 / 128x256 / 256   -> atlas  512x512  =  2.7 MB
+        ///   sources 512 / 256x512 / 256   -> atlas 1024x512  =  5.5 MB
+        ///   sources 512 / 256x512 / 512   -> atlas 1024x1024 = 10.9 MB
+        ///   upstream's own sizes          -> atlas 2048x1024 = 21.8 MB
+        ///
+        /// 256 is shipped: it is the size upstream's own Classic billboards are, it keeps the atlas
+        /// at 2.7 MB, and it also quarters the readable CPU copy every raw-data texture keeps (the
+        /// atlas is built from those pixels - see the class header). Upstream's Grass_tex is
+        /// 1024x1024 and GrassDetails_01 is 512x1024; both are alpha-cut vegetation drawn at 0.65-2.1
+        /// m, so the texel density at the 100 m draw radius is not what limits this look.
+        /// </summary>
+        public const int RealGrassMaxTextureSize = 256;
+
+        /// <summary>MOBILE: the default iOS import ceiling for a raw-data pack texture.</summary>
+        public const int DefaultMaxTextureSize = 2048;
+
+        /// <summary>
+        /// MOBILE: the iOS maxTextureSize a raw-data texture imports at. See
+        /// <see cref="RealGrassMaxTextureSize"/> for why Real Grass is the exception.
+        /// </summary>
+        public static int MaxTextureSize(string assetPath)
+        {
+            string p = (assetPath ?? "").Replace('\\', '/');
+            if (p.StartsWith("Assets/Game/Mods/" + RealGrassMod + "/", System.StringComparison.Ordinal))
+                return RealGrassMaxTextureSize;
+            return DefaultMaxTextureSize;
+        }
+
+        /// <summary>
         /// MOBILE: textures that carry data in ONE channel and should import as R8 rather than RGBA32.
         /// Only Distant Terrain's daggerfall_deriv_map.png qualifies: it is an 8-bit greyscale PNG and
         /// DistantTerrain.ApplyDerivativeHeightmap reads `pixels[i].r` alone, comparing it against a

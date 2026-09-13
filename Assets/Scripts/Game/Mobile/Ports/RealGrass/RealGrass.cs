@@ -60,7 +60,10 @@ namespace RealGrass
 
     public class RealGrassOptions
     {
-        internal GrassStyle GrassStyle { get; set; }
+        // MOBILE: public, where upstream had it internal. The editor self-test builds a real
+        // DensityManager in the shipped configuration to check that Full allocates the flower and
+        // tuft layers, and the self-test lives in another assembly.
+        public GrassStyle GrassStyle { get; set; }
         public bool WaterPlants { get; set; }
         public bool TerrainStones { get; set; }
         public bool FlyingInsects { get; set; }
@@ -118,19 +121,74 @@ namespace RealGrass
         public const int DetailResolutionPerPatch = 16;
 
         /// <summary>
-        /// MOBILE: forced. Classic is both the cheap path (one grass layer, no flower/accent
-        /// layers) and the licence-clean one (the Mixed and Full textures are VMblast's, not
-        /// shipped). Upstream's default was Full.
+        /// MOBILE: forced, and it is upstream's own default. Full is Mixed|2: the Mixed bit adds
+        /// the two extra detail layers (flowers and tufts), and the 2 bit points the grass layer at
+        /// upstream's realistic <c>Grass_tex</c> instead of the 256x256 Classic billboards. This is
+        /// the configuration the reference screenshot is - tall waving blades with tan seed-head
+        /// stalks through them - and Classic could never look like it.
+        ///
+        /// It costs no extra INSTANCES: DensityManager.SetGrassDensity splits a cell's draw between
+        /// the three layers rather than adding to it (accents take a share of 30 % of cells,
+        /// flowers of up to 25 %, the grass layer keeps the remainder), so the billboard count per
+        /// square metre is the same as Classic's. What it costs is three detail prototypes in the
+        /// terrain detail atlas instead of one (measured 2.7 MB at the shipped 256 import clamp -
+        /// see MobileModPackTextureRules.RealGrassMaxTextureSize) and up to three patch meshes per
+        /// detail patch instead of one.
+        ///
+        /// The licence, not the look, is why this ships private-only: Grass_tex and the
+        /// GrassDetails_* textures are VMblast's, "authorized for this project only". See
+        /// tools/bundled-mods/mods.json and THIRD-PARTY.md.
         /// </summary>
-        public const GrassStyle ForcedStyle = GrassStyle.Classic;
+        public const GrassStyle ForcedStyle = GrassStyle.Full;
 
         /// <summary>
-        /// MOBILE: forced. Billboard means DetailRenderMode.GrassBillboard fed by a texture -
-        /// Unity's cheapest detail path. Upstream's default (false) renders FBX prototypes with
-        /// their own Standard-shader materials, which on a phone backbuffer with alpha-tested
-        /// overdraw is the single most expensive thing this mod can do.
+        /// MOBILE: forced, and it is the third state upstream's own Billboard toggle cannot
+        /// express. Upstream has two: <c>GrassBillboard</c> + a texture (camera-facing quads), or
+        /// <c>Grass</c> + a PREFAB (its "grass shader" path). This port takes <c>Grass</c> + a
+        /// TEXTURE - Unity's waving cross-quads, drawn by
+        /// <c>Hidden/TerrainEngine/Details/WavingDoublePass</c>, which is already pinned and
+        /// already gated here.
+        ///
+        /// The prefab path is out for a build reason, not a taste one: every upstream mesh
+        /// prototype (Grass.prefab, GrassDetails.fbx, the plants, the stones) carries a material on
+        /// the built-in <b>Standard</b> shader, which is not pinned for iOS and which an IL2CPP
+        /// build is free to strip - a stripped one draws a pink or invisible prototype with no
+        /// managed error. Cross-quads keep the half of the realistic look that matters: the blades
+        /// are not camera-facing, so they read as geometry standing in the field rather than as
+        /// stickers that turn with the player.
         /// </summary>
-        public const bool ForcedBillboard = true;
+        public const DetailRenderMode ForcedRenderMode = DetailRenderMode.Grass;
+
+        /// <summary>
+        /// MOBILE: forced off - upstream's <c>UseGrassShader</c>, i.e. "prototypes are prefabs".
+        /// See <see cref="ForcedRenderMode"/> for why the bundle ships no prefabs.
+        /// </summary>
+        public const bool ForcedPrototypeMesh = false;
+
+        /// <summary>
+        /// MOBILE: which of upstream's flower textures the detail layer uses, as a FIXED index into
+        /// DetailPrototypesManager's grassDetails table. Upstream re-rolls this (and the accent
+        /// below) with Random.Range inside every UpdateClimateSummer, i.e. on every terrain
+        /// promotion.
+        ///
+        /// That roll is unaffordable here, and the reason is measured rather than assumed: Unity
+        /// builds one "Terrain Detail Atlas" per distinct set of prototype TEXTURES, so a live ring
+        /// of 49 terrains carrying upstream's 4x2 combinations holds up to 8 atlases at once - 8 x
+        /// 2.7 MB at this port's import sizes, for a variation nobody can see from inside one
+        /// terrain. Fixed, the whole session shares one atlas.
+        ///
+        /// 0 is GrassDetails_01, the tan seed-head stalks that are the yellow flowers in upstream's
+        /// own screenshot. The other three (02 purple, 04, 05) are not in the bundle.
+        /// </summary>
+        public const int ForcedGrassDetailIndex = 0;
+
+        /// <summary>
+        /// MOBILE: the accent layer's texture, fixed for the same reason as
+        /// <see cref="ForcedGrassDetailIndex"/>. 1 is GrassDetails_06, a plain green tuft drawn at
+        /// 0.65 of the grass size - the low fill between the tall blades. GrassDetails_03 (index 0)
+        /// is not in the bundle.
+        /// </summary>
+        public const int ForcedGrassAccentIndex = 1;
 
         /// <summary>MOBILE: forced off - a whole extra detail layer, and the 13.7 MB rock textures.</summary>
         public const bool ForcedTerrainStones = false;
@@ -295,11 +353,25 @@ namespace RealGrass
         };
 
         /// <summary>
-        /// MOBILE: the two Classic billboard textures the bundle ships. BrownGrass_tex is used by
-        /// Mountain, Swamp and (see DesertGrassTexture) Desert; GreenGrass_tex by Temperate.
-        /// Both must be there or the gate refuses: a null prototypeTexture draws nothing.
+        /// MOBILE: every texture the forced configuration can ask the bundle for, and therefore
+        /// every texture the bundle has to ship. All four must be there or the gate refuses: a null
+        /// prototypeTexture contributes nothing to the detail atlas and draws nothing.
+        ///
+        /// Grass_tex is the Full grass layer, on every non-desert climate (in Full style the
+        /// climate difference is colour, not texture - see DetailPrototypesManager.SetGrass).
+        /// GrassDetails_01 and _06 are the flower and tuft layers. BrownGrass_tex is the Desert
+        /// fallback, because upstream asks Desert for a DesertGrass_tex that exists in no version
+        /// of the repo. GreenGrass_tex is in the bundle too - it is the Classic fallback if
+        /// ForcedStyle is ever moved back - but nothing in this configuration loads it, so it is
+        /// deliberately not part of the gate.
         /// </summary>
-        public static readonly string[] GrassTextureNames = { "BrownGrass_tex", "GreenGrass_tex" };
+        public static readonly string[] GrassTextureNames =
+        {
+            "Grass_tex", "GrassDetails_01", "GrassDetails_06", "BrownGrass_tex",
+        };
+
+        /// <summary>MOBILE: textures the bundle ships but the forced configuration never loads.</summary>
+        public static readonly string[] SpareTextureNames = { "GreenGrass_tex" };
 
         /// <summary>
         /// MOBILE: did Init get past the gate and subscribe to DaggerfallTerrain.OnPromoteTerrainData?
@@ -655,7 +727,7 @@ namespace RealGrass
             // and it is the only thing in the app that can see that error class.
             foreach (string name in GrassTextureNames)
                 LogOnce("[RealGrass] prototype " + DescribePrototypeTexture(mod.GetAsset<Texture2D>(name))
-                    + " mode=" + (ForcedBillboard ? "GrassBillboard" : "Grass")
+                    + " mode=" + ForcedRenderMode
                     + " gfx=" + SystemInfo.graphicsDeviceType);
 
             // MOBILE: the blended blade edge, on. iOS runs quality level 2, whose softVegetation
@@ -756,8 +828,11 @@ namespace RealGrass
                     FallDry = new Color32(105, 51, 29, 255),
                     SeasonInterpolation = false
                 },
-                // MOBILE: the billboard path. Upstream computed this as !settings Style/Billboard.
-                UseGrassShader = !RealGrassPort.ForcedBillboard,
+                // MOBILE: upstream computed this as !settings Style/Billboard, and it decides
+                // both the prototype KIND (prefab vs texture) and the render mode. The port splits
+                // the two: this stays false (textures, never prefabs) and the render mode comes
+                // from RealGrassPort.ForcedRenderMode.
+                UseGrassShader = RealGrassPort.ForcedPrototypeMesh,
                 TextureOverride = RealGrassPort.ForcedTextureOverride
             };
 
@@ -1001,7 +1076,7 @@ namespace RealGrass
                 // metre - instead of leaving any of it to documentation. The target is upstream's
                 // thick mean cell; upstream's own figure is 1.17/m2.
                 Debug.Log(string.Format(
-                    "[RealGrass] detail data ~{0:0.0} MB (res {1}, layers {2}, terrains {3}, scatter {4}/{5}, density {6:0.00}, distance {7:0} m [device {10} MB -> class default {11:0} m], soft veg {8}, target {9:0.00} inst/m2)",
+                    "[RealGrass] detail data ~{0:0.0} MB (res {1}, layers {2} [{12}], style {13}/{14}, terrains {3}, scatter {4}/{5}, density {6:0.00}, distance {7:0} m [device {10} MB -> class default {11:0} m], soft veg {8}, target {9:0.00} inst/m2)",
                     RealGrassPort.DetailDataMegabytes(RealGrassPort.DetailResolution, layers, terrains),
                     RealGrassPort.DetailResolution, layers, terrains,
                     terrainData.detailScatterMode, RealGrassPort.MaxDetailValue,
@@ -1010,7 +1085,12 @@ namespace RealGrass
                     RealGrassPort.TargetInstancesPerSquareMetre(
                         RealGrassPort.DetailCellAreaM2, RealGrassPort.MaxDetailValue),
                     SystemInfo.systemMemorySize,
-                    RealGrassPort.DefaultDetailDistanceFor(SystemInfo.systemMemorySize)));
+                    RealGrassPort.DefaultDetailDistanceFor(SystemInfo.systemMemorySize),
+                    // MOBILE: the per-layer totals for THIS terrain, and the style the layer count
+                    // follows from. Three layers with two of them empty is a different bug from
+                    // three layers drawing, and the count alone cannot tell them apart.
+                    densityManager.DescribeLayerCounts(),
+                    RealGrassPort.ForcedStyle, RealGrassPort.ForcedRenderMode));
             }
             if (promotions % CounterInterval == 0)
                 Debug.Log("[RealGrass] details on " + promotions + " terrains");

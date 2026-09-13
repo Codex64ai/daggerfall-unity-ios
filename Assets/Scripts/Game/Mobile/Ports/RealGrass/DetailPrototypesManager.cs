@@ -10,9 +10,12 @@
 // DetailPrototype goes through LoadPrototypeTexture, because Unity builds the terrain detail atlas
 // from those textures' CPU pixels and an unreadable one fails natively and silently.
 //
-// Everything the Mixed and Full styles reach - the VMblast GrassDetails_* and Grass_tex textures,
-// the FBX prototypes, the stones and the plants - is unreachable in this port's configuration and
-// none of it is in the bundle.
+// MOBILE: the port now ships upstream's FULL style - Grass_tex plus the GrassDetails_01 flower and
+// GrassDetails_06 tuft layers - as TEXTURE prototypes in DetailRenderMode.Grass (waving cross-quads
+// on Unity's WavingDoublePass), never as upstream's FBX/prefab prototypes, whose materials are on
+// the Standard shader and would be stripped from an iOS build with no error. Those three textures
+// are VMblast's, "authorized for this project only", so this bundle ships on the private test draft
+// and never in the public pack. The stones, the water plants and the fireflies stay out entirely.
 
 // Project:         Real Grass for Daggerfall Unity
 // Web Site:        http://forums.dfworkshop.net/viewtopic.php?f=14&t=17
@@ -301,6 +304,18 @@ namespace RealGrass
             }
         };
 
+        /// <summary>MOBILE: the flower texture the forced configuration loads (self-test hook).</summary>
+        public static string ForcedDetailName
+        {
+            get { return grassDetails[Mathf.Clamp(RealGrassPort.ForcedGrassDetailIndex, 0, grassDetails.Length - 1)].Name; }
+        }
+
+        /// <summary>MOBILE: the accent texture the forced configuration loads (self-test hook).</summary>
+        public static string ForcedAccentName
+        {
+            get { return grassAccents[Mathf.Clamp(RealGrassPort.ForcedGrassAccentIndex, 0, grassAccents.Length - 1)].Name; }
+        }
+
         private readonly Mod mod;
         private readonly Transform parent;
         private readonly RealGrassOptions options;
@@ -350,7 +365,11 @@ namespace RealGrass
                 minWidth = properties.GrassWidth.Min,
                 maxWidth = properties.GrassWidth.Max,
                 noiseSpread = properties.NoiseSpread,
-                renderMode = useGrassShader ? DetailRenderMode.Grass : DetailRenderMode.GrassBillboard,
+                // MOBILE: the render mode is the port's, not upstream's boolean. Upstream ties
+                // "texture" to GrassBillboard and "prefab" to Grass; this port draws TEXTURES in
+                // Grass mode - waving cross-quads, not camera-facing stickers. See
+                // RealGrassPort.ForcedRenderMode.
+                renderMode = RealGrassPort.ForcedRenderMode,
                 usePrototypeMesh = useGrassShader
             };
             detailPrototypes.Add(grassPrototypes);
@@ -365,7 +384,7 @@ namespace RealGrass
                     noiseSpread = properties.NoiseSpread,
                     healthyColor = healthyColor,
                     dryColor = dryColor,
-                    renderMode = useGrassShader ? DetailRenderMode.Grass : DetailRenderMode.GrassBillboard,
+                    renderMode = RealGrassPort.ForcedRenderMode,   // MOBILE: see above
                     usePrototypeMesh = useGrassShader
                 });
                 GrassDetails = ++index;
@@ -377,7 +396,7 @@ namespace RealGrass
                     noiseSpread = properties.NoiseSpread,
                     healthyColor = healthyColor,
                     dryColor = dryColor,
-                    renderMode = useGrassShader ? DetailRenderMode.Grass : DetailRenderMode.GrassBillboard,
+                    renderMode = RealGrassPort.ForcedRenderMode,   // MOBILE: see above
                     usePrototypeMesh = useGrassShader
                 });
                 GrassAccents = ++index;
@@ -696,10 +715,18 @@ namespace RealGrass
             return day > DaysOfYear.GrowDay || day < DaysOfYear.DieDay;
         }
 
+        /// <summary>
+        /// MOBILE: fixed, where upstream re-rolled both with Random.Range on every call - and this
+        /// is called from UpdateClimateSummer, i.e. once per terrain promotion. Unity builds one
+        /// "Terrain Detail Atlas" per distinct set of prototype TEXTURES, so upstream's roll leaves
+        /// a 49-terrain ring holding up to 4x2 = 8 atlases at once. Fixed, the session has one.
+        /// The indices are RealGrassPort.ForcedGrassDetailIndex / ForcedGrassAccentIndex, and they
+        /// are the only two entries of these tables the bundle ships a texture for.
+        /// </summary>
         private void RefreshGrassDetails()
         {
-            currentGrassDetail = UnityEngine.Random.Range(0, grassDetails.Length);
-            currentGrassAccent = UnityEngine.Random.Range(0, grassAccents.Length);
+            currentGrassDetail = Mathf.Clamp(RealGrassPort.ForcedGrassDetailIndex, 0, grassDetails.Length - 1);
+            currentGrassAccent = Mathf.Clamp(RealGrassPort.ForcedGrassAccentIndex, 0, grassAccents.Length - 1);
         }
 
         private void ResetColor(DetailPrototype detailPrototype)

@@ -177,7 +177,19 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 // measured against a full-resolution carve, a 2048-clamped one loses 0.3% of water
                 // cells and gains 0.2% (a 1250x625 one, 1.0%/0.4%). Full size would cost 50 MB of GPU
                 // memory plus a 50 MB readable copy.
-                raw.maxTextureSize = 2048;
+                // MOBILE: per-mod (see MobileModPackTextureRules.MaxTextureSize). 2048 for the
+                // deriv map and the Biomes tiles; 256 for Real Grass, whose textures are terrain
+                // detail prototypes and therefore also decide the size of Unity's detail atlas.
+                int maxSize = MobileModPackTextureRules.MaxTextureSize(path);
+                raw.maxTextureSize = maxSize;
+                // A non-default clamp goes on the DEFAULT platform block as well, so the editor's
+                // imported asset is the one that ships and a self-test can assert the size against
+                // the texture rather than against the .meta. Deliberately only when it differs:
+                // the pixel-read maps (Biomes' colour key, Distant Terrain's deriv map) keep
+                // whatever their upstream meta chose for the editor platform, and their colour key
+                // and carve depend on that resolution.
+                if (maxSize != MobileModPackTextureRules.DefaultMaxTextureSize)
+                    importer.maxTextureSize = maxSize;
                 importer.SetPlatformTextureSettings(raw);
                 return;
             }
@@ -235,7 +247,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // of the textures these postprocessors apply to, on the next Editor run.
         // 1 -> 2: RealGrass joined rawDataMods (its two detail-prototype billboards must import
         // readable and uncompressed - the terrain detail atlas is built from their CPU pixels).
-        public override uint GetVersion() { return 2; }
+        // 2 -> 3: the raw-data iOS maxTextureSize became per-mod (MobileModPackTextureRules
+        // .MaxTextureSize) - Real Grass's realistic textures import at 256, not 2048, because they
+        // are detail prototypes and their sizes are what the detail atlas is built to.
+        public override uint GetVersion() { return 3; }
     }
 
     /// <summary>

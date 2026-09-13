@@ -4,9 +4,12 @@
   "ModAuthor": "Uncanny_Valley, TheLacus",
   "ContactInfo": "https://www.nexusmods.com/daggerfallunity/mods/20",
   "DFUnity_Version": "1.1.1",
-  "ModDescription": "Groundcover with grass. iOS textures-only bundle: the two Classic-style billboard textures the port's forced configuration loads, and nothing else. The mod's C# is compiled into the app (Assets/Scripts/Game/Mobile/Ports/RealGrass), so this manifest ships no scripts, no meshes, no materials and none of the project-scoped VMblast textures. Upstream declared DFUnity_Version 0.15.3; this bundle is built for and verified against 1.1.1.",
+  "ModDescription": "Groundcover with grass. iOS textures-only bundle: the five textures the port's forced configuration loads - upstream's realistic Grass_tex plus the GrassDetails_01/06 flower and tuft layers (all three VMblast's, authorized for this project only - see LICENSE; this bundle ships on the private test draft only), and the two Classic-style billboards BrownGrass_tex (Desert) and GreenGrass_tex (the Classic fallback). The mod's C# is compiled into the app (Assets/Scripts/Game/Mobile/Ports/RealGrass), so this manifest ships no scripts, no meshes and no materials: the port renders upstream's Full style as texture prototypes in DetailRenderMode.Grass, never as the FBX prototypes, whose materials are on the Standard shader. Upstream declared DFUnity_Version 0.15.3; this bundle is built for and verified against 1.1.1.",
   "GUID": "2185b00e-bc5d-4758-81f5-7540817e2cbc",
   "Files": [
+    "Assets/Game/Mods/RealGrass/Textures/Grass_tex.psd",
+    "Assets/Game/Mods/RealGrass/Textures/GrassDetails_01.psd",
+    "Assets/Game/Mods/RealGrass/Textures/GrassDetails_06.psd",
     "Assets/Game/Mods/RealGrass/Textures/BrownGrass_tex.png",
     "Assets/Game/Mods/RealGrass/Textures/GreenGrass_tex.png"
   ]

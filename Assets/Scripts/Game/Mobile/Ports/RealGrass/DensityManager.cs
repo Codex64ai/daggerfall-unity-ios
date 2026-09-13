@@ -239,6 +239,36 @@ namespace RealGrass
         }
 
         /// <summary>
+        /// MOBILE: what one layer owes this terrain, summed over its cells. Used once per session
+        /// by the [RealGrass] detail data line: the layer COUNT alone does not say whether the
+        /// flower and tuft layers actually got anything (they are fed from a 30 % / 25 % chance per
+        /// cell, out of the grass layer's own draw), and "three layers, two of them empty" and
+        /// "three layers" read identically in a log otherwise.
+        /// </summary>
+        public static long TotalInstances(DetailMap map)
+        {
+            if (map == null) return 0;
+            int[,] cells = map.Cells;
+            long total = 0;
+            int height = cells.GetLength(0), width = cells.GetLength(1);
+            for (int y = 0; y < height; y++)
+                for (int x = 0; x < width; x++)
+                    total += cells[y, x];
+            return total;
+        }
+
+        /// <summary>MOBILE: the per-layer instance totals, named, for the detail-data line.</summary>
+        public string DescribeLayerCounts()
+        {
+            string text = "grass " + TotalInstances(Grass);
+            if (GrassDetails != null) text += ", flowers " + TotalInstances(GrassDetails);
+            if (GrassAccents != null) text += ", tufts " + TotalInstances(GrassAccents);
+            if (WaterPlants != null) text += ", water plants " + TotalInstances(WaterPlants);
+            if (Rocks != null) text += ", stones " + TotalInstances(Rocks);
+            return text;
+        }
+
+        /// <summary>
         /// Set density for Summer.
         /// </summary>
         public void SetDensitySummer(Terrain terrain, Color32[] tilemap, ClimateBases currentClimate)

@@ -863,23 +863,47 @@ textures drawn from three CC0 packs, without mapping any file to any pack.
 
 | Mod | Author, licence | Source | What is NOT shipped |
 |---|---|---|---|
-| Real Grass 2.11 | Uncanny_Valley & TheLacus. Code: **MIT** (`RealGrass/LICENSE`, header preserved on all four ported files). Art: **NO LICENCE DECLARED for the two textures shipped** - they are outside VMblast's named list, but nothing states positively whose they are (permission being sought by Ikram) | github.com/TheLacus/daggerfall-unity-mods @ `556ef6e1dd0f2da95aa34275a30861daf58fee86` ("Bump version", 2023-08-25); manifest `RealGrass.dfmod.json`, GUID `2185b00e-bc5d-4758-81f5-7540817e2cbc` | Every VMblast `.psd` (`Grass_tex`, all `GrassDetails_*`, `DesertGrass`); every `.fbx`, `.prefab` and `.mat` - the Classic billboard path wants textures and nothing else; the stone, water-plant and firefly art with the features that read it; `External/RealGrassConsoleCommands.cs` (a desktop console this port has no way to reach); `modsettings.json` and `modpresets.json`, which live in the code root and are unreachable from the asset root the fetch reads |
+| Real Grass 2.11 | Uncanny_Valley & TheLacus. Code: **MIT** (`RealGrass/LICENSE`, header preserved on all four ported files). Art: **three of the five shipped textures are VMblast's, and his only permission is "authorized for this project only"** (quoted verbatim below); the other two are outside his named list, but nothing states positively whose they are (permission being sought by Ikram) | github.com/TheLacus/daggerfall-unity-mods @ `556ef6e1dd0f2da95aa34275a30861daf58fee86` ("Bump version", 2023-08-25); manifest `RealGrass.dfmod.json`, GUID `2185b00e-bc5d-4758-81f5-7540817e2cbc` | The other five VMblast `.psd`s (`DesertGrass`, `GrassDetails_02/03/04/05`); every `.fbx`, `.prefab` and `.mat` - the port draws upstream's Full style as TEXTURE prototypes, and every upstream mesh prototype carries a material on the built-in Standard shader, which is not pinned for iOS; the stone, water-plant and firefly art with the features that read it; `External/RealGrassConsoleCommands.cs` (a desktop console this port has no way to reach); `modsettings.json` and `modpresets.json`, which live in the code root and are unreachable from the asset root the fetch reads |
 
-**What ships is two 256² PNGs**: `BrownGrass_tex.png` (25,073 bytes) and `GreenGrass_tex.png`
-(40,306 bytes), the Classic set. Their `.meta` carries a default-platform `maxTextureSize` of 128,
-which is upstream's own setting and is easy to misread as the shipped size - but the iOS entry is
-`overridden: 1` (ASTC 6x6, `maxTextureSize` 4096), written by `MobileModPackTextureImporter`
-(`Assets/Editor/MobileModBuilder.cs`), and **a platform override wins over the default rule**. So on
-the only platform this project builds they import at their full **256²**; the 128 would apply only to
-a desktop player, which is not shipped. Neither appears in VMblast's list, and the history says they predate
-his contribution - both were added in 2017 and last touched in 2018, where the changelog dates
-VMblast's textures to 2.3 and 2.11, and the green one has a changelog line in the original author's
-own voice ("Improved the green grass texture (I'm no artist but I try)"). That is a strong lead and
-it is not a licence, so the same rule as the WoD family applies: `private_only: true` with a
-`pending:` record in `tools/bundled-mods/mods.json`, the bundle rides the private test draft only,
-and `pack.py` keeps `realgrass.dfmod` out of the public MIT mod pack. One line from TheLacus or
-Uncanny_Valley would flip it; so would replacing the two textures with our own, which at 256² is
-cheap. The evidence is in the `licence` string so a future reader need not redo the archaeology.
+**What ships is five textures, all imported at 256 px or less.** Three are upstream's realistic
+set, and they are VMblast's:
+
+- `Grass_tex.psd` (1024² upstream) - the grass layer of upstream's Full style, on every non-desert
+  climate. In Full the climate difference is colour, not texture.
+- `GrassDetails_01.psd` (512×1024) - the flower layer: the tan seed-head stalks in upstream's own
+  screenshots, drawn at twice the grass height.
+- `GrassDetails_06.psd` (512²) - the accent layer: a green tuft at 0.65 of the grass size.
+
+`credits.txt` says of them, verbatim:
+
+> VMblast, author of textures 'Grass_tex.psd' and all 'GrassDetails_\*.psd'; 'DesertGrass.psd' is an
+> edited version of 'Grass.psd'. **Use of these textures is authorized for this project only**
+> [RealGrass for Daggerfall Unity].
+
+That is a positive permission, and it is scoped. Whether "this project" reaches an iOS port of the
+same mod is a reading that needs TheLacus's word, so the bundle ships **on the private test draft
+only and never in the public mod pack**: `private_only: true` with a `pending:` record in
+`tools/bundled-mods/mods.json`, and `pack.py` refuses a pending licence in the public pack as a hard
+error (`tools/bundled-mods/test_pack.py`, `RealGrassIsPrivateOnly`, asserts all of that against the
+shipped entry rather than a synthetic one).
+
+The other two are the Classic set - `BrownGrass_tex.png` (25,073 bytes) and `GreenGrass_tex.png`
+(40,306 bytes), both 256². `BrownGrass_tex` is the Desert fallback (upstream asks Desert for a
+`DesertGrass_tex` that exists in no version of the repo); `GreenGrass_tex` is the Classic-style
+fallback and nothing in the shipped configuration loads it. Neither appears in VMblast's list, and
+the history says they predate his contribution - both were added in 2017 and last touched in 2018,
+where the changelog dates VMblast's textures to 2.3 and 2.11, and the green one has a changelog line
+in the original author's own voice ("Improved the green grass texture (I'm no artist but I try)").
+That is a strong lead and it is not a licence, so they ride the same private-only rule. One line
+from TheLacus or Uncanny_Valley would flip the whole entry; so would replacing the art with our own.
+The evidence is in the `licence` string so a future reader need not redo the archaeology.
+
+All five import **readable, uncompressed RGBA32, at most 256 px** on iOS
+(`MobileModPackTextureRules.RealGrassMod` / `.RealGrassMaxTextureSize`). Readable because Unity
+builds its "Terrain Detail Atlas" from the prototypes' CPU pixels and an unreadable input gives an
+empty atlas with no managed error; 256 because those source sizes are what the atlas is built to -
+measured on 6000.3.23f1 with this port's three layers, 256-clamped sources give a 512² atlas
+(2.7 MB) where upstream's own sizes give 2048×1024 (21.8 MB).
 
 The MIT text below is the one that matters even on a build with no bundle at all, because **the code
 is compiled into the app**: the app is a distribution of it, and MIT requires this notice to travel
