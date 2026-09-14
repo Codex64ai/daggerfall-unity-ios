@@ -42,6 +42,26 @@ namespace RoleplayRealism
         static bool newWeapons = false;
         static bool newArmor = false;
 
+        // MOBILE: the three module flags Daggerfall Enemy Expansion's compatibility layer needs
+        // (Ports/DEX/DEX_RRICompat.cs). Upstream DEX found this mod by the GUID of its .dfmod and
+        // read its ModSettings; compiled in, there is no such GUID and no ModSettings to look up,
+        // so the values are published here instead - the same booleans Awake already read out of
+        // the same modsettings.json, one step earlier than DEX asks for them.
+        static bool realisticEnemyEquipment = false;
+        static bool started = false;
+
+        /// <summary>MOBILE: true once Awake ran - the mod is actually on, not merely compiled in.</summary>
+        public static bool Started { get { return started; } }
+
+        /// <summary>MOBILE: Modules.newWeapons - the archer's axe and light flail are registered.</summary>
+        public static bool NewWeapons { get { return newWeapons; } }
+
+        /// <summary>MOBILE: Modules.newArmor - the chain and leather sets are registered.</summary>
+        public static bool NewArmor { get { return newArmor; } }
+
+        /// <summary>MOBILE: Modules.realisticEnemyEquipment.</summary>
+        public static bool RealisticEnemyEquipment { get { return realisticEnemyEquipment; } }
+
         static Dictionary<string, string> textDataBase = null;
         public static void Init(InitParams initParams)
         {
@@ -58,6 +78,7 @@ namespace RoleplayRealism
             bool conditionBasedPrices = settings.GetBool("Modules", "conditionBasedPrices");
             bool storeQualityItems = settings.GetBool("Modules", "storeQualityItemCondition");
             bool enemyEquipment = settings.GetBool("Modules", "realisticEnemyEquipment");
+            realisticEnemyEquipment = enemyEquipment;   // MOBILE: published for DEX_RRICompat
             bool skillStartEquip = settings.GetBool("Modules", "skillBasedStartingEquipment");
             bool skillStartSpells = settings.GetBool("Modules", "skillBasedStartingSpells");
             bool weaponBalance = settings.GetBool("Modules", "weaponBalance");
@@ -69,6 +90,7 @@ namespace RoleplayRealism
 
             InitMod(lootRebalance, bandaging, conditionBasedPrices, storeQualityItems, enemyEquipment, skillStartEquip, skillStartSpells, weaponBalance, newWeapons, newArmor, alchemistPotions);
 
+            started = true;   // MOBILE: after InitMod, so DEX_RRICompat never reads half-applied flags
             mod.IsReady = true;
         }
 

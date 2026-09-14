@@ -150,6 +150,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestPortedModGate();
             TestPortedModOrder();
             TestPortedModTitles();
+            TestDEXPort();
             TestLocationLoaderRmbObjects();
             TestBiomesClimateSwapGuard();
             TestTravelOptionsBridge();
@@ -3603,6 +3604,208 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(string.Join(",", MobilePortedMods.OrderedPriorities(3, 1, 2, 10).Select(i => i.ToString()).ToArray()) == "11,12,13", "order: RR last moves all three to the end in order");
         }
 
+        /// <summary>
+        /// MOBILE: Daggerfall Enemy Expansion (DEX 1.3.4 by Kab and Kamer, github.com/SquidKamer/
+        /// DaggerfallBestiaryProject @ fa21b073), compiled in under Ports/DEX and inert until the
+        /// launcher entry is switched on. The checks are of four kinds: pure gate logic; the port's
+        /// sources (no [Invoke], no editor scripts, the upstream headers); the two numbers that tie
+        /// this port to another one - DEX's hard-coded RoleplayRealism-Items template indices
+        /// against the ones our RR-Items port actually registers; and the six CSV databases in the
+        /// bundle, which are the whole content of the mod and the only place its 50 enemies exist.
+        /// </summary>
+        static void TestDEXPort()
+        {
+            // ---- 1. the launcher entry ----
+            Check(global::DaggerfallBestiaryProject.DEXPort.Title == "Daggerfall Enemy Expansion",
+                "DEX: the port's title is the ModTitle its bundle declares",
+                global::DaggerfallBestiaryProject.DEXPort.Title);
+            Check(MobilePortedMods.DEXTitle == global::DaggerfallBestiaryProject.DEXPort.Title,
+                "DEX: the launcher and the port name the same mod");
+            // ...and that literal against the fetched manifest itself where it is present. The
+            // fetched folder is gitignored, so a clone that has not run fetch.py skips this.
+            const string dexManifest = "Assets/Game/Mods/DEX/DaggerfallBestiaryProject.dfmod.json";
+            if (File.Exists(dexManifest))
+            {
+                var dexMatch = System.Text.RegularExpressions.Regex.Match(File.ReadAllText(dexManifest), "\"ModTitle\"\\s*:\\s*\"([^\"]*)\"");
+                Check(dexMatch.Success && dexMatch.Groups[1].Value == MobilePortedMods.DEXTitle,
+                    "DEX: DEXTitle is the ModTitle in DaggerfallBestiaryProject.dfmod.json",
+                    dexMatch.Success ? dexMatch.Groups[1].Value : "no ModTitle in " + dexManifest);
+            }
+            else log.AppendLine("  SKIP  DEXTitle against the fetched manifest (not fetched - run tools/bundled-mods/fetch.py --only DEX)");
+            Check(System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.DEXTitle) >= 0,
+                "DEX: Daggerfall Enemy Expansion is a default-off title");
+            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 1] == MobilePortedMods.DEXTitle,
+                "DEX: it is last in Titles, the list DefaultOff walks, after Real Grass");
+            // The entry's note is the only place the player is told the two things that make this
+            // switch unlike every other one: it is read once at start-up, and a save that contains a
+            // DEX enemy cannot be loaded without it. Neither is recoverable in a running session.
+            Check(MobilePortedMods.DEXNote.Contains("restart") && MobilePortedMods.DEXNote.Contains("save"),
+                "DEX: the entry note says restart-to-apply and saves-need-it-on",
+                MobilePortedMods.DEXNote);
+
+            // ---- 2. the gate ----
+            bool availableTableOk = true;
+            for (int mask = 0; mask < 4; mask++)
+            {
+                bool bundle = (mask & 1) != 0, csvs = (mask & 2) != 0;
+                if (global::DaggerfallBestiaryProject.DEXPort.Available(bundle, csvs) != (bundle && csvs))
+                    availableTableOk = false;
+            }
+            Check(availableTableOk, "DEX: Available is bundleFound && csvsFound (all four cases)");
+            Check(!global::DaggerfallBestiaryProject.DEXPort.Available(false, true)
+                  && !global::DaggerfallBestiaryProject.DEXPort.Available(true, false),
+                "DEX: neither half alone is enough - the code defines no enemy without the databases");
+            Check(!global::DaggerfallBestiaryProject.DEXPort.HasDatabases(null),
+                "DEX: a null mod has no databases");
+            Check(!global::DaggerfallBestiaryProject.DEXPort.Installed && !global::DaggerfallBestiaryProject.DEXPort.Loaded,
+                "DEX: Installed and Loaded are false until Init runs - nothing in this editor session started it");
+            Check(global::DaggerfallBestiaryProject.DEXPort.DatabaseExtensions.Length == 3,
+                "DEX: all three database extensions are recognised (.mdb/.cdb/.tdb.csv)");
+            MethodInfo dexInit = typeof(global::DaggerfallBestiaryProject.DEXPort).GetMethod("Init");
+            Check(dexInit != null && dexInit.IsStatic && dexInit.GetParameters().Length == 1
+                  && dexInit.GetParameters()[0].ParameterType == typeof(InitParams),
+                "DEX: Init(InitParams) is the entry point MobilePortedMods calls");
+            Check(dexInit != null && Attribute.GetCustomAttributes(dexInit, typeof(Invoke), false).Length == 0,
+                "DEX: no [Invoke] survives - the launcher switch is the only way in");
+            MethodInfo bestiaryInit = typeof(global::DaggerfallBestiaryProject.BestiaryMod).GetMethod("Init");
+            Check(bestiaryInit != null && Attribute.GetCustomAttributes(bestiaryInit, typeof(Invoke), false).Length == 0,
+                "DEX: BestiaryMod.Init carries no [Invoke] either - upstream's was removed, not moved");
+
+            // ---- 3. the sources ----
+            const string dexDir = "Assets/Scripts/Game/Mobile/Ports/DEX/";
+            string[] dexFiles =
+            {
+                "BestiaryMod.cs", "BestiaryEnemySpells.cs", "BestiarySaveInterface.cs", "BestiaryTextProvider.cs",
+                "BestiaryTrollCorpseBillboard.cs", "BestiaryTrollCorpseEntity.cs", "BestiaryTrollCorpseSerializer.cs",
+                "DEX_RRICompat.cs", "DEXPort.cs",
+            };
+            foreach (string file in dexFiles)
+            {
+                Check(File.Exists(dexDir + file), "DEX: " + dexDir + file + " exists");
+                if (!File.Exists(dexDir + file)) continue;
+                string raw = File.ReadAllText(dexDir + file);
+                if (file != "DEXPort.cs")
+                    Check(raw.Contains("github.com/SquidKamer/DaggerfallBestiaryProject @ fa21b07331e914d9e622aeaef65a4d8ab9496872")
+                          && raw.Contains("no licence declared - private draft only"),
+                        "DEX: " + file + " carries the port header with the upstream pin and the licence warning");
+                // Comments stripped: the headers and the MOBILE notes name what was removed on
+                // purpose, and an "it is gone" check a comment can satisfy is worthless.
+                string code = StripShaderComments(raw);
+                Check(!code.Contains("[Invoke("), "DEX: " + file + " carries no [Invoke] attribute");
+            }
+            // Scripts/Editor/ is authoring UI for the CSV databases - it opens Unity windows and
+            // writes the repo's own files. It is not in the author's manifest either, so neither the
+            // port nor the bundle has any part of it.
+            Check(!File.Exists(dexDir + "BestiaryModManager.cs") && !File.Exists(dexDir + "BestiaryEncounterTablesEditor.cs")
+                  && !Directory.Exists(dexDir + "Editor"),
+                "DEX: no editor script was ported");
+            string compatSrc = StripShaderComments(File.ReadAllText(dexDir + "DEX_RRICompat.cs"));
+            Check(!compatSrc.Contains("GetModFromGUID") && !compatSrc.Contains("rriMod.GetSettings()"),
+                "DEX: the RR-Items compatibility layer no longer looks the mod up by .dfmod GUID - it is compiled in and has none");
+            Check(compatSrc.Contains("RoleplayRealism.RoleplayRealismItemsMod.Started")
+                  && compatSrc.Contains("RoleplayRealism.RoleplayRealismItemsMod.NewWeapons")
+                  && compatSrc.Contains("RoleplayRealism.RoleplayRealismItemsMod.NewArmor")
+                  && compatSrc.Contains("RoleplayRealism.RoleplayRealismItemsMod.RealisticEnemyEquipment"),
+                "DEX: it reads the three module flags from our RoleplayRealism-Items port instead");
+            // The launcher block: the four-argument StartOne, the Installed flag and the [DEX] hint,
+            // placed after the Real Grass block and before the sky is handed back.
+            string dexLauncherSrc = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobilePortedMods.cs"));
+            Check(dexLauncherSrc.Contains("StartOne(DEXTitle,")
+                  && dexLauncherSrc.Contains("DaggerfallBestiaryProject.DEXPort.Init(new InitParams(")
+                  && dexLauncherSrc.Contains("() => DaggerfallBestiaryProject.DEXPort.Installed")
+                  && dexLauncherSrc.Contains("\"[DEX]\""),
+                "DEX: it is started by the four-argument StartOne with Installed and the [DEX] hint");
+            Check(dexLauncherSrc.Contains("Mod dex = Entry(DEXTitle);")
+                  && dexLauncherSrc.Contains("if (dex != null && dex.Enabled)"),
+                "DEX: it runs only when its launcher entry exists and is on - off by default");
+            int grassStartAt = dexLauncherSrc.IndexOf("StartOne(GrassTitle,", StringComparison.Ordinal);
+            int dexStartAt = dexLauncherSrc.IndexOf("StartOne(DEXTitle,", StringComparison.Ordinal);
+            int skyHandBackAt = dexLauncherSrc.LastIndexOf("return SkyRuns(", StringComparison.Ordinal);
+            Check(grassStartAt >= 0 && dexStartAt > grassStartAt && skyHandBackAt > dexStartAt,
+                "DEX: its block sits after Real Grass's and before the sky is handed back",
+                grassStartAt + " < " + dexStartAt + " < " + skyHandBackAt);
+
+            // ---- 4. the one number shared with another port ----
+            // DEX hard-codes RoleplayRealism-Items' custom item template indices. Nothing ties them
+            // to what our RR-Items port registers: a drift would not fail to compile, it would
+            // quietly dress DEX's class enemies in whatever else happens to sit at those indices.
+            int[] rriRegistered =
+            {
+                global::RoleplayRealism.ItemArchersAxe.templateIndex, global::RoleplayRealism.ItemLightFlail.templateIndex,
+                global::RoleplayRealism.ItemHauberk.templateIndex, global::RoleplayRealism.ItemChausses.templateIndex,
+                global::RoleplayRealism.ItemLeftSpaulder.templateIndex, global::RoleplayRealism.ItemRightSpaulder.templateIndex,
+                global::RoleplayRealism.ItemSollerets.templateIndex, global::RoleplayRealism.ItemJerkin.templateIndex,
+                global::RoleplayRealism.ItemCuisse.templateIndex, global::RoleplayRealism.ItemHelmet.templateIndex,
+                global::RoleplayRealism.ItemBoots.templateIndex, global::RoleplayRealism.ItemGloves.templateIndex,
+                global::RoleplayRealism.ItemLeftVambrace.templateIndex, global::RoleplayRealism.ItemRightVambrace.templateIndex,
+            };
+            int[] dexExpects = global::DaggerfallBestiaryProject.DEX_RRICompat.TemplateIndices;
+            bool indicesMatch = dexExpects.Length == rriRegistered.Length;
+            for (int i = 0; indicesMatch && i < dexExpects.Length; i++)
+                if (dexExpects[i] != rriRegistered[i]) indicesMatch = false;
+            Check(indicesMatch,
+                "DEX: its fourteen RR-Items template indices are the ones our RoleplayRealism-Items port registers",
+                string.Join(",", dexExpects.Select(i => i.ToString()).ToArray()) + " vs " +
+                string.Join(",", rriRegistered.Select(i => i.ToString()).ToArray()));
+            Check(dexExpects.Length == 14 && dexExpects[0] == 513 && dexExpects[dexExpects.Length - 1] == 526,
+                "DEX: the indices are the contiguous 513-526 block, archer's axe first and right vambrace last");
+
+            // ---- 5. the databases (the whole content of the mod) ----
+            const string dexData = "Assets/Game/Mods/DEX/";
+            if (!File.Exists(dexData + "MonsterBase.mdb.csv"))
+            {
+                log.AppendLine("  SKIP  DEX database parse (not fetched - run tools/bundled-mods/fetch.py --only DEX)");
+            }
+            else
+            {
+                // Rows, not lines: every database is one header line plus one row per entry, and the
+                // .tdb rows carry braced lists with commas in them, so only column 0 is read here.
+                Func<string, string[]> rows = name =>
+                    File.ReadAllLines(dexData + name).Skip(1).Where(l => !string.IsNullOrEmpty(l.Trim())).ToArray();
+                Func<string, int[]> ids = name =>
+                    rows(name).Select(l => { int v; return int.TryParse(l.Split(',')[0], out v) ? v : -1; }).ToArray();
+
+                int[] monsterIds = ids("MonsterBase.mdb.csv");
+                int[] classIds = ids("ClassBase.mdb.csv");
+                int careers = rows("CareerBase.cdb.csv").Length;
+                int tables = rows("DefaultTableReplacement.tdb.csv").Length;
+                int classicMonsters = rows("ClassicMonsterReplacement.mdb.csv").Length;
+                int classicClasses = rows("ClassicClassBase.mdb.csv").Length;
+
+                Check(monsterIds.Length == 35, "DEX: MonsterBase.mdb.csv holds 35 new monsters", monsterIds.Length.ToString());
+                Check(classIds.Length == 15, "DEX: ClassBase.mdb.csv holds 15 new class enemies", classIds.Length.ToString());
+                Check(monsterIds.Length + classIds.Length == 50, "DEX: 50 new enemies in all");
+                Check(careers == 43, "DEX: CareerBase.cdb.csv holds 43 careers", careers.ToString());
+                Check(tables == 39, "DEX: DefaultTableReplacement.tdb.csv rewrites 39 encounter tables", tables.ToString());
+                // 16 + 2, not the 16 + 1 the research note says: ClassicClassBase.mdb.csv ends
+                // without a newline, so a line count undercounts it by one. Both rows are real
+                // (ids 143 and 140 - the two vanilla class enemies DEX re-skins).
+                Check(classicMonsters == 16 && classicClasses == 2,
+                    "DEX: the classic re-stats are 16 monsters and 2 class enemies",
+                    classicMonsters + " + " + classicClasses);
+
+                // The id convention (BestiaryMod.IsMonster): ids alternate in blocks of 128, so DEX's
+                // reserved 256-511 is 256-383 monsters and 384-511 class enemies. An id in the wrong
+                // half does not fail to load - it produces an enemy the engine builds with the wrong
+                // entity type, which is the sort of thing only a check like this one ever catches.
+                Check(monsterIds.All(id => id >= 256 && id <= 383),
+                    "DEX: every new monster id is in the 256-383 monster half",
+                    string.Join(",", monsterIds.Where(id => id < 256 || id > 383).Select(i => i.ToString()).ToArray()));
+                Check(classIds.All(id => id >= 384 && id <= 511),
+                    "DEX: every new class enemy id is in the 384-511 class half",
+                    string.Join(",", classIds.Where(id => id < 384 || id > 511).Select(i => i.ToString()).ToArray()));
+                Check(monsterIds.All(id => global::DaggerfallBestiaryProject.BestiaryMod.IsMonster(id))
+                      && classIds.All(id => !global::DaggerfallBestiaryProject.BestiaryMod.IsMonster(id)),
+                    "DEX: the mod's own IsMonster agrees with the two id bands");
+                Check(monsterIds.Concat(classIds).Distinct().Count() == 50, "DEX: no id is used twice");
+                // The re-stats edit VANILLA enemies, so their ids must be below 256 - the same test
+                // the other way round, and the one that catches a re-stat row pasted into the wrong file.
+                Check(ids("ClassicMonsterReplacement.mdb.csv").All(id => id >= 0 && id < 256)
+                      && ids("ClassicClassBase.mdb.csv").All(id => id >= 0 && id < 256),
+                    "DEX: every classic re-stat targets a vanilla id below 256");
+            }
+        }
+
         static void TestPortedModTitles()
         {
             Check(System.Array.IndexOf(MobilePortedMods.Titles, "Dynamic Skies") >= 0, "PortedMods: Dynamic Skies is a default-off title");
@@ -3644,9 +3847,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobilePortedMods.TerrainTitle == "World of Daggerfall - Terrain" && System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.TerrainTitle) >= 0, "PortedMods: World of Daggerfall - Terrain is a default-off title");
             // Titles is what DefaultOff walks, so this pins the default-off coverage and the dependency
             // ORDER OF THAT LIST - not the start order, which is the statement sequence in StartEnabled
-            // and is pinned by the block comment there. Distant Terrain and then Real Grass were
-            // appended after it, so the Terrain entry is now third from last.
-            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 3] == MobilePortedMods.TerrainTitle, "PortedMods: World of Daggerfall - Terrain is third from last in Titles, the list DefaultOff walks");
+            // and is pinned by the block comment there. Distant Terrain, Real Grass and then
+            // Daggerfall Enemy Expansion were appended after it, so the Terrain entry is now fourth
+            // from last.
+            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 4] == MobilePortedMods.TerrainTitle, "PortedMods: World of Daggerfall - Terrain is fourth from last in Titles, the list DefaultOff walks");
 
             // MOBILE: Distant Terrain (World of Daggerfall flavour). Gated by nothing but its own
             // switch, like the Terrain port, and started after it - last of the immediate Inits,
@@ -3669,10 +3873,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             else log.AppendLine("  SKIP  DistantTitle against the fetched manifest (not fetched - run tools/bundled-mods/fetch.py --only DistantTerrainWoD)");
             Check(System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.DistantTitle) >= 0,
                 "PortedMods: Distant Terrain is a default-off title");
-            // Real Grass was appended after it (same move the Terrain entry made when Distant
-            // Terrain arrived), so Distant Terrain is now next to last.
-            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 2] == MobilePortedMods.DistantTitle,
-                "PortedMods: Distant Terrain is next to last in Titles, after World of Daggerfall - Terrain");
+            // Real Grass and then Daggerfall Enemy Expansion were appended after it (the same move
+            // the Terrain entry made when Distant Terrain arrived), so it is now third from last.
+            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 3] == MobilePortedMods.DistantTitle,
+                "PortedMods: Distant Terrain is third from last in Titles, after World of Daggerfall - Terrain");
 
             // MOBILE: Real Grass. The only compiled-in mod that uses Unity's terrain DETAIL
             // renderer, so it takes none of DFU's four terrain slots and is gated by nothing but
@@ -3699,8 +3903,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             else log.AppendLine("  SKIP  GrassTitle against the fetched manifest (not fetched - run tools/bundled-mods/fetch.py --only RealGrass)");
             Check(System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.GrassTitle) >= 0,
                 "PortedMods: Real Grass is a default-off title");
-            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 1] == MobilePortedMods.GrassTitle,
-                "PortedMods: Real Grass is last in Titles, after Distant Terrain");
+            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 2] == MobilePortedMods.GrassTitle,
+                "PortedMods: Real Grass is next to last in Titles, after Distant Terrain");
             // The launcher block itself: the four-argument StartOne, the Installed flag and the
             // [RealGrass] hint, placed after the Distant Terrain block and before the sky is
             // handed back. Asked of the source text because there is no scene to start it in.

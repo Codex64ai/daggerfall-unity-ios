@@ -82,6 +82,16 @@ namespace DaggerfallWorkshop.Game.Mobile
         // this literal against. Same rule as the two above: a wrong literal here does not fail, the
         // mod is simply never found and the switch does nothing.
         public const string GrassTitle = "Real Grass";
+        // MOBILE: the ModTitle declared in DaggerfallBestiaryProject.dfmod.json, verbatim - same rule
+        // as the three above: a wrong literal here does not fail, the mod is simply never found and
+        // the switch does nothing. MobileSelfTest compares it with the fetched manifest.
+        public const string DEXTitle = "Daggerfall Enemy Expansion";
+        // MOBILE: what the player is told about the switch, appended to the bundle's own description.
+        // Two facts, both of them consequences of the same thing - the mod wires itself into global
+        // engine state once, at start-up: flipping the switch does nothing until the app is
+        // restarted, and a save that contains one of DEX's 50 enemies cannot be loaded without it
+        // (DFU builds the enemy from EnemyBasics.Enemies, which with DEX off has no such id).
+        public const string DEXNote = " Takes effect after a restart. A save with DEX enemies in it needs this switched on to load.";
         // MOBILE: composed from SkyTitle so the two lines the sky writes while it waits can never
         // disagree about its name. Reads "[PortedMods] Dynamic Skies waiting for Distant Terrain's
         // stacked camera".
@@ -155,7 +165,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         public static bool BiomesRunning;
 
         /// <summary>Titles of the compiled-in mods, in dependency order.</summary>
-        public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle, SkyTitle, LLTitle, WoDTitle, BiomesTitle, TerrainTitle, DistantTitle, GrassTitle };
+        public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle, SkyTitle, LLTitle, WoDTitle, BiomesTitle, TerrainTitle, DistantTitle, GrassTitle, DEXTitle };
 
         /// <summary>
         /// Called by ModManager after it found the bundles and before it applies saved settings: a
@@ -520,6 +530,30 @@ namespace DaggerfallWorkshop.Game.Mobile
                     () => RealGrass.RealGrassPort.Init(new InitParams(grass, ModManager.Instance.GetModIndex(GrassTitle), count)),
                     () => RealGrass.RealGrassPort.Installed,
                     "[RealGrass]");
+
+            // MOBILE: Daggerfall Enemy Expansion. Read ONCE, here, and never again. BestiaryMod
+            // resizes the static EnemyBasics.Enemies array, registers 43 career templates, rewrites
+            // all 39 vanilla encounter tables and adds 50 names to the quest FoesTable; none of that
+            // can be taken back in a running session, so this is a boot-time choice and the entry
+            // says so (DEXNote, appended whether or not the mod is on - the player reads it to
+            // decide). Started last of everything here, for the same reason the terrain ports are
+            // late: it is the most global of the ports, and an Init that threw at this point cannot
+            // cost any other mod its start.
+            //
+            // Four-argument StartOne: DEXPort.Init declines by LOGGING "[DEX] not available: ..."
+            // and returning when the dex.dfmod bundle is absent or lists no .mdb/.cdb/.tdb.csv
+            // database - the code alone defines no enemy, every stat and sprite is a CSV row - so
+            // the plain StartOne would write "started" for a mod with an empty bestiary. The flag is
+            // Installed: Init returned and the mod object exists. What the databases then produced
+            // is said a frame later by the mod itself, in "[DEX] loaded N enemies, M careers, T tables".
+            Mod dex = Entry(DEXTitle);
+            if (dex != null && !(dex.ModInfo.ModDescription ?? "").Contains(DEXNote))
+                dex.ModInfo.ModDescription += DEXNote;
+            if (dex != null && dex.Enabled)
+                StartOne(DEXTitle,
+                    () => DaggerfallBestiaryProject.DEXPort.Init(new InitParams(dex, ModManager.Instance.GetModIndex(DEXTitle), count)),
+                    () => DaggerfallBestiaryProject.DEXPort.Installed,
+                    "[DEX]");
 
             return SkyRuns(sky != null, sky != null && sky.Enabled) ? sky : null;
         }
