@@ -3917,6 +3917,12 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // out magenta in winter and rain on the device. Not a broken mod: DFU picks each RECORD from
         // the highest-priority mod that has it, so DREAM won record 0 at 1024x1024 while Vanilla
         // Enhanced's two partial overlays won the road records at 256x256.
+        //
+        // And the bug the FIRST fix caused: resampling those records in meant the array could not stay
+        // ASTC, because nothing renders into a compressed surface - so it was allocated RGBA32, at
+        // record 0's 1024x1024, 56 slices deep. 235 MB, twice over in winter rain, and the iPad ran
+        // out of memory. The array now keeps record 0's format as well as its size, and a record that
+        // does not fit is taken from the next mod down that supplies it at a size the array can copy.
         static void TestTextureArraySlices()
         {
             const TextureFormat astc = TextureFormat.ASTC_6x6;
@@ -3933,40 +3939,71 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "TextureArraySlices: a mip-count difference alone is a blit");
 
             // No driver renders into a block-compressed surface, and on iOS every one of these arrays
-            // is ASTC - so the moment one slice needs resampling the whole array has to change format.
+            // is ASTC - so an ASTC array cannot be resampled into AT ALL.
             Check(!MobileTextureArraySlices.CanBlitInto(astc) && !MobileTextureArraySlices.CanBlitInto(TextureFormat.DXT5),
                 "TextureArraySlices: a compressed format cannot be a render target");
             Check(MobileTextureArraySlices.CanBlitInto(TextureFormat.RGBA32) && MobileTextureArraySlices.CanBlitInto(TextureFormat.ARGB32),
                 "TextureArraySlices: the uncompressed colour formats can");
 
-            // The size decision, which is the whole of the fix's visual contract: the array keeps
-            // RECORD 0's size, so nothing that works today looks different - only the slices that were
-            // not being drawn at all change. Only the FORMAT moves, and only when it has to.
-            Check(MobileTextureArraySlices.ArrayFormat(astc, false) == astc,
-                "TextureArraySlices: with every slice matching, an ASTC array stays ASTC");
-            Check(MobileTextureArraySlices.ArrayFormat(astc, true) == TextureFormat.RGBA32,
-                "TextureArraySlices: one mismatched slice forces the array to RGBA32 (nothing renders into ASTC)");
-            Check(MobileTextureArraySlices.ArrayFormat(TextureFormat.RGBA32, true) == TextureFormat.RGBA32,
-                "TextureArraySlices: an already-blittable format is left alone even when resampling");
-            Check(MobileTextureArraySlices.ArrayFormat(TextureFormat.ARGB32, true) == TextureFormat.ARGB32,
-                "TextureArraySlices: ARGB32 is blittable and is not needlessly converted");
+            // THE DECISION TABLE, which is the whole of the fix. The array is always RECORD 0's size
+            // AND format - the first attempt at this widened it to RGBA32 whenever one slice needed a
+            // resample, and 56 x 1024 x 1024 x 4 = 235 MB per tileset, two of them live in winter
+            // rain, killed the iPad. Four outcomes, in the order of the damage they do.
+            //
+            //   1. fits                                 -> Copy
+            Check(MobileTextureArraySlices.Plan(1024, 1024, 11, astc, 1024, 1024, 11, astc, false) == MobileTextureArraySlices.SlicePlan.Copy,
+                "TextureArraySlices: a record that fits the array is copied, lower providers irrelevant");
+            //   2. does not fit, a lower provider fits  -> LowerProvider  (the device's case)
+            Check(MobileTextureArraySlices.Plan(256, 256, 9, astc, 1024, 1024, 11, astc, true) == MobileTextureArraySlices.SlicePlan.LowerProvider,
+                "TextureArraySlices: the winter-road case - a 256 winner in a 1024 ASTC array takes DREAM's 1024 record instead");
+            //   3. does not fit, nothing below fits, array uncompressed -> Resample
+            Check(MobileTextureArraySlices.Plan(256, 256, 9, astc, 1024, 1024, 11, TextureFormat.RGBA32, false) == MobileTextureArraySlices.SlicePlan.Resample,
+                "TextureArraySlices: with no lower provider, an ALREADY uncompressed array is resampled into (no re-allocation)");
+            //   4. does not fit, nothing below fits, array compressed   -> Drop
+            Check(MobileTextureArraySlices.Plan(256, 256, 9, astc, 1024, 1024, 11, astc, false) == MobileTextureArraySlices.SlicePlan.Drop,
+                "TextureArraySlices: with no lower provider and a compressed array the slice drops - the array is NEVER widened to RGBA32");
+
+            // A lower provider is preferred over a resample even where a resample is possible: it is
+            // the cheaper of the two, and it is exact pixels rather than a rescale.
+            Check(MobileTextureArraySlices.Plan(256, 256, 9, TextureFormat.RGBA32, 1024, 1024, 11, TextureFormat.RGBA32, true) == MobileTextureArraySlices.SlicePlan.LowerProvider,
+                "TextureArraySlices: a matching lower provider beats a resample even in an uncompressed array");
+            // A format difference alone, and a mip-count difference alone, are mismatches too.
+            Check(MobileTextureArraySlices.Plan(1024, 1024, 11, astc, 1024, 1024, 11, TextureFormat.RGBA32, false) == MobileTextureArraySlices.SlicePlan.Resample,
+                "TextureArraySlices: a format difference alone is a mismatch");
+            Check(MobileTextureArraySlices.Plan(1024, 1024, 1, astc, 1024, 1024, 11, astc, false) == MobileTextureArraySlices.SlicePlan.Drop,
+                "TextureArraySlices: a mip-count difference alone is a mismatch");
 
             // The injector must USE all of this, not restate it. Comments stripped so the MOBILE note
             // explaining the fix cannot satisfy the check.
             string inj = StripShaderComments(File.ReadAllText("Assets/Scripts/Utility/AssetInjection/TextureReplacement.cs"));
-            Check(inj.Contains(".ArrayFormat(first.format, anyResample)"),
-                "TextureArraySlices: the injector picks the array format from the shared rule");
+            Check(inj.Contains("TextureFormat arrayFormat = first.format;")
+                  && !inj.Contains("ArrayFormat("),
+                "TextureArraySlices: the injector allocates the array in RECORD 0's own format and has no widening rule left to call");
+            Check(inj.Contains("new Texture2DArray(first.width, first.height, depth, arrayFormat,"),
+                "TextureArraySlices: the array is RECORD 0's size as well");
+            Check(inj.Contains("MobileTextureArraySlices.Plan(")
+                  && inj.Contains("case MobileTextureArraySlices.SlicePlan.LowerProvider:")
+                  && inj.Contains("Graphics.CopyTexture(lower, 0, textureArray, record);"),
+                "TextureArraySlices: the injector takes a misfitting record from a lower-priority provider");
+            Check(inj.Contains("lower = FindMatchingLowerProvider(archive, record, textureMap, tex, textureArray);"),
+                "TextureArraySlices: the search runs only for a record that does not already fit");
+            Check(MethodBody(inj, "Texture2D FindMatchingLowerProvider(int archive, int record, TextureMap textureMap, Texture2D winner, Texture2DArray textureArray)")
+                      .Contains("ModManager.Instance.EnumerateEnabledModsReverse()"),
+                "TextureArraySlices: the search walks the ENABLED mods in reverse load order, which is the order that picked the winner");
+            Check(MethodBody(inj, "Texture2D FindMatchingLowerProvider(int archive, int record, TextureMap textureMap, Texture2D winner, Texture2DArray textureArray)")
+                      .Contains("candidate == winner"),
+                "TextureArraySlices: the search skips the winner itself rather than returning it again");
             Check(inj.Contains("MobileTextureArraySlices.CreateSliceScratch(textureArray)")
                   && inj.Contains("MobileTextureArraySlices.BlitSlice(tex, 0, textureArray, record, scratch)"),
-                "TextureArraySlices: the injector writes a mismatched record through the scratch surface instead of dropping it");
+                "TextureArraySlices: the resample path is still there for an array that can take one");
             Check(inj.Contains("MobileTextureArraySlices.DestroySliceScratch(scratch)"),
                 "TextureArraySlices: the injector gives the scratch surface back");
-            Check(inj.Contains("\"[TextureArray] archive {0} ({1}): {2} of {3} slices resampled"),
-                "TextureArraySlices: the injector says once per ARCHIVE what it resampled");
-            // The old error log stays, for the one case that is still impossible - a driver that will
-            // not give us a render target of the array's own format.
+            Check(inj.Contains("\"[TextureArray] archive {0}: {1} records taken from a lower-priority provider (size/format mismatch with {2}x{3} {4})\""),
+                "TextureArraySlices: the injector says once per ARCHIVE how many records changed provider");
+            // The old error log stays, for the case that is still a loss - nothing fits and the array
+            // cannot be rendered into.
             Check(inj.Contains("due to size or format mismatch."),
-                "TextureArraySlices: the original failure log survives for the still-impossible case");
+                "TextureArraySlices: the original failure log survives for the slice that still drops");
 
             // Distant Terrain's four helpers were lifted here rather than duplicated; its own members
             // now forward, so this port's call sites and its existing tests read unchanged.

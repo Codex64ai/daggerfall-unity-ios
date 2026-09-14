@@ -1259,12 +1259,12 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
             bool mipMaps = false;
             Texture2D fallback = null;
 
-            // MOBILE 2026-09-14 (winter roads render magenta): the loop below used to allocate the
-            // array from RECORD 0 and then, for every later record whose size or format disagreed,
-            // log an error and WRITE NOTHING. An unwritten Texture2DArray slice is uninitialised GPU
-            // memory - Metal draws it magenta - so a perfectly ordinary mod stack produced eighteen
-            // magenta road and track tiles in winter and rain, with a Player.log full of "Failed to
-            // inject record N" and no other symptom.
+            // MOBILE 2026-09-14 (winter roads render magenta, then the iPad ran out of memory): the
+            // loop below used to allocate the array from RECORD 0 and then, for every later record
+            // whose size or format disagreed, log an error and WRITE NOTHING. An unwritten
+            // Texture2DArray slice is uninitialised GPU memory - Metal draws it magenta - so a
+            // perfectly ordinary mod stack produced eighteen magenta road and track tiles in winter
+            // and rain, with a Player.log full of "Failed to inject record N" and no other symptom.
             //
             // It is not a broken mod. DFU picks each RECORD independently from the highest-priority
             // mod that has it, so a full-tileset pack and a small partial overlay routinely end up
@@ -1273,18 +1273,23 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
             // at 256x256. Archive 403 is the control: the same two overlays, no magenta, because a
             // full 256x256 pack happened to win record 0 there and the sizes agreed by luck.
             //
-            // So: prescan the records first, and when they disagree, resample the odd ones into the
-            // array instead of dropping them. The array keeps RECORD 0's SIZE - deliberately, so that
-            // nothing which works today changes what it looks like; the only pixels that move are the
-            // ones that were not being drawn at all. Its FORMAT may have to change, because no driver
-            // renders into a block-compressed surface and on iOS these arrays are ASTC (see
-            // MobileTextureArraySlices.ArrayFormat).
+            // The first fix resampled the odd records in through a scratch RenderTexture, which meant
+            // allocating the whole array in a format a RenderTexture can hold - RGBA32, because no
+            // driver renders into the ASTC these arrays are on iOS. That is 56 x 1024 x 1024 x 4 =
+            // 235 MB for ONE tileset, and winter rain has two of them live. The device died.
+            //
+            // So the array now keeps RECORD 0's SIZE *AND* FORMAT, always, and a record that does not
+            // fit it is sourced differently instead: the next enabled mod down the load order that
+            // supplies the same record name at a size and format the array can copy. DREAM supplies
+            // every record of 103/303 at 1024 ASTC, so on the device the eighteen road slices come
+            // from DREAM's own winter art rather than from the Vanilla Enhanced overlays - which
+            // cannot be used at 1024 without paying the 235 MB. The RT-blit path survives only for an
+            // array that is ALREADY uncompressed, where a resample costs a scratch surface and
+            // nothing else. See MobileTextureArraySlices.Plan for the whole table.
             //
             // The scan costs nothing extra: TryImportTexture is the same call the loop was already
             // making once per record, and the textures it returns are the mods' own cached assets.
             var records = new Texture2D[depth];
-            bool anyResample = false;
-            int resampled = 0;
             Texture2D first = null;
             for (int record = 0; record < depth; record++)
             {
@@ -1293,24 +1298,17 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
                     continue;
                 records[record] = scanned;
                 if (first == null)
-                {
                     first = scanned;
-                    continue;
-                }
-                if (scanned.width != first.width || scanned.height != first.height
-                    || scanned.format != first.format || scanned.mipmapCount != first.mipmapCount)
-                {
-                    anyResample = true;
-                    resampled++;
-                }
             }
 
             if (first == null)
                 return false;
 
+            // MOBILE: record 0's own format, never widened. This is the line the memory crash was.
+            TextureFormat arrayFormat = first.format;
             RenderTexture scratch = null;
-            TextureFormat arrayFormat = DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices
-                .ArrayFormat(first.format, anyResample);
+            bool scratchTried = false;
+            int fromLowerProvider = 0, resampled = 0, dropped = 0;
 
             for (int record = 0; record < depth; record++)
             {
@@ -1347,41 +1345,77 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
 
                     textureArray = new Texture2DArray(first.width, first.height, depth, arrayFormat, mipMaps = first.mipmapCount > 1, IsLinearTextureMap(textureMap));
                     textureArray.filterMode = (FilterMode)DaggerfallUnity.Settings.MainFilterMode;
-
-                    if (anyResample)
-                    {
-                        scratch = DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices.CreateSliceScratch(textureArray);
-                        // MOBILE: once per ARCHIVE, not once per slice - eighteen of these per tileset
-                        // was the old failure's other problem. If the driver refuses the scratch
-                        // surface the mismatched records still drop, which is where the original
-                        // error log below remains the right thing to print.
-                        Debug.LogFormat("[TextureArray] archive {0} ({1}): {2} of {3} slices resampled to {4}x{5} {6}{7}",
-                            archive, textureMap, resampled, depth, textureArray.width, textureArray.height, arrayFormat,
-                            scratch == null ? " - SCRATCH SURFACE REFUSED, they will be dropped" : "");
-                    }
                 }
 
-                if (DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices.Method(
+                // MOBILE: only a record that does not fit pays for the search, and it searches the
+                // mods' already-loaded bundles - no disk work, no decode of anything not taken.
+                Texture2D lower = null;
+                if (MobileTextureArraySlices.Method(
                         tex.width, tex.height, tex.mipmapCount, tex.format,
                         textureArray.width, textureArray.height, textureArray.mipmapCount, textureArray.format)
-                    == DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices.SlicePack.Copy)
+                    != MobileTextureArraySlices.SlicePack.Copy)
                 {
-                    Graphics.CopyTexture(tex, 0, textureArray, record);
+                    lower = FindMatchingLowerProvider(archive, record, textureMap, tex, textureArray);
                 }
-                else if (scratch != null)
+
+                switch (MobileTextureArraySlices.Plan(
+                    tex.width, tex.height, tex.mipmapCount, tex.format,
+                    textureArray.width, textureArray.height, textureArray.mipmapCount, textureArray.format,
+                    lower != null))
                 {
-                    DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices.BlitSlice(tex, 0, textureArray, record, scratch);
-                }
-                else
-                {
-                    // Still impossible: the driver would not give us a render target of the array's
-                    // own format. Unchanged from upstream, because there is nothing else to do.
-                    Debug.LogErrorFormat("Failed to inject record {0} for texture archive {1} ({2}) due to size or format mismatch.", record, archive, textureMap);
+                    case MobileTextureArraySlices.SlicePlan.Copy:
+                        Graphics.CopyTexture(tex, 0, textureArray, record);
+                        break;
+
+                    case MobileTextureArraySlices.SlicePlan.LowerProvider:
+                        Graphics.CopyTexture(lower, 0, textureArray, record);
+                        fromLowerProvider++;
+                        break;
+
+                    case MobileTextureArraySlices.SlicePlan.Resample:
+                        // Only reached for an array that is ALREADY uncompressed, so the scratch
+                        // surface is the entire cost - the array is not re-allocated to allow it.
+                        if (!scratchTried)
+                        {
+                            scratch = MobileTextureArraySlices.CreateSliceScratch(textureArray);
+                            scratchTried = true;
+                        }
+                        if (scratch != null)
+                        {
+                            MobileTextureArraySlices.BlitSlice(tex, 0, textureArray, record, scratch);
+                            resampled++;
+                        }
+                        else
+                        {
+                            Debug.LogErrorFormat("Failed to inject record {0} for texture archive {1} ({2}) due to size or format mismatch.", record, archive, textureMap);
+                            dropped++;
+                        }
+                        break;
+
+                    default:
+                        // Nothing fits and the array is compressed. Upstream's log, upstream's
+                        // outcome - for this ONE slice. The array is never widened to avoid it;
+                        // that is what cost 235 MB and the device.
+                        Debug.LogErrorFormat("Failed to inject record {0} for texture archive {1} ({2}) due to size or format mismatch.", record, archive, textureMap);
+                        dropped++;
+                        break;
                 }
             }
 
             if (scratch != null)
-                DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices.DestroySliceScratch(scratch);
+                MobileTextureArraySlices.DestroySliceScratch(scratch);
+
+            // MOBILE: once per ARCHIVE, not once per slice - eighteen error lines that named a symptom
+            // and not a cause was the old failure's other problem.
+            if (textureArray && fromLowerProvider > 0)
+                Debug.LogFormat("[TextureArray] archive {0}: {1} records taken from a lower-priority provider (size/format mismatch with {2}x{3} {4})",
+                    archive, fromLowerProvider, textureArray.width, textureArray.height, textureArray.format);
+            if (textureArray && resampled > 0)
+                Debug.LogFormat("[TextureArray] archive {0}: {1} records resampled into the uncompressed array ({2}x{3} {4})",
+                    archive, resampled, textureArray.width, textureArray.height, textureArray.format);
+            if (textureArray && dropped > 0)
+                Debug.LogFormat("[TextureArray] archive {0}: {1} records dropped - no provider matches {2}x{3} {4} and it cannot be resampled into",
+                    archive, dropped, textureArray.width, textureArray.height, textureArray.format);
 
             if (fallback)
                 Texture2D.Destroy(fallback);
@@ -1394,6 +1428,58 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// MOBILE: the next provider of one texture-array record that the array can actually copy.
+        /// </summary>
+        /// <remarks>
+        /// DFU resolves each RECORD of an archive independently, taking it from the highest-priority
+        /// mod that has it, so one archive's records routinely arrive at two different sizes. The array
+        /// can only be one size and one format, and it is record 0's - see
+        /// <see cref="TryMakeTextureArrayCopyTexture"/> for why widening it instead is not affordable.
+        /// So when the winning asset does not fit, keep walking DOWN the load order from it and take
+        /// the first mod that supplies the same record name at a size and format
+        /// <see cref="MobileTextureArraySlices.Method"/> calls a Copy. Mods above the winner need no
+        /// skipping: the winner IS the highest-priority provider, so there are none.
+        ///
+        /// Mods only, deliberately. The classic arena2 record is not a candidate: it reaches an array
+        /// as Color32 through SetPixels32 (see TextureReader.GetTerrainTextureArray's fallback loader,
+        /// which builds the whole array that way when there are no overrides at all), and SetPixels32
+        /// neither writes into a compressed array nor mixes with the CopyTexture-written slices around
+        /// it. Where an arena2 record COULD be used - an uncompressed array - the winner's own art can
+        /// simply be resampled in, which is better art for the same cost.
+        /// </remarks>
+        /// <param name="archive">The texture archive.</param>
+        /// <param name="record">The record whose winning asset does not fit the array.</param>
+        /// <param name="textureMap">The texture type, which is part of the asset name.</param>
+        /// <param name="winner">The asset that won and does not fit; skipped if met again.</param>
+        /// <param name="textureArray">The array the candidate has to fit.</param>
+        /// <returns>A matching lower-priority texture, or null if no mod below the winner has one.</returns>
+        private static Texture2D FindMatchingLowerProvider(int archive, int record, TextureMap textureMap, Texture2D winner, Texture2DArray textureArray)
+        {
+            if (!DaggerfallUnity.Settings.AssetInjection || !ModManager.Instance || !textureArray)
+                return null;
+
+            string name = GetName(archive, record, 0, textureMap);
+
+            foreach (Mod mod in ModManager.Instance.EnumerateEnabledModsReverse())
+            {
+                if (mod == null || !mod.HasAsset(name))
+                    continue;
+
+                Texture2D candidate = mod.GetAsset<Texture2D>(name);
+                if (!candidate || candidate == winner)
+                    continue;
+
+                if (MobileTextureArraySlices.Method(
+                        candidate.width, candidate.height, candidate.mipmapCount, candidate.format,
+                        textureArray.width, textureArray.height, textureArray.mipmapCount, textureArray.format)
+                    == MobileTextureArraySlices.SlicePack.Copy)
+                    return candidate;
+            }
+
+            return null;
         }
 
         /// <summary>
