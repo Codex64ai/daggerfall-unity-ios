@@ -3429,6 +3429,37 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(global::DistantTerrain.DistantTerrainPort.ScaledFogDensity(0f, 2f, false) == 0f,
                 "DistantTerrain dials: a weather with no fog of its own (sunny, 0) gains none at any dial position");
 
+            // 2026-09-14, the device bug: multiplying the SUNNY base was multiplying 0.0000, so the
+            // dial did nothing on a clear day - which is when a player looks at the mountains. On
+            // the clear weathers the dial now SETS the haze instead of scaling a base.
+            Check(global::DistantTerrain.DistantTerrainPort.ClearHazeBase == 0.00005f,
+                "DistantTerrain haze: the clear-weather haze at 100 % is 0.00005 (~37 % of the terrain's own colour left at 20 km)");
+            Check(global::DistantTerrain.DistantTerrainPort.ClearWeatherFog(0f).Density == 0f
+                  && global::DistantTerrain.DistantTerrainPort.ClearWeatherFog(1f).Density == 0.00005f
+                  && global::DistantTerrain.DistantTerrainPort.ClearWeatherFog(2f).Density == 0.0001f,
+                "DistantTerrain haze: the dial sets the clear-weather density outright - 0 %, 100 %, 200 % are 0, 0.00005, 0.0001");
+            Check(global::DistantTerrain.DistantTerrainPort.ClearWeatherFog(0f).Mode == FogMode.Exponential
+                  && global::DistantTerrain.DistantTerrainPort.ClearWeatherFog(1f).Mode == FogMode.Exponential
+                  && global::DistantTerrain.DistantTerrainPort.ClearWeatherFog(2f).Mode == FogMode.Exponential,
+                "DistantTerrain haze: the mode is Exponential at every position INCLUDING zero - exp2(-0*d) = 1 is exactly no haze, and the slider never jumps modes");
+            Check(global::DistantTerrain.DistantTerrainPort.ClearWeatherFog(9f).Density == 0.0001f
+                  && global::DistantTerrain.DistantTerrainPort.ClearWeatherFog(-3f).Density == 0f
+                  && global::DistantTerrain.DistantTerrainPort.ClearWeatherFog(float.NaN).Density == 0.00005f,
+                "DistantTerrain haze: the helper clamps its own argument, and a NaN ini lands on the 100 % default");
+            // Monotonic, and never accidentally a fog bank: across the dial the haze only rises, and
+            // even at 200 % more than half the terrain's own colour survives at 5 km.
+            bool hazeRises = true;
+            float previousHaze = -1f;
+            for (int step = 0; step <= 20; step++)
+            {
+                float d = global::DistantTerrain.DistantTerrainPort.ClearWeatherFog(step / 10f).Density;
+                if (d < previousHaze) hazeRises = false;
+                previousHaze = d;
+            }
+            Check(hazeRises
+                  && Mathf.Pow(2f, -global::DistantTerrain.DistantTerrainPort.ClearWeatherFog(2f).Density * 5000f) > 0.5f,
+                "DistantTerrain haze: the dial rises monotonically and even 200 % leaves the near-middle distance (5 km) more than half unhazed");
+
             // Reach -> BlendEnd, with the invariant the README states: the pair is never stated
             // independently. BlendStart is derived, and must stay below BlendEnd across the whole
             // new range or the shader's fade band (BlendEnd - BlendStart + 1) inverts and the far
@@ -3478,10 +3509,21 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // The apply sites, which only exist with a world up. Source-pinned: that the port reads
             // the SETTING (not the old modsettings key) where the fog is pushed and where the
             // cameras are set, and that the panel and the test-app `set` both re-apply.
-            Check(portCode.Contains("DistantTerrainPort.ScaledFogDensity(FogConfig.SunnyFogDensity, strength, false)")
+            Check(portCode.Contains("DistantTerrainPort.ClearFog clear = DistantTerrainPort.ClearWeatherFog(strength);")
+                  && portCode.Contains("float sunny = clear.Density;")
                   && portCode.Contains("DistantTerrainPort.ScaledFogDensity(FogConfig.HeavyFogDensity, strength, true)")
                   && portCode.Contains("float strength = DistantTerrainPort.FogStrength;"),
-                "DistantTerrain dials: the fog push reads the dial and passes the Heavy flag for the Heavy density alone");
+                "DistantTerrain dials: the fog push sets the clear-weather haze from the dial, and passes the Heavy flag for the Heavy density alone");
+            Check(portCode.Contains("float overcast = Mathf.Max(clear.Density,"),
+                "DistantTerrain haze: overcast takes whichever of the dial's haze and its own scaled base is thicker - an overcast day is never clearer than a sunny one");
+            // The MODE, not just the density. WeatherManager's own sunny/overcast rows are
+            // FogMode.Linear with a 2400 end - a mode that ignores density altogether - so a table
+            // carrying only our numbers would be overruled the next time the weather changed.
+            Check(portCode.Contains("wm.SunnyFogSettings = new WeatherManager.FogSettings { fogMode = clear.Mode,")
+                  && portCode.Contains("wm.OvercastFogSettings = new WeatherManager.FogSettings { fogMode = clear.Mode,"),
+                "DistantTerrain haze: the overwritten weather table carries the fog MODE too, so a weather change cannot restore Linear/2400 over the haze");
+            Check(portCode.Contains("\"[DistantTerrain] clear-weather haze strength {0} -> mode {1} density {2}\""),
+                "DistantTerrain haze: the apply logs the haze line a Player.log reader greps for");
             Check(portCode.Contains("internal void ApplyLiveDials()")
                   && MethodBody(portCode, "internal void ApplyLiveDials()").Contains("SetUpCameras();")
                   && MethodBody(portCode, "internal void ApplyLiveDials()").Contains("PushFogSettings()")
@@ -3517,6 +3559,19 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(!cginc.Contains("_HazeColor") && !cginc.Contains("_DistanceTint")
                   && cginc.Contains("unity_FogColor.rgb"),
                 "DistantTerrain dials: the far terrain has no haze colour uniform - the fog dial is the whole haze control");
+
+            // And why no haze uniform was needed for the 2026-09-14 fix either: the far terrain does
+            // NOT fade by _BlendStart/_BlendEnd alone. It carries its own copy of the RenderSettings
+            // fog state (_FogMode/_FogDensity), pushed every frame by the port, and its exponential
+            // branch is the same exp2(-density * dist) the near world uses - so a density the dial
+            // writes into RenderSettings reaches the mountains, which is the surface the dial is for.
+            Check(cginc.Contains("if (_FogMode == 2)") && cginc.Contains("fogFac = _FogDensity * dist;")
+                  && cginc.Contains("blendFacTerrain = exp2(-fogFac);"),
+                "DistantTerrain haze: the far terrain shader hazes exponentially by _FogDensity, not only by its blend band");
+            Check(MethodBody(portCode, "private void pushFogParametersCached(Material mat)").Contains("RenderSettings.fogDensity")
+                  && MethodBody(portCode, "private void pushFogParametersCached(Material mat)").Contains("pushIntCached(mat, \"_FogMode\", 2, ref _cachedFogMode);")
+                  && portCode.Contains("pushFogParametersCached(mat);"),
+                "DistantTerrain haze: the port copies RenderSettings' fog mode and density onto the far-terrain material every frame, so the dial hazes the far terrain and not just the near world");
         }
 
 

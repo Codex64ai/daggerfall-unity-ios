@@ -73,11 +73,20 @@ namespace DistantTerrain
     /// hard-coded on DistantTerrain's inspector fields, so a missing or
     /// malformed Fog section gives identical visuals to the pre-settings build.
     /// <para>
-    /// MOBILE: these are the BASE densities. What reaches WeatherManager is each of them through
-    /// DistantTerrainPort.ScaledFogDensity, which multiplies by the player's Distance fog dial
-    /// (settings.ini DistantFogStrength, 0..2, the settings panel's 0..200 % row) - EXCEPT
-    /// HeavyFogDensity, which is the Fog WEATHER itself rather than distance haze and is passed
-    /// through unscaled: scaling it to zero would delete a weather type.
+    /// MOBILE: these are the BASE densities, and the player's Distance fog dial (settings.ini
+    /// DistantFogStrength, 0..2, the settings panel's 0..200 % row) decides what reaches
+    /// WeatherManager. Three different rules, because the three cases are three different things:
+    /// <list type="bullet">
+    /// <item>Sunny and Overcast are CLEAR weather, where the haze is a rendering choice and nothing
+    /// else - so the dial SETS it outright, through DistantTerrainPort.ClearWeatherFog. SunnyFogDensity
+    /// is 0.0000 and so is unused on that path (a multiplier over it could only ever be zero, which
+    /// is the bug this replaced); Overcast keeps its own base as a floor, so an overcast day is
+    /// never hazier when clear.</item>
+    /// <item>Rainy and Snowy carry weather of their own, so their bases still scale by the dial
+    /// through DistantTerrainPort.ScaledFogDensity.</item>
+    /// <item>HeavyFogDensity is the Fog WEATHER itself rather than distance haze and is passed
+    /// through unscaled: scaling it to zero would delete a weather type.</item>
+    /// </list>
     /// </para>
     public static class FogConfig
     {
@@ -334,6 +343,26 @@ namespace DistantTerrain
         public const float MinFogStrength = 0f;
         public const float MaxFogStrength = 2f;
 
+        /// <summary>
+        /// MOBILE 2026-09-14: the clear-weather haze density the dial means at 100 %.
+        /// <para>
+        /// The dial used to be a pure multiplier over FogConfig's per-weather BASE densities, and on
+        /// a clear day that multiplied FogConfig.SunnyFogDensity - which is 0.0000. Nothing times
+        /// anything is nothing: the player moved the slider through its whole range on a sunny day
+        /// and the far hills never changed, which is exactly what was reported from the device. So
+        /// on the two clear weathers the dial no longer multiplies, it SETS: density =
+        /// strength * ClearHazeBase.
+        /// </para>
+        /// <para>
+        /// 0.00005 is chosen from what the player sees, since the far terrain shader's exponential
+        /// branch is exp2(-density * dist): at 100 % that leaves ~78 % of the terrain's own colour at
+        /// 5 km, ~37 % at 20 km and ~5 % at 60 km (the default reach) - a light aerial haze that
+        /// fades the farthest mountains into the sky without touching the near world. 0 % is bare
+        /// silhouettes; 200 % is heavy.
+        /// </para>
+        /// </summary>
+        public const float ClearHazeBase = 0.00005f;
+
         /// <summary>Reach (= BlendEnd) in world units. 60,000 is the iOS default; 120,000 is upstream's.</summary>
         public const int DefaultReach = 60000;
         public const int MinReach = 20000;
@@ -369,6 +398,36 @@ namespace DistantTerrain
             if (isHeavyFogWeather)
                 return baseDensity;
             return baseDensity * ClampFogStrength(strength);
+        }
+
+        /// <summary>MOBILE: a fog mode and a density together - what one weather slot is set to.</summary>
+        public struct ClearFog
+        {
+            public FogMode Mode;
+            public float Density;
+        }
+
+        /// <summary>
+        /// MOBILE pure: what the dial means on a CLEAR day - the whole fix for "I tried all the
+        /// sliders, nothing changes". Not a multiplier over a per-weather base (the sunny base is
+        /// zero, so that could only ever produce zero) but the haze itself: Exponential fog at
+        /// strength * ClearHazeBase.
+        /// <para>
+        /// The mode is Exponential at every dial position, INCLUDING zero. Exponential with density
+        /// 0 is exactly no haze - Unity's factor is exp2(-0 * z) = 1, and the far terrain shader's
+        /// own branch (FarTerrainCommon.cginc, _FogMode 2) computes the same exp2(-0 * dist) = 1 and
+        /// lerps nothing toward the fog colour. Linear/0..2400 would also read as "no haze" out at
+        /// the mountains, but it is a different mode with a hard 2.4 km end that fogs the NEAR world
+        /// solid, and switching modes as the dial crosses zero would make the slider discontinuous
+        /// in a way nothing else here is. One mode, one number.
+        /// </para>
+        /// </summary>
+        public static ClearFog ClearWeatherFog(float strength)
+        {
+            ClearFog fog;
+            fog.Mode = FogMode.Exponential;
+            fog.Density = ClampFogStrength(strength) * ClearHazeBase;
+            return fog;
         }
 
         /// <summary>

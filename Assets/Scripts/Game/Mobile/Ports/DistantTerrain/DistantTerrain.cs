@@ -1621,8 +1621,19 @@ namespace DistantTerrain
         /// WeatherManager yet (Start() at the title), which is what leaves fogApplied false so
         /// InitFarTerrain retries at world entry.
         /// <para>
-        /// The four ordinary densities are scaled by the dial; Heavy is not - see
-        /// DistantTerrainPort.ScaledFogDensity, which owns that rule.
+        /// Three rules, one per kind of weather. The two CLEAR weathers (sunny, and the cloudy that
+        /// shares their slot) get their haze SET by the dial - DistantTerrainPort.ClearWeatherFog -
+        /// because there is no weather-borne fog there to scale and the sunny base is zero; overcast
+        /// takes whichever of that haze and its own scaled base is thicker, so an overcast day is
+        /// never clearer than a sunny one. Rainy and snowy still scale their own bases. Heavy - the
+        /// Fog WEATHER - is passed through untouched; see DistantTerrainPort.ScaledFogDensity, which
+        /// owns that rule.
+        /// </para>
+        /// <para>
+        /// The MODE is written here too, not just the density. WeatherManager's own sunny and
+        /// overcast settings are FogMode.Linear with a 2400 end, which ignores density entirely - so
+        /// a table that carried only our densities would have been overruled by the mode beside them
+        /// the moment the weather next changed and WeatherManager re-pushed its own row.
         /// </para>
         /// </summary>
         bool PushFogSettings()
@@ -1632,18 +1643,23 @@ namespace DistantTerrain
                 return false;
 
             float strength = DistantTerrainPort.FogStrength;
-            float sunny = DistantTerrainPort.ScaledFogDensity(FogConfig.SunnyFogDensity, strength, false);
-            float overcast = DistantTerrainPort.ScaledFogDensity(FogConfig.OvercastFogDensity, strength, false);
+            DistantTerrainPort.ClearFog clear = DistantTerrainPort.ClearWeatherFog(strength);
+            float sunny = clear.Density;
+            float overcast = Mathf.Max(clear.Density,
+                DistantTerrainPort.ScaledFogDensity(FogConfig.OvercastFogDensity, strength, false));
             float rainy = DistantTerrainPort.ScaledFogDensity(FogConfig.RainyFogDensity, strength, false);
             float snowy = DistantTerrainPort.ScaledFogDensity(FogConfig.SnowyFogDensity, strength, false);
             float heavy = DistantTerrainPort.ScaledFogDensity(FogConfig.HeavyFogDensity, strength, true);
 
-            wm.SunnyFogSettings = new WeatherManager.FogSettings { fogMode = FogMode.Exponential, density = sunny, startDistance = 0, endDistance = 0, excludeSkybox = true };
-            wm.OvercastFogSettings = new WeatherManager.FogSettings { fogMode = FogMode.Exponential, density = overcast, startDistance = 0, endDistance = 0, excludeSkybox = true };
+            wm.SunnyFogSettings = new WeatherManager.FogSettings { fogMode = clear.Mode, density = sunny, startDistance = 0, endDistance = 0, excludeSkybox = true };
+            wm.OvercastFogSettings = new WeatherManager.FogSettings { fogMode = clear.Mode, density = overcast, startDistance = 0, endDistance = 0, excludeSkybox = true };
             wm.RainyFogSettings = new WeatherManager.FogSettings { fogMode = FogMode.Exponential, density = rainy, startDistance = 0, endDistance = 0, excludeSkybox = true };
             wm.SnowyFogSettings = new WeatherManager.FogSettings { fogMode = FogMode.Exponential, density = snowy, startDistance = 0, endDistance = 0, excludeSkybox = true };
             wm.HeavyFogSettings = new WeatherManager.FogSettings { fogMode = FogMode.Exponential, density = heavy, startDistance = 0, endDistance = 0, excludeSkybox = false };
 
+            Debug.Log(string.Format(
+                "[DistantTerrain] clear-weather haze strength {0} -> mode {1} density {2}",
+                strength, clear.Mode, clear.Density));
             Debug.Log(string.Format(
                 "[DistantTerrain] fog settings overwritten -- sunny {0}, overcast {1}, rainy {2}, snowy {3}, heavy {4}",
                 sunny, overcast, rainy, snowy, heavy));

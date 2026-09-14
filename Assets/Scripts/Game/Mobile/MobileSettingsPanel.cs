@@ -509,14 +509,16 @@ namespace DaggerfallWorkshop.Game.Mobile
             bool running = global::DistantTerrain.DistantTerrainPort.Running;
 
             AddNote(c, ref y, rowW, running
-                ? "Distant terrain. Distance fog is the haze over the far mountains: 0% shows the "
-                  + "silhouettes bare, 100% is the mod's own look. Reach is how far the world is "
-                  + "drawn - lower costs less. Both apply as you move them."
+                ? "Distant terrain. Distance fog is the clear-day haze over the far mountains: 0% "
+                  + "shows the silhouettes bare, 100% is a light haze, 200% is heavy. Fog weather is "
+                  + "unaffected. Reach is how far the world is drawn - lower costs less. Both apply "
+                  + "as you move them."
                 : "Distant terrain is off this session - turn it on in the launcher's MODS window "
                   + "before PLAY. These two rows still save, and apply the next time it runs.");
 
-            // Shown as a percentage because that is what the dial means - 100% is the mod's own
-            // densities, 0% is no distance fog at all. Stored as the 0..2 multiplier.
+            // Shown as a percentage because that is what the dial means - 100% is the light
+            // clear-day haze (DistantTerrainPort.ClearHazeBase), 0% is no distance haze at all.
+            // Stored as the 0..2 strength.
             AddSlider(c, ref y, rowW, rowH, "Distance fog", 0f, 200f,
                 () => DaggerfallUnity.Settings.DistantFogStrength * 100f,
                 v => ApplyDistantDial(() => DaggerfallUnity.Settings.DistantFogStrength = Mathf.Round(v) / 100f),
