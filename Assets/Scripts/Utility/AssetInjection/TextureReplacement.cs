@@ -582,7 +582,33 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
         /// If this texture has an emission map the material is considered emissive and all emission maps are imported.
         /// </remarks>
         /// <returns>A material or null.</returns>
+        // MOBILE: archives whose first-import cost has already been logged (see the wrapper below).
+        static readonly HashSet<int> timedBillboardArchives = new HashSet<int>();
+
+        /// <summary>
+        /// MOBILE: times the FIRST import of each sprite archive and logs one line for it.
+        ///
+        /// An enemy a mod adds brings its own sprite archive, decoded out of an AssetBundle on the
+        /// frame the enemy first appears - every record, every frame, in one call - and that is a
+        /// visible hitch on a phone. This is the only place the cost is attributable to a single
+        /// archive, and it is paid once per archive per run (the results are cached), so the log
+        /// line is one per archive and not per enemy.
+        /// </summary>
         public static Material GetMobileBillboardMaterial(int archive, MeshFilter meshFilter, ref MobileBillboardImportedTextures importedTextures)
+        {
+            if (!timedBillboardArchives.Add(archive))
+                return GetMobileBillboardMaterialUntimed(archive, meshFilter, ref importedTextures);
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            Material material = GetMobileBillboardMaterialUntimed(archive, meshFilter, ref importedTextures);
+            sw.Stop();
+            Debug.LogFormat("[MobileTex] archive {0} first import {1} ms ({2})",
+                archive, sw.Elapsed.TotalMilliseconds.ToString("0.0"),
+                material != null ? "imported" : "no injected textures");
+            return material;
+        }
+
+        static Material GetMobileBillboardMaterialUntimed(int archive, MeshFilter meshFilter, ref MobileBillboardImportedTextures importedTextures)
         {
             if (!DaggerfallUnity.Settings.AssetInjection)
                 return null;

@@ -19,6 +19,12 @@
 //                                     way the in-game settings panel does. <seconds> may be left
 //                                     out, in which case the command fires five seconds after the
 //                                     previous one (the first, five seconds after the world).
+//   spawn [<seconds>] <id|name>       put one enemy three metres in front of the player, facing
+//                                     them, on the same schedule as `set`. The id (or name) must
+//                                     be in EnemyBasics.Enemies - the table a mod like Daggerfall
+//                                     Enemy Expansion appends to - so with that mod off the line
+//                                     is refused with a log line instead of spawning a blank.
+//                                     "spawn 260", "spawn Goblin", "spawn 20 Fire Daedra".
 //
 // WHY `set` EXISTS. Some bugs only happen on the TRANSITION between two settings - the CRT
 // filter's native render target handing Camera.main back to retro mode is the one this was
@@ -67,6 +73,15 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// the air - the Distant Terrain distance-fog dial does - cannot wait for the dice.
         /// </summary>
         public static int weatherOverride = -1;
+
+        /// <summary>
+        /// `spawn [seconds] &lt;id|name&gt;` lines from the command file, in schedule order: the time
+        /// after the world is up, and the enemy asked for (a numeric MobileTypes id, or a name to
+        /// look up). Parsed into a public field rather than an out parameter so the four existing
+        /// <see cref="ParseCommands"/> callers and their tests stay as they are.
+        /// </summary>
+        public static List<KeyValuePair<float, string>> spawns = new List<KeyValuePair<float, string>>();
+
         static readonly HashSet<string> audited = new HashSet<string>();
 #if DFU_IOS_TESTAPP
         static int targetX = -1, targetY = -1;   // "pixel X Y" in the command file teleports there once in the world
@@ -89,6 +104,17 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         static readonly List<SetCommand> setCommands = new List<SetCommand>();
+
+        /// <summary>One scheduled `spawn` line: an enemy put in front of the player
+        /// <see cref="at"/> seconds after the world finished loading.</summary>
+        class SpawnCommand
+        {
+            public float at;
+            public string target;
+            public bool fired;
+        }
+
+        static readonly List<SpawnCommand> spawnCommands = new List<SpawnCommand>();
 
         /// <summary>Time.realtimeSinceStartup at which the world finished loading; the `set`
         /// schedule is measured from here. Negative until then.</summary>
@@ -127,6 +153,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             toX = -1;
             toY = -1;
             journeyFix = -1;
+            spawns = new List<KeyValuePair<float, string>>();
             sets = new List<KeyValuePair<float, string>>();
             List<string> errors = new List<string>();
             float previous = 0f;
@@ -179,6 +206,29 @@ namespace DaggerfallWorkshop.Game.Mobile
                     int x, y;
                     if (int.TryParse(w[1], out x) && int.TryParse(w[2], out y)) { toX = x; toY = y; }
                     else errors.Add(line);
+                    continue;
+                }
+
+                // `spawn [seconds] <id|name>` - put one enemy three metres in front of the player
+                // once the world is up. The only scripted way to SEE a modded enemy: a mod that
+                // adds ids 256+ puts them in encounter tables the test route never rolls, and a
+                // simulator run has no dev console to type into. The name form takes the rest of
+                // the line, so "spawn Fire Daedra" works.
+                if (w[0] == "spawn" && w.Length >= 2)
+                {
+                    int si = 1;
+                    float sat;
+                    if (w.Length >= 3 && float.TryParse(w[1], System.Globalization.NumberStyles.Float,
+                                                       System.Globalization.CultureInfo.InvariantCulture, out sat))
+                        si = 2;
+                    else
+                        sat = previous + DefaultSetSpacing;
+
+                    string target = string.Join(" ", w, si, w.Length - si).Trim();
+                    if (target.Length == 0) { errors.Add(line); continue; }
+
+                    previous = sat;
+                    spawns.Add(new KeyValuePair<float, string>(sat, target));
                     continue;
                 }
 
@@ -240,6 +290,11 @@ namespace DaggerfallWorkshop.Game.Mobile
                 }
                 if (weatherOverride >= 0)
                     Debug.Log("[DebugStart] scheduled: weather " + (DaggerfallWorkshop.Game.Weather.WeatherType)weatherOverride);
+                foreach (KeyValuePair<float, string> sp in spawns)
+                {
+                    spawnCommands.Add(new SpawnCommand { at = sp.Key, target = sp.Value });
+                    Debug.Log(string.Format("[DebugStart] scheduled: spawn '{0}' at world+{1:0.0}s", sp.Value, sp.Key));
+                }
                 foreach (KeyValuePair<float, string> s in sets)
                 {
                     string[] nv = s.Value.Split(' ');
@@ -271,6 +326,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             ApplyScheduledWeather();
             StartScheduledJourney();
             ReportJourneyEnd();
+            RunSpawnCommands();
 
             if (snapshotsOwed > 0)
             {
@@ -304,6 +360,145 @@ namespace DaggerfallWorkshop.Game.Mobile
                 snapshotsOwed = 3;
                 return;     // one per frame: two settings changing in the same frame is not what a player does
             }
+        }
+
+        /// <summary>
+        /// Fires the scheduled `spawn` commands, at most one per frame. Separate from the `set`
+        /// loop because the two schedules are independent - a run that spawns four enemies changes
+        /// no setting - and because a spawn owes no camera snapshots.
+        /// </summary>
+        static void RunSpawnCommands()
+        {
+            if (worldReadyAt < 0f)
+                return;
+
+            float t = Time.realtimeSinceStartup - worldReadyAt;
+            foreach (SpawnCommand c in spawnCommands)
+            {
+                if (c.fired || t < c.at)
+                    continue;
+                try { SpawnEnemy(c.target); }
+                catch (System.Exception ex)
+                { Debug.LogWarning("[DebugStart] spawn " + c.target + " threw: " + ex.Message); }
+                c.fired = true;
+                return;     // one per frame
+            }
+        }
+
+        /// <summary>
+        /// Puts one enemy three metres in front of the player, facing them.
+        ///
+        /// The id is looked up in <see cref="EnemyBasics.Enemies"/>, which is the table a mod like
+        /// Daggerfall Enemy Expansion APPENDS to at load - so with the mod off the same line is
+        /// refused rather than silently instantiating an enemy with no sprite, stats or career.
+        /// The name form matches either the localized enemy name (DEX names its own enemies through
+        /// the custom-enemy text provider) or the MobileTypes enum name, ignoring case and spaces.
+        /// </summary>
+        static void SpawnEnemy(string target)
+        {
+            int id;
+            string name;
+            if (!ResolveEnemy(target, out id, out name))
+                return;
+
+            GameObject player = GameManager.Instance.PlayerObject;
+            if (player == null)
+            {
+                Debug.LogWarning("[DebugStart] spawn: no player object yet");
+                return;
+            }
+
+            Vector3 forward = player.transform.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.001f)
+                forward = Vector3.forward;
+            Vector3 pos = player.transform.position + forward.normalized * 3f;
+
+            GameObject go = GameObjectHelper.CreateEnemy(name, (MobileTypes)id, pos);
+            if (go == null)
+            {
+                Debug.LogWarning("[DebugStart] spawn: CreateEnemy returned nothing for id " + id);
+                return;
+            }
+            go.transform.position = pos;
+            go.transform.rotation = Quaternion.LookRotation(-forward.normalized, Vector3.up);
+            Debug.Log(string.Format("[DebugStart] spawned {0} (id {1}) at {2}", name, id, pos));
+        }
+
+        /// <summary>
+        /// Resolves a `spawn` argument to an id present in <see cref="EnemyBasics.Enemies"/>.
+        /// Returns false - with a log line saying why - when nothing matches, which is the whole
+        /// point of the negative run: "spawn 260" with the mod that adds id 260 switched off must
+        /// say so, not throw somewhere inside the sprite loader.
+        /// </summary>
+        static bool ResolveEnemy(string target, out int id, out string name)
+        {
+            id = -1;
+            name = null;
+            MobileEnemy[] table = EnemyBasics.Enemies;
+            if (table == null || table.Length == 0)
+            {
+                Debug.LogWarning("[DebugStart] spawn: the enemy table is empty");
+                return false;
+            }
+
+            int asked;
+            if (int.TryParse(target, out asked))
+            {
+                foreach (MobileEnemy e in table)
+                {
+                    if (e.ID != asked)
+                        continue;
+                    id = e.ID;
+                    name = EnemyName(e.ID);
+                    return true;
+                }
+                Debug.LogWarning(string.Format(
+                    "[DebugStart] spawn refused: no enemy with id {0} in the {1}-entry table " +
+                    "(a mod that adds it is not loaded)", asked, table.Length));
+                return false;
+            }
+
+            string wanted = Squash(target);
+            foreach (MobileEnemy e in table)
+            {
+                string localized = EnemyName(e.ID);
+                if (Squash(localized) != wanted && Squash(((MobileTypes)e.ID).ToString()) != wanted)
+                    continue;
+                id = e.ID;
+                name = localized;
+                return true;
+            }
+            Debug.LogWarning(string.Format(
+                "[DebugStart] spawn refused: no enemy named '{0}' in the {1}-entry table " +
+                "(a mod that adds it is not loaded)", target, table.Length));
+            return false;
+        }
+
+        /// <summary>The display name of an enemy id, falling back to the enum name.</summary>
+        static string EnemyName(int id)
+        {
+            try
+            {
+                string n = TextManager.Instance.GetLocalizedEnemyName(id);
+                if (!string.IsNullOrEmpty(n))
+                    return n;
+            }
+            catch (System.Exception) { }
+            return ((MobileTypes)id).ToString();
+        }
+
+        /// <summary>Lower-cased with spaces, underscores and hyphens removed, so "Fire Daedra",
+        /// "firedaedra" and "Fire_Daedra" are the same enemy to the command file.</summary>
+        static string Squash(string s)
+        {
+            if (string.IsNullOrEmpty(s))
+                return string.Empty;
+            StringBuilder sb = new StringBuilder(s.Length);
+            foreach (char ch in s)
+                if (ch != ' ' && ch != '_' && ch != '-' && ch != '\'')
+                    sb.Append(char.ToLowerInvariant(ch));
+            return sb.ToString();
         }
 
         /// <summary>

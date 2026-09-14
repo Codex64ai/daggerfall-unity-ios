@@ -605,9 +605,14 @@ replace flats or terrain work without any import flag.
 **Hands-free start for bug reports.** Put an empty file named `debug-newchar.txt` in the app's
 `Documents` folder and launch: the title menu is skipped, a new character starts outdoors, quest
 greetings are dismissed, and every custom model and the first vanilla meshes get one line in
-`Player.log` describing their materials (shader, texture, format). Delete the file to play normally.
+`Player.log` describing their materials (shader, texture, format). A line of
+`spawn [seconds] <id|name>` (for example `spawn Goblin`, `spawn 260`, `spawn 20 Fire Daedra`) puts
+that enemy three metres in front of the player, facing them, a few seconds after the world is up —
+the way to see an enemy a mod adds without waiting for an encounter table to roll it. The id or
+name must be one the loaded game knows, so with the mod that adds it switched off the line is
+refused with a log line rather than spawning a blank. Delete the file to play normally.
 
-**Test builds only.** All of it — the hands-free start and the `set` command below — is compiled in
+**Test builds only.** All of it — the hands-free start and the `set` and `spawn` commands below — is compiled in
 only when the app was built with `DFU_IOS_TESTAPP=1` (`MobileBuildSetup` adds the `DFU_IOS_TESTAPP`
 scripting define, and removes it for an ordinary build). `set` writes *any* `SettingsManager`
 property by reflection and saves it, and `Documents` is the same folder players are told to drop
