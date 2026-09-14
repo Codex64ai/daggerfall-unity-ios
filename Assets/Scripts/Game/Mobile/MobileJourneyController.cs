@@ -1608,6 +1608,7 @@ namespace DaggerfallWorkshop.Game.Mobile
                 DaggerfallUI.Instance.DaggerfallHUD.SetMidScreenText(
                     "You have arrived at your destination", 5f);
                 ForgetDestination();
+                RaiseOnJourneyArrived();
             }
             else if (reason == JourneyEnd.Cancelled)
             {
@@ -1615,6 +1616,20 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
             // Interrupted deliberately keeps the destination, so the travel map can offer to
             // resume rather than making the player pick the same place again.
+        }
+
+        /// <summary>
+        /// Raised once when a journey ends by reaching its destination - not on an interrupt, a
+        /// camp or a cancellation, all of which leave the player somewhere they did not choose.
+        /// Static because the listener (MobileAutosave) outlives any one controller instance, and
+        /// an event here is cheaper than a poll: arrival is a single frame in a journey that can
+        /// run for many game days.
+        /// </summary>
+        public static event System.Action OnJourneyArrived;
+        static void RaiseOnJourneyArrived()
+        {
+            if (OnJourneyArrived != null)
+                OnJourneyArrived();
         }
 
         #endregion

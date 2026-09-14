@@ -32,6 +32,8 @@ making the game playable on iPhone and iPad without a keyboard or mouse.
   proper pointer lock during play, hover-driven cursor in menus, hold-right-and-drag
   attacks, and your own mouse keybinds honoured (iPadOS 14+)
 - **Real haptics** via the Taptic Engine (iPhone only; iPad has no motor)
+- **Autosave** - three rotating slots written on travel arrival, dungeon transitions and a
+  timer, with guard rails so one is never taken mid-fight
 
 ## Engine footprint
 
@@ -381,6 +383,45 @@ Touch feel cannot be calibrated without a real finger, so the defaults are estim
 Open **Pause -> Mobile Settings -> Input** and adjust **Swipe to attack** and **Look sensitivity** first - they matter
 most. Enable `showGestureDebug` on the `MobileInput` object to see the required swipe
 distance in pixels.
+
+## Saving
+
+### Autosave
+
+Daggerfall Unity saves only when you tell it to, and iOS kills a backgrounded game whenever
+it needs the memory. The port therefore keeps three rotating saves of its own.
+
+**Slots.** `Autosave 1`, `Autosave 2`, `Autosave 3` - ordinary saves in every respect, listed
+and loadable in the normal load window, one per character. Each autosave overwrites the
+**oldest** of the three, so there is always a save from two events ago to fall back to when the
+newest one turns out to be a trap. Your own saves and the quick save are never touched.
+
+**Triggers.**
+
+| Trigger | When |
+| --- | --- |
+| Travel | arriving after a fast travel, and at the end of a Real travel journey |
+| Dungeon | entering a dungeon, and coming back out |
+| Timer | every N minutes of real, unpaused play |
+
+**Guard rails.** An autosave taken at the wrong moment is worse than none, so nothing is
+written while the player is dead, while enemies are nearby, mid weapon swing, under any open
+window, while the Real travel autopilot is driving, or where a quest forbids saving. A trigger
+that fires at such a moment is remembered and taken at the first quiet frame instead of being
+dropped. At least 60 seconds separate two autosaves, so a burst of transitions produces one
+save rather than three. Each save prints `[Autosave] saved 'Autosave 2' (travel)` to
+`Documents/Player.log` and shows **Autosaved** on the HUD; a blocked trigger prints
+`[Autosave] deferred (enemies nearby)` once.
+
+**Settings** - *Pause -> Mobile Settings -> Game*, and in `settings.ini` under
+`[Enhancements]`:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `Autosave` | `True` | master switch |
+| `AutosaveOnTravel` | `True` | save on travel arrival |
+| `AutosaveOnDungeon` | `True` | save on dungeon enter/exit |
+| `AutosaveIntervalMinutes` | `10` | timer, 0..60; `0` turns the timer off |
 
 ## Picture: retro mode and the CRT filter
 

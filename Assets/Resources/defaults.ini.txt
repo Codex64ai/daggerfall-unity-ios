@@ -200,3 +200,7 @@ EnhancedCombatAI=True
 GuildQuestListBox=False
 BowLeftHandWithSwitching=False
 LoiterLimitInHours=3
+Autosave=True
+AutosaveOnTravel=True
+AutosaveOnDungeon=True
+AutosaveIntervalMinutes=10

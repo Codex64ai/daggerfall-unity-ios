@@ -32,6 +32,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using UnityEngine;
 using DaggerfallConnect.Utility;
 using UnityEditor;
@@ -95,6 +96,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestJourneyStatusEffectPause();
             TestJourneyPassThrough();
             TestJourneyResumesAfterBoxes();
+            TestAutosaveRotation();
+            TestAutosaveGuardRails();
+            TestAutosaveSettings();
+            TestAutosaveHooks();
             TestRouteRule();
             TestNightDecision();
             TestPassThroughGeometry();
@@ -5601,6 +5606,242 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // UPSTREAM-PATCHES must name the engine file that was touched.
             Check(File.ReadAllText("UPSTREAM-PATCHES.md").Contains("WhenPcEntersExits.cs"),
                   "pass-through: UPSTREAM-PATCHES lists the quest-engine site");
+        }
+
+        /// <summary>
+        /// AUTOSAVE - which slot. Three saves rotate oldest-first so there is always a save from
+        /// two events ago; an empty slot is taken first so a new character fills 1, 2, 3 in order.
+        /// </summary>
+        static void TestAutosaveRotation()
+        {
+            Func<int, DateTime?> T = m => new DateTime(2026, 9, 13, 12, m, 0);
+
+            Check(MobileAutosave.NextSlot(new DateTime?[] { null, null, null }) == 0,
+                  "autosave: a character with no autosaves starts at slot 1");
+            Check(MobileAutosave.NextSlot(new DateTime?[] { T(0), null, null }) == 1,
+                  "autosave: the second autosave fills slot 2");
+            Check(MobileAutosave.NextSlot(new DateTime?[] { T(0), T(1), null }) == 2,
+                  "autosave: the third autosave fills slot 3");
+            Check(MobileAutosave.NextSlot(new DateTime?[] { T(0), T(1), T(2) }) == 0,
+                  "autosave: with all three full the oldest is reused - back to slot 1");
+            Check(MobileAutosave.NextSlot(new DateTime?[] { T(3), T(1), T(2) }) == 1,
+                  "autosave: the oldest wins wherever it sits");
+            Check(MobileAutosave.NextSlot(new DateTime?[] { T(5), T(5), T(5) }) == 0,
+                  "autosave: a tie is broken by the lower slot, so the choice is deterministic");
+            Check(MobileAutosave.NextSlot(new DateTime?[] { T(9), null, T(2) }) == 1,
+                  "autosave: an empty slot beats an older full one (a save deleted by hand is refilled)");
+
+            // Full rotation over five saves: 1,2,3,1,2 - each save replaces the oldest.
+            DateTime?[] slots = new DateTime?[3];
+            int[] order = new int[5];
+            for (int i = 0; i < 5; i++)
+            {
+                order[i] = MobileAutosave.NextSlot(slots);
+                slots[order[i]] = T(i);
+            }
+            Check(order[0] == 0 && order[1] == 1 && order[2] == 2 && order[3] == 0 && order[4] == 1,
+                  "autosave: five saves rotate 1,2,3,1,2",
+                  string.Join(",", order.Select(o => (o + 1).ToString()).ToArray()));
+
+            Check(MobileAutosave.SlotName(0) == "Autosave 1" && MobileAutosave.SlotName(2) == "Autosave 3",
+                  "autosave: slots are named Autosave 1..3, so the load window shows them as themselves");
+            Check(MobileAutosave.IsAutosaveName("Autosave 2") &&
+                  !MobileAutosave.IsAutosaveName("QuickSave") &&
+                  !MobileAutosave.IsAutosaveName("Autosave 4") &&
+                  !MobileAutosave.IsAutosaveName("") && !MobileAutosave.IsAutosaveName(null),
+                  "autosave: only the three rotating names are ours - manual saves and QuickSave are not");
+
+            // Degenerate input must not throw out of a save.
+            Check(MobileAutosave.NextSlot(null) == 0 && MobileAutosave.NextSlot(new DateTime?[0]) == 0,
+                  "autosave: a missing slot table answers slot 1 rather than throwing");
+            Check(MobileAutosave.TicksToDate(long.MinValue) == DateTime.MinValue &&
+                  MobileAutosave.TicksToDate(new DateTime(2026, 1, 1).Ticks) == new DateTime(2026, 1, 1),
+                  "autosave: a SaveInfo timestamp out of DateTime's range reads as very old, not as a throw");
+        }
+
+        /// <summary>
+        /// AUTOSAVE - when it may not save. A save taken mid-fight or one frame before death is a
+        /// save the player cannot escape, so every trigger passes this truth table first.
+        /// </summary>
+        static void TestAutosaveGuardRails()
+        {
+            // All-clear baseline, then one flag flipped at a time.
+            Func<bool, bool, bool, bool, bool, bool, bool, bool, bool> C = MobileAutosave.CanSaveNow;
+
+            Check(C(true, true, false, false, false, false, false, false),
+                  "autosave: a quiet frame in a running game saves");
+
+            Check(!C(false, true, false, false, false, false, false, false),
+                  "autosave: the master switch off means no save");
+            Check(!C(true, false, false, false, false, false, false, false),
+                  "autosave: nothing is saved before a game has started");
+            Check(!C(true, true, true, false, false, false, false, false),
+                  "autosave: never save a dead player");
+            Check(!C(true, true, false, true, false, false, false, false),
+                  "autosave: never save with enemies nearby");
+            Check(!C(true, true, false, false, true, false, false, false),
+                  "autosave: never save mid-swing");
+            Check(!C(true, true, false, false, false, true, false, false),
+                  "autosave: never save under an open window");
+            Check(!C(true, true, false, false, false, false, true, false),
+                  "autosave: never save while the journey autopilot is driving");
+            Check(!C(true, true, false, false, false, false, false, true),
+                  "autosave: never start a second save over a running one");
+
+            // The reason is what the deferred log line says, so it has to be the true one.
+            Check(MobileAutosave.BlockReason(true, true, false, false, false, false, false, false) == null,
+                  "autosave: a clear frame has no blocking reason");
+            Check(MobileAutosave.BlockReason(true, true, false, true, false, false, false, false) == "enemies nearby",
+                  "autosave: the deferred line names enemies");
+            Check(MobileAutosave.BlockReason(true, true, false, false, false, false, true, false) == "travelling",
+                  "autosave: the deferred line names the autopilot");
+            // Priority: a dead player under an open window (the death screen) reports death, not UI.
+            Check(MobileAutosave.BlockReason(true, true, true, true, true, true, true, true) == "the player is dead",
+                  "autosave: the most serious reason is the one reported");
+            Check(MobileAutosave.BlockReason(false, false, true, true, true, true, true, true) == "autosave is off",
+                  "autosave: a feature that is off reports nothing else");
+
+            // The 60 s floor: a burst of transitions collapses into one save.
+            Check(MobileAutosave.ThrottleOpen(-1f),
+                  "autosave: the first autosave of a session is never throttled");
+            Check(!MobileAutosave.ThrottleOpen(0f) && !MobileAutosave.ThrottleOpen(59.9f),
+                  "autosave: a second trigger inside 60 s waits");
+            Check(MobileAutosave.ThrottleOpen(60f) && MobileAutosave.ThrottleOpen(600f),
+                  "autosave: 60 s after the last save the next trigger is taken");
+            Check(MobileAutosave.MinSecondsBetweenSaves == 60f && MobileAutosave.SlotCount == 3,
+                  "autosave: three slots, one minute apart");
+
+            Check(MobileAutosave.TriggerName(MobileAutosave.Trigger.Timer) == "timer" &&
+                  MobileAutosave.TriggerName(MobileAutosave.Trigger.Travel) == "travel" &&
+                  MobileAutosave.TriggerName(MobileAutosave.Trigger.DungeonEnter) == "dungeon enter" &&
+                  MobileAutosave.TriggerName(MobileAutosave.Trigger.DungeonExit) == "dungeon exit",
+                  "autosave: every trigger has the name the log line prints");
+        }
+
+        /// <summary>
+        /// AUTOSAVE - the four settings. All default ON (the point of an autosave is that it
+        /// happens to a player who never thinks about it) and the interval is clamped both in
+        /// SettingsManager, where a hand-edited ini arrives, and in the helper.
+        /// </summary>
+        static void TestAutosaveSettings()
+        {
+            string ini = File.ReadAllText("Assets/Resources/defaults.ini.txt");
+            Check(ini.Contains("\nAutosave=True"), "autosave: defaults.ini ships Autosave=True");
+            Check(ini.Contains("\nAutosaveOnTravel=True"), "autosave: defaults.ini ships AutosaveOnTravel=True");
+            Check(ini.Contains("\nAutosaveOnDungeon=True"), "autosave: defaults.ini ships AutosaveOnDungeon=True");
+            Check(ini.Contains("\nAutosaveIntervalMinutes=10"), "autosave: defaults.ini ships a 10 minute timer");
+
+            // The keys must sit under a section SettingsManager reads them from, or SyncIniData
+            // adds them to a section nothing looks in.
+            int enh = ini.IndexOf("[Enhancements]");
+            Check(enh >= 0 && ini.IndexOf("Autosave=True") > enh,
+                  "autosave: the keys live in the [Enhancements] section they are read from");
+
+            string sm = StripShaderComments(File.ReadAllText("Assets/Scripts/SettingsManager.cs"));
+            Check(sm.Contains("public bool Autosave { get; set; }") &&
+                  sm.Contains("public bool AutosaveOnTravel { get; set; }") &&
+                  sm.Contains("public bool AutosaveOnDungeon { get; set; }") &&
+                  sm.Contains("public int AutosaveIntervalMinutes { get; set; }"),
+                  "autosave: SettingsManager exposes all four keys");
+            Check(sm.Contains("GetBool(sectionEnhancements, \"Autosave\")") &&
+                  sm.Contains("GetInt(sectionEnhancements, \"AutosaveIntervalMinutes\", 0, 60)"),
+                  "autosave: SettingsManager reads them, and clamps the interval to 0..60 on load");
+            Check(sm.Contains("SetBool(sectionEnhancements, \"Autosave\", Autosave)") &&
+                  sm.Contains("SetInt(sectionEnhancements, \"AutosaveIntervalMinutes\", AutosaveIntervalMinutes)"),
+                  "autosave: SettingsManager writes them back, so a panel change survives a relaunch");
+
+            Check(MobileAutosave.ClampIntervalMinutes(-5) == 0 &&
+                  MobileAutosave.ClampIntervalMinutes(0) == 0 &&
+                  MobileAutosave.ClampIntervalMinutes(10) == 10 &&
+                  MobileAutosave.ClampIntervalMinutes(61) == 60 &&
+                  MobileAutosave.ClampIntervalMinutes(int.MaxValue) == 60,
+                  "autosave: the interval clamps to 0..60, 0 meaning the timer is off");
+
+            // The panel's Timer row: every offered value round-trips, and a value from a
+            // hand-edited ini lights the nearest button rather than none.
+            for (int i = 0; i < MobileSettingsPanel.IntervalMinutes.Length; i++)
+            {
+                Check(MobileSettingsPanel.IntervalIndex(MobileSettingsPanel.IntervalMinutes[i]) == i,
+                      "autosave: the Timer row round-trips " + MobileSettingsPanel.IntervalMinutes[i] + " minutes");
+            }
+            Check(MobileSettingsPanel.IntervalIndex(7) == 1 && MobileSettingsPanel.IntervalIndex(50) == 5 &&
+                  MobileSettingsPanel.IntervalIndex(0) == 0 && MobileSettingsPanel.IntervalIndex(45) == 4,
+                  "autosave: an in-between interval lights the nearest Timer button, ties going to the shorter");
+
+            string panel = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileSettingsPanel.cs"));
+            Check(panel.Contains("enum Section { Input, HUD, Game, Advanced }") &&
+                  panel.Contains("void BuildGameSection(") &&
+                  panel.Contains("\"Input\", \"HUD\", \"Game\", \"Advanced\""),
+                  "autosave: the panel has a Game tab and builds it");
+            Check(!Regex.IsMatch(panel, @"AddToggle\(c, ref y, rowW, rowH, ""Autosave"",[^;]*""[a-z]+""\);"),
+                  "autosave: the panel rows carry a null key - the values belong to settings.ini, not PlayerPrefs");
+        }
+
+        /// <summary>
+        /// AUTOSAVE - the hooks. The three trigger sources are static engine events; subscribing
+        /// without unsubscribing fires into a destroyed instance after a return to the menu and
+        /// saves twice on the next transition. Source pins: a MonoBehaviour's event wiring cannot
+        /// be exercised headlessly.
+        /// </summary>
+        static void TestAutosaveHooks()
+        {
+            string auto = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileAutosave.cs"));
+
+            string[] hooks =
+            {
+                "DaggerfallTravelPopUp.OnPostFastTravel",
+                "MobileJourneyController.OnJourneyArrived",
+                "PlayerEnterExit.OnTransitionDungeonInterior",
+                "PlayerEnterExit.OnTransitionDungeonExterior",
+                "SaveLoadManager.OnSave",
+            };
+            foreach (string h in hooks)
+            {
+                Check(auto.Contains(h + " += "), "autosave: subscribes to " + h);
+                Check(auto.Contains(h + " -= "), "autosave: unsubscribes from " + h);
+            }
+            Check(Regex.IsMatch(auto, @"void OnDestroy\(\)\s*\{[^}]*OnDisable\(\);"),
+                  "autosave: OnDestroy releases the subscriptions as well as OnDisable");
+
+            // One host, created the way the other mobile singletons are.
+            Check(auto.Contains("[RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]") &&
+                  auto.Contains("new GameObject(\"MobileAutosave\")") &&
+                  auto.Contains("DontDestroyOnLoad(host)") &&
+                  Regex.IsMatch(auto, @"static void Install\(\)\s*\{\s*if \(instance != null\)\s*return;"),
+                  "autosave: one host object for the life of the app, installed once");
+
+            // The rotation must never reach a save that is not one of ours.
+            Check(auto.Contains("SaveLoadManager.Instance.Save(characterName, slotName)") &&
+                  !auto.Contains("QuickSave("),
+                  "autosave: saves only to its own slot names and never through QuickSave");
+            Check(auto.Contains("slm.IsSavingPrevented"),
+                  "autosave: obeys PreventSaveConditions, the same gate the quick save obeys");
+            Check(auto.Contains("Time.unscaledDeltaTime") && !auto.Contains("Time.deltaTime"),
+                  "autosave: the timer counts real time, not the 20x game clock a journey runs on");
+            Check(auto.Contains("[Autosave] saved '") && auto.Contains("[Autosave] deferred ("),
+                  "autosave: the two log lines the device evidence is read from");
+            Check(auto.Contains("DaggerfallUI.AddHUDText(\"Autosaved\")"),
+                  "autosave: the player is told, once, on the HUD");
+
+            // The journey arrival event, in our own file rather than an engine edit.
+            string journey = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileJourneyController.cs"));
+            Check(journey.Contains("public static event System.Action OnJourneyArrived;") &&
+                  Regex.IsMatch(journey, @"reason == JourneyEnd\.Arrived\)\s*\{[^}]*RaiseOnJourneyArrived\(\);"),
+                  "autosave: the journey raises OnJourneyArrived only on a real arrival");
+            Check(Regex.Matches(journey, @"RaiseOnJourneyArrived\(\);").Count == 1,
+                  "autosave: one arrival event per journey, from the single exit path");
+
+            // Fast travel and the dungeon transitions are upstream events that already existed:
+            // no engine file is edited for this feature, so UPSTREAM-PATCHES gains nothing.
+            string popup = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/UserInterfaceWindows/DaggerfallTravelPopUp.cs"));
+            Check(!popup.Contains("MobileAutosave"),
+                  "autosave: the travel popup is untouched - the port listens to its existing event");
+            string enterExit = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/PlayerEnterExit.cs"));
+            Check(!enterExit.Contains("MobileAutosave"),
+                  "autosave: PlayerEnterExit is untouched - the port listens to its existing events");
+
+            Check(File.ReadAllText("README-iOS.md").Contains("### Autosave"),
+                  "autosave: README-iOS documents the feature");
         }
 
         /// <summary>

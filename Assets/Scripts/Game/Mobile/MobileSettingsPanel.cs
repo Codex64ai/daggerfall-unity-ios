@@ -55,9 +55,12 @@ namespace DaggerfallWorkshop.Game.Mobile
         MobileSettingsWindow hostWindow;
 
         // Sections. One content transform each; the scroll view shows the active one.
-        enum Section { Input, HUD, Advanced }   // MOBILE 2026-09-07: mod switches live only in the launcher's MODS window
-        readonly RectTransform[] sectionContent = new RectTransform[3];
-        readonly Image[] sectionTabs = new Image[3];
+        // MOBILE 2026-09-07: mod switches live only in the launcher's MODS window.
+        // MOBILE 2026-09-13: Game holds the rules of play that are not input or picture - autosave
+        // is the first of them, and it belongs in front of the player rather than under Advanced.
+        enum Section { Input, HUD, Game, Advanced }
+        readonly RectTransform[] sectionContent = new RectTransform[4];
+        readonly Image[] sectionTabs = new Image[4];
         Section activeSection = Section.Input;
         ScrollRect scroll;
 
@@ -285,6 +288,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             BuildInputSection(sectionContent[(int)Section.Input], rowW, rowH);
             BuildHudSection(sectionContent[(int)Section.HUD], rowW, rowH);
+            BuildGameSection(sectionContent[(int)Section.Game], rowW, rowH);
             BuildAdvancedSection(sectionContent[(int)Section.Advanced], rowW, rowH);
 
             ShowSection(Section.Input);
@@ -299,7 +303,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             bar.anchoredPosition = new Vector2(0f, y);
             bar.sizeDelta = new Vector2(panelSize.x - 48f, rowH - 8f);
 
-            string[] names = { "Input", "HUD", "Advanced" };
+            string[] names = { "Input", "HUD", "Game", "Advanced" };
             float gap = 8f;
             float w = (bar.sizeDelta.x - gap * (names.Length - 1)) / names.Length;
             for (int i = 0; i < names.Length; i++)
@@ -503,6 +507,86 @@ namespace DaggerfallWorkshop.Game.Mobile
         // The Mods section (Roads & tracks, Real travel, Summer start) was removed on 2026-09-07:
         // every mod switch, built-in or installed, is made in the launcher's MODS window before
         // PLAY and holds for the session. Nothing about mods can change mid-game.
+
+        /// <summary>
+        /// MOBILE 2026-09-13: autosave. Every value here belongs to settings.ini (SettingsManager),
+        /// not to this panel's PlayerPrefs - MobileAutosave reads the settings live so a change
+        /// takes effect on the next trigger - so all four rows pass a null key and own their own
+        /// persistence, exactly as the CRT filter row does.
+        /// </summary>
+        void BuildGameSection(RectTransform c, float rowW, float rowH)
+        {
+            float y = 0f;
+
+            AddNote(c, ref y, rowW,
+                "Autosave keeps three rotating saves of its own, named Autosave 1 to Autosave 3, " +
+                "and writes the oldest of them. They appear in the normal load window. Your own " +
+                "saves and the quick save are never overwritten.");
+
+            AddToggle(c, ref y, rowW, rowH, "Autosave",
+                () => DaggerfallUnity.Settings.Autosave,
+                v => SaveSetting(() => DaggerfallUnity.Settings.Autosave == v,
+                                 () => DaggerfallUnity.Settings.Autosave = v),
+                null);
+
+            AddToggle(c, ref y, rowW, rowH, "  ...on arriving after travel",
+                () => DaggerfallUnity.Settings.AutosaveOnTravel,
+                v => SaveSetting(() => DaggerfallUnity.Settings.AutosaveOnTravel == v,
+                                 () => DaggerfallUnity.Settings.AutosaveOnTravel = v),
+                null);
+
+            AddToggle(c, ref y, rowW, rowH, "  ...on entering or leaving a dungeon",
+                () => DaggerfallUnity.Settings.AutosaveOnDungeon,
+                v => SaveSetting(() => DaggerfallUnity.Settings.AutosaveOnDungeon == v,
+                                 () => DaggerfallUnity.Settings.AutosaveOnDungeon = v),
+                null);
+
+            // A choice rather than a slider: these are the only intervals anyone wants, and a
+            // slider on a touch screen cannot be trusted to land on a round number.
+            AddChoice(c, ref y, rowW, rowH, "Timer (minutes of play)",
+                new[] { "Off", "5", "10", "15", "30", "60" },
+                () => IntervalIndex(DaggerfallUnity.Settings.AutosaveIntervalMinutes),
+                v => SaveSetting(() => DaggerfallUnity.Settings.AutosaveIntervalMinutes == IntervalMinutes[v],
+                                 () => DaggerfallUnity.Settings.AutosaveIntervalMinutes = IntervalMinutes[v]));
+
+            AddNote(c, ref y, rowW,
+                "The timer counts real playing time, and never saves in a fight, while a window " +
+                "is open or while Real travel is walking for you - it waits for a quiet moment.");
+
+            FinishSection(c, y);
+        }
+
+        /// <summary>Minutes offered by the Timer row, in the order the buttons appear.</summary>
+        public static readonly int[] IntervalMinutes = { 0, 5, 10, 15, 30, 60 };
+
+        /// <summary>
+        /// PURE. Which Timer button an interval lights up. An ini can hold any minute count in
+        /// 0..60, so anything between two offered values shows as the nearest one rather than
+        /// leaving every button dark.
+        /// </summary>
+        public static int IntervalIndex(int minutes)
+        {
+            int best = 0;
+            for (int i = 1; i < IntervalMinutes.Length; i++)
+            {
+                if (Mathf.Abs(IntervalMinutes[i] - minutes) < Mathf.Abs(IntervalMinutes[best] - minutes))
+                    best = i;
+            }
+            return best;
+        }
+
+        /// <summary>
+        /// Writes a settings.ini value and saves the file, but only when it actually changed -
+        /// AddToggle and AddChoice both call their setter once while building the panel, and
+        /// settings.ini must not be rewritten for a value nobody touched.
+        /// </summary>
+        static void SaveSetting(System.Func<bool> unchanged, System.Action apply)
+        {
+            if (unchanged())
+                return;
+            apply();
+            DaggerfallUnity.Settings.SaveSettings();
+        }
 
         void BuildAdvancedSection(RectTransform c, float rowW, float rowH)
         {

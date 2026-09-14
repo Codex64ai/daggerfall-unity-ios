@@ -1146,3 +1146,34 @@ contains no `PassingThrough`, so the blast radius cannot quietly grow.
 *Rebase risk: LOW.* One class, three methods, all additive; upstream changes to `WhenPcEntersExits`
 would conflict textually rather than semantically. If the gate call were lost in a merge the only
 consequence is the old behaviour returning, which the device test catches immediately.
+
+
+---
+
+### Autosave settings keys (2026-09-13) — `Assets/Scripts/SettingsManager.cs`, `Assets/Resources/defaults.ini.txt`
+
+Native autosave (three rotating slots on travel arrival, dungeon transitions and a timer) lives
+entirely in the port: `Assets/Scripts/Game/Mobile/MobileAutosave.cs` plus a `Game` tab in
+`MobileSettingsPanel`. It needs **no engine hooks** — all three triggers are static events the
+engine already raises (`DaggerfallTravelPopUp.OnPostFastTravel`,
+`PlayerEnterExit.OnTransitionDungeonInterior` / `...Exterior`), and the journey arrival event
+(`MobileJourneyController.OnJourneyArrived`) is in our own file. Self-test pins assert that
+`DaggerfallTravelPopUp.cs` and `PlayerEnterExit.cs` contain no reference to `MobileAutosave`, so
+that stays true.
+
+The only engine surface is four settings keys, added exactly as the CRT keys were:
+
+**`SettingsManager.cs`** gains `Autosave`, `AutosaveOnTravel`, `AutosaveOnDungeon` (bools) and
+`AutosaveIntervalMinutes` (int), declared with the other `[Enhancements]` properties, read in
+`LoadSettings` (the interval through `GetInt(..., 0, 60)` — a hand-edited ini reaches the timer
+through this property and nothing else) and written back in `SaveSettings`.
+
+**`defaults.ini.txt`** `[Enhancements]` gains `Autosave=True`, `AutosaveOnTravel=True`,
+`AutosaveOnDungeon=True`, `AutosaveIntervalMinutes=10`. Defaults-on is deliberate: the player who
+benefits from an autosave is the one who never thinks about saving. `SyncIniData()` copies the new
+keys into an existing `settings.ini` on first launch, so upgraders get them too.
+
+*Rebase risk: LOW.* Both are additive at the end of a section. Taking theirs on either file drops
+the keys, `GetBool` then warns and returns `False`, and autosave silently switches itself off —
+visible immediately because the Game tab shows every row OFF. The self test pins all four keys in
+both files.

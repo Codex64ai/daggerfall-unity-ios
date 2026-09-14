@@ -358,6 +358,14 @@ namespace DaggerfallWorkshop
         public bool GuildQuestListBox { get; set; }
         public bool BowLeftHandWithSwitching { get; set; }
         public int LoiterLimitInHours { get; set; }
+        // MOBILE: native autosave (Assets/Scripts/Game/Mobile/MobileAutosave.cs). Three rotating
+        // saves named "Autosave 1".."Autosave 3", written on fast-travel or journey arrival, on
+        // entering and leaving a dungeon, and every AutosaveIntervalMinutes of unpaused play.
+        // The interval is clamped 0..60 on load, where 0 means the timer alone is off.
+        public bool Autosave { get; set; }
+        public bool AutosaveOnTravel { get; set; }
+        public bool AutosaveOnDungeon { get; set; }
+        public int AutosaveIntervalMinutes { get; set; }
 
         #endregion
 
@@ -607,6 +615,12 @@ namespace DaggerfallWorkshop
             GuildQuestListBox = GetBool(sectionEnhancements, "GuildQuestListBox");
             BowLeftHandWithSwitching = GetBool(sectionEnhancements, "BowLeftHandWithSwitching");
             LoiterLimitInHours = GetInt(sectionEnhancements, "LoiterLimitInHours");
+            Autosave = GetBool(sectionEnhancements, "Autosave");
+            AutosaveOnTravel = GetBool(sectionEnhancements, "AutosaveOnTravel");
+            AutosaveOnDungeon = GetBool(sectionEnhancements, "AutosaveOnDungeon");
+            // MOBILE: clamped here as well as in MobileAutosave.ClampIntervalMinutes, because a
+            // hand-edited ini reaches the timer through this property and nothing else.
+            AutosaveIntervalMinutes = GetInt(sectionEnhancements, "AutosaveIntervalMinutes", 0, 60);
         }
 
         /// <summary>
@@ -808,6 +822,10 @@ namespace DaggerfallWorkshop
             SetBool(sectionEnhancements, "GuildQuestListBox", GuildQuestListBox);
             SetBool(sectionEnhancements, "BowLeftHandWithSwitching", BowLeftHandWithSwitching);
             SetInt(sectionEnhancements, "LoiterLimitInHours", LoiterLimitInHours);
+            SetBool(sectionEnhancements, "Autosave", Autosave);
+            SetBool(sectionEnhancements, "AutosaveOnTravel", AutosaveOnTravel);
+            SetBool(sectionEnhancements, "AutosaveOnDungeon", AutosaveOnDungeon);
+            SetInt(sectionEnhancements, "AutosaveIntervalMinutes", AutosaveIntervalMinutes);
 
             // Write settings to persistent file
             WriteSettingsFile();
