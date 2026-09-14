@@ -86,6 +86,15 @@ namespace DaggerfallWorkshop.Game.Mobile
         // as the three above: a wrong literal here does not fail, the mod is simply never found and
         // the switch does nothing. MobileSelfTest compares it with the fetched manifest.
         public const string DEXTitle = "Daggerfall Enemy Expansion";
+
+        // MOBILE: the atmosphere round's four optional audio/light mods. Each literal is the ModTitle
+        // declared in the fetched manifest, verbatim - same rule as the titles above: a wrong literal
+        // does not fail, the mod is simply never found and its switch does nothing, so MobileSelfTest
+        // compares every one of them against tools/bundled-mods/mods.json's fetched manifest.
+        public const string AmbienceTitle = "Better Ambience";
+        public const string FootstepsTitle = "ImmersiveFootsteps";
+        public const string MusicTitle = "Dynamic Music";
+        public const string LightingTitle = "First-Person-Lighting";
         // MOBILE: what the player is told about the switch, appended to the bundle's own description.
         // Two facts, both of them consequences of the same thing - the mod wires itself into global
         // engine state once, at start-up: flipping the switch does nothing until the app is
@@ -165,7 +174,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         public static bool BiomesRunning;
 
         /// <summary>Titles of the compiled-in mods, in dependency order.</summary>
-        public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle, SkyTitle, LLTitle, WoDTitle, BiomesTitle, TerrainTitle, DistantTitle, GrassTitle, DEXTitle };
+        public static readonly string[] Titles = { RRTitle, RRItemsTitle, CCTitle, SkyTitle, LLTitle, WoDTitle, BiomesTitle, TerrainTitle, DistantTitle, GrassTitle, DEXTitle,
+                                                   AmbienceTitle, FootstepsTitle, MusicTitle, LightingTitle };
 
         /// <summary>
         /// Called by ModManager after it found the bundles and before it applies saved settings: a
@@ -554,6 +564,47 @@ namespace DaggerfallWorkshop.Game.Mobile
                     () => DaggerfallBestiaryProject.DEXPort.Init(new InitParams(dex, ModManager.Instance.GetModIndex(DEXTitle), count)),
                     () => DaggerfallBestiaryProject.DEXPort.Installed,
                     "[DEX]");
+
+            // MOBILE: the atmosphere round's four. None of them is gated by another mod and none of
+            // them touches terrain, so they go after everything above - last started, first thing a
+            // crash report would exonerate. All four take the four-argument StartOne: each Init
+            // declines by LOGGING and returning when its bundle entry is missing (the bundle is where
+            // the clips and the mod settings live), never by throwing, so the plain StartOne would
+            // write "started" for a mod that did nothing.
+            //
+            // Footsteps ordering matters and is decided here rather than left to chance: Better
+            // Ambience goes FIRST and Immersive Footsteps SECOND, so that when a player has both on,
+            // the one that runs second is the one holding the player's footsteps - and upstream's own
+            // manifest makes Immersive Footsteps an optional dependant of Better Ambience, i.e. the
+            // author expects his to win. MobileModConflicts asks the player to pick one of the two;
+            // this is what happens if they keep both anyway.
+            Mod ambience = Entry(AmbienceTitle);
+            if (ambience != null && ambience.Enabled)
+                StartOne(AmbienceTitle,
+                    () => SpellcastStudios.BetterAmbiencePort.Init(new InitParams(ambience, ModManager.Instance.GetModIndex(AmbienceTitle), count)),
+                    () => SpellcastStudios.BetterAmbiencePort.Installed,
+                    "[BetterAmbience]");
+
+            Mod footsteps = Entry(FootstepsTitle);
+            if (footsteps != null && footsteps.Enabled)
+                StartOne(FootstepsTitle,
+                    () => ImmersiveFootsteps.ImmersiveFootstepsMain.Init(new InitParams(footsteps, ModManager.Instance.GetModIndex(FootstepsTitle), count)),
+                    () => ImmersiveFootsteps.ImmersiveFootstepsMain.Installed,
+                    "[ImmersiveFootsteps]");
+
+            Mod music = Entry(MusicTitle);
+            if (music != null && music.Enabled)
+                StartOne(MusicTitle,
+                    () => DynamicMusic.DynamicMusic.Init(new InitParams(music, ModManager.Instance.GetModIndex(MusicTitle), count)),
+                    () => DynamicMusic.DynamicMusic.Installed,
+                    "[DynamicMusic]");
+
+            Mod lighting = Entry(LightingTitle);
+            if (lighting != null && lighting.Enabled)
+                StartOne(LightingTitle,
+                    () => FirstPersonLighting.FirstPersonLightingMod.Init(new InitParams(lighting, ModManager.Instance.GetModIndex(LightingTitle), count)),
+                    () => FirstPersonLighting.FirstPersonLightingMod.Installed,
+                    "[FirstPersonLighting]");
 
             return SkyRuns(sky != null, sky != null && sky.Enabled) ? sky : null;
         }

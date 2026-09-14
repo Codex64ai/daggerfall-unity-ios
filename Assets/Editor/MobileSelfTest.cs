@@ -115,6 +115,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestWavEncoderRule();
             TestConvertedModImportPolicy();
             TestPackTextureRules();
+            TestPackAudioRules();
             TestModExtractorRoundTrip();
             TestModExtractorPathContainment();
             TestModExtractorSurvivesBadPaths();
@@ -154,6 +155,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestPortedModOrder();
             TestPortedModTitles();
             TestDEXPort();
+            TestAtmosphereMods();
             TestLocationLoaderRmbObjects();
             TestBiomesClimateSwapGuard();
             TestTravelOptionsBridge();
@@ -3692,8 +3694,13 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             else log.AppendLine("  SKIP  DEXTitle against the fetched manifest (not fetched - run tools/bundled-mods/fetch.py --only DEX)");
             Check(System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.DEXTitle) >= 0,
                 "DEX: Daggerfall Enemy Expansion is a default-off title");
-            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 1] == MobilePortedMods.DEXTitle,
-                "DEX: it is last in Titles, the list DefaultOff walks, after Real Grass");
+            // MOBILE: written as a RELATIVE order, not "last". It used to be Titles[Length - 1], and
+            // the atmosphere round appending four more titles broke it - a failure that said nothing
+            // about DEX. What the list has to preserve is the dependency order it is written in, so
+            // that is what is asserted; a new title appended after this one is not a regression.
+            Check(System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.DEXTitle)
+                  > System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.GrassTitle),
+                "DEX: it comes after Real Grass in Titles, the list DefaultOff walks");
             // The entry's note is the only place the player is told the two things that make this
             // switch unlike every other one: it is read once at start-up, and a save that contains a
             // DEX enemy cannot be loaded without it. Neither is recoverable in a running session.
@@ -3888,6 +3895,274 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "DEX: the engine edit is recorded in UPSTREAM-PATCHES.md");
         }
 
+        // MOBILE: the fetched packs' AUDIO import rules. Pure, so this pins the import without Unity
+        // importing anything - the same reason TestPackTextureRules exists. What it is guarding is a
+        // hole that was open until the atmosphere round: MobileConvertedModImporter.OnPreprocessAudio
+        // covers "Assets/Game/Mods/Converted/" only, and fetched packs live one level up, so before
+        // MobileModPackAudioRules every clip in Better Ambience and Immersive Footsteps would have
+        // imported at Unity's defaults - uncompressed PCM, samples resident - and gone into the bundle
+        // that way. None of that fails; it just costs several times the memory with nothing in any log.
+        static void TestPackAudioRules()
+        {
+            const string sfx = "Assets/Game/Mods/BetterAmbience/Sound/sfx_footstep_stone_000.wav";
+            const string mp3 = "Assets/Game/Mods/ImmersiveFootsteps/Audio/High_Quality/Climate_Footsteps/HQ_Grass_Footstep_1.mp3";
+            const string ogg = "Assets/Game/Mods/FirstPersonLighting/Sound/FlareHiss.ogg";
+            const string other = "Assets/Game/Mods/RealGrass/Assets/Grass_tex.png";
+
+            Check(MobileModPackAudioRules.Applies(sfx) && MobileModPackAudioRules.Applies(mp3) && MobileModPackAudioRules.Applies(ogg),
+                "PackAudioRules: the three packs with audio are in scope");
+            Check(!MobileModPackAudioRules.Applies(other),
+                "PackAudioRules: a pack with no audio is untouched (its import cache must not move)");
+            Check(MobileModPackAudioRules.Applies("Assets\\Game\\Mods\\BetterAmbience\\Sound\\x.wav"),
+                "PackAudioRules: backslash paths are normalized");
+
+            // The thresholds are per SOURCE EXTENSION because the packs are not one format: a single
+            // byte count would mean ~12 s of 44.1 kHz mono WAV and ~4 minutes of 22 kHz mono MP3.
+            Check(MobileModPackAudioRules.BedThresholdBytes(sfx) == MobileModPackAudioRules.WavBedThresholdBytes
+                  && MobileModPackAudioRules.BedThresholdBytes(mp3) == MobileModPackAudioRules.CompressedBedThresholdBytes
+                  && MobileModPackAudioRules.BedThresholdBytes(ogg) == MobileModPackAudioRules.CompressedBedThresholdBytes,
+                "PackAudioRules: the bed threshold is chosen by source extension, not by one number for all");
+            Check(MobileModPackAudioRules.WavBedThresholdBytes > MobileModPackAudioRules.CompressedBedThresholdBytes,
+                "PackAudioRules: an uncompressed source needs more bytes than a compressed one to be the same duration");
+
+            // Real measurements from the four shipped mods. Every clip is Sfx; the one file that was a
+            // bed (AmbientRaining.wav, 29.5 s / 5,211,900 B) is excluded by mods.json because nothing
+            // in that repo references it - so the Bed branch is exercised HERE and nowhere else today.
+            Check(MobileModPackAudioRules.For(sfx, 12848) == MobileModPackAudioRules.Class.Sfx,
+                "PackAudioRules: a 0.15 s footstep WAV is an effect");
+            Check(MobileModPackAudioRules.For(sfx, 139714) == MobileModPackAudioRules.Class.Sfx,
+                "PackAudioRules: Better Ambience's LONGEST clip (0.79 s, 139,714 B) is still an effect");
+            Check(MobileModPackAudioRules.For(mp3, 11213) == MobileModPackAudioRules.Class.Sfx,
+                "PackAudioRules: Immersive Footsteps' longest clip (0.91 s, 11,213 B) is an effect");
+            Check(MobileModPackAudioRules.For(ogg, 7099) == MobileModPackAudioRules.Class.Sfx,
+                "PackAudioRules: First-Person Lighting's flare hiss is an effect");
+            Check(MobileModPackAudioRules.For(sfx, 5211900) == MobileModPackAudioRules.Class.Bed,
+                "PackAudioRules: a 29.5 s stereo WAV would be a bed");
+            Check(MobileModPackAudioRules.For(mp3, 400000) == MobileModPackAudioRules.Class.Bed,
+                "PackAudioRules: a long compressed clip is a bed");
+            Check(MobileModPackAudioRules.For(sfx, MobileModPackAudioRules.WavBedThresholdBytes) == MobileModPackAudioRules.Class.Sfx
+                  && MobileModPackAudioRules.For(sfx, MobileModPackAudioRules.WavBedThresholdBytes + 1) == MobileModPackAudioRules.Class.Bed,
+                "PackAudioRules: the threshold is exclusive - exactly at it is still an effect");
+
+            // The three settings that decide what the device pays. A streamed effect misses the frame
+            // it was triggered on; a resident bed is megabytes that do not come back.
+            Check(MobileModPackAudioRules.LoadType(MobileModPackAudioRules.Class.Sfx) == UnityEngine.AudioClipLoadType.CompressedInMemory
+                  && MobileModPackAudioRules.LoadType(MobileModPackAudioRules.Class.Bed) == UnityEngine.AudioClipLoadType.Streaming,
+                "PackAudioRules: effects sit compressed in memory, beds stream");
+            Check(MobileModPackAudioRules.ForceToMono(MobileModPackAudioRules.Class.Sfx)
+                  && !MobileModPackAudioRules.ForceToMono(MobileModPackAudioRules.Class.Bed),
+                "PackAudioRules: effects are forced to mono (23 of Better Ambience's 51 are needlessly stereo), beds are not");
+            Check(MobileModPackAudioRules.PreloadAudioData(MobileModPackAudioRules.Class.Sfx)
+                  && !MobileModPackAudioRules.PreloadAudioData(MobileModPackAudioRules.Class.Bed),
+                "PackAudioRules: an effect's samples are resident before it is asked for; a bed's are not");
+            Check(MobileModPackAudioRules.VorbisQuality > 0f && MobileModPackAudioRules.VorbisQuality < 1f,
+                "PackAudioRules: Vorbis quality is the spec's ~0.5, not the top of the scale");
+
+            // Same trap as the texture side: nothing but this literal ties the rule to the fetched
+            // folder, and a rename in mods.json would send 262 clips back to uncompressed PCM silently.
+            string modsJson = "tools/bundled-mods/mods.json";
+            if (File.Exists(modsJson))
+            {
+                string json = File.ReadAllText(modsJson);
+                foreach (string name in MobileModPackAudioRules.AudioMods)
+                    Check(json.Contains("\"name\": \"" + name + "\""),
+                        "PackAudioRules: " + name + " is a mods.json entry name");
+            }
+            else log.AppendLine("  SKIP  PackAudioRules names against mods.json (not present)");
+
+            // The importer must read the rules rather than restate them, and it must name the iOS
+            // platform explicitly - an unoverridden platform picks its own format and load type.
+            string builder = File.ReadAllText("Assets/Editor/MobileModBuilder.cs");
+            Check(builder.Contains("class MobileModPackAudioImporter : AssetPostprocessor"),
+                "PackAudioRules: MobileModBuilder carries the pack AUDIO importer, not only the texture one");
+            Check(builder.Contains("MobileModPackAudioRules.For(path, bytes)")
+                  && builder.Contains("MobileModPackAudioRules.LoadType(cls)")
+                  && builder.Contains("MobileModPackAudioRules.ForceToMono(cls)")
+                  && builder.Contains("settings.preloadAudioData = MobileModPackAudioRules.PreloadAudioData(cls)"),
+                "PackAudioRules: the importer reads every decision from the rules class");
+            Check(builder.Contains("importer.SetOverrideSampleSettings(MobileConvertedModPolicy.IosPlatform, settings)"),
+                "PackAudioRules: the iOS platform override is set, not only the default sample settings");
+        }
+
+        // MOBILE: the atmosphere round's four optional audio/light mods - Better Ambience, Immersive
+        // Footsteps, Dynamic Music and First-Person Lighting. All four are compiled in under Ports/ and
+        // reached ONLY through a default-off launcher entry, so what this pins is the same three things
+        // every port before them pins - the title is the bundle's own ModTitle, no [Invoke] survives the
+        // copy, and the upstream header is still on every file - plus the port-specific rulings that
+        // have no other record: what was deliberately NOT ported, and the two Unity-6/iOS fixes without
+        // which two of the four would not compile or would throw on the device.
+        static void TestAtmosphereMods()
+        {
+            // ---- 1. titles are default-off and match the fetched manifests ----
+            var titles = new[]
+            {
+                new { Field = MobilePortedMods.AmbienceTitle, Manifest = "Assets/Game/Mods/BetterAmbience/better-ambience.dfmod.json", Fetch = "BetterAmbience" },
+                new { Field = MobilePortedMods.FootstepsTitle, Manifest = "Assets/Game/Mods/ImmersiveFootsteps/ImmersiveFootsteps.dfmod.json", Fetch = "ImmersiveFootsteps" },
+                new { Field = MobilePortedMods.MusicTitle, Manifest = "Assets/Game/Mods/DynamicMusic/DynamicMusic.dfmod.json", Fetch = "DynamicMusic" },
+                new { Field = MobilePortedMods.LightingTitle, Manifest = "Assets/Game/Mods/FirstPersonLighting/First-Person-Lighting.dfmod.json", Fetch = "FirstPersonLighting" },
+            };
+            foreach (var t in titles)
+            {
+                Check(System.Array.IndexOf(MobilePortedMods.Titles, t.Field) >= 0,
+                    "Atmosphere: \"" + t.Field + "\" is a default-off title (Titles is what DefaultOff walks)");
+                // The fetched folder is gitignored, so a clone that has not run fetch.py skips this.
+                if (File.Exists(t.Manifest))
+                {
+                    var m = System.Text.RegularExpressions.Regex.Match(File.ReadAllText(t.Manifest), "\"ModTitle\"\\s*:\\s*\"([^\"]*)\"");
+                    Check(m.Success && m.Groups[1].Value == t.Field,
+                        "Atmosphere: " + t.Field + " is the ModTitle its bundle declares",
+                        m.Success ? m.Groups[1].Value : "no ModTitle in " + t.Manifest);
+                }
+                else log.AppendLine("  SKIP  " + t.Field + " against the fetched manifest (run tools/bundled-mods/fetch.py --only " + t.Fetch + ")");
+            }
+
+            // ---- 2. the entry points ----
+            var inits = new[]
+            {
+                typeof(global::SpellcastStudios.BetterAmbiencePort).GetMethod("Init"),
+                typeof(global::ImmersiveFootsteps.ImmersiveFootstepsMain).GetMethod("Init"),
+                typeof(global::DynamicMusic.DynamicMusic).GetMethod("Init"),
+                typeof(global::FirstPersonLighting.FirstPersonLightingMod).GetMethod("Init"),
+            };
+            foreach (MethodInfo init in inits)
+            {
+                Check(init != null && init.IsStatic && init.GetParameters().Length == 1
+                      && init.GetParameters()[0].ParameterType == typeof(InitParams),
+                    "Atmosphere: " + (init == null ? "(missing)" : init.DeclaringType.Name) + ".Init(InitParams) is the entry point MobilePortedMods calls");
+                Check(init != null && Attribute.GetCustomAttributes(init, typeof(Invoke), false).Length == 0,
+                    "Atmosphere: " + (init == null ? "(missing)" : init.DeclaringType.Name) + " carries no [Invoke] - the launcher switch is the only way in");
+            }
+            Check(!global::SpellcastStudios.BetterAmbiencePort.Installed
+                  && !global::ImmersiveFootsteps.ImmersiveFootstepsMain.Installed
+                  && !global::DynamicMusic.DynamicMusic.Installed
+                  && !global::FirstPersonLighting.FirstPersonLightingMod.Installed,
+                "Atmosphere: all four report Installed false until Init runs - nothing in this editor session started one");
+
+            // ---- 3. the sources: headers, no [Invoke], and the rulings ----
+            const string baPath = "Assets/Scripts/Game/Mobile/Ports/BetterAmbience/";
+            const string ifPath = "Assets/Scripts/Game/Mobile/Ports/ImmersiveFootsteps/";
+            const string dmPath = "Assets/Scripts/Game/Mobile/Ports/DynamicMusic/";
+            const string fpPath = "Assets/Scripts/Game/Mobile/Ports/FirstPersonLighting/";
+
+            var pinned = new System.Collections.Generic.Dictionary<string, string>
+            {
+                { baPath, "github.com/joshcamas/daggerfall-unity-mods @ c59e2aa9085734df3aefd19b5dd8c0b49cfcaade" },
+                { ifPath, "github.com/magicono43/DFU-Mod_Immersive-Footsteps @ ac03581ca5b336eac0802af654b35c90af534290" },
+                { dmPath, "github.com/numidium/dfu-mods @ da1bf32f8a26a82627a16b2b3e72ba0bc5704845" },
+                { fpPath, "github.com/DunnyOfPenwick/First-Person-Lighting @ 7084736201e9a5eeec223d6a4352696f0542eb86" },
+            };
+            foreach (var pin in pinned)
+            {
+                Check(Directory.Exists(pin.Key), "Atmosphere: " + pin.Key + " exists");
+                if (!Directory.Exists(pin.Key)) continue;
+                foreach (string file in Directory.GetFiles(pin.Key, "*.cs"))
+                {
+                    string raw = File.ReadAllText(file);
+                    string name = Path.GetFileName(file);
+                    // BetterAmbiencePort.cs is this port's own file, not a copy, so it carries the
+                    // project header instead of an upstream pin.
+                    if (name != "BetterAmbiencePort.cs")
+                        Check(raw.Contains(pin.Value),
+                            "Atmosphere: " + name + " carries the port header with the upstream commit pin");
+                    // Comments stripped: the MOBILE notes name what was removed on purpose, and an
+                    // "it is gone" check that a comment can satisfy proves nothing.
+                    Check(!StripShaderComments(raw).Contains("[Invoke("),
+                        "Atmosphere: " + name + " carries no [Invoke] attribute");
+                }
+            }
+
+            // Better Ambience: three of its five upstream modules are NOT ported, and each omission is a
+            // decision that would otherwise be invisible. Dungeon Reverb duplicates MobileAmbience's own
+            // AudioReverb (two reverbs on one listener stack audibly); Better Rain raises rain particle
+            // emission to 2000/4000, which the spec puts out of scope; Dungeon Sounds is an empty Unity
+            // template with no body in either method.
+            foreach (string gone in new[] { "ReverbMod.cs", "BetterRainMod.cs", "DungeonSoundsMod.cs",
+                                            "BetterFootstepsComponentEnemy.cs", "BetterFootstepsComponentNPC.cs" })
+                Check(!File.Exists(baPath + gone),
+                    "Atmosphere: Better Ambience's " + gone + " was not ported (see BetterAmbiencePort's header)");
+            Check(File.Exists(baPath + "BetterAmbiencePort.cs") && File.Exists(baPath + "BetterFootstepsMod.cs")
+                  && File.Exists(baPath + "CameraShakeMod.cs") && File.Exists(baPath + "FoggyDungeonsMod.cs"),
+                "Atmosphere: Better Ambience's three ported modules and the single entry point are all present");
+
+            // UnityEngine.WWW was REMOVED in Unity 2023.1 and this project is on 6000.3.23f1. Two files
+            // used it upstream - Better Ambience's SoundList and Dynamic Music's DynamicSongPlayer - and
+            // neither would compile here unchanged. Comments stripped so the MOBILE notes explaining the
+            // removal cannot satisfy the check.
+            foreach (string wwwFile in new[] { baPath + "SoundList.cs", dmPath + "DynamicSongPlayer.cs" })
+            {
+                Check(File.Exists(wwwFile), "Atmosphere: " + wwwFile + " exists");
+                if (!File.Exists(wwwFile)) continue;
+                string code = StripShaderComments(File.ReadAllText(wwwFile));
+                Check(!code.Contains("new WWW("),
+                    "Atmosphere: " + Path.GetFileName(wwwFile) + " no longer constructs UnityEngine.WWW (removed in Unity 2023.1)");
+            }
+
+            // Dynamic Music: StreamingAssets is inside the signed .app on iOS and is read-only, so
+            // upstream's Directory.CreateDirectory under it THROWS - in Start, taking the mod with it.
+            string dmSrc = StripShaderComments(File.ReadAllText(dmPath + "DynamicMusic.cs"));
+            Check(!dmSrc.Contains("Directory.CreateDirectory("),
+                "Atmosphere: Dynamic Music creates no directory (StreamingAssets is read-only on iOS)");
+            Check(dmSrc.Contains("MobileContentPath.Override("),
+                "Atmosphere: Dynamic Music's custom-track root goes through MobileContentPath, which maps it onto the writable container");
+            // The synth: a 100-voice Synthesizer plus a ~6 MB SoundFont, built at Start upstream. Both
+            // paths that actually sequence MIDI open with InitSynth, so it is built on first use here.
+            string dspSrc = StripShaderComments(File.ReadAllText(dmPath + "DynamicSongPlayer.cs"));
+            int startIdx = dspSrc.IndexOf("void Start()", StringComparison.Ordinal);
+            int startEnd = startIdx >= 0 ? dspSrc.IndexOf("void Update()", startIdx, StringComparison.Ordinal) : -1;
+            Check(startIdx >= 0 && startEnd > startIdx && !dspSrc.Substring(startIdx, startEnd - startIdx).Contains("InitSynth()"),
+                "Atmosphere: Dynamic Music does not build the MIDI synth at Start - only when a MIDI song first plays");
+
+            // Immersive Footsteps: upstream finds Travel Options by Hazelnut's GUID. This port has no
+            // Travel Options - it has Real travel, and MobileTravelOptionsBridge answers the same
+            // messages under its own GUID - so the GUID test would say "absent" and leave footsteps
+            // firing through a whole autopilot leg at travel time compression.
+            string ifSrc = StripShaderComments(File.ReadAllText(ifPath + "ImmersiveFootstepsMain.cs"));
+            Check(!ifSrc.Contains("93f3ad1c-83cc-40ac-b762-96d2f47f2e05"),
+                "Atmosphere: Immersive Footsteps no longer looks for Travel Options by Hazelnut's GUID");
+            Check(ifSrc.Contains("MobileTravelOptionsBridge.Title"),
+                "Atmosphere: Immersive Footsteps finds the journey bridge by the title it registers");
+            string ifObj = StripShaderComments(File.ReadAllText(ifPath + "ImmersiveFootstepsObject.cs"));
+            Check(ifObj.Contains("MobileJourneyPilot.Active") && !ifObj.Contains("SendModMessage(\"TravelOptions\""),
+                "Atmosphere: the 50 Hz autopilot check reads MobileJourneyPilot directly, not a mod message round trip");
+            string baPlayer = StripShaderComments(File.ReadAllText(baPath + "BetterFootstepsComponentPlayer.cs"));
+            Check(baPlayer.Contains("MobileJourneyPilot.Active") && !baPlayer.Contains("SendModMessage("),
+                "Atmosphere: Better Ambience's player footsteps read the autopilot the same way");
+
+            // Foggy Dungeons writes the SHARED post-process profile (ColorBoost drives the same volume)
+            // and PostProcessLayer.fog.excludeSkybox, which is what the sky haze reads the fog through.
+            // Upstream hard-codes "off" on the way out; this port puts back what was there.
+            string fogSrc = File.ReadAllText(baPath + "FoggyDungeonsMod.cs");
+            Check(fogSrc.Contains("void TakeSnapshot()") && fogSrc.Contains("wasExcludeSkybox")
+                  && fogSrc.Contains("postProcessLayer.fog.excludeSkybox = wasExcludeSkybox;"),
+                "Atmosphere: Foggy Dungeons snapshots the post-process state and restores it, rather than forcing it off");
+            string fogCode = StripShaderComments(fogSrc);
+            Check(fogCode.Contains("!GameManager.Instance.PlayerEnterExit.IsPlayerInsideDungeon"),
+                "Atmosphere: Foggy Dungeons only paints fog while the player is actually inside a dungeon");
+
+            // ---- 4. the footsteps conflict group ----
+            MobileModConflicts.Group footsteps = null;
+            foreach (MobileModConflicts.Group g in MobileModConflicts.Groups)
+                if (g.Id == "footsteps") footsteps = g;
+            Check(footsteps != null, "Atmosphere: there is a footsteps conflict group");
+            if (footsteps != null)
+            {
+                Check(footsteps.Kind == MobileModConflicts.Kind.Look,
+                    "Atmosphere: the footsteps clash is a Look question, not Exclusive - the loser keeps its camera shake and dungeon fog");
+                Check(footsteps.Members.Length == 2
+                      && MobileModConflicts.Matches(footsteps.Members[0], MobilePortedMods.FootstepsTitle)
+                      && MobileModConflicts.Matches(footsteps.Members[1], MobilePortedMods.AmbienceTitle),
+                    "Atmosphere: the group's two members match the two launcher titles, Immersive Footsteps first");
+            }
+            // And the start ORDER, which is what decides the outcome for a player who keeps both on:
+            // whichever runs second ends up holding the player's footsteps, and upstream's own manifest
+            // makes Immersive Footsteps the optional dependant of Better Ambience.
+            string ported = File.ReadAllText("Assets/Scripts/Game/Mobile/MobilePortedMods.cs");
+            Check(ported.IndexOf("StartOne(AmbienceTitle", StringComparison.Ordinal) >= 0
+                  && ported.IndexOf("StartOne(FootstepsTitle", StringComparison.Ordinal)
+                     > ported.IndexOf("StartOne(AmbienceTitle", StringComparison.Ordinal),
+                "Atmosphere: Better Ambience starts before Immersive Footsteps, so with both on the latter owns the footsteps");
+        }
+
         static void TestPortedModTitles()
         {
             Check(System.Array.IndexOf(MobilePortedMods.Titles, "Dynamic Skies") >= 0, "PortedMods: Dynamic Skies is a default-off title");
@@ -3929,10 +4204,15 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobilePortedMods.TerrainTitle == "World of Daggerfall - Terrain" && System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.TerrainTitle) >= 0, "PortedMods: World of Daggerfall - Terrain is a default-off title");
             // Titles is what DefaultOff walks, so this pins the default-off coverage and the dependency
             // ORDER OF THAT LIST - not the start order, which is the statement sequence in StartEnabled
-            // and is pinned by the block comment there. Distant Terrain, Real Grass and then
-            // Daggerfall Enemy Expansion were appended after it, so the Terrain entry is now fourth
-            // from last.
-            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 4] == MobilePortedMods.TerrainTitle, "PortedMods: World of Daggerfall - Terrain is fourth from last in Titles, the list DefaultOff walks");
+            // and is pinned by the block comment there.
+            // MOBILE: a RELATIVE order, not an offset from the end. This was Titles[Length - 4] and had
+            // already been renumbered twice (Distant Terrain, then Real Grass, then DEX); the
+            // atmosphere round's four appended titles broke it a third time, with a failure message
+            // that said nothing about the Terrain port. The invariant that matters is that the four
+            // terrain-class ports keep their order relative to each other.
+            Check(System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.TerrainTitle)
+                  > System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.BiomesTitle),
+                "PortedMods: World of Daggerfall - Terrain comes after Biomes in Titles, the list DefaultOff walks");
 
             // MOBILE: Distant Terrain (World of Daggerfall flavour). Gated by nothing but its own
             // switch, like the Terrain port, and started after it - last of the immediate Inits,
@@ -3955,10 +4235,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             else log.AppendLine("  SKIP  DistantTitle against the fetched manifest (not fetched - run tools/bundled-mods/fetch.py --only DistantTerrainWoD)");
             Check(System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.DistantTitle) >= 0,
                 "PortedMods: Distant Terrain is a default-off title");
-            // Real Grass and then Daggerfall Enemy Expansion were appended after it (the same move
-            // the Terrain entry made when Distant Terrain arrived), so it is now third from last.
-            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 3] == MobilePortedMods.DistantTitle,
-                "PortedMods: Distant Terrain is third from last in Titles, after World of Daggerfall - Terrain");
+            // MOBILE: relative, not an offset from the end - see the note on the Terrain check above.
+            Check(System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.DistantTitle)
+                  > System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.TerrainTitle),
+                "PortedMods: Distant Terrain comes after World of Daggerfall - Terrain in Titles");
 
             // MOBILE: Real Grass. The only compiled-in mod that uses Unity's terrain DETAIL
             // renderer, so it takes none of DFU's four terrain slots and is gated by nothing but
@@ -3985,8 +4265,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             else log.AppendLine("  SKIP  GrassTitle against the fetched manifest (not fetched - run tools/bundled-mods/fetch.py --only RealGrass)");
             Check(System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.GrassTitle) >= 0,
                 "PortedMods: Real Grass is a default-off title");
-            Check(MobilePortedMods.Titles[MobilePortedMods.Titles.Length - 2] == MobilePortedMods.GrassTitle,
-                "PortedMods: Real Grass is next to last in Titles, after Distant Terrain");
+            // MOBILE: relative, not an offset from the end - see the note on the Terrain check above.
+            Check(System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.GrassTitle)
+                  > System.Array.IndexOf(MobilePortedMods.Titles, MobilePortedMods.DistantTitle),
+                "PortedMods: Real Grass comes after Distant Terrain in Titles");
             // The launcher block itself: the four-argument StartOne, the Installed flag and the
             // [RealGrass] hint, placed after the Distant Terrain block and before the sky is
             // handed back. Asked of the source text because there is no scene to start it in.

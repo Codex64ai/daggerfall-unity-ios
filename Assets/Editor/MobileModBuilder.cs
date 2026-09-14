@@ -254,6 +254,65 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
     }
 
     /// <summary>
+    /// MOBILE: import settings for a FETCHED mod pack's AUDIO (Assets/Game/Mods/&lt;Pack&gt;/). The
+    /// sibling of MobileModPackTextureImporter above, and the audio half of a hole this pipeline had
+    /// until the atmosphere round: the conversion side already had a full audio policy
+    /// (MobileConvertedModImporter.OnPreprocessAudio), but it is scoped to
+    /// MobileConvertedModPolicy.Root - "Assets/Game/Mods/Converted/" - and fetched packs are not
+    /// under that. No fetched pack had audio before Better Ambience (50 WAV) and Immersive Footsteps
+    /// (210 MP3), so nothing noticed; without this class both would have imported at Unity's
+    /// defaults, i.e. uncompressed PCM with the samples resident, and gone into the bundle that way.
+    ///
+    /// Every decision lives in MobileModPackAudioRules, where MobileSelfTest can pin it: an
+    /// AssetPostprocessor only runs inside an import, so a rule written here could not be tested.
+    /// </summary>
+    class MobileModPackAudioImporter : AssetPostprocessor
+    {
+        void OnPreprocessAudio()
+        {
+            string path = assetPath.Replace('\\', '/');
+            if (!MobileModPackAudioRules.Applies(path))
+                return;
+
+            var importer = (AudioImporter)assetImporter;
+
+            // The size is the SOURCE file's, which is what the rules' per-extension thresholds are
+            // written against - see MobileModPackAudioRules' header.
+            long bytes = 0;
+            try { bytes = new FileInfo(path).Length; }
+            catch (Exception) { }   // a file Unity can see but this cannot is Sfx, the safe default
+
+            MobileModPackAudioRules.Class cls = MobileModPackAudioRules.For(path, bytes);
+
+            var settings = importer.defaultSampleSettings;
+            settings.compressionFormat = AudioCompressionFormat.Vorbis;
+            settings.quality = MobileModPackAudioRules.VorbisQuality;
+            settings.loadType = MobileModPackAudioRules.LoadType(cls);
+            // Preload is PER PLATFORM on this Unity: AudioImporter.preloadAudioData is obsolete-as-error
+            // on 6000.3.23f1 ("moved to AudioImporter.SampleSettings as a per platform local setting"),
+            // so it rides in the same struct as the load type - which is where it belongs anyway, since
+            // the two answer one question together.
+            settings.preloadAudioData = MobileModPackAudioRules.PreloadAudioData(cls);
+            importer.defaultSampleSettings = settings;
+
+            // THE iOS OVERRIDE, NOT ONLY THE DEFAULT. The default sample settings are what the Editor
+            // and a desktop build use; the device is the point, and an unoverridden platform is free
+            // to pick its own format and load type - the same lesson the texture side learned as
+            // "ios.overridden = true".
+            importer.SetOverrideSampleSettings(MobileConvertedModPolicy.IosPlatform, settings);
+
+            importer.forceToMono = MobileModPackAudioRules.ForceToMono(cls);
+        }
+
+        // MOBILE: without this override Unity caches the import result against a hash that does not
+        // change when the rules above do - the trap MobileModPackTextureImporter.GetVersion documents
+        // at length, and which cost a round of silently stale bundles there. Bump it whenever
+        // OnPreprocessAudio or the MobileModPackAudioRules table changes behaviour; from Unity's side
+        // the rules and this method are one function.
+        public override uint GetVersion() { return 1; }
+    }
+
+    /// <summary>
     /// Import settings for the in-repo pilot mod's art only (Assets/Game/Mods/IOSPilot/).
     /// Classic-art replacements are odd sizes (320x200 IMGs, tiny CIF frames): Unity's
     /// default NPOT scaling would silently resize them and DFU draws them 1:1, so pin

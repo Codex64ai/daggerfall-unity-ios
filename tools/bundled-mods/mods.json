@@ -629,6 +629,46 @@
         "1516_[5-9]-2[0-3].png"
       ],
       "licence": "pending:No licence of any kind is declared upstream (github.com/SquidKamer/DaggerfallBestiaryProject, the repo that builds \"Daggerfall Enemy Expansion\" 1.3.4 by Kamer and Kab): there is no LICENSE file, no copyright header in any of the ten source files, and the Nexus permissions box (mod 372) sits behind Cloudflare and cannot be read. The art needs a second grant and may need one nobody in the mod's lineage can give: the sprite folders are named ARENA - , BATTLESPIRE - , MORROWIND - , OBLIVION - , SKYRIM - alongside DAGGER - , KAMER - and KAB - , i.e. much of the 8,031-frame sprite set is derived from other Bethesda titles rather than authored for Daggerfall. Permission is being sought from Kab (code) and Kamer (art); until both are given this bundle ships only on the private test draft, never in the public mod pack (pack.py refuses a pending licence there). Its C# is compiled into the app under Assets/Scripts/Game/Mobile/Ports/DEX (see THIRD-PARTY.md). exclude_globs drops the 45 KAMER - Witches frames (archive 1516, records 5-9, frames 15-23) that the author's manifest still lists but the repo no longer contains; Scripts/Editor/ never appears in the manifest and the remaining eight scripts are removed by strip_code."
+    },
+    {
+      "name": "BetterAmbience",
+      "repo": "https://github.com/joshcamas/daggerfall-unity-mods.git",
+      "commit": "c59e2aa9085734df3aefd19b5dd8c0b49cfcaade",
+      "subdir": "BetterAmbience",
+      "manifest": "better-ambience.dfmod.json",
+      "strip_code": true,
+      "exclude_globs": [
+        "AmbientRaining.wav"
+      ],
+      "licence": "text:MIT License\n\nCopyright (c) 2020 Josh Steinhauer. The repo root carries a full MIT LICENSE (github.com/joshcamas/daggerfall-unity-mods): 'Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files, to deal in the Software without restriction', subject to the MIT conditions. CAVEAT: the LICENSE sits at the REPO ROOT, outside BetterAmbience/, so the subdir fetch does not copy it; it is reproduced in THIRD-PARTY.md instead. NOT shipped as data: AmbientRaining.wav (29.5 s, 5.21 MB, 63 percent of the mod's bytes - no source file in the repo references it). NOT ported as code: DungeonSoundsMod.cs (an empty Unity stub), ReverbMod.cs (this port ships a native reverb, MobileAmbience) and BetterRainMod.cs (it raises rain particle emission to 2000/4000, which the atmosphere spec puts out of scope). Code compiled in under Assets/Scripts/Game/Mobile/Ports/BetterAmbience (see THIRD-PARTY.md)."
+    },
+    {
+      "name": "ImmersiveFootsteps",
+      "repo": "https://github.com/magicono43/DFU-Mod_Immersive-Footsteps.git",
+      "commit": "ac03581ca5b336eac0802af654b35c90af534290",
+      "manifest": "ImmersiveFootsteps.dfmod.json",
+      "strip_code": true,
+      "drop_dependencies": [
+        "better ambience"
+      ],
+      "licence": "text:MIT License\n\nCopyright (C) 2024 Kirk.O. CAVEAT: there is no LICENSE file in the repo (github.com/magicono43/DFU-Mod_Immersive-Footsteps) and the README says nothing about licence; the grant is the HEADER of Scripts/ImmersiveFootstepsMain.cs, verbatim: '// Copyright:       Copyright (C) 2024 Kirk.O' / '// License:         MIT License (http://www.opensource.org/licenses/mit-license.php)'. The mod's other source file, Scripts/ImmersiveFootstepsObject.cs, carries no header at all, but both files are by the same sole author and are the one mod that header names. All 210 clips are the author's own. Code compiled in under Assets/Scripts/Game/Mobile/Ports/ImmersiveFootsteps (see THIRD-PARTY.md)."
+    },
+    {
+      "name": "DynamicMusic",
+      "repo": "https://github.com/numidium/dfu-mods.git",
+      "commit": "da1bf32f8a26a82627a16b2b3e72ba0bc5704845",
+      "subdir": "DynamicMusic",
+      "manifest": "DynamicMusic.dfmod.json",
+      "strip_code": true,
+      "licence": "text:MIT License\n\nCopyright (c) 2020 numidium. The repo root carries a full MIT LICENSE (github.com/numidium/dfu-mods) covering all eight mods in it: 'Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files, to deal in the Software without restriction', subject to the MIT conditions. CAVEAT: the LICENSE sits at the REPO ROOT, outside DynamicMusic/, so the subdir fetch does not copy it; it is reproduced in THIRD-PARTY.md instead. The mod ships no audio of its own - it re-sequences Daggerfall's own songs - so after strip_code the bundle is modsettings.json and the manifest. Code compiled in under Assets/Scripts/Game/Mobile/Ports/DynamicMusic (see THIRD-PARTY.md)."
+    },
+    {
+      "name": "FirstPersonLighting",
+      "repo": "https://github.com/DunnyOfPenwick/First-Person-Lighting.git",
+      "commit": "7084736201e9a5eeec223d6a4352696f0542eb86",
+      "manifest": "First-Person-Lighting.dfmod.json",
+      "strip_code": true,
+      "licence": "text:MIT License\n\nCopyright (c) 2024 DunnyOfPenwick. The repo carries a full MIT LICENSE (github.com/DunnyOfPenwick/First-Person-Lighting) inside the fetched tree: 'Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files, to deal in the Software without restriction', subject to the MIT conditions. The bundle ships the mod's data: three small PNGs, AlchemicalFlare.flare, ItemTemplates.json, two short OGG clips and four textdatabase.txt translations. Code compiled in under Assets/Scripts/Game/Mobile/Ports/FirstPersonLighting (see THIRD-PARTY.md)."
     }
   ]
 }
