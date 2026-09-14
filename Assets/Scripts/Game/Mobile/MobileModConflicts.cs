@@ -96,6 +96,28 @@ namespace DaggerfallWorkshop.Game.Mobile
                     new Member("Wereboar", "become a wereboar"),
                 },
             },
+            // MOBILE: the atmosphere round. Both of these replace the player's footsteps, and they do
+            // it the same way - fetch PlayerFootsteps off the player object and silence it (Immersive
+            // Footsteps at ImmersiveFootstepsMain, Better Ambience at BetterFootstepsMod) - so with
+            // both on the player hears two sets of steps out of step with each other. Kind.Look and
+            // not Exclusive on purpose: Better Ambience is three modules, and a player who gives the
+            // footsteps to Immersive Footsteps should still keep its camera shake and dungeon fog, so
+            // the loser stays installed. Upstream agrees about who should win when both are on -
+            // Immersive Footsteps declares Better Ambience as an OPTIONAL dependency and reads its
+            // "Better Footsteps/enable" setting to notice the clash - and MobilePortedMods starts
+            // them in that order so the answer is the same even if the player keeps both.
+            new Group
+            {
+                Id = "footsteps", Kind = Kind.Look,
+                Question = "{mods} both replace the sound of your own footsteps, and with both on you hear two sets at once. Which one should own them? " +
+                           "The other stays installed and keeps everything else it does - Better Ambience also has camera shake and dungeon fog. " +
+                           "Pick None of these to switch both off. You can change this later in the MODS window.",
+                Members = new[]
+                {
+                    new Member("Immersive Footsteps", "immersivefootsteps", "immersive footsteps"),
+                    new Member("Better Ambience", "better ambience"),
+                },
+            },
         };
 
         public const string RecordFileName = "Conflicts.txt";
