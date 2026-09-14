@@ -581,7 +581,13 @@ namespace DynamicMusic
         private const byte combatTaperLength = 2;
         private byte combatTaper;
         private Playlist[] customPlaylists;
-        private Dictionary<int, ConditionUsage[]> userDefinedConditionSets;
+        // MOBILE: initialised here, not only inside the "UserDefined.txt exists" branch of Start.
+        // Upstream leaves it null when there is no user playlist file, and Update calls
+        // GetUserDefinedPlaylistKey(userDefinedConditionSets) unconditionally - so on any install
+        // without that file the mod throws a NullReferenceException EVERY FRAME. On desktop a user who
+        // went looking for this mod usually has one; on iOS nobody has one on first run, and a sim pass
+        // produced 7,241 of them in two minutes. An empty dictionary is what "no user playlists" means.
+        private Dictionary<int, ConditionUsage[]> userDefinedConditionSets = new Dictionary<int, ConditionUsage[]>();
         private string currentCustomTrack;
         private bool customTrackQueued;
         private bool combatMusicIsEnabled;
