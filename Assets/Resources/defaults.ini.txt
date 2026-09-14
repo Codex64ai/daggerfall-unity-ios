@@ -207,3 +207,6 @@ AutosaveOnTravel=True
 AutosaveOnDungeon=True
 AutosaveIntervalMinutes=10
 SkyHaze=True
+AudioReverb=True
+GrassWindFollowsWeather=True
+LightningFlash=True

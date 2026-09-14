@@ -279,6 +279,21 @@ namespace DaggerfallWorkshop.Game
                 {
                     // Play ambient sound as a one-shot 3D sound
                     SoundClips clip = ambientSounds[index];
+
+                    // MOBILE 2026-09-14: ask the mobile ambience layer whether this storm clip should
+                    // be held back. It flashes the screen on the way past and returns the seconds of
+                    // thunder delay for the strike it drew; 0 - which is what it returns when the
+                    // feature is off, when the player is indoors, or when nothing is listening -
+                    // leaves the three lines below running exactly as they always did. This cannot
+                    // be done from OnPlayEffect: that event is raised WITH the sound, and a flash
+                    // that arrives with its own thunder has no distance.
+                    float mobileDelay = (MobileStormDelay != null) ? MobileStormDelay(clip) : 0f;
+                    if (mobileDelay > 0f)
+                    {
+                        StartCoroutine(MobileDelayedStormClip(clip, mobileDelay));
+                        return;
+                    }
+
                     PlaySomewhereOnHorizon(clip, 1f);
 
                     // AmbientPlayOneShot(clip, 5f);
@@ -303,6 +318,22 @@ namespace DaggerfallWorkshop.Game
                 PlaySomewhereAround(clip, 1f);
                 RaiseOnPlayEffectEvent(clip);
             }
+        }
+
+        /// <summary>
+        /// MOBILE 2026-09-14: set by MobileAmbience. Given the storm clip about to play, returns the
+        /// seconds to hold it back (having flashed the screen), or 0 to play it now. A hook rather
+        /// than an event because the answer is needed BEFORE the sound starts and the caller has to
+        /// act on the return value.
+        /// </summary>
+        public static System.Func<SoundClips, float> MobileStormDelay;
+
+        /// <summary>MOBILE 2026-09-14: the held-back storm clip, played the way the caller would have.</summary>
+        private IEnumerator MobileDelayedStormClip(SoundClips clip, float delay)
+        {
+            yield return new WaitForSeconds(delay);
+            PlaySomewhereOnHorizon(clip, 1f);
+            RaiseOnPlayEffectEvent(clip);
         }
 
         private void PlayCemeteryEffects()

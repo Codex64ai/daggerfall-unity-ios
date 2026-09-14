@@ -35,6 +35,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using UnityEngine;
+using DaggerfallConnect;                        // MOBILE: DFRegion.DungeonTypes, for the reverb map
 using DaggerfallConnect.Utility;
 using UnityEditor;
 
@@ -147,6 +148,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestDistantTerrainSliceBlit();
             TestRealGrassPort();
             TestSkyHaze();
+            TestAmbience();
             TestModConflictOrder();
             TestPortedModGate();
             TestPortedModOrder();
@@ -4651,6 +4653,235 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "SkyHaze: the mobile settings panel carries a row for it");
         }
 
+        /// <summary>
+        /// MOBILE 2026-09-14: reverb, weather-driven grass wind and the lightning flash. Every rule
+        /// here is a table or an envelope that a headless run can walk end to end; what it cannot do
+        /// is hear a reverb or see a flash, so the four places that APPLY those tables are pinned to
+        /// their source instead - the engine hook, the IMGUI overlay, the terrain write and the
+        /// weather subscription.
+        /// </summary>
+        static void TestAmbience()
+        {
+            log.AppendLine("-- ambience (reverb, weather wind, lightning) --");
+
+            // ---- 1. the three settings ----
+            string settingsSrcAmb = StripShaderComments(File.ReadAllText("Assets/Scripts/SettingsManager.cs"));
+            string defaultsAmb = File.ReadAllText("Assets/Resources/defaults.ini.txt");
+            foreach (string name in new[] { "AudioReverb", "GrassWindFollowsWeather", "LightningFlash" })
+            {
+                PropertyInfo prop = typeof(SettingsManager).GetProperty(name);
+                Check(prop != null && prop.PropertyType == typeof(bool) && prop.CanWrite
+                      && settingsSrcAmb.Contains("GetBool(sectionEnhancements, \"" + name + "\")")
+                      && settingsSrcAmb.Contains("SetBool(sectionEnhancements, \"" + name + "\", " + name + ")")
+                      && defaultsAmb.Contains(name + "=True"),
+                    "Ambience: " + name + " is a writable bool, round-trips [Enhancements] and is on by default");
+            }
+
+            // ---- 2. reverb: the space -> preset map ----
+            Check(MobileAmbience.PresetFor(MobileAmbience.Space.Exterior, DFRegion.DungeonTypes.NoDungeon, false)
+                      == AudioReverbPreset.Off,
+                "Ambience: outdoors is Off, not Generic - a Generic preset outdoors is a small room under the sky");
+            Check(MobileAmbience.PresetFor(MobileAmbience.Space.BuildingInterior, DFRegion.DungeonTypes.NoDungeon, false)
+                      == AudioReverbPreset.Room,
+                "Ambience: a building interior is Room");
+            Check(MobileAmbience.PresetFor(MobileAmbience.Space.Dungeon, DFRegion.DungeonTypes.Crypt, false)
+                      == AudioReverbPreset.StoneCorridor,
+                "Ambience: a built dungeon is StoneCorridor");
+            Check(MobileAmbience.PresetFor(MobileAmbience.Space.Dungeon, DFRegion.DungeonTypes.NaturalCave, false)
+                      == AudioReverbPreset.Cave,
+                "Ambience: a natural dungeon is Cave");
+            // Castle wins over the dungeon type: a castle block is a castle block whatever the
+            // location's nominal type says, and it is the one read taken from the live world.
+            Check(MobileAmbience.PresetFor(MobileAmbience.Space.Dungeon, DFRegion.DungeonTypes.NaturalCave, true)
+                      == AudioReverbPreset.Hallway
+                  && MobileAmbience.PresetFor(MobileAmbience.Space.Dungeon, DFRegion.DungeonTypes.Crypt, true)
+                      == AudioReverbPreset.Hallway,
+                "Ambience: a castle block is Hallway whatever the dungeon type claims");
+            Check(MobileAmbience.PresetFor(MobileAmbience.Space.Exterior, DFRegion.DungeonTypes.NaturalCave, true)
+                      == AudioReverbPreset.Off,
+                "Ambience: outdoors stays Off even with a stale dungeon type and castle flag - the space decides first");
+            Check(MobileAmbience.IsNaturalDungeon(DFRegion.DungeonTypes.NaturalCave)
+                  && MobileAmbience.IsNaturalDungeon(DFRegion.DungeonTypes.Mine)
+                  && MobileAmbience.IsNaturalDungeon(DFRegion.DungeonTypes.VolcanicCaves)
+                  && MobileAmbience.IsNaturalDungeon(DFRegion.DungeonTypes.SpiderNest)
+                  && MobileAmbience.IsNaturalDungeon(DFRegion.DungeonTypes.ScorpionNest)
+                  && MobileAmbience.IsNaturalDungeon(DFRegion.DungeonTypes.HarpyNest),
+                "Ambience: the six dungeon types Daggerfall builds out of the cave block set are caves");
+            Check(!MobileAmbience.IsNaturalDungeon(DFRegion.DungeonTypes.Crypt)
+                  && !MobileAmbience.IsNaturalDungeon(DFRegion.DungeonTypes.OrcStronghold)
+                  && !MobileAmbience.IsNaturalDungeon(DFRegion.DungeonTypes.Cemetery)
+                  && !MobileAmbience.IsNaturalDungeon(DFRegion.DungeonTypes.NoDungeon),
+                "Ambience: and the built ones are not");
+            // Every type resolves to something - a new or unknown type must not fall out as Off,
+            // which would silently drop reverb in a dungeon rather than being obviously wrong.
+            bool everyDungeonHasReverb = true;
+            foreach (DFRegion.DungeonTypes t in Enum.GetValues(typeof(DFRegion.DungeonTypes)))
+                if (MobileAmbience.PresetFor(MobileAmbience.Space.Dungeon, t, false) == AudioReverbPreset.Off)
+                    everyDungeonHasReverb = false;
+            Check(everyDungeonHasReverb,
+                "Ambience: every dungeon type in the enum gets a reverb, so an unknown one is StoneCorridor rather than silence");
+
+            // ---- 3. lightning: which clips, and how far away ----
+            Check(MobileAmbience.IsStormClip(SoundClips.StormLightningShort)
+                  && MobileAmbience.IsStormClip(SoundClips.StormLightningThunder)
+                  && MobileAmbience.IsStormClip(SoundClips.StormThunderRoll),
+                "Ambience: the three storm clips are the lightning clips");
+            Check(!MobileAmbience.IsStormClip(SoundClips.AmbientRaining)
+                  && !MobileAmbience.IsStormClip(SoundClips.AmbientCrickets)
+                  && !MobileAmbience.IsStormClip(SoundClips.AmbientDistantHowl),
+                "Ambience: nothing else is - a howl must not whiten the screen");
+            Check(MobileAmbience.DelayForDistance(0f) == MobileAmbience.MinThunderDelay
+                  && MobileAmbience.DelayForDistance(1f) == MobileAmbience.MaxThunderDelay,
+                "Ambience: the thunder delay spans 0.3 s to 4 s - about 100 m to 1.4 km of air",
+                MobileAmbience.DelayForDistance(0f) + " / " + MobileAmbience.DelayForDistance(1f));
+            Check(MobileAmbience.DelayForDistance(-2f) == MobileAmbience.MinThunderDelay
+                  && MobileAmbience.DelayForDistance(7f) == MobileAmbience.MaxThunderDelay
+                  && MobileAmbience.DelayForDistance(float.NaN) > 0f,
+                "Ambience: an out-of-range or NaN roll still yields a real delay - a 0 would play the thunder with the flash");
+            Check(Mathf.Approximately(MobileAmbience.DelayForDistance(0.5f),
+                      (MobileAmbience.MinThunderDelay + MobileAmbience.MaxThunderDelay) * 0.5f),
+                "Ambience: linear in the roll, because the delay IS the distance - strikes spread evenly across the sky",
+                MobileAmbience.DelayForDistance(0.5f).ToString());
+
+            // ---- 4. how bright ----
+            Check(MobileAmbience.PeakAlphaForDelay(MobileAmbience.MinThunderDelay) == MobileAmbience.MaxFlashAlpha
+                  && MobileAmbience.PeakAlphaForDelay(MobileAmbience.MaxThunderDelay) == MobileAmbience.MinFlashAlpha,
+                "Ambience: the nearest strike is the brightest and the farthest the dimmest");
+            bool peakFalls = true;
+            float prevPeak = float.MaxValue;
+            for (int step = 0; step <= 20; step++)
+            {
+                float v = MobileAmbience.PeakAlphaForDelay(Mathf.Lerp(
+                    MobileAmbience.MinThunderDelay, MobileAmbience.MaxThunderDelay, step / 20f));
+                if (v > prevPeak) peakFalls = false;
+                prevPeak = v;
+            }
+            Check(peakFalls, "Ambience: brightness falls off monotonically with distance");
+            Check(MobileAmbience.MaxFlashAlpha < 1f && MobileAmbience.MinFlashAlpha > 0f,
+                "Ambience: never a fully white frame, and never an invisible one",
+                MobileAmbience.MaxFlashAlpha + " / " + MobileAmbience.MinFlashAlpha);
+
+            // ---- 5. the flash envelope ----
+            Check(MobileAmbience.FlashAlpha(-0.01f, 0.5f) == 0f
+                  && MobileAmbience.FlashAlpha(MobileAmbience.FlashDuration, 0.5f) == 0f
+                  && MobileAmbience.FlashAlpha(99f, 0.5f) == 0f,
+                "Ambience: the envelope is zero before it starts and after it ends, so OnGUI can draw nothing on every other frame");
+            Check(Mathf.Approximately(MobileAmbience.FlashAlpha(MobileAmbience.FlashRise, 0.5f), 0.5f),
+                "Ambience: it reaches the full peak at the top of the rise",
+                MobileAmbience.FlashAlpha(MobileAmbience.FlashRise, 0.5f).ToString());
+            Check(MobileAmbience.FlashAlpha(MobileAmbience.FlashRise * 0.5f, 0.5f) < 0.5f
+                  && MobileAmbience.FlashAlpha(MobileAmbience.FlashRise * 0.5f, 0.5f) > 0f,
+                "Ambience: and rises into it rather than appearing at full brightness");
+            bool decays = true;
+            float prevAlpha = float.MaxValue;
+            for (int step = 0; step <= 20; step++)
+            {
+                float t = Mathf.Lerp(MobileAmbience.FlashRise, MobileAmbience.FlashDuration, step / 20f);
+                float v = MobileAmbience.FlashAlpha(t, 0.5f);
+                if (v > prevAlpha) decays = false;
+                prevAlpha = v;
+            }
+            Check(decays, "Ambience: and decays from there without a second peak");
+            Check(MobileAmbience.FlashAlpha(0.05f, 0f) == 0f && MobileAmbience.FlashAlpha(float.NaN, 0.5f) == 0f,
+                "Ambience: a zero peak or a NaN clock draws nothing rather than a stuck white screen");
+            Check(MobileAmbience.FlashDuration < 0.5f && MobileAmbience.FlashRise < MobileAmbience.FlashDuration,
+                "Ambience: the whole flash is well under half a second and rises inside its own duration");
+
+            // ---- 6. the rate limit ----
+            Check(MobileAmbience.CanFlash(-1f, 0f),
+                "Ambience: the first strike of a session always flashes");
+            Check(!MobileAmbience.CanFlash(10f, 10f + MobileAmbience.MinFlashInterval * 0.5f)
+                  && MobileAmbience.CanFlash(10f, 10f + MobileAmbience.MinFlashInterval),
+                "Ambience: and the next one waits out the rate limit - nothing can turn the screen into a strobe");
+
+            // ---- 7. weather-driven grass wind: the spec's table, exactly ----
+            Check(global::RealGrass.RealGrassPort.WeatherWindMultiplier(WeatherType.Sunny) == 1.0f
+                  && global::RealGrass.RealGrassPort.WeatherWindMultiplier(WeatherType.Cloudy) == 1.0f
+                  && global::RealGrass.RealGrassPort.WeatherWindMultiplier(WeatherType.Overcast) == 1.2f
+                  && global::RealGrass.RealGrassPort.WeatherWindMultiplier(WeatherType.Fog) == 0.6f
+                  && global::RealGrass.RealGrassPort.WeatherWindMultiplier(WeatherType.Rain) == 1.6f
+                  && global::RealGrass.RealGrassPort.WeatherWindMultiplier(WeatherType.Thunder) == 2.2f
+                  && global::RealGrass.RealGrassPort.WeatherWindMultiplier(WeatherType.Snow) == 0.8f,
+                "Ambience: sunny 1.0, cloudy 1.0, overcast 1.2, fog 0.6, rain 1.6, thunder 2.2, snow 0.8");
+            // Fog and snow below 1 is the half of the table that is easy to lose in a refactor and
+            // is most of what makes those two weathers read as themselves.
+            Check(global::RealGrass.RealGrassPort.WeatherWindMultiplier(WeatherType.Fog) < 1f
+                  && global::RealGrass.RealGrassPort.WeatherWindMultiplier(WeatherType.Snow) < 1f,
+                "Ambience: fog and snow are STILLER than a clear day, not merely no windier");
+            Check(global::RealGrass.RealGrassPort.WeatherWind == 1f,
+                "Ambience: the live multiplier starts neutral, so a session that never changes weather waves on the dials alone",
+                global::RealGrass.RealGrassPort.WeatherWind.ToString());
+            Check(global::RealGrass.RealGrassPort.EffectiveWindSpeed(0.3f, 2.2f) == 0.3f * 2.2f
+                  && global::RealGrass.RealGrassPort.EffectiveWindStrength(0.4f, 2.2f) == 0.4f * 2.2f,
+                "Ambience: the multiplier sits on top of the player's dials rather than replacing them",
+                global::RealGrass.RealGrassPort.EffectiveWindSpeed(0.3f, 2.2f).ToString());
+            Check(global::RealGrass.RealGrassPort.EffectiveWindSpeed(0.9f, 2.2f) == 1f
+                  && global::RealGrass.RealGrassPort.EffectiveWindSpeed(0.3f, float.NaN) == 0.3f
+                  && global::RealGrass.RealGrassPort.EffectiveWindSpeed(float.NaN, 2.2f) == 0f,
+                "Ambience: the product still goes through the 0..1 clamp, and neither NaN reaches the TerrainData",
+                global::RealGrass.RealGrassPort.EffectiveWindSpeed(0.9f, 2.2f).ToString());
+            Check(global::RealGrass.RealGrassPort.EffectiveWindSpeed(0.3f, 1f)
+                      == global::RealGrass.RealGrassPort.ClampWind(0.3f),
+                "Ambience: a 1.0 multiplier is exactly the behaviour before this change - which is what the switch being off gives");
+
+            // ---- 8. the four places the tables are applied ----
+            string ambientSrc = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/AmbientEffectsPlayer.cs"));
+            Check(ambientSrc.Contains("public static System.Func<SoundClips, float> MobileStormDelay;"),
+                "Ambience: the engine exposes the storm-delay hook");
+            string playEffects = MethodBody(ambientSrc, "private void PlayEffects()");
+            Check(playEffects.Contains("float mobileDelay = (MobileStormDelay != null) ? MobileStormDelay(clip) : 0f;")
+                  && playEffects.Contains("StartCoroutine(MobileDelayedStormClip(clip, mobileDelay));"),
+                "Ambience: and asks it BEFORE playing the clip - OnPlayEffect fires with the sound and could only flash too late");
+            Check(playEffects.IndexOf("MobileStormDelay(clip)", StringComparison.Ordinal)
+                      < playEffects.IndexOf("PlaySomewhereOnHorizon(clip, 1f);", StringComparison.Ordinal),
+                "Ambience: the hook is asked ahead of the play call, not after it");
+            Check(MethodBody(ambientSrc, "private IEnumerator MobileDelayedStormClip(SoundClips clip, float delay)")
+                      .Contains("RaiseOnPlayEffectEvent(clip);"),
+                "Ambience: the held-back clip still raises OnPlayEffect, so anything listening for thunder still hears it");
+
+            string ambienceSrc = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileAmbience.cs"));
+            string onGui = MethodBody(ambienceSrc, "void OnGUI()");
+            Check(onGui.Contains("Event.current.type != EventType.Repaint"),
+                "Ambience: the flash draws on Repaint only - OnGUI runs at least twice a frame and the layout pass would double the alpha");
+            Check(onGui.Contains("GUI.depth = -100;")
+                  && onGui.Contains("GUI.DrawTexture(new Rect(0f, 0f, Screen.width, Screen.height), Texture2D.whiteTexture);"),
+                "Ambience: an IMGUI quad over the finished frame at a depth in front of DaggerfallUI - not a camera clear, so retro, CRT and the 4:3 viewport all work unchanged");
+            Check(MethodBody(ambienceSrc, "internal float StormClipDelay(SoundClips clip)").Contains("return 0f;")
+                  && MethodBody(ambienceSrc, "internal float StormClipDelay(SoundClips clip)")
+                        .Contains("!DaggerfallUnity.Settings.LightningFlash"),
+                "Ambience: the hook answers 0 when the switch is off, which is the engine's own behaviour restored");
+            Check(MethodBody(ambienceSrc, "internal float StormClipDelay(SoundClips clip)")
+                      .Contains("enterExit.IsPlayerInside || enterExit.IsPlayerInsideDungeon"),
+                "Ambience: and no flash from indoors - a dungeon has no sky");
+            Check(MethodBody(ambienceSrc, "internal void RefreshReverb()").Contains("filter.enabled = preset != AudioReverbPreset.Off;"),
+                "Ambience: the reverb filter is switched off outdoors rather than left running on the Off preset");
+
+            string grassSrc = StripShaderComments(File.ReadAllText(
+                "Assets/Scripts/Game/Mobile/Ports/RealGrass/RealGrass.cs"));
+            Check(MethodBody(grassSrc, "private void StartMod(bool loadSettings, bool initTerrains)")
+                      .Contains("WeatherManager.OnWeatherChange += RealGrass_OnWeatherChange;")
+                  && MethodBody(grassSrc, "private void StopMod()")
+                      .Contains("WeatherManager.OnWeatherChange -= RealGrass_OnWeatherChange;"),
+                "Ambience: Real Grass subscribes to the weather beside the terrain promotion it already subscribes to, and unsubscribes with it");
+            Check(MethodBody(grassSrc, "private void StopMod()").Contains("RealGrassPort.WeatherWind = 1f;"),
+                "Ambience: and puts the multiplier back to neutral on the way out, so a restart does not inherit a storm");
+            Check(MethodBody(grassSrc, "public static void ApplyWeatherWind(DaggerfallWorkshop.Game.Weather.WeatherType weather)")
+                      .Contains("DaggerfallUnity.Settings.GrassWindFollowsWeather"),
+                "Ambience: the switch is read where the multiplier is chosen, so turning it off is one neutral push");
+            Check(grassSrc.Contains("\"[RealGrass] wind x{0:0.0#} ({1}) -> speed {2:0.00} strength {3:0.00} on {4} terrains\""),
+                "Ambience: and says what it did, with the multiplier, the weather and how many terrains it reached");
+
+            string panelAmb = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileSettingsPanel.cs"));
+            Check(panelAmb.Contains("\"Reverb in dungeons and interiors\"")
+                  && panelAmb.Contains("\"Grass wind follows the weather\"")
+                  && panelAmb.Contains("\"Lightning flash\""),
+                "Ambience: all three have a row in the mobile settings panel");
+            string debugAmb = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileDebugStart.cs"));
+            Check(debugAmb.Contains("if (name == \"AudioReverb\")")
+                  && debugAmb.Contains("if (name == \"GrassWindFollowsWeather\")"),
+                "Ambience: and `set` applies the two with live state instead of only storing them");
+        }
+
         static void TestRealGrassPort()
         {
             // ---- 1. the forced configuration ----
@@ -4850,10 +5081,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             string addDetails = MethodBody(portSrcForWind,
                 "private void AddTerrainDetails(DaggerfallTerrain daggerTerrain, TerrainData terrainData)");
             Check(addDetails.Contains("terrainData.wavingGrassTint = Color.gray;")
-                  && addDetails.Contains("terrainData.wavingGrassSpeed = RealGrassPort.ClampWind(RealGrassPort.WindSpeed);")
-                  && addDetails.Contains("terrainData.wavingGrassStrength = RealGrassPort.ClampWind(RealGrassPort.WindStrength);")
+                  && addDetails.Contains("terrainData.wavingGrassSpeed = RealGrassPort.EffectiveWindSpeed(RealGrassPort.WindSpeed, RealGrassPort.WeatherWind);")
+                  && addDetails.Contains("terrainData.wavingGrassStrength = RealGrassPort.EffectiveWindStrength(RealGrassPort.WindStrength, RealGrassPort.WeatherWind);")
                   && addDetails.Contains("terrainData.wavingGrassAmount = RealGrassPort.ClampWind(RealGrassPort.WindAmount);"),
-                "RealGrass: all three go onto the TerrainData in terrain promotion, beside the tint, through the clamp");
+                "RealGrass: all three go onto the TerrainData in terrain promotion, beside the tint, through the clamp - speed and strength via the weather multiplier");
             Check(portSrcForWind.Contains("wind speed {15:0.00} strength {16:0.00} amount {17:0.00}")
                   && addDetails.Contains("terrainData.wavingGrassSpeed, terrainData.wavingGrassStrength"),
                 "RealGrass: the detail data line reports the wind AS APPLIED, read back off the TerrainData");

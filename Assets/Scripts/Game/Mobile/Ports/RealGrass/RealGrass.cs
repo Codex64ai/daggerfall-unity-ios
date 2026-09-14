@@ -302,6 +302,94 @@ namespace RealGrass
             return value < 0f ? 0f : (value > 1f ? 1f : value);
         }
 
+        // MOBILE 2026-09-14 (weather-driven grass wind) -----------------------------------------
+        // Upstream Real Grass waves at one speed forever; the weather it is waving in is right
+        // there in WeatherManager and was never asked. The multiplier below sits ON TOP of the
+        // player's three dials rather than replacing them - the dials stay the calm-day baseline,
+        // and a storm is 2.2x THAT - so moving a dial still does what the player expects in every
+        // weather. Only speed and strength scale: wavingGrassAmount is HOW MUCH of the grass waves,
+        // which is a property of the grass rather than of the wind, and scaling it would make a
+        // storm turn blades on and off rather than blow them harder.
+
+        /// <summary>
+        /// MOBILE pure: the wind multiplier for a weather. Sunny and cloudy are the baseline the
+        /// dials were tuned on. Overcast stirs a little; rain is a real wind; a thunderstorm is the
+        /// top of the range. Snow and fog go BELOW 1 on purpose - both are weathers that only exist
+        /// in still air, and the stillness is most of what makes them read as snow and fog at all.
+        /// </summary>
+        public static float WeatherWindMultiplier(DaggerfallWorkshop.Game.Weather.WeatherType weather)
+        {
+            switch (weather)
+            {
+                case DaggerfallWorkshop.Game.Weather.WeatherType.Overcast: return 1.2f;
+                case DaggerfallWorkshop.Game.Weather.WeatherType.Fog:      return 0.6f;
+                case DaggerfallWorkshop.Game.Weather.WeatherType.Rain:     return 1.6f;
+                case DaggerfallWorkshop.Game.Weather.WeatherType.Thunder:  return 2.2f;
+                case DaggerfallWorkshop.Game.Weather.WeatherType.Snow:     return 0.8f;
+                default:                                                   return 1.0f;   // Sunny, Cloudy
+            }
+        }
+
+        /// <summary>
+        /// MOBILE: the multiplier in force right now - 1.0 until a weather change says otherwise,
+        /// and 1.0 forever when the switch is off. Read on every terrain promotion beside the three
+        /// dials, so a terrain streamed in mid-storm waves like the ones already up.
+        /// </summary>
+        public static float WeatherWind = 1f;
+
+        /// <summary>MOBILE pure: the speed a terrain should be waving at, dial and weather together.</summary>
+        public static float EffectiveWindSpeed(float dial, float weatherWind)
+        {
+            return ClampWind(ClampWind(dial) * (float.IsNaN(weatherWind) ? 1f : weatherWind));
+        }
+
+        /// <summary>MOBILE pure: and the strength. Same rule; kept separate so the two read as a pair.</summary>
+        public static float EffectiveWindStrength(float dial, float weatherWind)
+        {
+            return ClampWind(ClampWind(dial) * (float.IsNaN(weatherWind) ? 1f : weatherWind));
+        }
+
+        /// <summary>
+        /// MOBILE: take the new weather and push it to every terrain that is already up. Terrains
+        /// promoted AFTER this read WeatherWind themselves, so this only has to catch the ones
+        /// already standing - which is all of them, on a weather change in open country.
+        /// <para>
+        /// Safe to call when the mod is off or before world entry: WeatherWind is stored either way
+        /// and the live push is skipped, exactly as DistantTerrainPort.ApplyLiveSettings does.
+        /// </para>
+        /// </summary>
+        public static void ApplyWeatherWind(DaggerfallWorkshop.Game.Weather.WeatherType weather)
+        {
+            float multiplier = DaggerfallUnity.Settings.GrassWindFollowsWeather
+                ? WeatherWindMultiplier(weather)
+                : 1f;
+            WeatherWind = multiplier;
+
+            float speed = EffectiveWindSpeed(WindSpeed, multiplier);
+            float strength = EffectiveWindStrength(WindStrength, multiplier);
+
+            int touched = 0;
+            StreamingWorld streamingWorld = GameManager.HasInstance ? GameManager.Instance.StreamingWorld : null;
+            if (Installed && streamingWorld != null && streamingWorld.StreamingTarget != null)
+            {
+                foreach (Terrain terrain in streamingWorld.StreamingTarget.GetComponentsInChildren<Terrain>())
+                {
+                    TerrainData data = terrain != null ? terrain.terrainData : null;
+                    // Only the terrains that actually carry grass: the rest have no waving to change,
+                    // and writing a shared pooled TerrainData that has no details is pure churn.
+                    if (data == null || data.detailPrototypes == null || data.detailPrototypes.Length == 0)
+                        continue;
+                    data.wavingGrassSpeed = speed;
+                    data.wavingGrassStrength = strength;
+                    touched++;
+                }
+            }
+
+            Debug.Log(string.Format(
+                "[RealGrass] wind x{0:0.0#} ({1}) -> speed {2:0.00} strength {3:0.00} on {4} terrains",
+                multiplier, weather, speed, strength, touched));
+        }
+
         /// <summary>
         /// MOBILE: the device-class line, in MB of system memory. Below it a device gets
         /// <see cref="SmallDeviceDetailDistance"/> instead of <see cref="DefaultDetailDistance"/>.
@@ -1047,8 +1135,10 @@ namespace RealGrass
             // here, per promotion, beside the tint: StreamingWorld pools and reuses TerrainData, so
             // this is the one place that is guaranteed to run for every terrain that ever carries
             // grass, and a dial moved at runtime lands on the next terrain promoted.
-            terrainData.wavingGrassSpeed = RealGrassPort.ClampWind(RealGrassPort.WindSpeed);
-            terrainData.wavingGrassStrength = RealGrassPort.ClampWind(RealGrassPort.WindStrength);
+            // MOBILE 2026-09-14: ...times the weather. WeatherWind is 1.0 on a calm day and when
+            // the switch is off, so this is the line above until a storm arrives.
+            terrainData.wavingGrassSpeed = RealGrassPort.EffectiveWindSpeed(RealGrassPort.WindSpeed, RealGrassPort.WeatherWind);
+            terrainData.wavingGrassStrength = RealGrassPort.EffectiveWindStrength(RealGrassPort.WindStrength, RealGrassPort.WeatherWind);
             terrainData.wavingGrassAmount = RealGrassPort.ClampWind(RealGrassPort.WindAmount);
             Terrain terrain = daggerTerrain.gameObject.GetComponent<Terrain>();
             terrain.detailObjectDistance = options.DetailObjectDistance;
@@ -1383,6 +1473,8 @@ namespace RealGrass
 
             // Subscribe to events
             DaggerfallTerrain.OnPromoteTerrainData += DaggerfallTerrain_OnPromoteTerrainData;
+            // MOBILE 2026-09-14: and to the weather, which is the other thing the wind depends on.
+            WeatherManager.OnWeatherChange += RealGrass_OnWeatherChange;
 
             // Place details on existing terrains
             if (initTerrains)
@@ -1395,12 +1487,23 @@ namespace RealGrass
         }
 
         /// <summary>
+        /// MOBILE 2026-09-14: the weather hook. Thin on purpose - the rule and the push both live
+        /// on RealGrassPort, where the self test can reach them without a world.
+        /// </summary>
+        private void RealGrass_OnWeatherChange(DaggerfallWorkshop.Game.Weather.WeatherType weather)
+        {
+            RealGrassPort.ApplyWeatherWind(weather);
+        }
+
+        /// <summary>
         /// Stop mod and remove grass fom existing terrains.
         /// </summary>
         private void StopMod()
         {
             // Unsubscribe from events
             DaggerfallTerrain.OnPromoteTerrainData -= DaggerfallTerrain_OnPromoteTerrainData;
+            WeatherManager.OnWeatherChange -= RealGrass_OnWeatherChange;   // MOBILE
+            RealGrassPort.WeatherWind = 1f;                                // MOBILE: back to the dials
             RealGrassPort.MarkStopped();   // MOBILE: symmetric with StartMod
 
             // Remove details from terrains

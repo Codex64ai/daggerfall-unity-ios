@@ -568,6 +568,17 @@ namespace DaggerfallWorkshop.Game.Mobile
                 // re-promotes itself off the band, but the procedural skybox needs the push.
                 if (name == "SkyHaze")
                     MobileSkyHaze.ApplyLiveDial();
+
+                // MOBILE 2026-09-14: the atmosphere round's two switches that have live state. The
+                // lightning switch has none - StormClipDelay reads it each time it is asked.
+                if (name == "AudioReverb")
+                    MobileAmbience.ApplyReverbNow();
+                if (name == "GrassWindFollowsWeather")
+                {
+                    WeatherManager wm = GameManager.HasInstance ? GameManager.Instance.WeatherManager : null;
+                    if (wm != null && wm.PlayerWeather != null)
+                        global::RealGrass.RealGrassPort.ApplyWeatherWind(wm.PlayerWeather.WeatherType);
+                }
             }
             catch (System.Exception ex)
             {

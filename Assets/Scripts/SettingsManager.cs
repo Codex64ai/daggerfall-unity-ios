@@ -386,6 +386,17 @@ namespace DaggerfallWorkshop
         // one. See Assets/Scripts/Game/Mobile/MobileSkyHaze.cs.
         public bool SkyHaze { get; set; }
 
+        // MOBILE 2026-09-14 (atmosphere round). AudioReverb puts one AudioReverbFilter on the
+        // AudioListener and switches its preset on PlayerEnterExit transitions, so a dungeon stops
+        // sounding exactly like a tavern. GrassWindFollowsWeather scales Real Grass's wind dials by
+        // the weather (still in fog and snow, 2.2x in a thunderstorm). LightningFlash whitens the
+        // screen during storm weather and holds the existing thunder clip back by a delay drawn
+        // from a random strike distance, which is the half of DFU's lightning that has been
+        // switched off since 2015. See Assets/Scripts/Game/Mobile/MobileAmbience.cs.
+        public bool AudioReverb { get; set; }
+        public bool GrassWindFollowsWeather { get; set; }
+        public bool LightningFlash { get; set; }
+
         #endregion
 
         #region Public Methods
@@ -645,6 +656,9 @@ namespace DaggerfallWorkshop
             // hand-edited ini reaches the timer through this property and nothing else.
             AutosaveIntervalMinutes = GetInt(sectionEnhancements, "AutosaveIntervalMinutes", 0, 60);
             SkyHaze = GetBool(sectionEnhancements, "SkyHaze");   // MOBILE
+            AudioReverb = GetBool(sectionEnhancements, "AudioReverb");                             // MOBILE
+            GrassWindFollowsWeather = GetBool(sectionEnhancements, "GrassWindFollowsWeather");     // MOBILE
+            LightningFlash = GetBool(sectionEnhancements, "LightningFlash");                       // MOBILE
         }
 
         /// <summary>
@@ -853,6 +867,9 @@ namespace DaggerfallWorkshop
             SetBool(sectionEnhancements, "AutosaveOnDungeon", AutosaveOnDungeon);
             SetInt(sectionEnhancements, "AutosaveIntervalMinutes", AutosaveIntervalMinutes);
             SetBool(sectionEnhancements, "SkyHaze", SkyHaze);   // MOBILE
+            SetBool(sectionEnhancements, "AudioReverb", AudioReverb);                              // MOBILE
+            SetBool(sectionEnhancements, "GrassWindFollowsWeather", GrassWindFollowsWeather);      // MOBILE
+            SetBool(sectionEnhancements, "LightningFlash", LightningFlash);                        // MOBILE
 
             // Write settings to persistent file
             WriteSettingsFile();

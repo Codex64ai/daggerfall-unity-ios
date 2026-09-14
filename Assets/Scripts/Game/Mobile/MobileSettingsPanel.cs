@@ -636,6 +636,40 @@ namespace DaggerfallWorkshop.Game.Mobile
                 "The timer counts real playing time, and never saves in a fight, while a window " +
                 "is open or while Real travel is walking for you - it waits for a quiet moment.");
 
+            // MOBILE 2026-09-14: the atmosphere round's three switches. Grouped here rather than
+            // under Picture because none of them is a picture setting and two of them are sound.
+            AddNote(c, ref y, rowW,
+                "Atmosphere. Reverb gives dungeons, caves and interiors their own echo instead of " +
+                "playing every sound dry. Grass wind follows the weather - still in fog and snow, " +
+                "hard in a thunderstorm (needs Real Grass). Lightning whitens the sky during a " +
+                "storm and the thunder follows a moment later, further away meaning a longer wait.");
+
+            AddToggle(c, ref y, rowW, rowH, "Reverb in dungeons and interiors",
+                () => DaggerfallUnity.Settings.AudioReverb,
+                v =>
+                {
+                    SaveSetting(() => DaggerfallUnity.Settings.AudioReverb == v,
+                                () => DaggerfallUnity.Settings.AudioReverb = v);
+                    MobileAmbience.ApplyReverbNow();
+                },
+                null);
+
+            AddToggle(c, ref y, rowW, rowH, "Grass wind follows the weather",
+                () => DaggerfallUnity.Settings.GrassWindFollowsWeather,
+                v =>
+                {
+                    SaveSetting(() => DaggerfallUnity.Settings.GrassWindFollowsWeather == v,
+                                () => DaggerfallUnity.Settings.GrassWindFollowsWeather = v);
+                    ApplyGrassWindNow();
+                },
+                null);
+
+            AddToggle(c, ref y, rowW, rowH, "Lightning flash",
+                () => DaggerfallUnity.Settings.LightningFlash,
+                v => SaveSetting(() => DaggerfallUnity.Settings.LightningFlash == v,
+                                 () => DaggerfallUnity.Settings.LightningFlash = v),
+                null);
+
             FinishSection(c, y);
         }
 
@@ -663,6 +697,19 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// AddToggle and AddChoice both call their setter once while building the panel, and
         /// settings.ini must not be rewritten for a value nobody touched.
         /// </summary>
+        /// <summary>
+        /// MOBILE 2026-09-14: push the weather wind switch to the terrains that are already up.
+        /// Reads the weather rather than taking it as an argument because the row only knows the
+        /// switch moved, not what the sky is doing. No-op before world entry and with Real Grass off.
+        /// </summary>
+        static void ApplyGrassWindNow()
+        {
+            WeatherManager wm = GameManager.HasInstance ? GameManager.Instance.WeatherManager : null;
+            if (wm == null || wm.PlayerWeather == null)
+                return;
+            global::RealGrass.RealGrassPort.ApplyWeatherWind(wm.PlayerWeather.WeatherType);
+        }
+
         static void SaveSetting(System.Func<bool> unchanged, System.Action apply)
         {
             if (unchanged())
