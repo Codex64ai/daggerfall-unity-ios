@@ -7,6 +7,11 @@
 // over the 320x200 raster with retro mode on and over the full-resolution world with it off
 // (MobileCrtNative), so this page's toggle means the same thing in both.
 //
+// MOBILE 2026-09-15: what the filter COVERS is one row over in Mobile Settings (CRT coverage:
+// World / Frame / Everything) rather than here, because at coverage 1 and 2 the filter is no longer
+// something the world's presentation blit does - MobileCrtFrame filters the finished frame - and
+// this page is the presentation blit's page. The sliders below shape the picture in every coverage.
+//
 // The scanline-count slider is shown only with retro mode OFF, and that is not a tidiness
 // decision: in retro mode the count is the source raster's own height (200 / 400, or 154 / 308
 // under a docked large HUD) and any other number beats against it as moire. There is nothing to
@@ -44,9 +49,10 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
         // carries the English reversion it should fall back to. GetLocalizedText would return the
         // lookup-error string instead.
         const string titleReversion = "CRT Filter";
-        const string tipReversion = "Curved tube, scanlines and phosphor grille over the world, " +
-                                    "with retro mode on or off. The HUD stays sharp on purpose, " +
-                                    "and curvature crops the edges of the view.";
+        const string tipReversion = "Curved tube, scanlines and phosphor grille, " +
+                                    "with retro mode on or off. How much of the frame it covers " +
+                                    "is the CRT coverage row in Mobile Settings; " +
+                                    "curvature crops the edges.";
 
         Checkbox enableCheckbox;
         HorizontalSlider curvatureSlider;
@@ -180,6 +186,7 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
             DaggerfallUnity.Settings.CRTMask = 0.25f;
             DaggerfallUnity.Settings.CRTVignette = 0.25f;
             DaggerfallUnity.Settings.CRTScanlineCount = MobileCrt.DefaultScanlineCount;
+            DaggerfallUnity.Settings.CRTCoverage = MobileCrt.DefaultCoverage;
         }
 
         private void EnableCheckbox_OnToggleState()

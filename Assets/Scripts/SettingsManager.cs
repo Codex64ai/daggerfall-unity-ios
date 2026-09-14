@@ -173,6 +173,11 @@ namespace DaggerfallWorkshop
         // raster's own height and there is nothing to choose; with retro mode off the source IS the
         // screen and no count is "correct", so it becomes the player's.
         public int CRTScanlineCount { get; set; }
+        // MOBILE: how much of the frame the filter covers. 0 = the world only (the presentation
+        // blit, which is where the filter has always run); 1 = the whole frame except the touch
+        // controls, so the IMGUI HUD, the menus and the first-person weapon are filtered too;
+        // 2 = everything, touch controls included. See MobileCrt/MobileCrtFrame.
+        public int CRTCoverage { get; set; }
         // MOBILE: the two Distant Terrain dials the settings panel shows (the mod itself is a
         // compiled-in port, Assets/Scripts/Game/Mobile/Ports/DistantTerrain). DistantFogStrength
         // multiplies the mod's four ordinary per-weather fog densities (sunny/overcast/rainy/snowy)
@@ -474,6 +479,7 @@ namespace DaggerfallWorkshop
             CRTMask = GetFloat(sectionVideo, "CRTMask", 0f, 1f);
             CRTVignette = GetFloat(sectionVideo, "CRTVignette", 0f, 1f);
             CRTScanlineCount = GetInt(sectionVideo, "CRTScanlineCount", 100, 1200);
+            CRTCoverage = GetInt(sectionVideo, "CRTCoverage", 0, 2);
             // MOBILE: clamped here and again in DistantTerrainPort (ClampFogStrength / ClampReach),
             // because a hand-edited ini reaches the port without passing through the panel.
             DistantFogStrength = GetFloat(sectionVideo, "DistantFogStrength", 0f, 2f);
@@ -694,6 +700,7 @@ namespace DaggerfallWorkshop
             SetFloat(sectionVideo, "CRTMask", CRTMask);
             SetFloat(sectionVideo, "CRTVignette", CRTVignette);
             SetInt(sectionVideo, "CRTScanlineCount", CRTScanlineCount);
+            SetInt(sectionVideo, "CRTCoverage", CRTCoverage);
             SetFloat(sectionVideo, "DistantFogStrength", DistantFogStrength);
             SetInt(sectionVideo, "DistantReach", DistantReach);
             SetBool(sectionVideo, "VSync", VSync);

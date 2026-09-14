@@ -485,8 +485,27 @@ namespace DaggerfallWorkshop.Game.Mobile
                 },
                 null);
 
+            // MOBILE 2026-09-15: how much of the frame the filter covers. World is where the filter
+            // has always run; Frame adds the HUD, the menus and the first-person weapon (they are
+            // IMGUI, drawn after every camera, so only an end-of-frame pass can reach them) and
+            // leaves the touch controls sharp; Everything curves those too. Same null-key rule as
+            // the row above - the value belongs to settings.ini, not to this panel's PlayerPrefs.
+            AddChoice(c, ref y, rowW, rowH, "CRT coverage",
+                new[] { "World", "Frame", "Everything" },
+                () => MobileCrt.ClampCoverage(DaggerfallUnity.Settings.CRTCoverage),
+                v =>
+                {
+                    int clamped = MobileCrt.ClampCoverage(v);
+                    if (DaggerfallUnity.Settings.CRTCoverage == clamped)
+                        return;
+                    DaggerfallUnity.Settings.CRTCoverage = clamped;
+                    DaggerfallUnity.Settings.SaveSettings();
+                });
+
             AddNote(c, ref y, rowW,
-                "Curvature crops the edges of the view, and the HUD stays sharp on purpose.");
+                "Curvature crops the edges of the view. World filters the world only; Frame adds "
+                + "the HUD, the menus and the weapon in your hand; Everything curves the touch "
+                + "controls too, which makes them harder to hit.");
 
             // MOBILE 2026-09-14: sky haze. Placed immediately above the Distance fog row because
             // that row is its thickness dial - the band and the far-terrain haze are one setting

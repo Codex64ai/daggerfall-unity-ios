@@ -139,6 +139,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestMobileCRTRender();
             TestMobileCRTSettingsEndToEnd();
             TestMobileCRTUI();
+            TestMobileCRTCoverage();
             TestDebugStartCommands();
             TestWODBiomesPort();
             TestBiomesClimateKey();
@@ -2393,6 +2394,194 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // This one writes a rogue value into the editor's own settings.ini, constructs a
         // SettingsManager (whose constructor is LoadSettings), reads the public property, and puts
         // the file back byte for byte - and then checks that it did.
+        /// <summary>
+        /// WHOLE-FRAME COVERAGE (2026-09-15). The filter used to run on the world's presentation
+        /// blit and nowhere else, so DFU's HUD, its menus and the first-person weapon - all IMGUI,
+        /// all drawn after every camera - came out flat and sharp over a curved world ("the CRT
+        /// doesn't affect the UI or the player first person sprites so it looks off"). CRTCoverage
+        /// 1 and 2 move the filtering to an end-of-frame pass over the finished backbuffer.
+        ///
+        /// Nothing about that pass is reachable from a headless editor: it is a WaitForEndOfFrame
+        /// coroutine that captures a screen there is none of. So what is executed here is the RULES -
+        /// which of the three filtering paths runs, and the fact that never more than one of them
+        /// does - and what is pinned in source is the ORDER inside the pass, which is the only thing
+        /// that can silently turn "the HUD is filtered" back into "the HUD is not".
+        /// </summary>
+        static void TestMobileCRTCoverage()
+        {
+            // ---- the clamp and the three names ----
+            Check(MobileCrt.CoverageWorld == 0 && MobileCrt.CoverageFrame == 1 && MobileCrt.CoverageEverything == 2,
+                "MobileCRT coverage: the three coverages are 0 world / 1 frame / 2 everything");
+            Check(MobileCrt.DefaultCoverage == MobileCrt.CoverageFrame,
+                "MobileCRT coverage: the default is 1 - the whole frame with the touch controls left sharp",
+                MobileCrt.DefaultCoverage.ToString());
+            Check(MobileCrt.ClampCoverage(-3) == 0 && MobileCrt.ClampCoverage(0) == 0 && MobileCrt.ClampCoverage(1) == 1
+                  && MobileCrt.ClampCoverage(2) == 2 && MobileCrt.ClampCoverage(99) == 2,
+                "MobileCRT coverage: ClampCoverage clamps both ends and passes 0/1/2 through",
+                MobileCrt.ClampCoverage(-3) + "/" + MobileCrt.ClampCoverage(99));
+
+            // The ini is the other front end, and a hand-edited one is the reason the clamp exists.
+            string defaults = File.ReadAllText("Assets/Resources/defaults.ini.txt");
+            Check(defaults.Contains("CRTCoverage=1"),
+                "MobileCRT coverage: defaults.ini ships CRTCoverage=1");
+            string settingsSrc = StripShaderComments(File.ReadAllText("Assets/Scripts/SettingsManager.cs"));
+            Check(settingsSrc.Contains("CRTCoverage = GetInt(sectionVideo, \"CRTCoverage\", 0, 2);"),
+                "MobileCRT coverage: LoadSettings clamps CRTCoverage to 0..2 on the way in");
+            Check(settingsSrc.Contains("SetInt(sectionVideo, \"CRTCoverage\", CRTCoverage);"),
+                "MobileCRT coverage: SaveSettings writes CRTCoverage back to the ini");
+
+            // ---- one filtering path per frame, never two, never none ----
+            // THE INVARIANT THE FEATURE RESTS ON. Filtering twice is not a subtle defect: two sets of
+            // scanlines at two scales, two barrel warps, the vignette squared. The three-argument
+            // Active/NativeActive above keep the retro-versus-native partition they have always had
+            // (their own exhaustive table is in TestMobileCRT and must stay green); these are the
+            // same two predicates asked the coverage question as well, plus the frame pass.
+            foreach (int mode in new[] { 0, 1, 2 })
+                foreach (bool enabled in new[] { false, true })
+                    foreach (bool materialOk in new[] { false, true })
+                        foreach (int coverage in new[] { -1, 0, 1, 2, 7 })
+                        {
+                            bool retro = MobileCrt.Active(enabled, mode, materialOk, coverage);
+                            bool native = MobileCrt.NativeActive(enabled, mode, materialOk, coverage);
+                            bool frame = MobileCrt.FrameActive(enabled, materialOk, coverage);
+                            int running = (retro ? 1 : 0) + (native ? 1 : 0) + (frame ? 1 : 0);
+                            string where = string.Format("(enabled={0}, retroMode={1}, materialOk={2}, coverage={3})",
+                                enabled, mode, materialOk, coverage);
+
+                            Check(running <= 1,
+                                "MobileCRT coverage: at most one path filters the picture " + where,
+                                "retro=" + retro + " native=" + native + " frame=" + frame);
+                            Check((running == 1) == (enabled && materialOk),
+                                "MobileCRT coverage: exactly one path filters whenever the filter is on and the shader is present " + where,
+                                running + " paths");
+
+                            int clamped = MobileCrt.ClampCoverage(coverage);
+                            Check(retro == (enabled && materialOk && mode != 0 && clamped == 0),
+                                "MobileCRT coverage: the retro presentation blit filters only at coverage 0 " + where);
+                            Check(native == (enabled && materialOk && mode == 0 && clamped == 0),
+                                "MobileCRT coverage: the native path runs only at coverage 0 " + where);
+                            Check(frame == (enabled && materialOk && clamped != 0),
+                                "MobileCRT coverage: the frame pass runs at coverage 1 and 2, in either retro mode " + where);
+                        }
+
+            // The touch controls: sharp at 1, filtered at 2, and at 0 the question does not arise
+            // because the pass does not run.
+            Check(!MobileCrt.TouchControlsSharp(0) && MobileCrt.TouchControlsSharp(1) && !MobileCrt.TouchControlsSharp(2),
+                "MobileCRT coverage: the touch controls are redrawn sharp at coverage 1 only");
+            Check(!MobileCrt.TouchControlsSharp(-5) && !MobileCrt.TouchControlsSharp(99),
+                "MobileCRT coverage: TouchControlsSharp clamps its argument like everything else");
+
+            // The frame pass has no raster to lock to - the source is the backbuffer, and with retro
+            // mode on it holds an already-upscaled retro picture with a native-resolution IMGUI HUD
+            // over it. So the count is the player's, clamped, exactly as on the native path.
+            Check(MobileCrt.FrameScanlineCount(480) == 480
+                  && MobileCrt.FrameScanlineCount(0) == MobileCrt.MinScanlineCount
+                  && MobileCrt.FrameScanlineCount(99999) == MobileCrt.MaxScanlineCount,
+                "MobileCRT coverage: the frame pass draws CRTScanlineCount lines, clamped",
+                MobileCrt.FrameScanlineCount(0) + " / " + MobileCrt.FrameScanlineCount(99999));
+
+            // ---- the touch canvas's layer ----
+            Check(MobileCrt.TouchUILayer == 5 && MobileCrt.TouchUILayerMask == (1 << 5),
+                "MobileCRT coverage: the touch canvas is drawn on Unity's built-in UI layer (5)",
+                MobileCrt.TouchUILayer + " / 0x" + MobileCrt.TouchUILayerMask.ToString("X8"));
+            Check((MobileCrt.WithoutTouchUILayer(~0) & MobileCrt.TouchUILayerMask) == 0
+                  && MobileCrt.WithoutTouchUILayer(~0) == (~0 & ~MobileCrt.TouchUILayerMask),
+                "MobileCRT coverage: WithoutTouchUILayer clears that bit off a world camera's mask and no other");
+
+            // ---- MobileCrtFrame: the shape, and that it is inert without a game ----
+            Type frameType = typeof(MobileCrt).Assembly.GetType("DaggerfallWorkshop.Game.Mobile.MobileCrtFrame");
+            Check(frameType != null, "MobileCRT coverage: MobileCrtFrame exists");
+            if (frameType != null)
+            {
+                foreach (string member in new[] { "Active", "Wanted", "Capture", "TouchCamera" })
+                    Check(frameType.GetProperty(member, BindingFlags.Public | BindingFlags.Static) != null,
+                        "MobileCRT coverage: MobileCrtFrame." + member + " is a public static property");
+                var activeProp = frameType.GetProperty("Active", BindingFlags.Public | BindingFlags.Static);
+                var captureProp = frameType.GetProperty("Capture", BindingFlags.Public | BindingFlags.Static);
+                Check(activeProp != null && (bool)activeProp.GetValue(null, null) == false,
+                    "MobileCRT coverage: the frame pass is off with no running game");
+                Check(captureProp != null && captureProp.GetValue(null, null) == null,
+                    "MobileCRT coverage: no capture texture is allocated with no running game");
+            }
+
+            // ---- the pass's order, pinned in source ----
+            // Every one of these is silently survivable: the build compiles and the game runs, with
+            // the HUD unfiltered again, or the picture filtered into the retro raster, or the
+            // joysticks curved when the player asked for them sharp.
+            string frameSrc = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileCrtFrame.cs"));
+            Check(frameSrc.Contains("WaitForEndOfFrame"),
+                "MobileCRT coverage: the pass is driven from WaitForEndOfFrame - the one point after OnGUI");
+            Check(frameSrc.Contains("ScreenCapture.CaptureScreenshotIntoRenderTexture(capture)"),
+                "MobileCRT coverage: the finished frame is captured GPU-side, with no readback");
+            // Graphics.Blit with a null destination is documented to go to CAMERA.MAIN'S RENDER
+            // TEXTURE when it has one - which it does in retro mode - so the filtered frame would
+            // land in the 320x200 raster instead of on the screen. The explicit target plus a quad
+            // is the fix, and "no Graphics.Blit in this file" is how it stays fixed.
+            Check(!frameSrc.Contains("Graphics.Blit("),
+                "MobileCRT coverage: the pass never uses Graphics.Blit (a null destination is redirected in retro mode)");
+            Check(frameSrc.Contains("RenderTexture.active = null;"),
+                "MobileCRT coverage: the pass targets the backbuffer explicitly");
+
+            string passBody = MethodBody(frameSrc, "static void Pass()");
+            Check(passBody.Length > 0, "MobileCRT coverage: Pass() is readable for the order checks");
+            int iTake = passBody.IndexOf("TakeTouchCanvas()", StringComparison.Ordinal);
+            int iCapture = passBody.IndexOf("CaptureScreenshotIntoRenderTexture", StringComparison.Ordinal);
+            int iDraw = passBody.IndexOf("DrawFullScreen(", StringComparison.Ordinal);
+            int iRender = passBody.IndexOf("touchCamera.Render()", StringComparison.Ordinal);
+            Check(iTake >= 0 && iCapture > iTake,
+                "MobileCRT coverage: the touch canvas is taken BEFORE the capture, so the first filtered frame is already free of it",
+                iTake + " -> " + iCapture);
+            Check(iCapture >= 0 && iDraw > iCapture,
+                "MobileCRT coverage: capture then filter", iCapture + " -> " + iDraw);
+            Check(iDraw >= 0 && iRender > iDraw,
+                "MobileCRT coverage: the touch controls are rendered AFTER the filtered frame is on the backbuffer",
+                iDraw + " -> " + iRender);
+            string drawBody = MethodBody(frameSrc, "static void DrawFullScreen(Material crt)");
+            Check(drawBody.IndexOf("RenderTexture.active = null;", StringComparison.Ordinal) >= 0
+                  && drawBody.IndexOf("RenderTexture.active = null;", StringComparison.Ordinal)
+                     < drawBody.IndexOf("GL.Begin(", StringComparison.Ordinal),
+                "MobileCRT coverage: the backbuffer is selected before the quad is drawn, not after");
+            Check(frameSrc.Contains("cam.enabled = false;"),
+                "MobileCRT coverage: the touch camera is disabled - only the pass renders it, after the filter");
+            Check(frameSrc.Contains("cam.targetTexture = null;"),
+                "MobileCRT coverage: the touch camera owns no render texture (one would put the HUD back inside the picture)");
+            Check(frameSrc.Contains("cam.clearFlags = CameraClearFlags.Depth;"),
+                "MobileCRT coverage: the touch camera clears depth only, so the filtered frame survives under it");
+            Check(frameSrc.Contains("MobileCrt.WithoutTouchUILayer(mask)"),
+                "MobileCRT coverage: the world camera is kept off the touch canvas's layer");
+            Check(frameSrc.Contains("[CRT] frame pass "),
+                "MobileCRT coverage: the pass logs its size and coverage once");
+
+            // ---- no double filtering, pinned at the two sites that would cause it ----
+            string presenter = StripShaderComments(File.ReadAllText("Assets/Scripts/Utility/RetroPresentation.cs"));
+            Check(presenter.Contains("MobileCrt.Active(wanted, retroMode, true, coverage)"),
+                "MobileCRT coverage: the presentation blit asks the coverage question before it filters");
+            string nativeSrc = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileCrtNative.cs"));
+            Check(MethodBody(nativeSrc, "public static bool Wanted").Contains("MobileCrt.ClampCoverage(coverage) != MobileCrt.CoverageWorld"),
+                "MobileCRT coverage: the native path refuses to allocate its 15-21 MB target at coverage 1 and 2");
+
+            // ---- the front ends ----
+            string panel = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileSettingsPanel.cs"));
+            Check(panel.Contains("\"CRT coverage\""),
+                "MobileCRT coverage: the mobile settings panel carries a CRT coverage row");
+            Check(panel.Contains("new[] { \"World\", \"Frame\", \"Everything\" }"),
+                "MobileCRT coverage: the row offers World / Frame / Everything");
+            Check(panel.Contains("DaggerfallUnity.Settings.CRTCoverage = clamped;")
+                  && MethodBody(panel, "void BuildHudSection").Contains("DaggerfallUnity.Settings.SaveSettings();"),
+                "MobileCRT coverage: the row writes DaggerfallUnity.Settings and owns its own persistence");
+            string page = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/UserInterfaceWindows/CRTConfigPage.cs"));
+            Check(MethodBody(page, "public override void SetDefaults()").Contains("CRTCoverage = MobileCrt.DefaultCoverage"),
+                "MobileCRT coverage: the config page's defaults button restores the default coverage");
+
+            // The simulator's only way to get the first-person weapon - an IMGUI draw, and half the
+            // reason this feature exists - into a screenshot.
+            string debug = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileDebugStart.cs"));
+            Check(debug.Contains("if (name == \"DrawWeapon\")"),
+                "MobileCRT coverage: the command file's `set <t> DrawWeapon 1` readies the weapon for a screenshot");
+            Check(MethodBody(debug, "static void DrawWeapon(bool drawn)").Contains("weapons.ToggleSheath()"),
+                "MobileCRT coverage: DrawWeapon goes through WeaponManager.ToggleSheath, the path the player's own button takes");
+        }
+
         static void TestMobileCRTSettingsEndToEnd()
         {
             SettingsManager live = null;
@@ -2549,7 +2738,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                       && page.Contains("scanlineCountSlider.Enabled = nativePath"),
                     "MobileCRT UI: the scanline-count slider is shown only with retro mode off");
                 // Two things a player cannot discover by looking, so the tip has to say them.
-                Check(page.Contains("HUD stays sharp"), "MobileCRT UI: the tip text says the HUD stays sharp on purpose");
+                // The first USED to be "the HUD stays sharp on purpose", which was true while the
+                // filter was one blit on the world. Since CRTCoverage (2026-09-15) the HUD is
+                // filtered by default and what the tip owes the player is where to change that.
+                Check(page.Contains("CRT coverage row"),
+                    "MobileCRT UI: the tip text points at the CRT coverage row for how much is filtered");
                 Check(page.Contains("crops the edges"), "MobileCRT UI: the tip text says curvature crops the edges");
                 // ... and one thing that USED to be true and is not any more. The page said "Needs
                 // retro mode on" while the filter was retro-only; leaving that line in place would

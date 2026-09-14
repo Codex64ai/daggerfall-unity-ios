@@ -433,19 +433,26 @@ crush the colours back to the 1996 VGA palette (*Game Effects -> Retro Mode*), w
 or 16:10 aspect correction.
 
 **The CRT filter** is this port's, and it works **with retro mode on or off** - it is not tied to
-one picture. It draws a curved tube, scanlines, an RGB phosphor grille and a vignette over the
-**world**; the HUD, the touch controls, the menus and the paper doll stay pin-sharp and flat on
-top of it. That is deliberate: curving the touch controls away from where your fingers land would
-be worse than the inconsistency. Curvature crops the extreme edges of the view.
+one picture. It draws a curved tube, scanlines, an RGB phosphor grille and a vignette. Curvature
+crops the extreme edges of the view.
+
+**How much of the picture it covers** is the **CRT coverage** row in *Mobile Settings*:
+
+| Coverage | What is filtered |
+|---|---|
+| **World** | the world only - the HUD, the menus, the paper doll, the weapon in your hand and the touch controls all stay pin-sharp and flat on top of it. This is how the filter behaved before September 2026. |
+| **Frame** (default) | everything you can see except the touch controls: the world, the HUD, the menus **and the first-person weapon**, which are drawn by Daggerfall's own interface code after every camera and so used to escape the filter entirely. The joysticks and buttons are redrawn sharp on top, because a control that curves away from where your finger lands is a control you miss. |
+| **Everything** | the touch controls too. |
 
 | Setting | Default | What it does |
 |---|---|---|
 | `CRTFilter` | off | the whole filter |
+| `CRTCoverage` | 1 | 0 world / 1 frame / 2 everything |
 | `CRTCurvature` | 0.08 | barrel warp, 0 to 0.3 |
 | `CRTScanlines` | 0.35 | scanline depth, 0 to 1 |
 | `CRTMask` | 0.25 | phosphor grille depth, 0 to 1 |
 | `CRTVignette` | 0.25 | corner falloff, 0 to 1 |
-| `CRTScanlineCount` | 480 | **lines drawn when retro mode is OFF**, 100 to 1200 |
+| `CRTScanlineCount` | 480 | **lines drawn when retro mode is OFF, and at any coverage above World**, 100 to 1200 |
 
 `CRTScanlineCount` only appears while retro mode is off, and only matters there. **In retro mode
 the number of scanlines is not yours to pick**: it is the height of the raster the game is
@@ -454,14 +461,21 @@ any other pitch beat against that raster and crawl as you move. With retro mode 
 raster; the world is drawn at the panel's own resolution, so the count becomes a taste setting.
 480 is a VGA monitor's count and is the default; 360 is heavier, 240 is a television.
 
-**What it costs with retro mode off.** The filter needs the world in a texture before it can
-curve it, so with retro mode off the game renders into one full-size render target - about
-**15 MB** on an 11in iPad, **21 MB** on a 12.9in - allocated when you switch the filter on and
-freed the moment you switch it off. (Only the colour surface is counted, because the depth buffer
+`CRTScanlineCount` is also what the **Frame** and **Everything** coverages draw, in either retro
+mode: what they filter is the finished screen, not a raster, so there is no line count to lock to.
+
+**What it costs with retro mode off, at coverage World.** The filter needs the world in a texture
+before it can curve it, so with retro mode off the game renders into one full-size render target -
+about **15 MB** on an 11in iPad, **21 MB** on a 12.9in - allocated when you switch the filter on
+and freed the moment you switch it off. (Only the colour surface is counted, because the depth buffer
 is declared memoryless and stays in the GPU's tile memory on Metal, which is half the cost gone.) There is no such cost in retro mode, which already renders
 into a texture, and none at all while the filter is off. The drawing cost is one extra
 full-screen pass either way; in the simulator it did not move the frame-time counter beyond its
 0.1 ms resolution, and it has not yet been measured on a device.
+
+**Frame** and **Everything** cost a screen-sized copy of the finished frame instead - the same
+order of memory, on the same terms - and they switch that render target OFF, so whole-frame
+coverage is not more expensive than World, it is a different way of paying the same price.
 
 ## Survival
 
@@ -659,6 +673,12 @@ The value is converted to the property's own type, so `set CRTFilter False` and
 `False`. Retro-mode and aspect-correction changes are deployed through
 `DeployCoreGameEffectSettings`, exactly as `MobileSettingsPanel` deploys them - anything else is
 simply stored and saved, which is all the panel does for the rest.
+
+One name on the `set` line is **not** a setting: `set 8 DrawWeapon 1` readies the character's
+weapon (and `0` sheathes it) through `WeaponManager.ToggleSheath`, the same path the player's own
+button takes. It is there because the first-person weapon is drawn by Daggerfall's interface code
+rather than by a camera, so it is one of the things whole-frame CRT coverage exists to filter - and
+there is no way to tap a button in a headless simulator run.
 
 ### Converting a desktop `.dfmod`
 

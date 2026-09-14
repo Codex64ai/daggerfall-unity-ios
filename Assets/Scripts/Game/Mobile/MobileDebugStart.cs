@@ -508,6 +508,28 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         /// <summary>
+        /// Readies or sheathes the character's weapon. WeaponManager.Sheathed is the flag FPSWeapon
+        /// reads before it draws anything in OnGUI, and ToggleSheath is what the ReadyWeapon action
+        /// calls - so this is the same path the player's own button takes, not a poke at a sprite.
+        /// The debug character starts with an iron dagger equipped, which is what the screenshots
+        /// of the weapon under the filter are taken with.
+        /// </summary>
+        static void DrawWeapon(bool drawn)
+        {
+            WeaponManager weapons = GameManager.HasInstance ? GameManager.Instance.WeaponManager : null;
+            if (weapons == null)
+            {
+                Debug.LogWarning("[DebugStart] DrawWeapon: no WeaponManager");
+                return;
+            }
+
+            if (weapons.Sheathed == !drawn)
+                weapons.ToggleSheath();
+
+            Debug.Log("[DebugStart] DrawWeapon " + drawn + ": sheathed=" + weapons.Sheathed);
+        }
+
+        /// <summary>
         /// Writes one DaggerfallUnity.Settings property by reflection and then deploys it the way
         /// the in-game panel does. The deploy half matters as much as the write: RetroRenderingMode
         /// is not read per frame by anything, it is pushed into RetroRenderer by
@@ -518,6 +540,19 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             try
             {
+                // MOBILE 2026-09-15: two PSEUDO-settings that are not SettingsManager properties at
+                // all. They ride the `set` schedule because that is already a timed, one-per-frame
+                // queue driven from the command file, and what they do is exactly what `set` is for:
+                // put the running game into a state a screenshot has to be taken in. `set 8
+                // DrawWeapon 1` readies the character's weapon, which is the only way to get the
+                // first-person weapon sprite - an IMGUI draw, and one of the two things whole-frame
+                // CRT coverage exists to filter - into a headless simulator screenshot.
+                if (name == "DrawWeapon")
+                {
+                    DrawWeapon(value != "0" && !value.Equals("false", System.StringComparison.OrdinalIgnoreCase));
+                    return;
+                }
+
                 SettingsManager settings = DaggerfallUnity.Settings;
                 PropertyInfo prop = typeof(SettingsManager).GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
                 if (prop == null || !prop.CanWrite)

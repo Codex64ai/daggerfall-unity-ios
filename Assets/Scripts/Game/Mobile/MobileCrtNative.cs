@@ -130,7 +130,15 @@ namespace DaggerfallWorkshop.Game.Mobile
                 if (!enabled || retroMode != 0)
                     return false;
 
-                return MobileCrt.NativeActive(enabled, retroMode, MobileCrt.Material != null);
+                // MOBILE 2026-09-15: and not at whole-frame coverage. This path exists only to give
+                // the presentation blit something to filter with retro mode off; at coverage 1 and 2
+                // MobileCrtFrame filters the backbuffer at the end of the frame, so the target here
+                // would be 15-21 MB of iPad memory bought for a blit that presents plainly.
+                int coverage = DaggerfallUnity.Settings.CRTCoverage;
+                if (MobileCrt.ClampCoverage(coverage) != MobileCrt.CoverageWorld)
+                    return false;
+
+                return MobileCrt.NativeActive(enabled, retroMode, MobileCrt.Material != null, coverage);
             }
         }
 

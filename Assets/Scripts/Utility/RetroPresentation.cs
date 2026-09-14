@@ -27,8 +27,10 @@ namespace DaggerfallWorkshop.Utility
         // camera.rect so aspect correction and the docked large HUD keep working, and it sits
         // downstream of every camera target, so nothing that re-points Camera.main.targetTexture
         // (RetroRenderer.UpdateRenderTarget, Distant Terrain's stacked camera) interacts with it.
-        // The IMGUI HUD is drawn after all cameras and so stays unfiltered, deliberately: curving
-        // the touch controls away from where fingers land would be worse than a sharp HUD.
+        // MOBILE 2026-09-15: ...at CRTCoverage 0. The IMGUI HUD is drawn after all cameras, so this
+        // blit cannot reach it; at coverage 1 and 2 MobileCrtFrame filters the finished frame at the
+        // end of it instead, and this blit must then present PLAINLY or the picture is filtered
+        // twice. That is the whole of `MobileCrt.Active(..., CRTCoverage)` below.
         //
         // It runs in BOTH pictures. With retro mode on the source is RetroRenderer's 640x400
         // presentation texture, as upstream intended. With retro mode off MobileCrtNative rebuilds
@@ -52,7 +54,8 @@ namespace DaggerfallWorkshop.Utility
                 int retroMode = DaggerfallUnity.Settings.RetroRenderingMode;
                 bool wanted = DaggerfallUnity.Settings.CRTFilter;
                 Material crt = wanted ? MobileCrt.Material : null;
-                if (crt != null && (MobileCrt.Active(wanted, retroMode, true) || MobileCrtNative.Active))
+                int coverage = DaggerfallUnity.Settings.CRTCoverage;
+                if (crt != null && (MobileCrt.Active(wanted, retroMode, true, coverage) || MobileCrtNative.Active))
                 {
                     crt.SetFloat(crtCurvatureId, MobileCrt.ClampCurvature(DaggerfallUnity.Settings.CRTCurvature));
                     crt.SetFloat(crtScanlinesId, MobileCrt.Clamp01(DaggerfallUnity.Settings.CRTScanlines));

@@ -83,6 +83,42 @@ namespace DaggerfallWorkshop.Game.Mobile
             return value > MaxScanlineCount ? MaxScanlineCount : value;
         }
 
+        // ---- coverage --------------------------------------------------------------------
+        // "the CRT doesn't affect the UI or the player first person sprites so it looks off"
+        // (Ikram, 2026-09-15). The filter has always run on the WORLD's presentation blit, and
+        // DFU draws its HUD, its menus and the first-person weapon afterwards in IMGUI (OnGUI),
+        // which no camera and no blit can reach. Coverage is the answer: at 1 and 2 the world-only
+        // filter is switched OFF and a single end-of-frame pass (MobileCrtFrame) filters the
+        // finished frame instead - everything the player can see, drawn in whatever order it was
+        // drawn. The only question left is the touch controls, and that is the difference between
+        // 1 and 2: a joystick that curves away from where the finger lands is a joystick the player
+        // misses, so 1 (the default) redraws them sharp on top of the filtered frame.
+
+        /// <summary>Coverage 0: the world's presentation blit only - where the filter has always
+        /// run. The IMGUI HUD, the menus and the first-person weapon stay flat and sharp.</summary>
+        public const int CoverageWorld = 0;
+
+        /// <summary>Coverage 1: the whole frame except the touch controls, which are redrawn sharp
+        /// on top of it. The default.</summary>
+        public const int CoverageFrame = 1;
+
+        /// <summary>Coverage 2: everything, touch controls included.</summary>
+        public const int CoverageEverything = 2;
+
+        /// <summary>Default coverage: the whole frame with the touch controls left sharp.</summary>
+        public const int DefaultCoverage = CoverageFrame;
+
+        /// <summary>Clamps a coverage to 0..2. A hand-edited ini is the reason this exists, and an
+        /// out-of-range value must land on a picture that works rather than on no picture: anything
+        /// below 0 becomes the world-only path the filter shipped with, anything above 2 becomes
+        /// "everything".</summary>
+        public static int ClampCoverage(int value)
+        {
+            if (value < CoverageWorld)
+                return CoverageWorld;
+            return value > CoverageEverything ? CoverageEverything : value;
+        }
+
         // ---- the material ----------------------------------------------------------------
         // Resolved once, and here rather than in RetroPresentation so the upstream file's patch
         // stays small and so MobileCrtNative can ask "is there a filter to run at all" without
@@ -139,6 +175,93 @@ namespace DaggerfallWorkshop.Game.Mobile
         public static bool NativeActive(bool enabled, int retroMode, bool materialOk)
         {
             return enabled && retroMode == 0 && materialOk;
+        }
+
+        /// <summary>
+        /// The retro presentation blit runs the filter only at coverage 0. At 1 and 2 the frame
+        /// pass owns the filter and this blit must present PLAINLY, or the picture is filtered
+        /// twice - two sets of scanlines at two scales, two barrel warps, a vignette squared.
+        /// The three-argument form above is left exactly as it was: it is the retro-versus-native
+        /// partition, which coverage does not change, and the truth table pinned for it in the
+        /// self test is the invariant this file has to keep.
+        /// </summary>
+        public static bool Active(bool enabled, int retroMode, bool materialOk, int coverage)
+        {
+            return Active(enabled, retroMode, materialOk) && ClampCoverage(coverage) == CoverageWorld;
+        }
+
+        /// <summary>
+        /// The native path (a viewport-sized render target under Camera.main) exists only to give
+        /// the presentation blit something to filter with retro mode off. At coverage 1 and 2 the
+        /// frame pass filters the backbuffer instead, so the target is not merely redundant, it is
+        /// 15-21 MB of iPad memory bought for nothing - the path is switched off and Camera.main
+        /// draws straight to the backbuffer, exactly as it does with the filter off.
+        /// </summary>
+        public static bool NativeActive(bool enabled, int retroMode, bool materialOk, int coverage)
+        {
+            return NativeActive(enabled, retroMode, materialOk) && ClampCoverage(coverage) == CoverageWorld;
+        }
+
+        /// <summary>
+        /// Whether the END-OF-FRAME pass runs: the filter is on, the shader made it into the build,
+        /// and coverage is 1 or 2. Deliberately independent of retro mode - with retro mode on the
+        /// retro picture is upscaled to the backbuffer plainly first and the finished frame is
+        /// filtered once, which is the same single filtering the other two paths give.
+        /// </summary>
+        public static bool FrameActive(bool enabled, bool materialOk, int coverage)
+        {
+            return enabled && materialOk && ClampCoverage(coverage) != CoverageWorld;
+        }
+
+        /// <summary>
+        /// Whether the touch controls must be kept OUT of the filtered frame and redrawn sharp over
+        /// it. True only at coverage 1: at 0 the frame pass does not run at all, and at 2 the
+        /// player has asked for everything.
+        /// </summary>
+        public static bool TouchControlsSharp(int coverage)
+        {
+            return ClampCoverage(coverage) == CoverageFrame;
+        }
+
+        /// <summary>
+        /// Scanlines the frame pass draws. There is no raster here in any coverage: the source is
+        /// the finished BACKBUFFER at panel resolution, and with retro mode on it holds the retro
+        /// picture already upscaled and with an IMGUI HUD sitting over it at native resolution -
+        /// so the retro mode's 200 or 400 lines would be locked to a raster that only occupies part
+        /// of what is being filtered, and would beat against everything else. The count is the
+        /// player's CRTScanlineCount, clamped, exactly as on the native path.
+        /// </summary>
+        public static int FrameScanlineCount(int nativeCount)
+        {
+            return ClampScanlineCount(nativeCount);
+        }
+
+        // ---- the touch canvas, at coverage 1 ----------------------------------------------
+        // An overlay canvas is drawn "to the screen" from outside any camera, and it is in the
+        // backbuffer before the frame pass ever sees it - so at coverage 1 the controls have to be
+        // drawn by a CAMERA instead, one the frame pass renders BY HAND after the filtered frame is
+        // on the backbuffer. A screen-space-camera canvas is real geometry a hundred units in front
+        // of that camera, and DFU keeps the player near the world origin, so Camera.main would
+        // otherwise be staring at a screen-sized quad: the subtree moves to Unity's built-in UI
+        // layer and the world camera stops rendering it. `Camera.main.cullingMask &= ~(1 << layer)`
+        // is DFU's own idiom for this - Automap, ExteriorAutomap and DaggerfallBankPurchasePopUp
+        // all do it for their own preview layers.
+
+        /// <summary>Unity's built-in "UI" layer (5). The touch canvas moves here while coverage 1
+        /// is drawing it with its own camera, and that camera renders nothing else.</summary>
+        public const int TouchUILayer = 5;
+
+        /// <summary>The touch canvas's layer as a culling-mask bit.</summary>
+        public static int TouchUILayerMask
+        {
+            get { return 1 << TouchUILayer; }
+        }
+
+        /// <summary>The mask a world camera must have while coverage 1 runs: anything but the
+        /// touch HUD's layer.</summary>
+        public static int WithoutTouchUILayer(int cullingMask)
+        {
+            return cullingMask & ~TouchUILayerMask;
         }
 
         /// <summary>
