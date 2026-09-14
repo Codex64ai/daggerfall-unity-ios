@@ -1259,10 +1259,63 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
             bool mipMaps = false;
             Texture2D fallback = null;
 
+            // MOBILE 2026-09-14 (winter roads render magenta): the loop below used to allocate the
+            // array from RECORD 0 and then, for every later record whose size or format disagreed,
+            // log an error and WRITE NOTHING. An unwritten Texture2DArray slice is uninitialised GPU
+            // memory - Metal draws it magenta - so a perfectly ordinary mod stack produced eighteen
+            // magenta road and track tiles in winter and rain, with a Player.log full of "Failed to
+            // inject record N" and no other symptom.
+            //
+            // It is not a broken mod. DFU picks each RECORD independently from the highest-priority
+            // mod that has it, so a full-tileset pack and a small partial overlay routinely end up
+            // supplying different records of one archive. DREAM wins record 0 of archives 103 and 303
+            // at 1024x1024; Vanilla Enhanced's Winter Tracks and Masked Roads win the 18 road records
+            // at 256x256. Archive 403 is the control: the same two overlays, no magenta, because a
+            // full 256x256 pack happened to win record 0 there and the sizes agreed by luck.
+            //
+            // So: prescan the records first, and when they disagree, resample the odd ones into the
+            // array instead of dropping them. The array keeps RECORD 0's SIZE - deliberately, so that
+            // nothing which works today changes what it looks like; the only pixels that move are the
+            // ones that were not being drawn at all. Its FORMAT may have to change, because no driver
+            // renders into a block-compressed surface and on iOS these arrays are ASTC (see
+            // MobileTextureArraySlices.ArrayFormat).
+            //
+            // The scan costs nothing extra: TryImportTexture is the same call the loop was already
+            // making once per record, and the textures it returns are the mods' own cached assets.
+            var records = new Texture2D[depth];
+            bool anyResample = false;
+            int resampled = 0;
+            Texture2D first = null;
             for (int record = 0; record < depth; record++)
             {
-                Texture2D tex;
-                if (!TryImportTexture(archive, record, 0, textureMap, true, out tex))
+                Texture2D scanned;
+                if (!TryImportTexture(archive, record, 0, textureMap, true, out scanned))
+                    continue;
+                records[record] = scanned;
+                if (first == null)
+                {
+                    first = scanned;
+                    continue;
+                }
+                if (scanned.width != first.width || scanned.height != first.height
+                    || scanned.format != first.format || scanned.mipmapCount != first.mipmapCount)
+                {
+                    anyResample = true;
+                    resampled++;
+                }
+            }
+
+            if (first == null)
+                return false;
+
+            RenderTexture scratch = null;
+            TextureFormat arrayFormat = DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices
+                .ArrayFormat(first.format, anyResample);
+
+            for (int record = 0; record < depth; record++)
+            {
+                Texture2D tex = records[record];
+                if (tex == null)
                 {
                     if (!textureArray)
                         return false;
@@ -1289,18 +1342,46 @@ namespace DaggerfallWorkshop.Utility.AssetInjection
 
                 if (!textureArray)
                 {
-                    if (fallbackColor.HasValue && tex.format != TextureFormat.RGBA32 && tex.format != TextureFormat.ARGB32)
+                    if (fallbackColor.HasValue && arrayFormat != TextureFormat.RGBA32 && arrayFormat != TextureFormat.ARGB32)
                         return false;
 
-                    textureArray = new Texture2DArray(tex.width, tex.height, depth, tex.format, mipMaps = tex.mipmapCount > 1, IsLinearTextureMap(textureMap));
+                    textureArray = new Texture2DArray(first.width, first.height, depth, arrayFormat, mipMaps = first.mipmapCount > 1, IsLinearTextureMap(textureMap));
                     textureArray.filterMode = (FilterMode)DaggerfallUnity.Settings.MainFilterMode;
+
+                    if (anyResample)
+                    {
+                        scratch = DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices.CreateSliceScratch(textureArray);
+                        // MOBILE: once per ARCHIVE, not once per slice - eighteen of these per tileset
+                        // was the old failure's other problem. If the driver refuses the scratch
+                        // surface the mismatched records still drop, which is where the original
+                        // error log below remains the right thing to print.
+                        Debug.LogFormat("[TextureArray] archive {0} ({1}): {2} of {3} slices resampled to {4}x{5} {6}{7}",
+                            archive, textureMap, resampled, depth, textureArray.width, textureArray.height, arrayFormat,
+                            scratch == null ? " - SCRATCH SURFACE REFUSED, they will be dropped" : "");
+                    }
                 }
 
-                if (tex.width == textureArray.width && tex.height == textureArray.height && tex.format == textureArray.format)
+                if (DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices.Method(
+                        tex.width, tex.height, tex.mipmapCount, tex.format,
+                        textureArray.width, textureArray.height, textureArray.mipmapCount, textureArray.format)
+                    == DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices.SlicePack.Copy)
+                {
                     Graphics.CopyTexture(tex, 0, textureArray, record);
+                }
+                else if (scratch != null)
+                {
+                    DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices.BlitSlice(tex, 0, textureArray, record, scratch);
+                }
                 else
+                {
+                    // Still impossible: the driver would not give us a render target of the array's
+                    // own format. Unchanged from upstream, because there is nothing else to do.
                     Debug.LogErrorFormat("Failed to inject record {0} for texture archive {1} ({2}) due to size or format mismatch.", record, archive, textureMap);
+                }
             }
+
+            if (scratch != null)
+                DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices.DestroySliceScratch(scratch);
 
             if (fallback)
                 Texture2D.Destroy(fallback);

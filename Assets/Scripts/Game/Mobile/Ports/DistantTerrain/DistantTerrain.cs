@@ -543,8 +543,14 @@ namespace DistantTerrain
         public static SlicePack SlicePackMethod(int srcWidth, int srcHeight, int srcMipCount, TextureFormat srcFormat,
                                                 int dstWidth, int dstHeight, int dstMipCount, TextureFormat dstFormat)
         {
-            return srcWidth == dstWidth && srcHeight == dstHeight
-                   && srcMipCount == dstMipCount && srcFormat == dstFormat
+            // MOBILE 2026-09-14: the rule moved to MobileTextureArraySlices - TextureReplacement's
+            // terrain tileset builder needs the same three-step slice write (the winter-road magenta),
+            // and two copies of "when is CopyTexture legal" is one copy too many. The enum here is kept
+            // so this port's own call sites and self-tests read unchanged.
+            return DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices.Method(
+                       srcWidth, srcHeight, srcMipCount, srcFormat,
+                       dstWidth, dstHeight, dstMipCount, dstFormat)
+                   == DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices.SlicePack.Copy
                 ? SlicePack.Copy : SlicePack.Blit;
         }
 
@@ -559,24 +565,8 @@ namespace DistantTerrain
         /// </summary>
         public static bool CanBlitInto(TextureFormat format)
         {
-            switch (format)
-            {
-                case TextureFormat.RGBA32:
-                case TextureFormat.ARGB32:
-                case TextureFormat.BGRA32:
-                case TextureFormat.RGB24:
-                case TextureFormat.R8:
-                case TextureFormat.RG16:
-                case TextureFormat.RHalf:
-                case TextureFormat.RGHalf:
-                case TextureFormat.RGBAHalf:
-                case TextureFormat.RFloat:
-                case TextureFormat.RGFloat:
-                case TextureFormat.RGBAFloat:
-                    return true;
-                default:
-                    return false;
-            }
+            // MOBILE 2026-09-14: moved to MobileTextureArraySlices; see SlicePackMethod.
+            return DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices.CanBlitInto(format);
         }
 
         /// <summary>
@@ -592,31 +582,8 @@ namespace DistantTerrain
         /// </summary>
         public static RenderTexture CreateSliceScratch(Texture2DArray dst)
         {
-            if (dst == null) return null;
-
-            RenderTextureDescriptor desc = new RenderTextureDescriptor(dst.width, dst.height);
-            desc.graphicsFormat = dst.graphicsFormat;
-            desc.depthBufferBits = 0;
-            desc.msaaSamples = 1;
-            desc.dimension = UnityEngine.Rendering.TextureDimension.Tex2D;
-            desc.volumeDepth = 1;
-            desc.useMipMap = dst.mipmapCount > 1;
-            // Mips are generated once per slice, after the blit - NOT by the RenderTexture itself:
-            // autoGenerateMips only regenerates when the surface is resolved, which a CopyTexture
-            // out of it does not do.
-            desc.autoGenerateMips = false;
-            desc.mipCount = Mathf.Max(1, dst.mipmapCount);
-
-            RenderTexture rt = new RenderTexture(desc);
-            rt.name = "DistantTerrain tile slice scratch";
-            rt.filterMode = FilterMode.Point;
-            rt.wrapMode = TextureWrapMode.Clamp;
-            if (!rt.Create())
-            {
-                DestroySliceScratch(rt);
-                return null;
-            }
-            return rt;
+            // MOBILE 2026-09-14: moved to MobileTextureArraySlices; see SlicePackMethod.
+            return DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices.CreateSliceScratch(dst);
         }
 
         /// <summary>
@@ -630,12 +597,8 @@ namespace DistantTerrain
         /// </summary>
         public static void BlitSlice(Texture2DArray src, int srcSlice, Texture2DArray dst, int dstSlice, RenderTexture scratch)
         {
-            RenderTexture wasActive = RenderTexture.active;
-            Graphics.Blit(src, scratch, srcSlice, 0);
-            RenderTexture.active = wasActive;
-            if (scratch.useMipMap)
-                scratch.GenerateMips();
-            Graphics.CopyTexture(scratch, 0, dst, dstSlice);
+            // MOBILE 2026-09-14: moved to MobileTextureArraySlices; see SlicePackMethod.
+            DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices.BlitSlice(src, srcSlice, dst, dstSlice, scratch);
         }
 
         /// <summary>
@@ -657,12 +620,8 @@ namespace DistantTerrain
         /// <summary>MOBILE: gives the scratch surface's GPU memory back (edit mode included).</summary>
         public static void DestroySliceScratch(RenderTexture rt)
         {
-            if (rt == null) return;
-            rt.Release();
-            if (Application.isPlaying)
-                Destroy(rt);
-            else
-                DestroyImmediate(rt);
+            // MOBILE 2026-09-14: moved to MobileTextureArraySlices; see SlicePackMethod.
+            DaggerfallWorkshop.Game.Mobile.MobileTextureArraySlices.DestroySliceScratch(rt);
         }
 
         /// <summary>Pure: bytes a texture array of this shape occupies, mip chain included.</summary>

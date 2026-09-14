@@ -116,6 +116,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestConvertedModImportPolicy();
             TestPackTextureRules();
             TestPackAudioRules();
+            TestTextureArraySlices();
             TestModExtractorRoundTrip();
             TestModExtractorPathContainment();
             TestModExtractorSurvivesBadPaths();
@@ -3277,12 +3278,17 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && portCode.Contains("scratch = CreateSliceScratch(dst);")
                   && portCode.Contains("RenderTexture scratch = null;"),
                 "DistantTerrain: a differing slice is blitted through a scratch RenderTexture that is only created when one is needed");
-            Check(portCode.Contains("Graphics.Blit(src, scratch, srcSlice, 0);")
-                  && portCode.Contains("scratch.GenerateMips();")
-                  && portCode.Contains("Graphics.CopyTexture(scratch, 0, dst, dstSlice);"),
+            // MOBILE 2026-09-14: these two pin the SHARED writer now. The bodies moved to
+            // MobileTextureArraySlices when TextureReplacement's terrain tileset builder needed the
+            // same three steps (the winter-road magenta); DistantTerrain's members forward to it, so
+            // what these assert about this port is still exactly true - the pin just follows the code.
+            string sliceCode = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileTextureArraySlices.cs"));
+            Check(sliceCode.Contains("Graphics.Blit(src, scratch, srcElement, 0);")
+                  && sliceCode.Contains("scratch.GenerateMips();")
+                  && sliceCode.Contains("Graphics.CopyTexture(scratch, 0, dst, dstSlice);"),
                 "DistantTerrain: the fallback is a sampler fetch of the source slice into a destination-format RenderTexture, mips regenerated, copied back whole");
-            Check(portCode.Contains("desc.graphicsFormat = dst.graphicsFormat;")
-                  && portCode.Contains("desc.mipCount = Mathf.Max(1, dst.mipmapCount);"),
+            Check(sliceCode.Contains("desc.graphicsFormat = dst.graphicsFormat;")
+                  && sliceCode.Contains("desc.mipCount = Mathf.Max(1, dst.mipmapCount);"),
                 "DistantTerrain: the scratch surface takes the destination array's exact graphics format and mip chain (CopyTexture demands both)");
             Check(MethodBody(portCode, "Texture2DArray PackSeason(TextureReader reader, string season, int[] archives)")
                       .Contains("DestroySliceScratch(scratch);"),
@@ -3902,6 +3908,74 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // MobileModPackAudioRules every clip in Better Ambience and Immersive Footsteps would have
         // imported at Unity's defaults - uncompressed PCM, samples resident - and gone into the bundle
         // that way. None of that fails; it just costs several times the memory with nothing in any log.
+        // MOBILE: the shared slice writer, and the winter-road fix that needed it.
+        //
+        // The bug it guards: TextureReplacement.TryMakeTextureArrayCopyTexture sized a terrain tileset
+        // array from RECORD 0 and then dropped - error log, nothing written - any record whose winning
+        // mod supplied a different size. An unwritten Texture2DArray slice is uninitialised GPU memory,
+        // which Metal draws as magenta, so eighteen road and track tiles of archives 103 and 303 came
+        // out magenta in winter and rain on the device. Not a broken mod: DFU picks each RECORD from
+        // the highest-priority mod that has it, so DREAM won record 0 at 1024x1024 while Vanilla
+        // Enhanced's two partial overlays won the road records at 256x256.
+        static void TestTextureArraySlices()
+        {
+            const TextureFormat astc = TextureFormat.ASTC_6x6;
+
+            // The rule that decides whether CopyTexture is legal. All four must agree - the mip count
+            // included, because CopyTexture copies every level of an element.
+            Check(MobileTextureArraySlices.Method(256, 256, 9, astc, 256, 256, 9, astc) == MobileTextureArraySlices.SlicePack.Copy,
+                "TextureArraySlices: an exact match is a copy");
+            Check(MobileTextureArraySlices.Method(256, 256, 9, astc, 1024, 1024, 11, astc) == MobileTextureArraySlices.SlicePack.Blit,
+                "TextureArraySlices: the winter-road case (256 source into a 1024 array) is a blit");
+            Check(MobileTextureArraySlices.Method(256, 256, 9, astc, 256, 256, 9, TextureFormat.RGBA32) == MobileTextureArraySlices.SlicePack.Blit,
+                "TextureArraySlices: a format difference alone is a blit");
+            Check(MobileTextureArraySlices.Method(256, 256, 1, astc, 256, 256, 9, astc) == MobileTextureArraySlices.SlicePack.Blit,
+                "TextureArraySlices: a mip-count difference alone is a blit");
+
+            // No driver renders into a block-compressed surface, and on iOS every one of these arrays
+            // is ASTC - so the moment one slice needs resampling the whole array has to change format.
+            Check(!MobileTextureArraySlices.CanBlitInto(astc) && !MobileTextureArraySlices.CanBlitInto(TextureFormat.DXT5),
+                "TextureArraySlices: a compressed format cannot be a render target");
+            Check(MobileTextureArraySlices.CanBlitInto(TextureFormat.RGBA32) && MobileTextureArraySlices.CanBlitInto(TextureFormat.ARGB32),
+                "TextureArraySlices: the uncompressed colour formats can");
+
+            // The size decision, which is the whole of the fix's visual contract: the array keeps
+            // RECORD 0's size, so nothing that works today looks different - only the slices that were
+            // not being drawn at all change. Only the FORMAT moves, and only when it has to.
+            Check(MobileTextureArraySlices.ArrayFormat(astc, false) == astc,
+                "TextureArraySlices: with every slice matching, an ASTC array stays ASTC");
+            Check(MobileTextureArraySlices.ArrayFormat(astc, true) == TextureFormat.RGBA32,
+                "TextureArraySlices: one mismatched slice forces the array to RGBA32 (nothing renders into ASTC)");
+            Check(MobileTextureArraySlices.ArrayFormat(TextureFormat.RGBA32, true) == TextureFormat.RGBA32,
+                "TextureArraySlices: an already-blittable format is left alone even when resampling");
+            Check(MobileTextureArraySlices.ArrayFormat(TextureFormat.ARGB32, true) == TextureFormat.ARGB32,
+                "TextureArraySlices: ARGB32 is blittable and is not needlessly converted");
+
+            // The injector must USE all of this, not restate it. Comments stripped so the MOBILE note
+            // explaining the fix cannot satisfy the check.
+            string inj = StripShaderComments(File.ReadAllText("Assets/Scripts/Utility/AssetInjection/TextureReplacement.cs"));
+            Check(inj.Contains(".ArrayFormat(first.format, anyResample)"),
+                "TextureArraySlices: the injector picks the array format from the shared rule");
+            Check(inj.Contains("MobileTextureArraySlices.CreateSliceScratch(textureArray)")
+                  && inj.Contains("MobileTextureArraySlices.BlitSlice(tex, 0, textureArray, record, scratch)"),
+                "TextureArraySlices: the injector writes a mismatched record through the scratch surface instead of dropping it");
+            Check(inj.Contains("MobileTextureArraySlices.DestroySliceScratch(scratch)"),
+                "TextureArraySlices: the injector gives the scratch surface back");
+            Check(inj.Contains("\"[TextureArray] archive {0} ({1}): {2} of {3} slices resampled"),
+                "TextureArraySlices: the injector says once per ARCHIVE what it resampled");
+            // The old error log stays, for the one case that is still impossible - a driver that will
+            // not give us a render target of the array's own format.
+            Check(inj.Contains("due to size or format mismatch."),
+                "TextureArraySlices: the original failure log survives for the still-impossible case");
+
+            // Distant Terrain's four helpers were lifted here rather than duplicated; its own members
+            // now forward, so this port's call sites and its existing tests read unchanged.
+            string dt = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/Ports/DistantTerrain/DistantTerrain.cs"));
+            Check(dt.Contains("MobileTextureArraySlices.Method(") && dt.Contains("MobileTextureArraySlices.CanBlitInto(format)")
+                  && dt.Contains("MobileTextureArraySlices.CreateSliceScratch(dst)") && dt.Contains("MobileTextureArraySlices.BlitSlice(src, srcSlice, dst, dstSlice, scratch)"),
+                "TextureArraySlices: Distant Terrain forwards to the shared utility rather than carrying its own copy");
+        }
+
         static void TestPackAudioRules()
         {
             const string sfx = "Assets/Game/Mods/BetterAmbience/Sound/sfx_footstep_stone_000.wav";
@@ -4102,6 +4176,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             string dmSrc = StripShaderComments(File.ReadAllText(dmPath + "DynamicMusic.cs"));
             Check(!dmSrc.Contains("Directory.CreateDirectory("),
                 "Atmosphere: Dynamic Music creates no directory (StreamingAssets is read-only on iOS)");
+            // Upstream leaves userDefinedConditionSets null unless a UserDefined.txt exists, and Update
+            // dereferences it every frame - 7,241 NullReferenceExceptions in a two-minute sim pass on a
+            // fresh install, which is every iOS install on first run.
+            Check(dmSrc.Contains("private Dictionary<int, ConditionUsage[]> userDefinedConditionSets = new Dictionary<int, ConditionUsage[]>();"),
+                "Atmosphere: Dynamic Music's user-playlist condition table is never null (Update dereferences it every frame)");
             Check(dmSrc.Contains("MobileContentPath.Override("),
                 "Atmosphere: Dynamic Music's custom-track root goes through MobileContentPath, which maps it onto the writable container");
             // The synth: a 100-voice Synthesizer plus a ~6 MB SoundFont, built at Start upstream. Both
