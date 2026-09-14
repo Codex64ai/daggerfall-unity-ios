@@ -159,6 +159,21 @@ namespace DaggerfallWorkshop.Game.Serialization
 
                 if (entity == null)
                     entity = entityBehaviour.Entity as EnemyEntity;
+
+                // MOBILE: ApplyEnemySettings returns having done nothing when the id is not in
+                // GameObjectHelper.EnemyDict, and that is exactly what a save made with a mod that
+                // ADDS enemies looks like when the mod is switched off (Daggerfall Enemy Expansion
+                // owns ids 256-290 and 384-398). Upstream dereferences the still-null entity on the
+                // next line; RestoreEnemyData does not wrap this call in a try/catch, so the NRE
+                // takes down the whole restore with it - loot containers, bank data, escorting
+                // faces, the scene cache, the automap and every mod's save data that follows. The
+                // player loses the save, not a monster. Skip the enemy and say so instead.
+                if (entity == null)
+                {
+                    Debug.LogWarning("[Save] enemy id " + data.careerIndex +
+                                     " unknown (a mod that added it is off) - skipped");
+                    return;
+                }
             }
 
             // Quiesce entity during state restore

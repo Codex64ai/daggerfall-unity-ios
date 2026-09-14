@@ -1045,3 +1045,46 @@ formulas: a barrel warp of the sampled UV (`uv *= 1 + k * dot(uv, uv)` about the
 everything outside the warped rectangle black), raised-cosine scanlines evaluated against the source
 raster, a three-band phosphor grille taken from the destination pixel's own x coordinate, and a
 radial vignette. One texture fetch, one sampler, no dependent read.
+
+## Daggerfall Enemy Expansion (compiled in, private draft only)
+
+Fifty new enemies — 35 monsters (ids 256–290) and 15 class enemies (384–398) — plus 43 career
+templates, 16 re-statted vanilla monsters, 2 re-statted vanilla class enemies and a rewrite of all
+39 encounter tables, so the new bestiary actually turns up in the world rather than only in a file.
+The mod is data-driven: the C# is a loader, and every stat, sprite archive, spell list and
+encounter row is a line in one of six CSV databases that ship inside the bundle. The code alone
+defines no enemy, which is why the port refuses to start without its bundle.
+
+**This is the one mod in the build with no licence of any kind.** Not a permissive licence, not a
+restrictive one — nothing. There is no `LICENSE` file in the repository, no copyright header in any
+of its ten source files, and the Nexus permissions box (mod 372) sits behind Cloudflare and cannot
+be read. Everything below is therefore a record of what we do not have.
+
+| Mod | Author, licence | Source | What is NOT shipped |
+|---|---|---|---|
+| Daggerfall Enemy Expansion 1.3.4 | Kamer & Kab. **No licence declared anywhere** — no `LICENSE`, no source header, Nexus permissions unreadable. Permission is being sought from Kab (code) and Kamer (art); until both are given, private test draft only | github.com/SquidKamer/DaggerfallBestiaryProject @ `fa21b07331e914d9e622aeaef65a4d8ab9496872` ("Added Pirate Sprite Archive (1529)", default-branch head 2026-09-14); manifest `DaggerfallBestiaryProject.dfmod.json`, GUID `76557441-7025-402e-a145-e3e1a28a093d` | `Scripts/Editor/` — `BestiaryModManager.cs` and `BestiaryEncounterTablesEditor.cs`, the authoring windows for the CSV databases, which open Unity editor windows and write the repo's own files and are not in the author's manifest either; the 45 `KAMER - Witches` frames (archive 1516, records 5–9, frames 15–23) the manifest still lists but the repository no longer contains |
+
+**The art needs a second grant, and it may need one nobody in this mod's lineage can give.** The 56
+sprite folders are named after the game each set came from: 18 `ARENA - `, 7 `OBLIVION - `, 3
+`BATTLESPIRE - `, 2 `MORROWIND - `, 1 `SKYRIM - ` and 4 `DAGGER - `, against 12 `KAMER - `, 3
+`KAB - ` and one `KAB & KAMER - `. On the face of it, much of the 7,341-frame sprite set is derived
+from other Bethesda titles rather than authored for Daggerfall. Kamer's own folders are a minority
+of the set. A grant from Kamer covers Kamer's frames; it cannot cover Arena's or Oblivion's.
+
+So the bundle ships **on the private test draft only and never in the public mod pack** —
+`private_only: true` with a `pending:` record in `tools/bundled-mods/mods.json`, which `pack.py`
+refuses to put in the public zip. The switch is off by default in the launcher.
+
+**What is compiled in.** The eight shipped C# files are under
+`Assets/Scripts/Game/Mobile/Ports/DEX/`, copied with their `[Invoke]` attributes removed (iOS
+compiles ahead of time; there is no mod assembly for DFU to scan), each carrying the header
+`Ported from DEX 1.3.4 (Kab & Kamer, no licence declared - private draft only)` and the upstream
+commit pin, with every edit marked `// MOBILE:`. `DEXPort.cs` is ours: the gate the launcher calls.
+`DEX_RRICompat.cs` originally looked RoleplayRealism-Items up by its `.dfmod` GUID; re-pointed at
+our compiled-in RoleplayRealism-Items port, with its fourteen hard-coded item template indices
+(513–526) asserted against what that port actually registers.
+
+**What is in the bundle.** `daggerfallbestiaryproject.dfmod`, 98,433,438 B: 7,341 sprite frames
+(none CPU-readable), the six databases, `SpellRecords.json`, `modsettings.json`, 1,130 sprite XMLs,
+the two Scamp sound clips, and `Prefabs/1618_20.prefab` — the troll corpse — whose component
+references still resolve through the upstream script GUIDs the port preserves.

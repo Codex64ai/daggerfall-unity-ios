@@ -1196,3 +1196,28 @@ empty bio file loads as an empty backstory.
 *Rebase risk: LOW.* Three lines inside one `if` block, no upstream logic changed. Taking theirs
 restores the crash; the self test pins both the local and the null guard, plus the empty-list
 assignment on the load side.
+
+### Enemy ids no loaded mod provides (2026-09-14) — `Assets/Scripts/Game/Serialization/SerializableEnemy.cs` (+14)
+
+`RestoreSaveData` rebuilds an enemy whose career changed by calling
+`SetupDemoEnemy.ApplyEnemySettings(entityType, careerIndex, …)` and then reading the entity back.
+`ApplyEnemySettings` looks the id up in `GameObjectHelper.EnemyDict` and **returns having done
+nothing** when it is not there, so `entity` stays null and the next statement,
+`entity.Quiesce = true`, throws.
+
+That is the shape of a perfectly ordinary player action: save a game in which a mod that *adds*
+enemies is running, switch the mod off, load. Daggerfall Enemy Expansion owns ids 256–290 and
+384–398, and its switch is read once at start-up, so "off" is the state the save comes back to
+after any restart the player did not think about. `SaveLoadManager.RestoreEnemyData` does not wrap
+the call, so the `NullReferenceException` does not cost the player one monster — it aborts the
+whole restore, and loot containers, bank data, escorting faces, the scene cache, the automap and
+every mod's save data queued after it are silently lost.
+
+The fix is one `if` marked `// MOBILE:`: when the entity is still null after `ApplyEnemySettings`,
+log `[Save] enemy id N unknown (a mod that added it is off) - skipped` and return. The enemy
+object stays as the scene built it and everything after it restores. Desktop behaviour with no
+such mod is unchanged — the branch is unreachable when every id in the save is in `EnemyDict`.
+
+*Rebase risk: LOW.* One guard immediately after an upstream `if` block, no upstream logic touched.
+Taking theirs restores the crash; `MobileSelfTest.TestDEXPort` pins the log string, the `// MOBILE:`
+marker and the guard's position before `entity.Quiesce`.

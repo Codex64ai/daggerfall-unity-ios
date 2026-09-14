@@ -3804,6 +3804,30 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                       && ids("ClassicClassBase.mdb.csv").All(id => id >= 0 && id < 256),
                     "DEX: every classic re-stat targets a vanilla id below 256");
             }
+
+            // ---- 6. the engine guard a DEX save needs ----
+            // A save containing one of DEX's enemies, loaded with DEX switched off, used to THROW:
+            // SetupDemoEnemy.ApplyEnemySettings returns having done nothing when GameObjectHelper
+            // .EnemyDict has no such id, and SerializableEnemy.RestoreSaveData then dereferenced the
+            // still-null EnemyEntity on `entity.Quiesce = true`. RestoreEnemyData does not wrap that
+            // call, so the NRE took the rest of the restore with it - loot containers, bank data,
+            // escorting faces, the scene cache, the automap and every mod's save data after it.
+            // Source-pinned rather than executed: reproducing it needs a save file written by a
+            // build with DEX on and a second build with it off, which no editor test can stage.
+            string enemyRestoreSrc = MethodBody(
+                File.ReadAllText("Assets/Scripts/Game/Serialization/SerializableEnemy.cs"),
+                "public void RestoreSaveData(object dataIn)");
+            Check(enemyRestoreSrc.Contains("[Save] enemy id ") && enemyRestoreSrc.Contains("- skipped"),
+                "DEX: RestoreSaveData logs and skips an enemy whose id no loaded mod provides");
+            int dexGuardAt = enemyRestoreSrc.IndexOf("[Save] enemy id ", StringComparison.Ordinal);
+            int dexQuiesceAt = enemyRestoreSrc.IndexOf("entity.Quiesce = true;", StringComparison.Ordinal);
+            Check(dexGuardAt >= 0 && dexQuiesceAt > dexGuardAt,
+                "DEX: the guard is before entity.Quiesce, the line that used to throw",
+                dexGuardAt + " < " + dexQuiesceAt);
+            Check(enemyRestoreSrc.Contains("// MOBILE:"),
+                "DEX: the guard carries the // MOBILE: marker every engine edit carries");
+            Check(File.ReadAllText("UPSTREAM-PATCHES.md").Contains("SerializableEnemy.cs"),
+                "DEX: the engine edit is recorded in UPSTREAM-PATCHES.md");
         }
 
         static void TestPortedModTitles()
