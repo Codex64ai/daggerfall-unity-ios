@@ -1088,3 +1088,178 @@ our compiled-in RoleplayRealism-Items port, with its fourteen hard-coded item te
 (none CPU-readable), the six databases, `SpellRecords.json`, `modsettings.json`, 1,130 sprite XMLs,
 the two Scamp sound clips, and `Prefabs/1618_20.prefab` — the troll corpse — whose component
 references still resolve through the upstream script GUIDs the port preserves.
+
+## Atmosphere round: four optional audio and light mods (compiled in, all MIT)
+
+Added 2026-09-14. Unlike most of the entries above, **all four of these are plain MIT with no pending
+question**, so they ship in the public mod pack as well as the private draft. Each one's C# is
+compiled into the app under `Assets/Scripts/Game/Mobile/Ports/<Mod>/` with its `[Invoke]` attribute
+removed (iOS compiles ahead of time; there is no mod assembly for DFU to scan) and every edit marked
+`// MOBILE:`; each one's DATA ships as its own bundle; each one's launcher entry is **off by
+default**, and they do not gate each other — the player mixes them freely.
+
+A fifth was researched and dropped: **Dynamic Ambience** (numidium, MIT) is a framework that ships no
+audio and no playlists at all. It reads user-supplied `.ogg` files from
+`StreamingAssets/Sound/DynAmbience/`, so on a phone with nothing in that folder it plays nothing.
+Shipping it would have been a switch that does nothing.
+
+### Better Ambience (joshcamas)
+
+Source `github.com/joshcamas/daggerfall-unity-mods`, subdirectory `BetterAmbience/`, pinned at
+`c59e2aa9085734df3aefd19b5dd8c0b49cfcaade`. Version 0.1.3 by Joshua Steinhauer.
+
+Licence: **MIT**, verbatim from the repository's `LICENSE`:
+
+> MIT License
+>
+> Copyright (c) 2020 Josh Steinhauer
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+> associated documentation files (the "Software"), to deal in the Software without restriction,
+> including without limitation the rights to use, copy, modify, merge, publish, distribute,
+> sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all copies or
+> substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+> NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+> NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+> DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
+> OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**Licence caveat — the LICENSE file is not in the fetched tree.** That repository holds several mods,
+and the `LICENSE` sits at the REPO ROOT while `mods.json` fetches only the `BetterAmbience/`
+subdirectory. The text above is therefore reproduced here in full, because this file is the only copy
+of it that travels with the build. The same is true of Dynamic Music below.
+
+**What is compiled in.** Upstream is five independent `[Invoke]` entry points in one `.dfmod`; the
+port has one, `BetterAmbiencePort.Init`, and **three of the five are not ported at all**:
+
+- `ReverbMod.cs` — it puts an `AudioReverbZone` on the player with a Cave/Stoneroom/Quarry preset
+  chosen by a settings dial. This app already has `MobileAmbience`, whose `AudioReverb` switch puts an
+  `AudioReverbFilter` on the AudioListener and picks a preset per SPACE (dungeon by type, building
+  interior, exterior). Two reverbs on one listener stack audibly.
+- `BetterRainMod.cs` — it raises the rain particle emission rate to 2000, and 4000 in a storm. Weather
+  particle rework is out of scope for this round, and that is a large per-frame bill on a phone.
+- `DungeonSoundsMod.cs` — an empty Unity template component: `Start()` and `Update()` with no body.
+
+`BetterFootstepsComponentEnemy.cs` and `...NPC.cs` go with them, for a different reason: nothing
+attaches them. The two lines that would have are commented out in upstream's own source, so no enemy
+has ever carried one on desktop either.
+
+**What is in the bundle.** `better-ambience.dfmod`, 235,098 B: the 50 `sfx_footstep_*` clips and
+`modsettings.json`. `AmbientRaining.wav` is **excluded** by `exclude_globs` — 29.5 s, 5,211,900 B,
+63% of the mod's bytes, and no source file in the repository references it.
+
+### Immersive Footsteps (Kirk.O / magicono43)
+
+Source `github.com/magicono43/DFU-Mod_Immersive-Footsteps`, pinned at
+`ac03581ca5b336eac0802af654b35c90af534290`. Version 1.01 by Kirk.O.
+
+Licence: **MIT**.
+
+**Licence caveat — the grant is a source header, not a file.** There is no `LICENSE` file anywhere in
+that repository and the README says nothing about licensing. The whole of the grant is the header of
+`Scripts/ImmersiveFootstepsMain.cs`, verbatim:
+
+> ```
+> // Project:         ImmersiveFootsteps mod for Daggerfall Unity (http://www.dfworkshop.net)
+> // Copyright:       Copyright (C) 2024 Kirk.O
+> // License:         MIT License (http://www.opensource.org/licenses/mit-license.php)
+> // Author:          Kirk.O
+> ```
+
+The mod's other source file, `Scripts/ImmersiveFootstepsObject.cs`, carries no header at all — but
+both files are by the same sole author, and the mod that header names is this one. All 210 audio
+clips are the author's own work. On that basis it ships in the public pack; if Kirk.O asks otherwise
+it moves to the private draft.
+
+**What is compiled in.** Both source files, under `Ports/ImmersiveFootsteps/`. The one substantive
+change is the Travel Options check: upstream finds that mod by Hazelnut's GUID, and this app has no
+Travel Options — it has Real travel, with `MobileTravelOptionsBridge` answering the same messages
+under its own GUID — so the lookup is by title instead. Without it the mod would play a footstep
+every few frames through an entire autopilot leg, at travel time compression.
+
+**What is in the bundle.** `immersivefootsteps.dfmod`, 458,857 B: all 210 clips (105 "high quality"
+at 44.1 kHz and 105 "low quality" at 22 kHz, both mono — the player picks) and `modsettings.json`.
+
+### Dynamic Music (numidium)
+
+Source `github.com/numidium/dfu-mods`, subdirectory `DynamicMusic/`, pinned at
+`da1bf32f8a26a82627a16b2b3e72ba0bc5704845`. Version 2.4.19 by numidium3rd.
+
+Licence: **MIT**, verbatim from the repository's `LICENSE`:
+
+> MIT License
+>
+> Copyright (c) 2020 numidium
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+> associated documentation files (the "Software"), to deal in the Software without restriction,
+> including without limitation the rights to use, copy, modify, merge, publish, distribute,
+> sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all copies or
+> substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+> NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+> NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+> DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
+> OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**Same licence caveat as Better Ambience:** that repository holds eight mods and the `LICENSE` is at
+the repo root, outside the `DynamicMusic/` subdirectory `mods.json` fetches, so the text above is the
+copy that travels with the build. `DynamicSongPlayer.cs` carries its own note that it is adapted from
+Daggerfall Unity's `SongPlayer.cs` by Interkarma, which is MIT under this project's own licence.
+
+**What is compiled in.** Both source files, under `Ports/DynamicMusic/`. Three changes were required
+rather than optional: `UnityEngine.WWW` (removed in Unity 2023.1) had to go, a
+`Directory.CreateDirectory` under `Application.streamingAssetsPath` had to go because that path is
+inside the signed `.app` and read-only on iOS, and the custom-track root now goes through
+`MobileContentPath` so it lands in the writable Documents container. A fourth is a judgement call:
+the MIDI synthesiser is no longer built at `Start` — it is a 100-voice synth at 48 kHz plus a ~6 MB
+SoundFont, and both code paths that actually sequence MIDI already build it on demand.
+
+**What is in the bundle.** `dynamicmusic.dfmod`, 1,934 B: `modsettings.json` and the manifest. The
+mod ships no audio of its own — it re-sequences Daggerfall's own songs.
+
+### First-Person Lighting (DunnyOfPenwick)
+
+Source `github.com/DunnyOfPenwick/First-Person-Lighting`, pinned at
+`7084736201e9a5eeec223d6a4352696f0542eb86`. Version 1.0.1 by DunnyOfPenwick.
+
+Licence: **MIT**, verbatim from the repository's `LICENSE`, which IS inside the fetched tree:
+
+> MIT License
+>
+> Copyright (c) 2024 DunnyOfPenwick
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+> associated documentation files (the "Software"), to deal in the Software without restriction,
+> including without limitation the rights to use, copy, modify, merge, publish, distribute,
+> sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+> furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all copies or
+> substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+> NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+> NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+> DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
+> OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+**What is compiled in.** Both source files, under `Ports/FirstPersonLighting/`. The cleanest of the
+four: every engine symbol it reaches for exists in Daggerfall Unity 1.1.1, it adds no keybind, and
+this project is on the built-in render pipeline so its legacy `Flare` asset still renders. One
+Unity 6 rename (`PhysicMaterial` → `PhysicsMaterial`) and the same start-deferral the other three
+needed. Its two mod messages, `entityLighting` and `locationLighting`, are kept even though nothing
+in this app asks them yet: removing them would be a change to the mod rather than a port of it.
+
+**What is in the bundle.** `first-person-lighting.dfmod`, 14,077 B: three small PNGs,
+`AlchemicalFlare.flare`, `ItemTemplates.json`, two short OGG clips and four `textdatabase.txt`
+translations (en/fr/pt/ru).

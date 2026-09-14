@@ -1221,3 +1221,111 @@ such mod is unchanged — the branch is unreachable when every id in the save is
 *Rebase risk: LOW.* One guard immediately after an upstream `if` block, no upstream logic touched.
 Taking theirs restores the crash; `MobileSelfTest.TestDEXPort` pins the log string, the `// MOBILE:`
 marker and the guard's position before `entity.Quiesce`.
+
+---
+
+## `Assets/Scripts/Game/AmbientEffectsPlayer.cs` — a hook so lightning can precede its own thunder
+
+*Added 2026-09-14 (atmosphere round, native item D).*
+
+Storm weather already plays three thunder clips through `PlayAmbientEffect`. What it has never had is
+a flash, and a flash is not a cosmetic addition to a sound — it is the thing the sound is a delayed
+consequence of. Light arrives instantly and sound does not, so a strike a kilometre away flashes now
+and rumbles three seconds later. Playing both together reads as neither.
+
+The obvious insertion point does not work. `AmbientEffectsPlayer` already raises `OnPlayEffect`, and
+a listener there could flash the screen — but that event is raised **with** the sound, so a flash
+hung off it arrives simultaneously with its own thunder and has no distance. The decision has to be
+made *before* the clip starts, and the caller has to act on the answer.
+
+So: one static hook, `public static System.Func<SoundClips, float> MobileStormDelay`, and one
+coroutine, `MobileDelayedStormClip`. `MobileAmbience` sets the hook; given the clip about to play it
+draws a distance, flashes the screen for that distance, and returns the seconds of delay. Zero means
+"play it now, unchanged", and zero is what it returns when `LightningFlash` is off, when the player
+is indoors, when the clip is not one of the three storm clips, or when nothing is listening at all —
+so with the feature off the three original lines run exactly as they always did, and the null check
+on the hook is the whole of the cost.
+
+*Rebase risk: LOW.* One `if` and an early `return` inside the existing `else` branch, plus two new
+members at the end of the class; no upstream line is modified or reordered. Taking theirs removes the
+flash and the delay and leaves the vanilla thunder. `MobileSelfTest.TestAmbience` pins the hook's
+signature, the delay range and the fact that a zero answer leaves the original call path.
+
+---
+
+## `Assets/Scripts/Internal/DaggerfallSky.cs` — the sky's horizon colour becomes the fog colour, and a haze band
+
+*Added 2026-09-14 (atmosphere round, native item A).*
+
+Daggerfall's sky is a painted image, and `RenderSettings.fogColor` was a constant that had nothing to
+do with it. The far terrain therefore faded into a colour the sky above it never used — most visibly
+at dawn and dusk, where the sky is orange and the mountains dissolved into grey.
+
+Two edits, both marked `// MOBILE 2026-09-14 (sky haze)`:
+
+1. **The fog colour is sampled from the sky.** `HorizonColour` averages the bottom rows of the sky
+   image's own pixels each time the sky frame changes, and that colour is written to
+   `RenderSettings.fogColor` (and used as the camera clear colour) instead of the constant. Nothing
+   is computed per frame: the sky image changes a few times an hour.
+2. **A haze band is baked into the promoted sky texture.** The bottom rows of the sky fade toward the
+   fog colour, with the band's thickness driven by the existing `DistantFogStrength` dial — 0% is a
+   clean sky and the original image, untouched. It is baked into the promoted pixels rather than
+   drawn, because DFU draws the sky as a blit of that texture and there is no shader stage to put it
+   in; `lastHazeBand` is cached beside the existing frame cache so the bake happens when the dial
+   moves, not every frame.
+
+Both are behind `DaggerfallUnity.Settings.SkyHaze` and both no-op when it is off.
+
+*Rebase risk: MEDIUM.* The first edit replaces two `RenderSettings.fogColor` assignments and the
+`cameraClearColor` assignment; the second adds a step inside the texture promotion path and one field
+to its cache-invalidation test. An upstream change to how the sky is promoted would need this
+re-applied by hand. `MobileSelfTest.TestSkyHaze` pins the horizon average, the band row count at 0 /
+100 / 200% and the fact that a zero band returns the source pixels unchanged.
+
+---
+
+## `Assets/Scripts/Utility/AssetInjection/TextureReplacement.cs` — a mismatched tile record is resampled, not dropped
+
+*Added 2026-09-14 (winter roads render magenta).*
+
+`TryMakeTextureArrayCopyTexture` builds a terrain tileset `Texture2DArray` by sizing it from **record
+0** and then `Graphics.CopyTexture`-ing every record into a slice. `CopyTexture` is exact, so upstream
+guards it — and the else branch logs an error and **writes nothing**:
+
+```csharp
+if (tex.width == textureArray.width && tex.height == textureArray.height && tex.format == textureArray.format)
+    Graphics.CopyTexture(tex, 0, textureArray, record);
+else
+    Debug.LogErrorFormat("Failed to inject record {0} ... due to size or format mismatch.", ...);
+```
+
+There is no fallback path: `TextureReader.GetTerrainTextureArray` passes `fallbackColor` null, so the
+fill branch above it is dead for terrain. An unwritten `Texture2DArray` slice is uninitialised GPU
+memory, and Metal draws that magenta.
+
+This is not a broken mod. Daggerfall Unity picks each **record** independently from the
+highest-priority mod that has it, so a full tileset and a small partial overlay routinely supply
+different records of one archive. On the reported device DREAM won record 0 of archives 103 and 303
+at 1024×1024 while Vanilla Enhanced's Winter Tracks and Masked Roads won the eighteen road and track
+records at 256×256 — and every one of those was skipped, giving magenta roads in winter and rain.
+Archive 403 is the control: the same two overlays, no magenta, because a full 256×256 pack happened
+to win record 0 there and the sizes agreed by luck.
+
+The patch prescans the records, and when they disagree pushes the odd ones through a scratch
+`RenderTexture` (blit → regenerate mips → `CopyTexture` the element) instead of dropping them. The
+array keeps **record 0's size**, deliberately: nothing that renders correctly today changes what it
+looks like, and the only pixels that move are the ones that were not being drawn at all. The array's
+**format** has to change when a resample is needed — no driver renders into a block-compressed
+surface, and on iOS these arrays are ASTC — so it falls back to RGBA32. That cost is real and is an
+argument for capping terrain tiles at build time (a separate item), not for magenta roads.
+
+The three steps were already written and device-proven in `Ports/DistantTerrain`; they now live in
+`Assets/Scripts/Game/Mobile/MobileTextureArraySlices.cs` and both callers use them. One log line per
+ARCHIVE replaces eighteen per-record errors: `[TextureArray] archive 103 (Albedo): 18 of 56 slices
+resampled to 1024x1024 RGBA32`. The original error survives for the one case that is still
+impossible — a driver that refuses a render target of the array's own format.
+
+*Rebase risk: MEDIUM.* The body of one private method is restructured (prescan, then the loop);
+upstream's fallback-colour branch, its array construction and its error string are all preserved
+inside it. Taking theirs restores the magenta. `MobileSelfTest.TestTextureArraySlices` pins the pure
+size/format decision and the fact that the injector calls the shared writer rather than restating it.
