@@ -59,6 +59,14 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         /// <summary>`journeyfix 0|1` from the command file: -1 means the line was not present.</summary>
         public static int journeyFix = -1;
+
+        /// <summary>
+        /// `weather N` from the command file (a DaggerfallWorkshop.Game.Weather.WeatherType value:
+        /// 0 sunny, 1 cloudy, 2 overcast, 3 fog, 4 rain, 5 thunder, 6 snow): -1 means the line was
+        /// not present. Weather is climate- and season-rolled, so a reproduction that needs fog in
+        /// the air - the Distant Terrain distance-fog dial does - cannot wait for the dice.
+        /// </summary>
+        public static int weatherOverride = -1;
         static readonly HashSet<string> audited = new HashSet<string>();
 #if DFU_IOS_TESTAPP
         static int targetX = -1, targetY = -1;   // "pixel X Y" in the command file teleports there once in the world
@@ -153,6 +161,16 @@ namespace DaggerfallWorkshop.Game.Mobile
                     continue;
                 }
 
+                // `weather N` - force a weather once the world is up, so a fog reproduction does not
+                // depend on the climate/season roll. N is a WeatherType ordinal (2 = overcast).
+                if (w[0] == "weather" && w.Length >= 2)
+                {
+                    int wx;
+                    if (int.TryParse(w[1], out wx) && wx >= 0 && wx <= 6) weatherOverride = wx;
+                    else errors.Add(line);
+                    continue;
+                }
+
                 // `journey X Y` - start Real travel's autopilot to that map pixel once the world is
                 // up. There is no other scripted way into a journey (it begins from a tap on the
                 // travel popup), and the pass-through rules cannot be driven from the self test.
@@ -220,6 +238,8 @@ namespace DaggerfallWorkshop.Game.Mobile
                     MobileJourneyController.DebugJourneyFixes = journeyFix == 1;
                     Debug.Log("[DebugStart] journey/quest-popup fixes " + (journeyFix == 1 ? "ON" : "OFF (measuring the old behaviour)"));
                 }
+                if (weatherOverride >= 0)
+                    Debug.Log("[DebugStart] scheduled: weather " + (DaggerfallWorkshop.Game.Weather.WeatherType)weatherOverride);
                 foreach (KeyValuePair<float, string> s in sets)
                 {
                     string[] nv = s.Value.Split(' ');
@@ -248,6 +268,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             LogMessageBoxes();
             AnswerPendingBox();
             CloseRestWindow();
+            ApplyScheduledWeather();
             StartScheduledJourney();
             ReportJourneyEnd();
 
@@ -335,6 +356,12 @@ namespace DaggerfallWorkshop.Game.Mobile
                     if (GameManager.HasInstance && GameManager.Instance.StartGameBehaviour != null)
                         GameManager.Instance.StartGameBehaviour.DeployCoreGameEffectSettings(CoreGameEffectSettingsGroups.RetroMode);
                 }
+
+                // The two Distant Terrain dials are the same kind of thing: the settings panel's
+                // rows re-apply them to the running world (DistantTerrainPort.ApplyLiveSettings),
+                // so a `set` that only stored them would measure nothing. No-op when the mod is off.
+                if (name == "DistantFogStrength" || name == "DistantReach")
+                    global::DistantTerrain.DistantTerrainPort.ApplyLiveSettings();
             }
             catch (System.Exception ex)
             {
@@ -478,6 +505,33 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         /// <summary>Starts the `journey X Y` autopilot once, a few seconds after the world settles.</summary>
+        static bool weatherForced;
+
+        /// <summary>
+        /// Forces the `weather N` line once the world is up. WeatherManager.SetWeather is the same
+        /// entry the weather poll uses, so the fog settings the Distant Terrain port wrote are
+        /// applied exactly as they would be on a natural change.
+        /// </summary>
+        static void ApplyScheduledWeather()
+        {
+            if (weatherForced || weatherOverride < 0 || worldReadyAt < 0f)
+                return;
+            if (Time.realtimeSinceStartup - worldReadyAt < 2f)
+                return;
+
+            weatherForced = true;
+            WeatherManager wm = GameManager.HasInstance ? GameManager.Instance.WeatherManager : null;
+            if (wm == null)
+            {
+                Debug.LogWarning("[DebugStart] weather: no WeatherManager");
+                return;
+            }
+            var type = (DaggerfallWorkshop.Game.Weather.WeatherType)weatherOverride;
+            wm.SetWeather(type);
+            Debug.Log(string.Format("[DebugStart] weather forced to {0}: RenderSettings density {1}",
+                type, RenderSettings.fogDensity));
+        }
+
         static void StartScheduledJourney()
         {
             if (journeyStarted || journeyX < 0 || worldReadyAt < 0f)

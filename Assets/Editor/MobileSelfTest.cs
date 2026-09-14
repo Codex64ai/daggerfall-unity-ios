@@ -22,6 +22,7 @@
 using System;
 using DaggerfallWorkshop.Game.Mobile;
 using DaggerfallWorkshop.Game.MagicAndEffects;
+using DaggerfallWorkshop.Game.Weather;          // MOBILE: WeatherType, for the Distant Terrain fog dial
 using DaggerfallWorkshop.Game.Utility.ModSupport;
 using FullSerializer;
 using DaggerfallWorkshop.Utility;
@@ -841,6 +842,20 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "DebugStart: and an untimed `set <Name> <value>` is untouched by that check",
                 "sets=" + sets.Count + " errors=" + errors.Count);
 
+            // `weather N` - the fog reproduction's other half. Weather is climate/season rolled, so
+            // the Distant Terrain fog dial has nothing to act on unless the run can name a weather.
+            MobileDebugStart.weatherOverride = -1;
+            errors = MobileDebugStart.ParseCommands("pixel 3 3\nweather 2\nset DistantFogStrength 0\n", out x, out y, out sets);
+            Check(errors.Count == 0 && MobileDebugStart.weatherOverride == 2 && sets.Count == 1,
+                "DebugStart: `weather N` is parsed beside the rest of the file",
+                "weather=" + MobileDebugStart.weatherOverride + " errors=" + errors.Count);
+            MobileDebugStart.weatherOverride = -1;
+            errors = MobileDebugStart.ParseCommands("weather 9\nweather\n", out x, out y, out sets);
+            Check(errors.Count == 2 && MobileDebugStart.weatherOverride == -1,
+                "DebugStart: a weather outside 0..6, or with no value, is an error rather than a silent cast",
+                "weather=" + MobileDebugStart.weatherOverride + " errors=" + errors.Count);
+            MobileDebugStart.weatherOverride = -1;
+
             // The runtime half, pinned as source text: ApplySetting must go through the SAME deploy
             // the settings panel uses, or a `set RetroRenderingMode 1` would change the ini and
             // nothing else, and the transition under test would never run.
@@ -851,6 +866,9 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "DebugStart: `set` writes the settings property by reflection, so any of them can be driven");
             Check(dbg.Contains("MobileContentPath.Active"),
                 "DebugStart: the whole hook is still gated on the iOS content path and the command file");
+            Check(dbg.Contains("wm.SetWeather(type);")
+                  && dbg.Contains("if (name == \"DistantFogStrength\" || name == \"DistantReach\")"),
+                "DebugStart: `weather` goes through WeatherManager.SetWeather, and the two Distant Terrain dials are re-applied after a `set`");
 
             // SF-1 (review 2026-09-11): and that runtime gate is not enough on its own.
             // MobileContentPath.Active is `UNITY_IOS && !UNITY_EDITOR` - TRUE in a RELEASE build -
@@ -3353,6 +3371,151 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(portCode.Contains("if (otherMs < 0) otherMs = 0;")
                   && portCode.Contains("long otherMs = totalMs - ("),
                 "DistantTerrain: the `other` field is the total minus the five stages, clamped at zero");
+
+            TestDistantTerrainDials(portCode, startupCode);
+        }
+
+        // MOBILE 2026-09-14: the two player-facing dials - Distance fog and Reach - added so the
+        // bluish distance haze can be cleared off the mountain silhouettes from inside the game.
+        // Both live in settings.ini [Video] and are re-applied to the running world; the mod's own
+        // modsettings.json no longer owns BlendEnd.
+        static void TestDistantTerrainDials(string portCode, string startupCode)
+        {
+            // Defaults, and the defaults.ini the first launch reads them from.
+            Check(global::DistantTerrain.DistantTerrainPort.DefaultFogStrength == 1.0f
+                  && global::DistantTerrain.DistantTerrainPort.MinFogStrength == 0f
+                  && global::DistantTerrain.DistantTerrainPort.MaxFogStrength == 2f,
+                "DistantTerrain dials: the fog dial is 0..2 with 1.0 (the mod's own look) as the default");
+            Check(global::DistantTerrain.DistantTerrainPort.DefaultReach == 60000
+                  && global::DistantTerrain.DistantTerrainPort.MinReach == 20000
+                  && global::DistantTerrain.DistantTerrainPort.MaxReach == 120000,
+                "DistantTerrain dials: reach is 20000..120000 with the iOS 60000 default");
+            Check(global::DistantTerrain.DistantTerrainPort.DefaultReach
+                      == (int)global::DistantTerrain.DistantTerrainPort.DefaultBlendEnd,
+                "DistantTerrain dials: the reach default IS the port's blendEnd default - one number, not two that can drift");
+            string ini = File.ReadAllText("Assets/Resources/defaults.ini.txt");
+            Check(ini.Contains("DistantFogStrength=1.0") && ini.Contains("DistantReach=60000"),
+                "DistantTerrain dials: defaults.ini ships both keys at the code defaults");
+
+            // Clamps. A hand-edited ini reaches the port without passing the panel's slider range.
+            Check(global::DistantTerrain.DistantTerrainPort.ClampFogStrength(-1f) == 0f
+                  && global::DistantTerrain.DistantTerrainPort.ClampFogStrength(0f) == 0f
+                  && global::DistantTerrain.DistantTerrainPort.ClampFogStrength(1f) == 1f
+                  && global::DistantTerrain.DistantTerrainPort.ClampFogStrength(2f) == 2f
+                  && global::DistantTerrain.DistantTerrainPort.ClampFogStrength(9f) == 2f,
+                "DistantTerrain dials: the fog dial clamps to 0..2");
+            Check(global::DistantTerrain.DistantTerrainPort.ClampFogStrength(float.NaN) == 1.0f,
+                "DistantTerrain dials: a NaN in the ini lands on the default, not on a NaN fog density");
+            Check(global::DistantTerrain.DistantTerrainPort.ClampReach(0) == 20000
+                  && global::DistantTerrain.DistantTerrainPort.ClampReach(20000) == 20000
+                  && global::DistantTerrain.DistantTerrainPort.ClampReach(60000) == 60000
+                  && global::DistantTerrain.DistantTerrainPort.ClampReach(145000) == 120000,
+                "DistantTerrain dials: reach clamps to 20000..120000");
+
+            // The multiplier itself, and the Heavy-fog exception that is the whole judgement in it:
+            // sunny/overcast/rainy/snowy are distance haze and scale; the Fog WEATHER's 0.05 is the
+            // weather the player is standing in and must survive a dial set to zero.
+            Check(global::DistantTerrain.DistantTerrainPort.ScaledFogDensity(0.000075f, 1f, false) == 0.000075f
+                  && global::DistantTerrain.DistantTerrainPort.ScaledFogDensity(0.000075f, 0f, false) == 0f
+                  && global::DistantTerrain.DistantTerrainPort.ScaledFogDensity(0.000075f, 2f, false) == 0.00015f,
+                "DistantTerrain dials: an ordinary weather's density is multiplied by the dial (0 clears it, 2 doubles it)");
+            Check(global::DistantTerrain.DistantTerrainPort.ScaledFogDensity(0.05f, 0f, true) == 0.05f
+                  && global::DistantTerrain.DistantTerrainPort.ScaledFogDensity(0.05f, 2f, true) == 0.05f,
+                "DistantTerrain dials: the Fog weather's density is NEVER scaled - the dial cannot delete a weather type");
+            Check(global::DistantTerrain.DistantTerrainPort.ScaledFogDensity(0.0001f, 9f, false) == 0.0002f
+                  && global::DistantTerrain.DistantTerrainPort.ScaledFogDensity(0.0001f, float.NaN, false) == 0.0001f,
+                "DistantTerrain dials: the multiplier clamps its own argument, so no caller can get past the range");
+            Check(global::DistantTerrain.DistantTerrainPort.ScaledFogDensity(0f, 2f, false) == 0f,
+                "DistantTerrain dials: a weather with no fog of its own (sunny, 0) gains none at any dial position");
+
+            // Reach -> BlendEnd, with the invariant the README states: the pair is never stated
+            // independently. BlendStart is derived, and must stay below BlendEnd across the whole
+            // new range or the shader's fade band (BlendEnd - BlendStart + 1) inverts and the far
+            // terrain vanishes.
+            Check(global::DistantTerrain.DistantTerrainPort.EffectiveBlendEnd(60000, 15000f) == 60000f
+                  && global::DistantTerrain.DistantTerrainPort.EffectiveBlendEnd(120000, 15000f) == 120000f
+                  && global::DistantTerrain.DistantTerrainPort.EffectiveBlendEnd(500, 15000f) == 20000f,
+                "DistantTerrain dials: the reach dial becomes blendEnd, clamped");
+            Check(global::DistantTerrain.DistantTerrainPort.EffectiveBlendEnd(20000, 30000f) == 30000f,
+                "DistantTerrain dials: blendEnd is never nearer than the main camera's far clip, whatever the dial says");
+            bool bandOk = true;
+            for (int reach = global::DistantTerrain.DistantTerrainPort.MinReach;
+                 reach <= global::DistantTerrain.DistantTerrainPort.MaxReach; reach += 1000)
+            {
+                float end = global::DistantTerrain.DistantTerrainPort.EffectiveBlendEnd(reach, 15000f);
+                float start = global::DistantTerrain.DistantTerrainPort.BlendStartFor(end);
+                if (!(start < end) || !(start > 0f) || (end - start + 1f) <= 0f)
+                    bandOk = false;
+            }
+            Check(bandOk,
+                "DistantTerrain dials: across the whole 20-120 km range the derived fade band is positive and never inverts");
+
+            // Which of WeatherManager's five settings the live re-push uses, mirroring
+            // WeatherManager.SetWeather's own switch.
+            Check(global::DistantTerrain.DistantTerrain.FogSlotFor(WeatherType.Sunny) == global::DistantTerrain.DistantTerrain.FogSlot.Sunny
+                  && global::DistantTerrain.DistantTerrain.FogSlotFor(WeatherType.Cloudy) == global::DistantTerrain.DistantTerrain.FogSlot.Sunny
+                  && global::DistantTerrain.DistantTerrain.FogSlotFor(WeatherType.Overcast) == global::DistantTerrain.DistantTerrain.FogSlot.Overcast
+                  && global::DistantTerrain.DistantTerrain.FogSlotFor(WeatherType.Fog) == global::DistantTerrain.DistantTerrain.FogSlot.Heavy
+                  && global::DistantTerrain.DistantTerrain.FogSlotFor(WeatherType.Rain) == global::DistantTerrain.DistantTerrain.FogSlot.Rainy
+                  && global::DistantTerrain.DistantTerrain.FogSlotFor(WeatherType.Thunder) == global::DistantTerrain.DistantTerrain.FogSlot.Rainy
+                  && global::DistantTerrain.DistantTerrain.FogSlotFor(WeatherType.Snow) == global::DistantTerrain.DistantTerrain.FogSlot.Snowy,
+                "DistantTerrain dials: every weather maps to the fog settings WeatherManager itself would pick");
+
+            // The settings themselves exist, with the right types, and round-trip through the ini.
+            PropertyInfo fogProp = typeof(SettingsManager).GetProperty("DistantFogStrength");
+            PropertyInfo reachProp = typeof(SettingsManager).GetProperty("DistantReach");
+            Check(fogProp != null && fogProp.PropertyType == typeof(float) && fogProp.CanWrite
+                  && reachProp != null && reachProp.PropertyType == typeof(int) && reachProp.CanWrite,
+                "DistantTerrain dials: SettingsManager carries both, writable (the test app's `set` reaches them by reflection)");
+            string settingsSrc = File.ReadAllText("Assets/Scripts/SettingsManager.cs");
+            Check(settingsSrc.Contains("DistantFogStrength = GetFloat(sectionVideo, \"DistantFogStrength\", 0f, 2f)")
+                  && settingsSrc.Contains("DistantReach = GetInt(sectionVideo, \"DistantReach\", 20000, 120000)")
+                  && settingsSrc.Contains("SetFloat(sectionVideo, \"DistantFogStrength\", DistantFogStrength)")
+                  && settingsSrc.Contains("SetInt(sectionVideo, \"DistantReach\", DistantReach)"),
+                "DistantTerrain dials: both are read AND written back by SettingsManager, clamped to the same range as the port");
+
+            // The apply sites, which only exist with a world up. Source-pinned: that the port reads
+            // the SETTING (not the old modsettings key) where the fog is pushed and where the
+            // cameras are set, and that the panel and the test-app `set` both re-apply.
+            Check(portCode.Contains("DistantTerrainPort.ScaledFogDensity(FogConfig.SunnyFogDensity, strength, false)")
+                  && portCode.Contains("DistantTerrainPort.ScaledFogDensity(FogConfig.HeavyFogDensity, strength, true)")
+                  && portCode.Contains("float strength = DistantTerrainPort.FogStrength;"),
+                "DistantTerrain dials: the fog push reads the dial and passes the Heavy flag for the Heavy density alone");
+            Check(portCode.Contains("internal void ApplyLiveDials()")
+                  && MethodBody(portCode, "internal void ApplyLiveDials()").Contains("SetUpCameras();")
+                  && MethodBody(portCode, "internal void ApplyLiveDials()").Contains("PushFogSettings()")
+                  && MethodBody(portCode, "internal void ApplyLiveDials()").Contains("wm.SetFog(fog)"),
+                "DistantTerrain dials: the live apply moves the cameras, rewrites the five densities and re-pushes the current weather's");
+            Check(portCode.Contains("\"[DistantTerrain] fog strength {0} -> density {1} ({2}{3}), reach {4}\""),
+                "DistantTerrain dials: the live apply logs the line a Player.log reader greps for");
+            Check(startupCode.Contains("public static void ApplyLiveSettings()")
+                  && MethodBody(startupCode, "public static void ApplyLiveSettings()").Contains("EffectiveBlendEnd(Reach,")
+                  && MethodBody(startupCode, "public static void ApplyLiveSettings()").Contains("if (!Running || componentDistantTerrain == null)"),
+                "DistantTerrain dials: ApplyLiveSettings stores the reach whatever happens, and only pushes when the mod is running");
+            Check(startupCode.Contains("DistantTerrainRenderConfig.BlendEnd = EffectiveBlendEnd(Reach, DistantTerrainRenderConfig.MainCameraFarClipPlane);")
+                  && !startupCode.Contains("\"Rendering\", \"BlendEnd\""),
+                "DistantTerrain dials: world entry takes blendEnd from the settings dial - the old modsettings BlendEnd key is gone, so there is one owner");
+            string panel = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileSettingsPanel.cs"));
+            Check(panel.Contains("void BuildDistantTerrainRows(")
+                  && panel.Contains("\"Distance fog\"") && panel.Contains("\"Reach (km)\"")
+                  && panel.Contains("DistantTerrainPort.ApplyLiveSettings();"),
+                "DistantTerrain dials: the settings panel has both rows and re-applies them live");
+            Check(panel.Contains("DaggerfallUnity.Settings.SaveSettings();")
+                  && MethodBody(panel, "static void ApplyDistantDial(System.Action write)").Contains("return;"),
+                "DistantTerrain dials: a row that did not actually change the value writes neither settings.ini nor the world");
+            string debugStart = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileDebugStart.cs"));
+            Check(debugStart.Contains("if (name == \"DistantFogStrength\" || name == \"DistantReach\")")
+                  && debugStart.Contains("DistantTerrainPort.ApplyLiveSettings();"),
+                "DistantTerrain dials: the test app's `set` re-applies them too, so a two-step reproduction measures the change");
+
+            // And the absence that made DistantHazeClear unnecessary: the far terrain has no haze
+            // colour of its own. Its distance tint IS the fog blend - unity_FogColor (RenderSettings)
+            // or the sky render-texture - so clearing the fog clears the haze, and a third key would
+            // have had nothing to switch off.
+            string cginc = StripShaderComments(File.ReadAllText("Assets/Shaders/DistantTerrain/FarTerrainCommon.cginc"));
+            Check(!cginc.Contains("_HazeColor") && !cginc.Contains("_DistanceTint")
+                  && cginc.Contains("unity_FogColor.rgb"),
+                "DistantTerrain dials: the far terrain has no haze colour uniform - the fog dial is the whole haze control");
         }
 
 

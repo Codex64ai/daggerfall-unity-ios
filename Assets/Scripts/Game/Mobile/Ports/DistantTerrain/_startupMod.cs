@@ -17,6 +17,7 @@
 //License: MIT License (http://www.opensource.org/licenses/mit-license.php)
 
 using UnityEngine;
+using DaggerfallWorkshop;                                             // MOBILE: DaggerfallUnity.Settings, the two player dials
 using DaggerfallWorkshop.Game;
 using DaggerfallWorkshop.Game.Mobile;                                 // MOBILE: MobileShaders.Find
 using DaggerfallWorkshop.Game.Utility.ModSupport;                     //required for modding features
@@ -56,6 +57,10 @@ namespace DistantTerrain
     /// </summary>
     public static class DistantTerrainRenderConfig
     {
+        // MOBILE: BlendEnd's front end is settings.ini DistantReach (the settings panel's "Reach"
+        // row), not the bundle's modsettings.json - one owner, live, and reachable by thumb. The
+        // value here is the clamped, main-camera-consistent result; see
+        // DistantTerrainPort.EffectiveBlendEnd.
         public static float BlendEnd = DistantTerrainPort.DefaultBlendEnd;
         public static float MainCameraFarClipPlane = DistantTerrainPort.DefaultMainCameraFarClipPlane;
     }
@@ -67,7 +72,13 @@ namespace DistantTerrain
     /// on the next game launch. Defaults match the values that were previously
     /// hard-coded on DistantTerrain's inspector fields, so a missing or
     /// malformed Fog section gives identical visuals to the pre-settings build.
-    /// </summary>
+    /// <para>
+    /// MOBILE: these are the BASE densities. What reaches WeatherManager is each of them through
+    /// DistantTerrainPort.ScaledFogDensity, which multiplies by the player's Distance fog dial
+    /// (settings.ini DistantFogStrength, 0..2, the settings panel's 0..200 % row) - EXCEPT
+    /// HeavyFogDensity, which is the Fog WEATHER itself rather than distance haze and is passed
+    /// through unscaled: scaling it to zero would delete a weather type.
+    /// </para>
     public static class FogConfig
     {
         public static float SunnyFogDensity = 0.0000f;
@@ -311,6 +322,97 @@ namespace DistantTerrain
         /// <summary>MOBILE: upstream's own main-camera far clip, now a setting.</summary>
         public const float DefaultMainCameraFarClipPlane = 15000f;
 
+        // ===================================================================================
+        // MOBILE 2026-09-14: the two player-facing dials (settings.ini [Video], Mobile Settings >
+        // HUD > Distant Terrain). Upstream shipped these as modsettings.json numbers no phone
+        // player will ever edit; the whole point of the pair is that the distance haze can be
+        // cleared off the mountain silhouettes from inside the game, and seen changing.
+        // ===================================================================================
+
+        /// <summary>Distance-fog multiplier: 0 = no distance fog, 1 = the mod's own densities, 2 = double.</summary>
+        public const float DefaultFogStrength = 1.0f;
+        public const float MinFogStrength = 0f;
+        public const float MaxFogStrength = 2f;
+
+        /// <summary>Reach (= BlendEnd) in world units. 60,000 is the iOS default; 120,000 is upstream's.</summary>
+        public const int DefaultReach = 60000;
+        public const int MinReach = 20000;
+        public const int MaxReach = 120000;
+
+        /// <summary>MOBILE pure: the dial's usable range. A NaN from a hand-edited ini lands on the default.</summary>
+        public static float ClampFogStrength(float strength)
+        {
+            if (float.IsNaN(strength))
+                return DefaultFogStrength;
+            return Mathf.Clamp(strength, MinFogStrength, MaxFogStrength);
+        }
+
+        /// <summary>MOBILE pure: the reach dial's usable range.</summary>
+        public static int ClampReach(int reach)
+        {
+            return Mathf.Clamp(reach, MinReach, MaxReach);
+        }
+
+        /// <summary>
+        /// MOBILE pure: what a per-weather fog density becomes at a given dial position.
+        /// <para>
+        /// isHeavyFogWeather is the whole subtlety. Sunny/Overcast/Rainy/Snowy densities are
+        /// DISTANCE HAZE - the bluish veil that swallows the mountains this mod exists to show - so
+        /// they scale. The Heavy density (0.05, ~600x the next thickest) is the Fog WEATHER: it is
+        /// the weather the player is standing in, not a rendering choice, and a dial that could set
+        /// it to zero would quietly delete one of Daggerfall's six weathers. So it is returned
+        /// unchanged at every dial position.
+        /// </para>
+        /// </summary>
+        public static float ScaledFogDensity(float baseDensity, float strength, bool isHeavyFogWeather)
+        {
+            if (isHeavyFogWeather)
+                return baseDensity;
+            return baseDensity * ClampFogStrength(strength);
+        }
+
+        /// <summary>
+        /// MOBILE pure: the reach the far terrain actually runs at. Two rules, both safety rather
+        /// than taste: the dial's own 20,000..120,000, and never nearer than the main camera's far
+        /// clip plane - a BlendEnd inside it would end the far terrain in front of the near terrain
+        /// and leave a ring of sky between them. BlendStart is derived from the result by
+        /// BlendStartFor and is never configured separately (the README's "do not change one without
+        /// the other" rule is kept by never letting the pair be stated independently).
+        /// </summary>
+        public static float EffectiveBlendEnd(int reach, float mainCameraFarClipPlane)
+        {
+            return Mathf.Max(ClampReach(reach), mainCameraFarClipPlane);
+        }
+
+        /// <summary>MOBILE: the Distance fog dial, read live from settings.ini and clamped.</summary>
+        public static float FogStrength
+        {
+            get { return ClampFogStrength(DaggerfallUnity.Settings.DistantFogStrength); }
+        }
+
+        /// <summary>MOBILE: the Reach dial, read live from settings.ini and clamped.</summary>
+        public static int Reach
+        {
+            get { return ClampReach(DaggerfallUnity.Settings.DistantReach); }
+        }
+
+        /// <summary>
+        /// MOBILE: re-read both dials and push them into the running far terrain - the settings
+        /// panel's rows and the test app's `set` command both land here. Safe to call when the mod
+        /// is off or before world entry: the config holders are updated either way (so the values
+        /// are in place when the far terrain is next built) and the live push is skipped.
+        /// </summary>
+        public static void ApplyLiveSettings()
+        {
+            DistantTerrainRenderConfig.BlendEnd =
+                EffectiveBlendEnd(Reach, DistantTerrainRenderConfig.MainCameraFarClipPlane);
+
+            if (!Running || componentDistantTerrain == null)
+                return;
+
+            componentDistantTerrain.ApplyLiveDials();
+        }
+
         /// <summary>The three mountain-prefab tables the far heightmap lifts from (bundle TextAssets).</summary>
         public static readonly string[] CsvFileNames = { "Mountains.csv", "Mountains_Small.csv", "Mountains_Foothills.csv" };
 
@@ -534,22 +636,21 @@ namespace DistantTerrain
         }
 
         /// <summary>
-        /// MOBILE: the two reach dials. Both keys are OPTIONAL - the shipped modsettings.json has no
-        /// Rendering section yet, and a settings file that predates it must not reset the iOS
-        /// defaults to something wilder. Read through GetFloatOrDefault, which is silent on a missing
-        /// key, and clamped: blendEnd below the main camera's far clip would put the far terrain
-        /// nearer than the near terrain, and above 145,000 exceeds what the shader's fade band and
-        /// the stacked camera's depth buffer were ever tuned for.
+        /// MOBILE: the two reach dials. MainCameraFarClipPlane stays a modsettings.json key - it is
+        /// upstream's own value, is not a matter of taste, and is OPTIONAL (the shipped
+        /// modsettings.json has no Rendering section, so it is read through GetFloatOrDefault, which
+        /// is silent on a missing key). BlendEnd is NOT read from there any more: it is the player's
+        /// Reach dial (settings.ini DistantReach, the settings panel's row), so that one value has
+        /// one owner and can be changed from inside the game. EffectiveBlendEnd applies both safety
+        /// rules - the dial's range, and never nearer than the main camera's far clip.
         /// </summary>
         private static void LoadRenderSettings()
         {
             float mainFar = DefaultMainCameraFarClipPlane;
-            float blendEnd = DefaultBlendEnd;
             try
             {
                 ModSettings settings = mod.GetSettings();
                 mainFar = GetFloatOrDefault(settings, "Rendering", "MainCameraFarClipPlane", DefaultMainCameraFarClipPlane);
-                blendEnd = GetFloatOrDefault(settings, "Rendering", "BlendEnd", DefaultBlendEnd);
             }
             catch (System.Exception ex)
             {
@@ -558,7 +659,7 @@ namespace DistantTerrain
             }
 
             DistantTerrainRenderConfig.MainCameraFarClipPlane = Mathf.Clamp(mainFar, 1000f, 30000f);
-            DistantTerrainRenderConfig.BlendEnd = Mathf.Clamp(blendEnd, DistantTerrainRenderConfig.MainCameraFarClipPlane, 145000f);
+            DistantTerrainRenderConfig.BlendEnd = EffectiveBlendEnd(Reach, DistantTerrainRenderConfig.MainCameraFarClipPlane);
 
             Debug.Log(string.Format(
                 "[DistantTerrain] reach: blendEnd {0} (blendStart {1}), main camera far clip {2}",

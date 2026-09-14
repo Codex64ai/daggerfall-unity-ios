@@ -488,7 +488,68 @@ namespace DaggerfallWorkshop.Game.Mobile
             AddNote(c, ref y, rowW,
                 "Curvature crops the edges of the view, and the HUD stays sharp on purpose.");
 
+            BuildDistantTerrainRows(c, ref y, rowW, rowH);
+
             FinishSection(c, y);
+        }
+
+        /// <summary>
+        /// MOBILE 2026-09-14: the Distant Terrain dials. The mod draws the whole Illiac Bay out to
+        /// the horizon and then veils it in a bluish distance haze; these two rows are how a player
+        /// clears that haze off the mountain silhouettes, and how far the world is drawn at all.
+        /// <para>
+        /// Both values belong to settings.ini (SettingsManager), not to this panel's PlayerPrefs, so
+        /// both rows pass a null key and own their persistence - as the CRT and autosave rows do.
+        /// Changing one re-applies it to the running world through DistantTerrainPort.ApplyLiveSettings,
+        /// which is a no-op (beyond storing the value) when the mod is off.
+        /// </para>
+        /// </summary>
+        void BuildDistantTerrainRows(RectTransform c, ref float y, float rowW, float rowH)
+        {
+            bool running = global::DistantTerrain.DistantTerrainPort.Running;
+
+            AddNote(c, ref y, rowW, running
+                ? "Distant terrain. Distance fog is the haze over the far mountains: 0% shows the "
+                  + "silhouettes bare, 100% is the mod's own look. Reach is how far the world is "
+                  + "drawn - lower costs less. Both apply as you move them."
+                : "Distant terrain is off this session - turn it on in the launcher's MODS window "
+                  + "before PLAY. These two rows still save, and apply the next time it runs.");
+
+            // Shown as a percentage because that is what the dial means - 100% is the mod's own
+            // densities, 0% is no distance fog at all. Stored as the 0..2 multiplier.
+            AddSlider(c, ref y, rowW, rowH, "Distance fog", 0f, 200f,
+                () => DaggerfallUnity.Settings.DistantFogStrength * 100f,
+                v => ApplyDistantDial(() => DaggerfallUnity.Settings.DistantFogStrength = Mathf.Round(v) / 100f),
+                null, "0");
+
+            // Kilometre-ish: a Daggerfall world unit is about a metre, so 60,000 reads as 60.
+            AddSlider(c, ref y, rowW, rowH, "Reach (km)",
+                global::DistantTerrain.DistantTerrainPort.MinReach / 1000f,
+                global::DistantTerrain.DistantTerrainPort.MaxReach / 1000f,
+                () => DaggerfallUnity.Settings.DistantReach / 1000f,
+                v => ApplyDistantDial(() => DaggerfallUnity.Settings.DistantReach = Mathf.RoundToInt(v) * 1000),
+                null, "0");
+        }
+
+        /// <summary>
+        /// Writes one Distant Terrain dial, saves settings.ini and re-applies it to the running
+        /// world - but only when the write actually changed something. AddSlider calls its setter
+        /// once while building the panel, and neither settings.ini nor the far terrain should be
+        /// touched for a value nobody moved.
+        /// </summary>
+        static void ApplyDistantDial(System.Action write)
+        {
+            float fogBefore = DaggerfallUnity.Settings.DistantFogStrength;
+            int reachBefore = DaggerfallUnity.Settings.DistantReach;
+
+            write();
+
+            if (DaggerfallUnity.Settings.DistantFogStrength == fogBefore
+                && DaggerfallUnity.Settings.DistantReach == reachBefore)
+                return;
+
+            DaggerfallUnity.Settings.SaveSettings();
+            global::DistantTerrain.DistantTerrainPort.ApplyLiveSettings();
         }
 
         /// <summary>
@@ -795,7 +856,12 @@ namespace DaggerfallWorkshop.Game.Mobile
             slider.targetGraphic = handleImg;
             slider.direction = Slider.Direction.LeftToRight;
 
-            float initial = Mathf.Clamp(PlayerPrefs.GetFloat(prefix + key, get()), min, max);
+            // A null key means the caller owns its own persistence - the settings.ini rows do,
+            // exactly as AddToggle's null key means. Without this, prefix + null collapses to the
+            // bare prefix and every such slider would share one pref.
+            float initial = (key != null)
+                ? Mathf.Clamp(PlayerPrefs.GetFloat(prefix + key, get()), min, max)
+                : Mathf.Clamp(get(), min, max);
             slider.value = initial;
             set(initial);
             value.text = initial.ToString(format);
@@ -804,9 +870,24 @@ namespace DaggerfallWorkshop.Game.Mobile
             {
                 set(v);
                 value.text = v.ToString(format);
-                PlayerPrefs.SetFloat(prefix + key, v);
-                PlayerPrefs.Save();
+                if (key != null)
+                {
+                    PlayerPrefs.SetFloat(prefix + key, v);
+                    PlayerPrefs.Save();
+                }
             });
+
+            // ...and, like AddToggle's caller-owned rows, a value with a second front end has to be
+            // re-read when the panel opens: this panel is built once and kept for the session.
+            if (key == null)
+            {
+                refreshDynamic += () =>
+                {
+                    float now = Mathf.Clamp(get(), min, max);
+                    slider.SetValueWithoutNotify(now);
+                    value.text = now.ToString(format);
+                };
+            }
         }
 
         void AddToggle(RectTransform parent, ref float y, float rowW, float rowH, string label,

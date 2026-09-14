@@ -173,6 +173,17 @@ namespace DaggerfallWorkshop
         // raster's own height and there is nothing to choose; with retro mode off the source IS the
         // screen and no count is "correct", so it becomes the player's.
         public int CRTScanlineCount { get; set; }
+        // MOBILE: the two Distant Terrain dials the settings panel shows (the mod itself is a
+        // compiled-in port, Assets/Scripts/Game/Mobile/Ports/DistantTerrain). DistantFogStrength
+        // multiplies the mod's four ordinary per-weather fog densities (sunny/overcast/rainy/snowy)
+        // so a player can clear the bluish haze off the mountains; 0 is no distance fog at all, 1 is
+        // the mod's own values, 2 is twice as thick. It deliberately does NOT touch the Fog WEATHER
+        // density - that fog IS the weather and clearing it would delete a weather type.
+        // DistantReach is the far camera's far clip plane and the distance the far terrain fades out
+        // at (the mod's BlendEnd), in world units; its fade band start is DERIVED from it, never set
+        // separately. Both are read live, so a change applies without a restart.
+        public float DistantFogStrength { get; set; }
+        public int DistantReach { get; set; }
         public bool VSync { get; set; }
         public int TargetFrameRate { get; set; }
         public bool Fullscreen { get; set; }
@@ -444,6 +455,10 @@ namespace DaggerfallWorkshop
             CRTMask = GetFloat(sectionVideo, "CRTMask", 0f, 1f);
             CRTVignette = GetFloat(sectionVideo, "CRTVignette", 0f, 1f);
             CRTScanlineCount = GetInt(sectionVideo, "CRTScanlineCount", 100, 1200);
+            // MOBILE: clamped here and again in DistantTerrainPort (ClampFogStrength / ClampReach),
+            // because a hand-edited ini reaches the port without passing through the panel.
+            DistantFogStrength = GetFloat(sectionVideo, "DistantFogStrength", 0f, 2f);
+            DistantReach = GetInt(sectionVideo, "DistantReach", 20000, 120000);
             VSync = GetBool(sectionVideo, "VSync");
             TargetFrameRate = GetInt(sectionVideo, "TargetFrameRate", 0, 300);
             Fullscreen = GetBool(sectionVideo, "Fullscreen");
@@ -656,6 +671,8 @@ namespace DaggerfallWorkshop
             SetFloat(sectionVideo, "CRTMask", CRTMask);
             SetFloat(sectionVideo, "CRTVignette", CRTVignette);
             SetInt(sectionVideo, "CRTScanlineCount", CRTScanlineCount);
+            SetFloat(sectionVideo, "DistantFogStrength", DistantFogStrength);
+            SetInt(sectionVideo, "DistantReach", DistantReach);
             SetBool(sectionVideo, "VSync", VSync);
             SetInt(sectionVideo, "TargetFrameRate", TargetFrameRate);
             SetBool(sectionVideo, "Fullscreen", Fullscreen);

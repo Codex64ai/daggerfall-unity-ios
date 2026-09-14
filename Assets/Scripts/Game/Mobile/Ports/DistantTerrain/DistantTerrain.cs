@@ -30,6 +30,7 @@ using DaggerfallWorkshop.Game.Serialization;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
 using DaggerfallWorkshop.Utility.AssetInjection;   // MOBILE: TextureMap.Albedo for the tile arrays
 using DaggerfallWorkshop.Game.Mobile;      // MOBILE: nothing but the port's own neighbours
+using DaggerfallWorkshop.Game.Weather;     // MOBILE: WeatherType, for the live fog dial
 
 namespace DistantTerrain
 {
@@ -1610,21 +1611,118 @@ namespace DistantTerrain
         {
             if (fogApplied)
                 return;
+            if (PushFogSettings())
+                fogApplied = true;
+        }
+
+        /// <summary>
+        /// MOBILE: the push itself, separated from the once-only guard so the settings panel can
+        /// re-run it when the player moves the Distance fog dial. Returns false when there is no
+        /// WeatherManager yet (Start() at the title), which is what leaves fogApplied false so
+        /// InitFarTerrain retries at world entry.
+        /// <para>
+        /// The four ordinary densities are scaled by the dial; Heavy is not - see
+        /// DistantTerrainPort.ScaledFogDensity, which owns that rule.
+        /// </para>
+        /// </summary>
+        bool PushFogSettings()
+        {
             WeatherManager wm = GameManager.HasInstance ? GameManager.Instance.WeatherManager : null;
             if (wm == null)
-                return;
+                return false;
 
-            wm.SunnyFogSettings = new WeatherManager.FogSettings { fogMode = FogMode.Exponential, density = FogConfig.SunnyFogDensity, startDistance = 0, endDistance = 0, excludeSkybox = true };
-            wm.OvercastFogSettings = new WeatherManager.FogSettings { fogMode = FogMode.Exponential, density = FogConfig.OvercastFogDensity, startDistance = 0, endDistance = 0, excludeSkybox = true };
-            wm.RainyFogSettings = new WeatherManager.FogSettings { fogMode = FogMode.Exponential, density = FogConfig.RainyFogDensity, startDistance = 0, endDistance = 0, excludeSkybox = true };
-            wm.SnowyFogSettings = new WeatherManager.FogSettings { fogMode = FogMode.Exponential, density = FogConfig.SnowyFogDensity, startDistance = 0, endDistance = 0, excludeSkybox = true };
-            wm.HeavyFogSettings = new WeatherManager.FogSettings { fogMode = FogMode.Exponential, density = FogConfig.HeavyFogDensity, startDistance = 0, endDistance = 0, excludeSkybox = false };
+            float strength = DistantTerrainPort.FogStrength;
+            float sunny = DistantTerrainPort.ScaledFogDensity(FogConfig.SunnyFogDensity, strength, false);
+            float overcast = DistantTerrainPort.ScaledFogDensity(FogConfig.OvercastFogDensity, strength, false);
+            float rainy = DistantTerrainPort.ScaledFogDensity(FogConfig.RainyFogDensity, strength, false);
+            float snowy = DistantTerrainPort.ScaledFogDensity(FogConfig.SnowyFogDensity, strength, false);
+            float heavy = DistantTerrainPort.ScaledFogDensity(FogConfig.HeavyFogDensity, strength, true);
 
-            fogApplied = true;
+            wm.SunnyFogSettings = new WeatherManager.FogSettings { fogMode = FogMode.Exponential, density = sunny, startDistance = 0, endDistance = 0, excludeSkybox = true };
+            wm.OvercastFogSettings = new WeatherManager.FogSettings { fogMode = FogMode.Exponential, density = overcast, startDistance = 0, endDistance = 0, excludeSkybox = true };
+            wm.RainyFogSettings = new WeatherManager.FogSettings { fogMode = FogMode.Exponential, density = rainy, startDistance = 0, endDistance = 0, excludeSkybox = true };
+            wm.SnowyFogSettings = new WeatherManager.FogSettings { fogMode = FogMode.Exponential, density = snowy, startDistance = 0, endDistance = 0, excludeSkybox = true };
+            wm.HeavyFogSettings = new WeatherManager.FogSettings { fogMode = FogMode.Exponential, density = heavy, startDistance = 0, endDistance = 0, excludeSkybox = false };
+
             Debug.Log(string.Format(
                 "[DistantTerrain] fog settings overwritten -- sunny {0}, overcast {1}, rainy {2}, snowy {3}, heavy {4}",
-                FogConfig.SunnyFogDensity, FogConfig.OvercastFogDensity, FogConfig.RainyFogDensity,
-                FogConfig.SnowyFogDensity, FogConfig.HeavyFogDensity));
+                sunny, overcast, rainy, snowy, heavy));
+            return true;
+        }
+
+        /// <summary>
+        /// MOBILE: re-apply both player dials to the world that is already running - no restart, no
+        /// transition. DistantTerrainPort.ApplyLiveSettings calls this after updating the config
+        /// holders; the settings panel's rows and the test app's `set` command both arrive here.
+        /// <para>
+        /// Reach: SetUpCameras() re-reads DistantTerrainRenderConfig, so it moves the stacked
+        /// camera's far clip plane and this component's blendEnd/blendStart - and Update() pushes
+        /// those two to the material's _BlendEnd/_BlendStart every frame through the change-tracking
+        /// helpers, so the shader's fade band follows on the next frame with no extra push here.
+        /// </para>
+        /// <para>
+        /// Fog: the five WeatherManager densities are rewritten, and then the one the player is
+        /// actually standing in is pushed to RenderSettings so the haze changes NOW rather than at
+        /// the next weather change. Indoors is left alone: RenderSettings then holds the interior or
+        /// dungeon fog, which is not ours to overwrite - WeatherManager restores the outdoor
+        /// settings (the ones just rewritten) on the way back out.
+        /// </para>
+        /// </summary>
+        internal void ApplyLiveDials()
+        {
+            SetUpCameras();
+
+            if (!PushFogSettings())
+                return;
+
+            WeatherManager wm = GameManager.HasInstance ? GameManager.Instance.WeatherManager : null;
+            if (wm == null || wm.PlayerWeather == null)
+                return;
+
+            WeatherType weather = wm.PlayerWeather.WeatherType;
+            WeatherManager.FogSettings fog = FogSettingsFor(wm, weather);
+
+            bool inside = GameManager.HasInstance && GameManager.Instance.IsPlayerInside;
+            if (!inside)
+                wm.SetFog(fog);
+
+            Debug.Log(string.Format("[DistantTerrain] fog strength {0} -> density {1} ({2}{3}), reach {4}",
+                DistantTerrainPort.FogStrength, fog.density, weather,
+                inside ? ", indoors - stored for the way out" : "", blendEnd));
+        }
+
+        /// <summary>
+        /// MOBILE pure: which of WeatherManager's five outdoor fog settings a weather uses. Mirrors
+        /// WeatherManager.SetWeather's own switch (Cloudy uses the sunny settings; Thunder is a rain
+        /// weather; Fog is the heavy one), so the density re-pushed above is the one the weather
+        /// system would itself have chosen.
+        /// </summary>
+        public static FogSlot FogSlotFor(WeatherType weather)
+        {
+            switch (weather)
+            {
+                case WeatherType.Overcast: return FogSlot.Overcast;
+                case WeatherType.Fog: return FogSlot.Heavy;
+                case WeatherType.Rain:
+                case WeatherType.Thunder: return FogSlot.Rainy;
+                case WeatherType.Snow: return FogSlot.Snowy;
+                default: return FogSlot.Sunny;      // Sunny, Cloudy
+            }
+        }
+
+        /// <summary>MOBILE: WeatherManager's five outdoor fog settings, named.</summary>
+        public enum FogSlot { Sunny, Overcast, Rainy, Snowy, Heavy }
+
+        static WeatherManager.FogSettings FogSettingsFor(WeatherManager wm, WeatherType weather)
+        {
+            switch (FogSlotFor(weather))
+            {
+                case FogSlot.Overcast: return wm.OvercastFogSettings;
+                case FogSlot.Heavy: return wm.HeavyFogSettings;
+                case FogSlot.Rainy: return wm.RainyFogSettings;
+                case FogSlot.Snowy: return wm.SnowyFogSettings;
+                default: return wm.SunnyFogSettings;
+            }
         }
 
         void OnDestroy()
