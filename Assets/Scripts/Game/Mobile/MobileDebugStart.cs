@@ -321,6 +321,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         static void RunSetCommands()
         {
             LogMessageBoxes();
+            PollTopBox();
             AnswerPendingBox();
             CloseRestWindow();
             ApplyScheduledWeather();
@@ -369,8 +370,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         static void RunSpawnCommands()
         {
-            if (worldReadyAt < 0f)
+            if (worldReadyAt < 0f || spawnCommands.Count == 0)
                 return;
+
+            // Test scaffolding, same as the journey run's: four hostile enemies three metres from a
+            // level-one debug character kill it in seconds, and a dead player is a title menu, not a
+            // screenshot of the enemies. Only on a run a `spawn` line is driving.
+            RefillPlayer();
 
             float t = Time.realtimeSinceStartup - worldReadyAt;
             foreach (SpawnCommand c in spawnCommands)
@@ -606,8 +612,11 @@ namespace DaggerfallWorkshop.Game.Mobile
 
                 // A scripted journey has no finger to dismiss boxes with, and one unanswered
                 // prompt stops the run dead (measured: the journey never left its first map pixel).
-                // Only while a `journey` line is driving the run.
-                if (journeyX >= 0)
+                // Only while a `journey` or `spawn` line is driving the run: a new character in a
+                // town gets the classic tutorial box (_TUTOR__), which sits over the middle of the
+                // screen - exactly where a `spawn` puts its enemy - and no pointer event reaches the
+                // app in the Simulator, so nothing on the Mac side can dismiss it.
+                if (journeyX >= 0 || spawnCommands.Count > 0)
                 {
                     pendingBox = box;
                     pendingBoxAt = Time.realtimeSinceStartup;
@@ -620,6 +629,32 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// Return does), otherwise the last button added, otherwise just closes it. Unscaled time,
         /// because the game is paused under the box.
         /// </summary>
+        /// <summary>
+        /// Arms <see cref="AnswerPendingBox"/> for a box that is ALREADY the top window.
+        ///
+        /// The logger above hooks OnWindowChange, which fires on a change; the classic tutorial
+        /// box (_TUTOR__, started by StartGameBehaviour for every new character) is pushed before
+        /// this driver has installed that handler, so nothing ever notices it and a scripted run
+        /// sits behind it for the whole session - with the box over the middle of the screen,
+        /// which is exactly where `spawn` puts its enemy. No pointer event reaches the app in the
+        /// Simulator, so this is the only way to clear it. Only while a `journey` or `spawn` line
+        /// is driving the run, same rule as the event handler.
+        /// </summary>
+        static void PollTopBox()
+        {
+            if (journeyX < 0 && spawnCommands.Count == 0)
+                return;
+            if (!DaggerfallUI.HasInstance || DaggerfallUI.UIManager == null)
+                return;
+            var box = DaggerfallUI.UIManager.TopWindow as DaggerfallWorkshop.Game.UserInterfaceWindows.DaggerfallMessageBox;
+            if (box == null || !loggedBoxes.Add(box))
+                return;
+            boxesSeen++;
+            Debug.Log("[DebugStart] MSGBOX #" + boxesSeen + " (polled, already on top)");
+            pendingBox = box;
+            pendingBoxAt = Time.realtimeSinceStartup;
+        }
+
         static void AnswerPendingBox()
         {
             if (pendingBox == null || Time.realtimeSinceStartup - pendingBoxAt < 1f)
