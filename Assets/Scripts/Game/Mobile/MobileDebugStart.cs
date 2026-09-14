@@ -563,6 +563,11 @@ namespace DaggerfallWorkshop.Game.Mobile
                 // so a `set` that only stored them would measure nothing. No-op when the mod is off.
                 if (name == "DistantFogStrength" || name == "DistantReach")
                     global::DistantTerrain.DistantTerrainPort.ApplyLiveSettings();
+
+                // MOBILE 2026-09-14: and the sky haze switch, for the same reason - the painted sky
+                // re-promotes itself off the band, but the procedural skybox needs the push.
+                if (name == "SkyHaze")
+                    MobileSkyHaze.ApplyLiveDial();
             }
             catch (System.Exception ex)
             {

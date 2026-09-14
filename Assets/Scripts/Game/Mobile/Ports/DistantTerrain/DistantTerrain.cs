@@ -1688,6 +1688,12 @@ namespace DistantTerrain
         {
             SetUpCameras();
 
+            // MOBILE 2026-09-14 (sky haze): the sky's haze band is thickened by the SAME dial as
+            // the distance haze - they are one atmosphere - so it is pushed from here, where both
+            // front ends for the dial (the settings panel row and the test app's `set`) already
+            // land. No-op when SkyHaze is off or the procedural sky is not up.
+            DaggerfallWorkshop.Game.Mobile.MobileSkyHaze.ApplyLiveDial();
+
             if (!PushFogSettings())
                 return;
 

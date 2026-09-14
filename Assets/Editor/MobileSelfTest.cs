@@ -146,6 +146,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestDistantTerrainPort();
             TestDistantTerrainSliceBlit();
             TestRealGrassPort();
+            TestSkyHaze();
             TestModConflictOrder();
             TestPortedModGate();
             TestPortedModOrder();
@@ -4484,6 +4485,172 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// the one ported mod that renders through Unity's own terrain detail path rather than a
         /// shader of its own, so the pins are the whole insurance against grass that draws nothing.
         /// </summary>
+        /// <summary>
+        /// MOBILE 2026-09-14: sky haze. The two skies draw nothing alike, so the whole value of the
+        /// feature is that the ARITHMETIC is shared - one band shape, one horizon colour rule, one
+        /// dial. That is what is checked here, plus source pins on the four places that apply it
+        /// (the skybox shader, the painted sky's promotion, the fog tick, the live dial push),
+        /// none of which a headless test can render.
+        /// </summary>
+        static void TestSkyHaze()
+        {
+            log.AppendLine("-- sky haze --");
+
+            // ---- 1. the setting ----
+            PropertyInfo hazeProp = typeof(SettingsManager).GetProperty("SkyHaze");
+            Check(hazeProp != null && hazeProp.PropertyType == typeof(bool) && hazeProp.CanWrite,
+                "SkyHaze: a writable bool on SettingsManager, so the test app's `set` can drive it");
+            string settingsSrcHaze = StripShaderComments(File.ReadAllText("Assets/Scripts/SettingsManager.cs"));
+            Check(settingsSrcHaze.Contains("SkyHaze = GetBool(sectionEnhancements, \"SkyHaze\")")
+                  && settingsSrcHaze.Contains("SetBool(sectionEnhancements, \"SkyHaze\", SkyHaze)"),
+                "SkyHaze: read and written in [Enhancements], so it round-trips settings.ini");
+            Check(File.ReadAllText("Assets/Resources/defaults.ini.txt").Contains("SkyHaze=True"),
+                "SkyHaze: on by default in defaults.ini");
+
+            // ---- 2. the band, which is the dial ----
+            // 0% is the whole point: "0 % clean" in the spec. Not "nearly clean" - no band at all,
+            // so a player who wants the bare mountain silhouettes gets a bare sky above them too.
+            Check(MobileSkyHaze.BandFraction(0f) == 0f
+                  && MobileSkyHaze.BandFraction(1f) == MobileSkyHaze.BandPerStrength
+                  && Mathf.Approximately(MobileSkyHaze.BandFraction(2f), 2f * MobileSkyHaze.BandPerStrength),
+                "SkyHaze: the band is 0 / 10% / 20% of the sky at the dial's 0 / 100 / 200",
+                MobileSkyHaze.BandFraction(0f) + " / " + MobileSkyHaze.BandFraction(1f) + " / " + MobileSkyHaze.BandFraction(2f));
+            Check(MobileSkyHaze.BandFraction(9f) == MobileSkyHaze.BandFraction(2f)
+                  && MobileSkyHaze.BandFraction(-3f) == 0f
+                  && MobileSkyHaze.BandFraction(float.PositiveInfinity) == MobileSkyHaze.BandFraction(2f),
+                "SkyHaze: the band clamps to the dial's own 0..2, infinities included");
+            // A NaN reaching the shader uniform would take the entire sky with it, not just the band.
+            Check(MobileSkyHaze.BandFraction(float.NaN) == MobileSkyHaze.BandFraction(1f),
+                "SkyHaze: a NaN strength lands on the default band rather than becoming a NaN uniform",
+                MobileSkyHaze.BandFraction(float.NaN).ToString());
+
+            // ---- 3. the band's shape ----
+            Check(MobileSkyHaze.HazeAmount(0f, 1f) == MobileSkyHaze.MaxHazeAlpha
+                  && MobileSkyHaze.HazeAmount(1f, 1f) == 0f,
+                "SkyHaze: full strength at the horizon, nothing at the top of the band",
+                MobileSkyHaze.HazeAmount(0f, 1f) + " / " + MobileSkyHaze.HazeAmount(1f, 1f));
+            Check(MobileSkyHaze.MaxHazeAlpha < 1f,
+                "SkyHaze: the horizon keeps a sixth of its own colour - a band that reached the fog colour exactly would be a flat stripe");
+            bool hazeMonotone = true;
+            float prevHaze = float.MaxValue;
+            for (int step = 0; step <= 20; step++)
+            {
+                float v = MobileSkyHaze.HazeAmount(step / 20f, 1f);
+                if (v > prevHaze) hazeMonotone = false;
+                prevHaze = v;
+            }
+            Check(hazeMonotone, "SkyHaze: the band only ever fades out going up - no ring, no second edge");
+            Check(MobileSkyHaze.HazeAmount(0f, 0f) == 0f && MobileSkyHaze.HazeAmount(0.5f, 0f) == 0f,
+                "SkyHaze: at 0% the band contributes nothing at any height");
+            Check(MobileSkyHaze.HazeAmount(0.5f, 1f) < 0.5f * MobileSkyHaze.MaxHazeAlpha,
+                "SkyHaze: squared, not linear - half way up the band is less than half the haze",
+                MobileSkyHaze.HazeAmount(0.5f, 1f).ToString());
+
+            // ---- 4. rows off a real sky image (512x219) ----
+            Check(MobileSkyHaze.BandRows(219, 0f) == 0
+                  && MobileSkyHaze.BandRows(219, 1f) == 22
+                  && MobileSkyHaze.BandRows(219, 2f) == 44,
+                "SkyHaze: 0, 22 and 44 rows of a 219-row sky image at 0 / 100 / 200%",
+                MobileSkyHaze.BandRows(219, 0f) + " / " + MobileSkyHaze.BandRows(219, 1f) + " / " + MobileSkyHaze.BandRows(219, 2f));
+            Check(MobileSkyHaze.BandRows(219, 0.01f) == 1,
+                "SkyHaze: a dial nudged off zero is at least one row - rounded up, never rounded away",
+                MobileSkyHaze.BandRows(219, 0.01f).ToString());
+            Check(MobileSkyHaze.BandRows(0, 1f) == 0 && MobileSkyHaze.BandRows(-5, 1f) == 0,
+                "SkyHaze: no image, no band");
+
+            // ---- 5. the horizon colour ----
+            // Stock DFU reads ONE pixel (skyColors.west[0]); this is the row it sits in.
+            Color32[] fakeSky = new Color32[8 * 3];
+            for (int i = 0; i < fakeSky.Length; i++)
+                fakeSky[i] = new Color32(0, 0, 0, 255);
+            for (int x = 0; x < 8; x++)
+                fakeSky[x] = (x % 2 == 0) ? new Color32(255, 0, 0, 255) : new Color32(0, 0, 0, 255);
+            Color horizonAvg = MobileSkyHaze.HorizonColour(fakeSky, 8, 3, Color.green);
+            Check(Mathf.Abs(horizonAvg.r - 0.5f) < 0.01f && horizonAvg.g == 0f,
+                "SkyHaze: the horizon colour is the average of the bottom row, not one dithered pixel of it",
+                horizonAvg.ToString());
+            Check(MobileSkyHaze.HorizonColour(null, 8, 3, Color.green) == Color.green
+                  && MobileSkyHaze.HorizonColour(fakeSky, 0, 3, Color.green) == Color.green
+                  && MobileSkyHaze.HorizonColour(new Color32[2], 8, 3, Color.green) == Color.green,
+                "SkyHaze: a missing or short image falls back to the colour DFU would have used");
+
+            // ---- 6. the bake ----
+            Color32[] source = new Color32[8 * 20];
+            for (int i = 0; i < source.Length; i++)
+                source[i] = new Color32(0, 0, 0, 255);
+            Color32[] unhazed = MobileSkyHaze.BakeHorizonBand(source, 8, 20, Color.white, 0f);
+            Check(ReferenceEquals(unhazed, source),
+                "SkyHaze: no band means the original array back - the clean path allocates nothing");
+            Color32[] hazed = MobileSkyHaze.BakeHorizonBand(source, 8, 20, Color.white, 1f);
+            Check(!ReferenceEquals(hazed, source) && source[0].r == 0,
+                "SkyHaze: the bake copies - DaggerfallSky re-promotes from the cached SkyColors when the dial moves, and would otherwise haze an already-hazed image");
+            Check(hazed[0].r == (byte)Mathf.RoundToInt(255f * MobileSkyHaze.MaxHazeAlpha),
+                "SkyHaze: the bottom row takes MaxHazeAlpha of the horizon colour",
+                hazed[0].r.ToString());
+            int bandRows = MobileSkyHaze.BandRows(20, 1f);
+            Check(hazed[bandRows * 8].r == 0 && hazed[(bandRows + 1) * 8].r == 0,
+                "SkyHaze: nothing above the band is touched",
+                bandRows + " rows, first untouched = " + hazed[bandRows * 8].r);
+            Check(hazed[8].r < hazed[0].r && hazed[8].r > 0,
+                "SkyHaze: and it is a gradient inside the band, not a block fill",
+                hazed[0].r + " -> " + hazed[8].r);
+            Check(hazed[0].a == 255,
+                "SkyHaze: alpha is left alone - the sky quads are opaque and a hazed alpha would punch a hole in them");
+
+            // ---- 7. the procedural skybox ----
+            string skyShader = File.ReadAllText("Assets/Shaders/BLB/BLBProceduralSkybox.shader");
+            Check(skyShader.Contains("_HorizonHaze(\"Horizon haze band (MOBILE)\", Range(0, 0.5)) = 0")
+                  && skyShader.Contains("uniform float _HorizonHaze;"),
+                "SkyHaze: the skybox shader declares _HorizonHaze and defaults it to 0, so an unpushed material draws as before");
+            Check(skyShader.Contains("float hazeFade = 1.0 - saturate(normWorldPos.y / _HorizonHaze);")
+                  && skyShader.Contains("col.rgb = lerp(col.rgb, _FogColor.rgb, hazeFade * hazeFade * 0.85);"),
+                "SkyHaze: the skybox fades toward _FogColor over the band, squared, the way HazeAmount does");
+            Check(skyShader.IndexOf("_HorizonHaze > 0.0", StringComparison.Ordinal)
+                  < skyShader.IndexOf("#ifdef REDUCE_COLOR", StringComparison.Ordinal),
+                "SkyHaze: the band is laid down BEFORE the retro posterise, so the palette quantises it instead of a smooth gradient covering the palette");
+            // The shader's 0.85 and MaxHazeAlpha are the same number written twice; if they drift,
+            // the two skies haze by different amounts at the same dial position and the dial lies.
+            Check(MobileSkyHaze.MaxHazeAlpha == 0.85f,
+                "SkyHaze: MaxHazeAlpha is the 0.85 hard-coded in the skybox shader - the two skies must agree",
+                MobileSkyHaze.MaxHazeAlpha.ToString());
+
+            string blb = StripShaderComments(File.ReadAllText(
+                "Assets/Scripts/Game/Mobile/Ports/DynamicSkies/BLBSkybox.cs"));
+            Check(blb.Contains("public static void PushHorizonHaze()")
+                  && blb.Contains("Instance.skyboxMat.SetFloat(\"_HorizonHaze\","),
+                "SkyHaze: BLBSkybox pushes the band to its material");
+            Check(MethodBody(blb, "public void Update()").Contains("UpdateHorizonFog();"),
+                "SkyHaze: and re-derives the fog colour from the horizon EVERY frame, not on the once-a-second fog tick");
+            Check(MethodBody(blb, "private void UpdateHorizonFog()").Contains("UnityEngine.RenderSettings.fogColor = lerpedColor;")
+                  && MethodBody(blb, "private void UpdateHorizonFog()").Contains("skyboxMat.SetColor(\"_FogColor\", lerpedColor);"),
+                "SkyHaze: the per-frame path writes both the engine fog colour and the shader's, so the far ground and the band never disagree");
+            Check(!MethodBody(blb, "private void UpdateHorizonFog()").Contains("GameObject.Find"),
+                "SkyHaze: the per-frame path does no scene-wide name search - the sun light is the one Init already resolved");
+
+            // ---- 8. the painted sky ----
+            string skySrc = StripShaderComments(File.ReadAllText("Assets/Scripts/Internal/DaggerfallSky.cs"));
+            Check(MethodBody(skySrc, "void Update()").Contains("lastHazeBand != hazeBand"),
+                "SkyHaze: the painted sky re-promotes when the band changes, so the dial does not wait for the next sky frame");
+            string promote = MethodBody(skySrc, "private void PromoteToTexture(SkyColors colors, bool flip = false)");
+            Check(promote.Contains("MobileSkyHaze.BakeHorizonBand(")
+                  && promote.Contains("westTexture.SetPixels32(west);"),
+                "SkyHaze: the band is baked into the promoted pixels - no overlay quad to get wrong under retro, CRT and the 4:3 viewport");
+            Check(MethodBody(skySrc, "public void SetSkyFogColor(SkyColors colors)").Contains("MobileSkyHaze.HorizonColour("),
+                "SkyHaze: and the fog colour comes off that same horizon row");
+
+            // ---- 9. the two front ends for the dial ----
+            Check(MethodBody(StripShaderComments(File.ReadAllText(
+                    "Assets/Scripts/Game/Mobile/Ports/DistantTerrain/DistantTerrain.cs")),
+                    "internal void ApplyLiveDials()").Contains("MobileSkyHaze.ApplyLiveDial();"),
+                "SkyHaze: moving Distance fog pushes the band too - one atmosphere, one dial");
+            Check(StripShaderComments(File.ReadAllText(
+                    "Assets/Scripts/Game/Mobile/MobileDebugStart.cs")).Contains("if (name == \"SkyHaze\")"),
+                "SkyHaze: `set SkyHaze 0` applies to the running world rather than only being stored");
+            Check(StripShaderComments(File.ReadAllText(
+                    "Assets/Scripts/Game/Mobile/MobileSettingsPanel.cs")).Contains("\"Sky haze\""),
+                "SkyHaze: the mobile settings panel carries a row for it");
+        }
+
         static void TestRealGrassPort()
         {
             // ---- 1. the forced configuration ----

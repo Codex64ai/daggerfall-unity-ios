@@ -30,6 +30,12 @@ Shader "BLB/SkyBox/BLBProceduralSkybox"
         _FogNightColor ("Fog Night Color", Color) = (.1, .1, .1, 1)
         _FogDistance("Fog distance", float) = 2048.0
 
+        // MOBILE 2026-09-14 (sky haze): how far up the sky the horizon haze band reaches, as a
+        // fraction of the way from the horizon to the zenith. 0 = clean sky, and that is the
+        // default so a material that never hears from MobileSkyHaze draws exactly as before.
+        // Driven from C# (BLBSkybox.PushHorizonHaze) off [Video] DistantFogStrength.
+        _HorizonHaze("Horizon haze band (MOBILE)", Range(0, 0.5)) = 0
+
         _MoonNightColor("Moon Night Color", Color) = (0, 0, 0.0196, 1)  // Define the property
 
         [Header(CloudsGeneral)]
@@ -159,6 +165,7 @@ Shader "BLB/SkyBox/BLBProceduralSkybox"
             uniform float3 _FogDayColor;
             uniform float3 _FogNightColor;
             uniform float _FogDistance;
+            uniform float _HorizonHaze;   // MOBILE: sky haze band thickness, 0 = off
             uniform float4 _MoonNightColor;
 
             uniform float _WorldTime;
@@ -857,6 +864,19 @@ col.rgb = finalStarsColor;
 
                 //finally lerp to the cloud color base on the cloud value
                 col.rgb = lerp(col.rgb, cloudColor, clouds * _CloudOpacity);
+
+                // MOBILE 2026-09-14 (sky haze): fade the bottom of the sky toward the fog colour
+                // over a band whose thickness is the Distance fog dial. Squared so the band has no
+                // visible top edge - the only hard edge is at the horizon, where the ground hides
+                // it - and placed BEFORE the REDUCE_COLOR posterise below so the retro palette
+                // still quantises the result instead of a smooth gradient being laid over it.
+                // MaxHazeAlpha (0.85) is MobileSkyHaze.MaxHazeAlpha; the two must agree or the
+                // painted sky and this one haze by different amounts at the same dial position.
+                if (_HorizonHaze > 0.0)
+                {
+                    float hazeFade = 1.0 - saturate(normWorldPos.y / _HorizonHaze);
+                    col.rgb = lerp(col.rgb, _FogColor.rgb, hazeFade * hazeFade * 0.85);
+                }
 
 #ifdef REDUCE_COLOR
     float3 normalSunPos = normalize(_WorldSpaceLightPos0.xyz);

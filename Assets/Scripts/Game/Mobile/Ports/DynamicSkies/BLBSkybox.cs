@@ -267,6 +267,11 @@ public void Update()
             setFogColor(dayTime);
             lastUpdateTime = Time.time; // Update the last update time
         }
+        // MOBILE 2026-09-14 (sky haze): the cheap re-derivation, every frame. See UpdateHorizonFog.
+        else if (DaggerfallWorkshop.Game.Mobile.MobileSkyHaze.Enabled)
+        {
+            UpdateHorizonFog();
+        }
             //When the timescale is altered, adjust the cloud speeds accordingly or they would move in slow-mo
             //Would really like an OnTimeScaleChange event for this but it works
             //if(playerInside) {
@@ -1140,8 +1145,20 @@ void UpdateWorldTime() {
             Color tmpColor;
             if(ColorUtility.TryParseHtmlString("#" + fogDayColor, out tmpColor)) {
                 skyboxMat.SetColor("_FogDayColor", tmpColor);
-                    // Assuming the main directional light is named "SunLight"
-                    Light sunLight = GameObject.Find("SunLight").GetComponent<Light>();
+                    // MOBILE (sky haze): the preset colour and the lerp duration cached for
+                    // UpdateHorizonFog below, so the per-frame path never re-parses the hex string
+                    // or re-reads a material float. Upstream did both once a second; every frame is
+                    // a different budget.
+                    hazeFogDayColor = tmpColor;
+                    hazeAtmosphereLerpDuration = AtmosphereLerpDuration;
+                    hazeFogValid = true;
+                    // MOBILE: dfSunlight is the same light, resolved and null-checked in Init.
+                    // GameObject.Find("SunLight") every frame is a scene-wide string search, and
+                    // upstream's version threw outright when the light was not up yet.
+                    Light sunLight = dfSunlight;
+                    if (sunLight == null)
+                        sunLight = GameObject.Find("SunLight") != null ? GameObject.Find("SunLight").GetComponent<Light>() : null;
+                    if (sunLight != null) {
 
                     // Get the normalized direction to the sun
                     Vector3 normalSunPos = sunLight.transform.forward.normalized;
@@ -1157,14 +1174,54 @@ void UpdateWorldTime() {
                     Color lerpedColor = Color.Lerp(tmpColor, tmpColorNight, lerpScale * lerpScale);
                     UnityEngine.RenderSettings.fogColor = lerpedColor;
                     //Debug.Log("BLB: lerpScale:" + lerpScale.ToString() + ", day: " + day.ToString() + ", lerpedColor:" + lerpedColor.ToString());
+                    }
             }
         fogColor = UnityEngine.RenderSettings.fogColor;
         skyboxMat.SetColor("_FogColor", fogColor); // carademono: Pass the fog color to the shader so it can color the distant ground
+        PushHorizonHaze();   // MOBILE (sky haze): the band goes with the colour it fades to
         skyboxMat.SetPass(0); // Assuming 0 is the pass index you want to use
         } 
         else {
             Debug.Log("BLB: Could not find Fog Color for weather " + currentWeather.ToString());
         }
+    }
+
+    // MOBILE 2026-09-14 (sky haze) -----------------------------------------------------------
+    // Upstream derives RenderSettings.fogColor from the weather preset's FogDayColor lerped to
+    // black by sun elevation, and refreshes it once a second. That colour IS this sky's horizon
+    // colour - it is what the shader's groundColor and the band below fade to - so the sky haze
+    // switch does not compute a different one, it just runs the cheap half of the same derivation
+    // EVERY frame instead of once a second, which is what stops the fog stepping through a dozen
+    // visible shades over a sunrise. The expensive half (dictionary lookup, hex parse, material
+    // reads, scene search for the sun) is cached by setFogColor above.
+    private Color hazeFogDayColor = Color.gray;
+    private float hazeAtmosphereLerpDuration = 0f;
+    private bool hazeFogValid = false;
+
+    private void UpdateHorizonFog() {
+        if (!hazeFogValid || skyboxMat == null || dfSunlight == null)
+            return;
+
+        Vector3 normalSunPos = dfSunlight.transform.forward.normalized;
+        float lerpScale = Mathf.SmoothStep(hazeAtmosphereLerpDuration, 0, -normalSunPos.y);
+        lerpScale = Mathf.Lerp(0f, 1f, lerpScale / 0.66f);
+        Color lerpedColor = Color.Lerp(hazeFogDayColor, Color.black, lerpScale * lerpScale);
+
+        UnityEngine.RenderSettings.fogColor = lerpedColor;
+        fogColor = lerpedColor;
+        skyboxMat.SetColor("_FogColor", lerpedColor);
+    }
+
+    /// <summary>
+    /// MOBILE (sky haze): push the horizon haze band to the skybox material. Public and static so
+    /// MobileSkyHaze.ApplyLiveDial can reach it the moment the Distance fog slider moves, rather
+    /// than the band waiting for the next fog tick. Harmless when the sky is not up.
+    /// </summary>
+    public static void PushHorizonHaze() {
+        if (Instance == null || Instance.skyboxMat == null)
+            return;
+        Instance.skyboxMat.SetFloat("_HorizonHaze",
+            DaggerfallWorkshop.Game.Mobile.MobileSkyHaze.ActiveBand());
     }
     private void SetFogDistance(WeatherType weather) {
         BLBSkyboxSetting[] skyboxSetting = SkyboxSettings[weather];

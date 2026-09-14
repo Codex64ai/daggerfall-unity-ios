@@ -70,6 +70,10 @@ namespace DaggerfallWorkshop
         int lastSkyIndex = -1;
         int lastSkyFrame = -1;
         bool lastNightFlag = false;
+        // MOBILE 2026-09-14 (sky haze): the haze band the promoted textures were baked with. The
+        // band is baked into the sky image rather than drawn over it - see PromoteToTexture - so a
+        // dial moved at runtime has to re-promote, and this is what notices.
+        float lastHazeBand = -1f;
         Rect westRect, eastRect;
         System.Random random = new System.Random(0);
         bool showNightSky = true;
@@ -160,7 +164,10 @@ namespace DaggerfallWorkshop
                 ApplyTimeAndSpace();
 
             // Update sky textures if index or frame changed
-            if ((lastSkyIndex != SkyIndex || lastSkyFrame != SkyFrame || lastNightFlag != IsNight))
+            // MOBILE (sky haze): ...or the haze band changed, which is how the Distance fog dial
+            // and the SkyHaze switch reach a sky that is otherwise only rebuilt on the hour.
+            float hazeBand = DaggerfallWorkshop.Game.Mobile.MobileSkyHaze.ActiveBand();
+            if ((lastSkyIndex != SkyIndex || lastSkyFrame != SkyFrame || lastNightFlag != IsNight || lastHazeBand != hazeBand))
             {
                 // Get target frame index based on am/pm
                 int targetFrame = SkyFrame;
@@ -176,6 +183,7 @@ namespace DaggerfallWorkshop
                 lastSkyIndex = SkyIndex;
                 lastSkyFrame = SkyFrame;
                 lastNightFlag = IsNight;
+                lastHazeBand = hazeBand;   // MOBILE (sky haze)
             }
         }
 
@@ -273,16 +281,40 @@ namespace DaggerfallWorkshop
             westTexture = new Texture2D(colors.imageSize.x, colors.imageSize.y, TextureFormat.ARGB32, false);
             eastTexture = new Texture2D(colors.imageSize.x, colors.imageSize.y, TextureFormat.ARGB32, false);
 
+            // MOBILE 2026-09-14 (sky haze): bake the horizon haze band into the promoted pixels.
+            // Baked rather than drawn as a second quad on purpose: the sky is two
+            // Graphics.DrawTexture calls in an immediate-mode OnPostRender with no material of its
+            // own, so a gradient overlay would need a blend material that survives retro mode, the
+            // CRT presenter and the 4:3 viewport. A band mixed into the image costs one pass over
+            // the bottom rows per sky frame (at most 64 of 219, twice) and is correct in every one
+            // of those paths by construction. BakeHorizonBand copies - colors is the cached
+            // SkyColors this method is re-run against when the dial moves.
+            Color32[] west = colors.west;
+            Color32[] east = colors.east;
+            float hazeStrength = DaggerfallWorkshop.Game.Mobile.MobileSkyHaze.Strength;
+            if (DaggerfallWorkshop.Game.Mobile.MobileSkyHaze.BandRows(colors.imageSize.y, hazeStrength) > 0)
+            {
+                Color horizon = DaggerfallWorkshop.Game.Mobile.MobileSkyHaze.HorizonColour(
+                    west, colors.imageSize.x, colors.imageSize.y, colors.clearColor);
+                west = DaggerfallWorkshop.Game.Mobile.MobileSkyHaze.BakeHorizonBand(
+                    west, colors.imageSize.x, colors.imageSize.y, horizon, hazeStrength);
+                east = DaggerfallWorkshop.Game.Mobile.MobileSkyHaze.BakeHorizonBand(
+                    east, colors.imageSize.x, colors.imageSize.y,
+                    DaggerfallWorkshop.Game.Mobile.MobileSkyHaze.HorizonColour(
+                        colors.east, colors.imageSize.x, colors.imageSize.y, colors.clearColor),
+                    hazeStrength);
+            }
+
             // Set pixels, flipping hemisphere if required
             if (!flip)
             {
-                westTexture.SetPixels32(colors.west);
-                eastTexture.SetPixels32(colors.east);
+                westTexture.SetPixels32(west);
+                eastTexture.SetPixels32(east);
             }
             else
             {
-                westTexture.SetPixels32(colors.east);
-                eastTexture.SetPixels32(colors.west);
+                westTexture.SetPixels32(east);
+                eastTexture.SetPixels32(west);
             }
 
             // Set wrap mode
@@ -310,7 +342,15 @@ namespace DaggerfallWorkshop
         public void SetSkyFogColor(SkyColors colors)
         {
             // Set camera clear colour
-            cameraClearColor = colors.clearColor;
+            // MOBILE 2026-09-14 (sky haze): the horizon colour is the average of the sky image's
+            // bottom row, not colors.clearColor - which is ONE pixel of that row (skyColors.west[0])
+            // and, on a dithered 512-wide palettised image, a lottery between two banding colours.
+            // It is both the camera clear below the sky quad and, a few lines down, the fog colour,
+            // so getting it wrong shows up as a seam at exactly the place this feature exists to fix.
+            cameraClearColor = DaggerfallWorkshop.Game.Mobile.MobileSkyHaze.Enabled
+                ? DaggerfallWorkshop.Game.Mobile.MobileSkyHaze.HorizonColour(
+                    colors.west, colors.imageSize.x, colors.imageSize.y, colors.clearColor)
+                : colors.clearColor;
             myCamera.backgroundColor = ((cameraClearColor * SkyTintColor) * 2f) * SkyColorScale;
 
             // Set gray fog color for anything denser than heavy rain, otherwise use sky color for atmospheric fogging

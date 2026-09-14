@@ -378,6 +378,14 @@ namespace DaggerfallWorkshop
         public bool AutosaveOnDungeon { get; set; }
         public int AutosaveIntervalMinutes { get; set; }
 
+        // MOBILE 2026-09-14 (sky haze): the sky's own horizon colour becomes RenderSettings.fogColor
+        // and a haze band is laid along the bottom of the sky, so the distance haze and the sky it
+        // fades into are the same colour instead of two unrelated ones. The band's thickness follows
+        // the Distance fog dial ([Video] DistantFogStrength) - at 0% there is no band at all and the
+        // sky is drawn clean. Both skies: the Dynamic Skies procedural skybox and the stock painted
+        // one. See Assets/Scripts/Game/Mobile/MobileSkyHaze.cs.
+        public bool SkyHaze { get; set; }
+
         #endregion
 
         #region Public Methods
@@ -636,6 +644,7 @@ namespace DaggerfallWorkshop
             // MOBILE: clamped here as well as in MobileAutosave.ClampIntervalMinutes, because a
             // hand-edited ini reaches the timer through this property and nothing else.
             AutosaveIntervalMinutes = GetInt(sectionEnhancements, "AutosaveIntervalMinutes", 0, 60);
+            SkyHaze = GetBool(sectionEnhancements, "SkyHaze");   // MOBILE
         }
 
         /// <summary>
@@ -843,6 +852,7 @@ namespace DaggerfallWorkshop
             SetBool(sectionEnhancements, "AutosaveOnTravel", AutosaveOnTravel);
             SetBool(sectionEnhancements, "AutosaveOnDungeon", AutosaveOnDungeon);
             SetInt(sectionEnhancements, "AutosaveIntervalMinutes", AutosaveIntervalMinutes);
+            SetBool(sectionEnhancements, "SkyHaze", SkyHaze);   // MOBILE
 
             // Write settings to persistent file
             WriteSettingsFile();

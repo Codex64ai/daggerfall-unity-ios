@@ -488,6 +488,26 @@ namespace DaggerfallWorkshop.Game.Mobile
             AddNote(c, ref y, rowW,
                 "Curvature crops the edges of the view, and the HUD stays sharp on purpose.");
 
+            // MOBILE 2026-09-14: sky haze. Placed immediately above the Distance fog row because
+            // that row is its thickness dial - the band and the far-terrain haze are one setting
+            // seen twice - and, like the CRT row above, it owns its own persistence (null key).
+            AddNote(c, ref y, rowW,
+                "Sky haze ties the sky to the distance fog: the fog takes the sky's own horizon "
+                + "colour, and a haze band sits along the bottom of the sky. Its thickness follows "
+                + "the Distance fog row below, so 0% draws a clean sky.");
+
+            AddToggle(c, ref y, rowW, rowH, "Sky haze",
+                () => DaggerfallUnity.Settings.SkyHaze,
+                v =>
+                {
+                    if (DaggerfallUnity.Settings.SkyHaze == v)
+                        return;
+                    DaggerfallUnity.Settings.SkyHaze = v;
+                    DaggerfallUnity.Settings.SaveSettings();
+                    MobileSkyHaze.ApplyLiveDial();
+                },
+                null);
+
             BuildDistantTerrainRows(c, ref y, rowW, rowH);
 
             FinishSection(c, y);
