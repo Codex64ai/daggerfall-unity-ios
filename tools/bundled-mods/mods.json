@@ -616,6 +616,19 @@
         "traveloptions"
       ],
       "licence": "text:MIT License\n\nCopyright (C) 2020 Ralzar. Every shipped source file carries the header 'License: MIT License (http://www.opensource.org/licenses/mit-license.php)'. Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files, to deal in the Software without restriction, subject to the MIT conditions. NOT shipped: TavernWindow.cs (no licence header; replaced by the port's own MobileTavernWindow), the tent model blb_tent.fbx / 41606.prefab and the two tavern PNGs (author unstated). Code compiled in under Assets/Scripts/Game/Mobile/Ports/ClimatesCalories (see THIRD-PARTY.md)."
+    },
+    {
+      "name": "DEX",
+      "repo": "https://github.com/SquidKamer/DaggerfallBestiaryProject.git",
+      "commit": "fa21b07331e914d9e622aeaef65a4d8ab9496872",
+      "manifest": "DaggerfallBestiaryProject.dfmod.json",
+      "strip_code": true,
+      "private_only": true,
+      "exclude_globs": [
+        "1516_[5-9]-1[5-9].png",
+        "1516_[5-9]-2[0-3].png"
+      ],
+      "licence": "pending:No licence of any kind is declared upstream (github.com/SquidKamer/DaggerfallBestiaryProject, the repo that builds \"Daggerfall Enemy Expansion\" 1.3.4 by Kamer and Kab): there is no LICENSE file, no copyright header in any of the ten source files, and the Nexus permissions box (mod 372) sits behind Cloudflare and cannot be read. The art needs a second grant and may need one nobody in the mod's lineage can give: the sprite folders are named ARENA - , BATTLESPIRE - , MORROWIND - , OBLIVION - , SKYRIM - alongside DAGGER - , KAMER - and KAB - , i.e. much of the 8,031-frame sprite set is derived from other Bethesda titles rather than authored for Daggerfall. Permission is being sought from Kab (code) and Kamer (art); until both are given this bundle ships only on the private test draft, never in the public mod pack (pack.py refuses a pending licence there). Its C# is compiled into the app under Assets/Scripts/Game/Mobile/Ports/DEX (see THIRD-PARTY.md). exclude_globs drops the 45 KAMER - Witches frames (archive 1516, records 5-9, frames 15-23) that the author's manifest still lists but the repo no longer contains; Scripts/Editor/ never appears in the manifest and the remaining eight scripts are removed by strip_code."
     }
   ]
 }
