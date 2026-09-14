@@ -5582,10 +5582,10 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // with 0x000fffff. Comparing the two never matches, so the destination read as somewhere
             // the journey was merely passing ("You are passing Warlech. Stop here?" at Warlech).
             Check(System.Text.RegularExpressions.Regex.Matches(journey, @"destinationSummary\.ID\b").Count == 1 &&
-                  System.Text.RegularExpressions.Regex.Matches(journey, @"destinationSummary\.MapID\b").Count == 4,
+                  System.Text.RegularExpressions.Regex.Matches(journey, @"destinationSummary\.MapID\b").Count == 5,
                   "pass-through: the destination is matched on the unmasked MapID at every site that asks");
             Check(System.Text.RegularExpressions.Regex.IsMatch(journey,
-                      @"public void Stop\(JourneyEnd reason\)\s*\{\s*CountAsVisit\(\);"),
+                      @"public void Stop\(JourneyEnd reason\)\s*\{[^}]*?CountAsVisit\(\);"),
                   "pass-through: every journey exit path counts the place it ended at as a visit");
             Check(System.Text.RegularExpressions.Regex.IsMatch(journey,
                       @"void SpendNightAtInn\(string townName\)\s*\{\s*CountAsVisit\(\);"),
@@ -5830,6 +5830,49 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   "autosave: the journey raises OnJourneyArrived only on a real arrival");
             Check(Regex.Matches(journey, @"RaiseOnJourneyArrived\(\);").Count == 1,
                   "autosave: one arrival event per journey, from the single exit path");
+
+            // A JOURNEY THAT STOPS ON ITS DESTINATION HAS ARRIVED. Climates & Calories' exhaustion
+            // interrupt fires as the player reaches a walled city, so Stop(Interrupted) was called
+            // with the player already inside the destination rect: no arrival greeting, no travel
+            // autosave, and the held quest entry taken as a plain visit. The truth table is pure;
+            // the pins hold the wiring, which needs a PlayerGPS and cannot run headlessly.
+            var C = new Func<MobileJourneyController.JourneyEnd, bool, MobileJourneyController.JourneyEnd>(
+                MobileJourneyController.ClassifyEnd);
+            var arrived = MobileJourneyController.JourneyEnd.Arrived;
+            var interrupted = MobileJourneyController.JourneyEnd.Interrupted;
+            var cancelled = MobileJourneyController.JourneyEnd.Cancelled;
+            var resting = MobileJourneyController.JourneyEnd.Resting;
+
+            Check(C(interrupted, true) == arrived,
+                  "journey end: an interrupt inside the destination is an arrival");
+            Check(C(cancelled, true) == arrived,
+                  "journey end: giving up once you are standing in the destination is still arriving");
+            Check(C(arrived, true) == arrived,
+                  "journey end: a real arrival stays an arrival");
+            Check(C(resting, true) == resting,
+                  "journey end: a camp keeps its destination and resumes itself, even at the destination");
+            Check(C(interrupted, false) == interrupted && C(cancelled, false) == cancelled &&
+                  C(arrived, false) == arrived && C(resting, false) == resting,
+                  "journey end: away from the destination nothing is reclassified");
+
+            Check(Regex.IsMatch(journey,
+                      @"public void Stop\(JourneyEnd reason\)\s*\{[^}]*?reason = ClassifyEnd\(requested, AtDestination\(\)\);"),
+                  "journey end: Stop classifies before any side effect, so the whole method sees the real end");
+            Check(journey.Contains("[Journey] ended \" + requested + \" inside the destination -> arrived"),
+                  "journey end: the reclassification is logged with the end that was requested");
+            Check(Regex.IsMatch(journey, @"bool AtDestination\(\)\s*\{\s*if \(!destinationValid \|\| tearingDown\)"),
+                  "journey end: a teardown stop is never an arrival, and neither is one with no destination");
+            Check(Regex.IsMatch(journey, @"tearingDown = true;\s*if \(IsTravelling\)\s*Stop\(JourneyEnd\.Cancelled\);"),
+                  "journey end: OnDestroy marks the teardown before stopping, so no greeting or autosave on the way out");
+
+            // SaveGame must survive a character with no backstory - the autosave fires at moments
+            // the player never chose, including before the biography questions have been answered.
+            string slm = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Serialization/SaveLoadManager.cs"));
+            Check(Regex.IsMatch(slm, @"List<string> backStory = GameManager\.Instance\.PlayerEntity\.BackStory;") &&
+                  Regex.IsMatch(slm, @"if \(backStory != null\)"),
+                  "autosave: SaveGame treats a null backstory as an empty one instead of throwing");
+            Check(slm.Contains("playerEntity.BackStory = new List<string>();"),
+                  "autosave: the load side starts from an empty backstory, so a save without one loads");
 
             // Fast travel and the dungeon transitions are upstream events that already existed:
             // no engine file is edited for this feature, so UPSTREAM-PATCHES gains nothing.

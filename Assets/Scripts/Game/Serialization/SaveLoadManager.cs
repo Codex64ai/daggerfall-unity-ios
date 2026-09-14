@@ -1175,10 +1175,17 @@ namespace DaggerfallWorkshop.Game.Serialization
             // Save backstory text
             if (!File.Exists(Path.Combine(path, bioFileName)))
             {
+                // MOBILE: a null BackStory is an empty one, not a crashed save. Characters that
+                // never went through the biography questions (and the autosave, which can fire at
+                // any moment) reached this foreach with null and took the whole save down.
+                List<string> backStory = GameManager.Instance.PlayerEntity.BackStory;
                 StreamWriter file = new StreamWriter(Path.Combine(path, bioFileName).ToString());
-                foreach (string line in GameManager.Instance.PlayerEntity.BackStory)
+                if (backStory != null)
                 {
-                    file.WriteLine(line);
+                    foreach (string line in backStory)
+                    {
+                        file.WriteLine(line);
+                    }
                 }
                 file.Close();
             }

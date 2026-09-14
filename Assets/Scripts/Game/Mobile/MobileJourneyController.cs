@@ -186,6 +186,7 @@ namespace DaggerfallWorkshop.Game.Mobile
         ContentReader.MapSummary destinationSummary;
         string destinationName;
         bool destinationValid;
+        bool tearingDown;                  // OnDestroy: a teardown stop is never an arrival
 
         // TERRAIN THROTTLE
         // Time compression multiplies PHYSICAL movement, not just the clock - at 21x the
@@ -262,6 +263,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             // A journey in progress when the object dies would otherwise leave Time.timeScale
             // permanently accelerated - the whole game left running at 20x.
+            // tearingDown first: this is a scene teardown, not a player standing at the gates, so
+            // it must never be reclassified into an arrival (greeting, autosave) on the way out.
+            tearingDown = true;
             if (IsTravelling)
                 Stop(JourneyEnd.Cancelled);
 
@@ -1578,6 +1582,16 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public void Stop(JourneyEnd reason)
         {
+            // A journey that stops ON its destination has arrived, whatever ended it. Climates &
+            // Calories' exhaustion interrupt fires the moment the player reaches a walled city,
+            // which left the journey "interrupted" while standing in the destination: no "You have
+            // arrived", no travel autosave, and the held quest entry taken only as a plain visit.
+            // Reclassified BEFORE any side effect, so the whole of Stop() below sees the real end.
+            JourneyEnd requested = reason;
+            reason = ClassifyEnd(requested, AtDestination());
+            if (reason != requested)
+                Debug.Log("[Journey] ended " + requested + " inside the destination -> arrived");
+
             // Wherever the journey ends, the player is THERE now - a settlement it stops in is a
             // visit, not a pass-through, and any quest entry held back on the way in is taken.
             CountAsVisit();
@@ -1616,6 +1630,38 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
             // Interrupted deliberately keeps the destination, so the travel map can offer to
             // resume rather than making the player pick the same place again.
+        }
+
+        /// <summary>
+        /// PURE. What a journey that ends here really is.
+        ///
+        /// Standing in the destination is arrival no matter what asked the journey to stop: an
+        /// exhaustion or encounter interrupt there is the player reaching the gates, and a player
+        /// who cancels once the walls are in front of them has still arrived. Only Resting is left
+        /// alone - a camp keeps the destination on purpose and resumes itself when the rest screen
+        /// closes, so turning it into an arrival would end a journey that is only pausing.
+        /// Away from the destination nothing changes.
+        /// </summary>
+        public static JourneyEnd ClassifyEnd(JourneyEnd requested, bool atDestination)
+        {
+            if (!atDestination || requested == JourneyEnd.Resting)
+                return requested;
+
+            return JourneyEnd.Arrived;
+        }
+
+        /// <summary>
+        /// Is the player standing in the destination's own location rect right now? Same test the
+        /// pilot's own arrival uses: MapSummary.MapID, not .ID - PlayerGPS.CurrentMapID is the
+        /// unmasked MapTableData.MapId and .ID is that masked with 0x000fffff.
+        /// </summary>
+        bool AtDestination()
+        {
+            if (!destinationValid || tearingDown)
+                return false;
+
+            PlayerGPS gps = GameManager.HasInstance ? GameManager.Instance.PlayerGPS : null;
+            return gps != null && gps.HasCurrentLocation && gps.CurrentMapID == destinationSummary.MapID;
         }
 
         /// <summary>

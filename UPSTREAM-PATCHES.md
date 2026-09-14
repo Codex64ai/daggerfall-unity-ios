@@ -1177,3 +1177,22 @@ keys into an existing `settings.ini` on first launch, so upgraders get them too.
 the keys, `GetBool` then warns and returns `False`, and autosave silently switches itself off —
 visible immediately because the Game tab shows every row OFF. The self test pins all four keys in
 both files.
+
+### Backstory-less save (2026-09-14) — `Assets/Scripts/Game/Serialization/SaveLoadManager.cs` (+7/-3)
+
+`SaveGame` wrote the biography file with a bare
+`foreach (string line in GameManager.Instance.PlayerEntity.BackStory)`. `BackStory` is null on any
+character that never went through the biography questions (the test app's debug start, and
+whatever produced the null seen in `~/dev/dfu-logs/sim-autosave-run3.log`), so the foreach threw
+an `NullReferenceException` and took the entire save with it. Vanilla never noticed because a save
+is normally a deliberate act at a moment the player chose; the autosave fires whenever its trigger
+does.
+
+The fix reads the list once into a local marked `// MOBILE:` and skips the loop when it is null —
+the bio file is still created, empty. The load side already tolerates that: it assigns
+`playerEntity.BackStory = new List<string>()` before the `File.Exists` check, so a missing or
+empty bio file loads as an empty backstory.
+
+*Rebase risk: LOW.* Three lines inside one `if` block, no upstream logic changed. Taking theirs
+restores the crash; the self test pins both the local and the null guard, plus the empty-list
+assignment on the load side.
