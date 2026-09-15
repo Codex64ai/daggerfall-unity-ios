@@ -8119,6 +8119,25 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MobileConvertedModPolicy.ParseSize("16", 1024) == 1024, "an absurdly small cap is refused");
             Check(MobileConvertedModPolicy.ParseSize("banana", 1024) == 1024, "garbage is refused");
 
+            // Terrain tiles take their own cap. 256 is a 56-slice array at ~1.6MB instead of
+            // ~26MB, and is the size the vanilla enhanced packs already ship, so the records
+            // match and DFU's array builder copies rather than resamples.
+            Check(MobileConvertedModPolicy.DefaultTerrainTileMaxTextureSize == 256,
+                  "terrain tiles default to a 256 cap, not the general 1024",
+                  "" + MobileConvertedModPolicy.DefaultTerrainTileMaxTextureSize);
+            Check(MobileConvertedModPolicy.ParseSize("256", 1024) == 256,
+                  "256 passes the parser, so the terrain default is reachable as an override");
+            Check(MobileConvertedModPolicy.IsTerrainTileTexture(
+                      "Assets/Game/Mods/Converted/x/Textures/302_12-0.png"),
+                  "a ground archive record is a terrain tile");
+            Check(!MobileConvertedModPolicy.IsTerrainTileTexture(
+                      "Assets/Game/Mods/Converted/x/Textures/1618_13-0.png"),
+                  "a non-ground archive is not a terrain tile");
+            Check(MobileConvertedModPolicy.IsTerrainTileTexture(
+                      "Assets/Game/Mods/Converted/x/Textures/302_12-0_Normal.png"),
+                  "a terrain tile's normal map is one too - the archive is the prefix, and the "
+                  + "array needs every map capped alike");
+
             // Booleans, in the spellings a shell user actually types.
             Check(MobileConvertedModPolicy.ParseBool("1", false)
                   && MobileConvertedModPolicy.ParseBool("true", false)

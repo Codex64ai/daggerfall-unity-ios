@@ -887,6 +887,14 @@ from a silent game. Known limits, in the order they bite:
   format differs, which would be a hole in the terrain rather than a visible error. Those
   keep exact dimensions, and therefore keep the uncompressed fallback: fat, but correct.
 
+  Terrain tiles do, however, take a **tighter size cap than everything else: 256**
+  (`DFU_MOD_TERRAIN_MAXTEXSIZE`, default 256, against `DFU_MOD_MAXTEXSIZE`'s 1024 for
+  everything else). One tileset is a 56-slice `Texture2DArray`, which at 1024 square in ASTC
+  6x6 with mips is ~26MB resident and ~1.6MB at 256 - for ground seen at a grazing angle. 256
+  is also what the *vanilla enhanced* pack family ships, so a DREAM tile capped to 256 matches
+  those records in size **and** format, which is the condition under which DFU's array builder
+  takes the plain `CopyTexture` path with no resample.
+
   **Fetched packs take the other cure: no mipmaps.** Packs built from source under
   `Assets/Game/Mods/<Pack>/` (`MobileBuildSetup.ApplyAll`) cannot round to a power of two at
   all - Daggerfall Expanded Textures replaces 66 archives that have no classic `TEXTURE.NNNN`

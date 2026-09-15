@@ -97,6 +97,7 @@
 // a real device and recompiling per attempt is the wrong loop:
 //
 //   DFU_MOD_MAXTEXSIZE   cap, power of two 32-16384          default 1024
+//   DFU_MOD_TERRAIN_MAXTEXSIZE  same, terrain tile archives only   default 256
 //   DFU_MOD_ASTC         iOS block size, 4x4|5x5|6x6|8x8|10x10|12x12   default 6x6
 //   DFU_MOD_TEX_QUALITY  compressor effort 0-100             default 50
 //   DFU_MOD_MIPS         master mipmap switch                default on
@@ -2281,6 +2282,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         public const string IosPlatform = "iPhone";
 
         public const string MaxSizeVar = "DFU_MOD_MAXTEXSIZE";
+        public const string TerrainMaxSizeVar = "DFU_MOD_TERRAIN_MAXTEXSIZE";
         public const string MipsVar = "DFU_MOD_MIPS";
         public const string StreamMipsVar = "DFU_MOD_STREAM_MIPS";
         public const string NoMipVar = "DFU_MOD_NOMIP";
@@ -2296,6 +2298,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// so a wall filling a quarter of it is being sampled at roughly 600 pixels. Raise it
         /// with DFU_MOD_MAXTEXSIZE=2048 when a specific pack proves it needs it.</summary>
         public const int DefaultMaxTextureSize = 1024;
+
+        /// <summary>256 for terrain TILES specifically, where the general 1024 is indefensible:
+        /// one tileset is a 56-slice Texture2DArray, and at 1024 square ASTC 6x6 with mips that
+        /// array is ~26MB of resident memory against ~1.6MB at 256 - for ground under the
+        /// player's feet, seen at a grazing angle. It is also not a downgrade invented here:
+        /// 256 is what the "vanilla enhanced" pack family already ships, so DREAM capped to 256
+        /// matches those records exactly in size AND format, which is precisely the condition
+        /// TextureReplacement.TryMakeTextureArrayCopyTexture needs to take the plain CopyTexture path
+        /// with no resample. Override with DFU_MOD_TERRAIN_MAXTEXSIZE.</summary>
+        public const int DefaultTerrainTileMaxTextureSize = 256;
 
         /// <summary>The cap applied to classic UI art, which is to say none: 16384 is Unity's
         /// maximum, so nothing is ever downscaled. This is not a memory oversight. UI art is
@@ -2434,6 +2446,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         public static int MaxTextureSize()
         {
             return ParseSize(Env(MaxSizeVar), DefaultMaxTextureSize);
+        }
+
+        public static int TerrainTileMaxTextureSize()
+        {
+            return ParseSize(Env(TerrainMaxSizeVar), DefaultTerrainTileMaxTextureSize);
         }
 
         public static bool MipmapsAllowed()
@@ -2777,9 +2794,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // No size clamp on UI art: its dimensions ARE the contract. DREAM sizes its talk
             // window art at exactly 6x the classic 320x200 canvas, and clamping it to 1024 turns
             // that into 3.2x and truncates every rect DaggerfallTalkWindow computes.
+            // Terrain tiles take their own, much tighter cap: a 56-slice tileset array is ~26MB
+            // at 1024 and ~1.6MB at 256, and 256 is what the vanilla enhanced packs ship, so the
+            // array builder finds every record already the right size and format.
             importer.maxTextureSize = pixelContract
                 ? MobileConvertedModPolicy.MaxUiTextureSize
-                : MobileConvertedModPolicy.MaxTextureSize();
+                : MobileConvertedModPolicy.IsTerrainTileTexture(assetPath)
+                    ? MobileConvertedModPolicy.TerrainTileMaxTextureSize()
+                    : MobileConvertedModPolicy.MaxTextureSize();
             importer.mipmapEnabled = MobileConvertedModPolicy.MipmapsAllowed()
                 && MobileConvertedModPolicy.ShouldMipmap(assetPath, markers);
             importer.streamingMipmaps = MobileConvertedModPolicy.StreamingMipmaps();
