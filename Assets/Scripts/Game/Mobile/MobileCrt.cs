@@ -224,16 +224,33 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         /// <summary>
-        /// Scanlines the frame pass draws. There is no raster here in any coverage: the source is
-        /// the finished BACKBUFFER at panel resolution, and with retro mode on it holds the retro
-        /// picture already upscaled and with an IMGUI HUD sitting over it at native resolution -
-        /// so the retro mode's 200 or 400 lines would be locked to a raster that only occupies part
-        /// of what is being filtered, and would beat against everything else. The count is the
-        /// player's CRTScanlineCount, clamped, exactly as on the native path.
+        /// Scanlines the frame pass draws, for a given live raster height.
+        ///
+        /// RETRO (retroMode != 0): the RASTER-LOCKED count, the same number the world-only path uses
+        /// - 200 or 400, or 154 / 308 while the large HUD is docked and DFU shortens the raster. The
+        /// backbuffer the frame pass filters is the retro picture ALREADY UPSCALED to fill the panel,
+        /// so one scanline per raster row lands one line on each upscaled row: the dark lines sit in
+        /// the seams the retro picture already has. Any other count - CRTScanlineCount, or the mode's
+        /// nominal 200 over a 154-row raster - is a second periodic signal over the first, and two
+        /// near-but-unequal frequencies beat: broad moire bands that crawl as the view moves. The
+        /// IMGUI HUD drawn over that picture at panel resolution is not locked to anything either
+        /// way, so it costs nothing to lock to the raster and it is what the world looks like.
+        ///
+        /// NATIVE (retroMode == 0): no raster exists, the source really is the panel, and the count
+        /// becomes the player's CRTScanlineCount, clamped - identical to the native world path.
         /// </summary>
-        public static int FrameScanlineCount(int nativeCount)
+        public static int FrameScanlineCountFor(int rasterHeight, int retroMode, int nativeCount)
         {
-            return ClampScanlineCount(nativeCount);
+            return ScanlineCountFor(rasterHeight, retroMode, nativeCount);
+        }
+
+        /// <summary>
+        /// Scanlines the frame pass draws this frame: raster-locked in retro mode, the player's
+        /// clamped CRTScanlineCount otherwise. See <see cref="FrameScanlineCountFor"/>.
+        /// </summary>
+        public static int FrameScanlineCount(int retroMode, int nativeCount)
+        {
+            return FrameScanlineCountFor(LiveRasterHeight, retroMode, nativeCount);
         }
 
         // ---- the touch canvas, at coverage 1 ----------------------------------------------

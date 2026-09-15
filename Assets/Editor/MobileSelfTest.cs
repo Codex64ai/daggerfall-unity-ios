@@ -2504,14 +2504,36 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(!MobileCrt.TouchControlsSharp(-5) && !MobileCrt.TouchControlsSharp(99),
                 "MobileCRT coverage: TouchControlsSharp clamps its argument like everything else");
 
-            // The frame pass has no raster to lock to - the source is the backbuffer, and with retro
-            // mode on it holds an already-upscaled retro picture with a native-resolution IMGUI HUD
-            // over it. So the count is the player's, clamped, exactly as on the native path.
-            Check(MobileCrt.FrameScanlineCount(480) == 480
-                  && MobileCrt.FrameScanlineCount(0) == MobileCrt.MinScanlineCount
-                  && MobileCrt.FrameScanlineCount(99999) == MobileCrt.MaxScanlineCount,
-                "MobileCRT coverage: the frame pass draws CRTScanlineCount lines, clamped",
-                MobileCrt.FrameScanlineCount(0) + " / " + MobileCrt.FrameScanlineCount(99999));
+            // The frame pass's line count, as a truth table. Native (retro 0): the backbuffer IS the
+            // panel, no count is "correct", so it is the player's CRTScanlineCount clamped. Retro
+            // (1/2): the backbuffer holds the retro picture already upscaled to fill the panel, so
+            // the count is RASTER-LOCKED - the live raster's own rows (200/400 normally, 154/308
+            // with the large HUD docked), never the slider, or the lines beat against the rows the
+            // upscale already drew. Same rule, same numbers, as the world-only path.
+            Check(MobileCrt.FrameScanlineCountFor(0, 0, 480) == 480
+                  && MobileCrt.FrameScanlineCountFor(0, 0, 0) == MobileCrt.MinScanlineCount
+                  && MobileCrt.FrameScanlineCountFor(0, 0, 99999) == MobileCrt.MaxScanlineCount,
+                "MobileCRT coverage: with retro mode off the frame pass draws CRTScanlineCount lines, clamped",
+                MobileCrt.FrameScanlineCountFor(0, 0, 0) + " / " + MobileCrt.FrameScanlineCountFor(0, 0, 99999));
+            Check(MobileCrt.FrameScanlineCountFor(200, 1, 480) == 200
+                  && MobileCrt.FrameScanlineCountFor(400, 2, 480) == 400
+                  && MobileCrt.FrameScanlineCountFor(154, 1, 480) == 154
+                  && MobileCrt.FrameScanlineCountFor(308, 2, 480) == 308,
+                "MobileCRT coverage: in retro mode the frame pass locks to the live raster's rows, not the slider",
+                MobileCrt.FrameScanlineCountFor(154, 1, 480) + " / " + MobileCrt.FrameScanlineCountFor(308, 2, 480));
+            Check(MobileCrt.FrameScanlineCountFor(0, 1, 480) == MobileCrt.ScanlinesLowRes
+                  && MobileCrt.FrameScanlineCountFor(0, 2, 480) == MobileCrt.ScanlinesHighRes,
+                "MobileCRT coverage: with no live raster the frame pass falls back to the retro mode's nominal count",
+                MobileCrt.FrameScanlineCountFor(0, 1, 480) + " / " + MobileCrt.FrameScanlineCountFor(0, 2, 480));
+            // The frame pass and the world-only path must not disagree about this - one picture.
+            for (int rm = 0; rm <= 2; rm++)
+                foreach (int rh in new[] { 0, 154, 200, 308, 400 })
+                    Check(MobileCrt.FrameScanlineCountFor(rh, rm, 480) == MobileCrt.ScanlineCountFor(rh, rm, 480),
+                        "MobileCRT coverage: the frame pass and the world path agree on the line count (retro " +
+                        rm + ", raster " + rh + ")");
+            Check(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileCrtFrame.cs")
+                    .Contains("DaggerfallUnity.Settings.RetroRenderingMode, DaggerfallUnity.Settings.CRTScanlineCount"),
+                "MobileCRT coverage: MobileCrtFrame passes the retro mode to FrameScanlineCount");
 
             // ---- the touch canvas's layer ----
             Check(MobileCrt.TouchUILayer == 5 && MobileCrt.TouchUILayerMask == (1 << 5),

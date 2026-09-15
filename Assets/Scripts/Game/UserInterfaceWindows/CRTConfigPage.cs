@@ -52,7 +52,9 @@ namespace DaggerfallWorkshop.Game.UserInterfaceWindows
         const string tipReversion = "Curved tube, scanlines and phosphor grille, " +
                                     "with retro mode on or off. How much of the frame it covers " +
                                     "is the CRT coverage row in Mobile Settings; " +
-                                    "curvature crops the edges.";
+                                    "curvature crops the edges. In retro mode the scanline count " +
+                                    "follows the retro raster, not this slider, so the lines land " +
+                                    "on raster rows instead of beating against them.";
 
         Checkbox enableCheckbox;
         HorizontalSlider curvatureSlider;

@@ -186,7 +186,11 @@ namespace DaggerfallWorkshop.Game.Mobile
             crt.SetTexture(mainTexId, capture);
             crt.SetFloat(curvatureId, MobileCrt.ClampCurvature(DaggerfallUnity.Settings.CRTCurvature));
             crt.SetFloat(scanlinesId, MobileCrt.Clamp01(DaggerfallUnity.Settings.CRTScanlines));
-            crt.SetFloat(scanlineCountId, MobileCrt.FrameScanlineCount(DaggerfallUnity.Settings.CRTScanlineCount));
+            // Retro mode locks the line count to the raster (MobileCrt.FrameScanlineCountFor): the
+            // backbuffer holds the retro picture upscaled, so one line per raster row lands in the
+            // seams instead of beating against them.
+            crt.SetFloat(scanlineCountId, MobileCrt.FrameScanlineCount(
+                DaggerfallUnity.Settings.RetroRenderingMode, DaggerfallUnity.Settings.CRTScanlineCount));
             crt.SetFloat(maskId, MobileCrt.Clamp01(DaggerfallUnity.Settings.CRTMask));
             crt.SetFloat(vignetteId, MobileCrt.Clamp01(DaggerfallUnity.Settings.CRTVignette));
 

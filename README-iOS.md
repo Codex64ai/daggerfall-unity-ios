@@ -461,7 +461,7 @@ crops the extreme edges of the view.
 | `CRTScanlines` | 0.35 | scanline depth, 0 to 1 |
 | `CRTMask` | 0.25 | phosphor grille depth, 0 to 1 |
 | `CRTVignette` | 0.25 | corner falloff, 0 to 1 |
-| `CRTScanlineCount` | 480 | **lines drawn when retro mode is OFF, and at any coverage above World**, 100 to 1200 |
+| `CRTScanlineCount` | 480 | **lines drawn when retro mode is OFF**, at every coverage, 100 to 1200 |
 
 `CRTScanlineCount` only appears while retro mode is off, and only matters there. **In retro mode
 the number of scanlines is not yours to pick**: it is the height of the raster the game is
@@ -470,8 +470,12 @@ any other pitch beat against that raster and crawl as you move. With retro mode 
 raster; the world is drawn at the panel's own resolution, so the count becomes a taste setting.
 480 is a VGA monitor's count and is the default; 360 is heavier, 240 is a television.
 
-`CRTScanlineCount` is also what the **Frame** and **Everything** coverages draw, in either retro
-mode: what they filter is the finished screen, not a raster, so there is no line count to lock to.
+**That rule holds at every coverage.** The **Frame** and **Everything** passes filter the finished
+screen rather than a raster, but in retro mode that screen is the retro picture *already upscaled
+to fill the panel* - so one line per raster row still lands one line on each upscaled row, and any
+other count is a second periodic signal over the first. Two near-but-unequal pitches beat: broad
+bands that crawl as you turn. So the frame pass is raster-locked in retro mode exactly like the
+world-only path, and falls back to `CRTScanlineCount` only when retro mode is off.
 
 **What it costs with retro mode off, at coverage World.** The filter needs the world in a texture
 before it can curve it, so with retro mode off the game renders into one full-size render target -
