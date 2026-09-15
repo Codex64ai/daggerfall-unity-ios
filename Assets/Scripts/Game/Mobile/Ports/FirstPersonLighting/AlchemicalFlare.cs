@@ -148,7 +148,7 @@ namespace FirstPersonLighting
             };
 
             rigidBody = gameObject.AddComponent<Rigidbody>();
-            rigidBody.velocity = forward * 12;
+            rigidBody.linearVelocity = forward * 12;
             rigidBody.mass = 0.1f;
 
             //Setting collision detection mode to continuous to prevent the flare from falling through the floor/walls.
@@ -201,7 +201,7 @@ namespace FirstPersonLighting
             flameLight.intensity = magnitude;
 
             //Setting collision detection back to discrete after flare comes to a rest, for efficiency.
-            if (rigidBody.velocity == Vector3.zero)
+            if (rigidBody.linearVelocity == Vector3.zero)
                 rigidBody.collisionDetectionMode = CollisionDetectionMode.Discrete;
 
         }
