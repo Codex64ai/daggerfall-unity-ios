@@ -3163,7 +3163,15 @@ namespace DistantTerrain
             if (terrain.terrainData == null)
             {
                 // Setup terrain data
-                TerrainData terrainData = new TerrainData();
+                // MOBILE 2026-09-15: MobileTerrainData.Create(), not `new TerrainData()`. A
+                // TerrainData built from nothing at runtime draws NO terrain details in a player
+                // build (Unity issue 10753) - the engine's own world terrains were moved onto the
+                // template for exactly that reason, and this one was the last `new TerrainData()`
+                // left in the project. The far terrain paints no details today, so this changes no
+                // picture; it is here so that the next thing which does - grass on the far terrain,
+                // or anything that reads DFU's terrains and this one through the same code - does
+                // not rediscover the bug from the far side of a shipped build.
+                TerrainData terrainData = MobileTerrainData.Create();
                 terrainData.name = "TerrainData";
 
                 terrainData.heightmapResolution = worldMapResolution;

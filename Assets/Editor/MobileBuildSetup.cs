@@ -33,6 +33,22 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         const string releaseBundleId = "net.codex64.daggerfall";
         const string releaseProductName = "Daggerfall Unity";
         const string testBundleId = "net.codex64.daggerfall.test";
+
+        /// <summary>
+        /// MOBILE 2026-09-15: the bundle id this build is for, as one public statement.
+        ///
+        /// PlayerSettings.SetApplicationIdentifier writes the identity into ProjectSettings and into
+        /// the generated Info.plist, but Unity ALSO writes a PRODUCT_BUNDLE_IDENTIFIER build setting
+        /// into the Xcode project, and that is what xcodebuild matches a provisioning profile
+        /// against. The two have come apart before - a generated project carrying the plain id while
+        /// the plist said `.test`, so xcodebuild picked the plain profile and the signed ipa
+        /// installed OVER the real app instead of beside it. MobileIOSPostProcess now pins the build
+        /// setting from this property, so the id has exactly one source: DFU_IOS_TESTAPP.
+        /// </summary>
+        public static string BundleIdentifier
+        {
+            get { return IsTestApp ? testBundleId : releaseBundleId; }
+        }
         const string testProductName = "DFU Test";
 
         /// <summary>

@@ -73,6 +73,15 @@ suppressing camera look mid-swing, which it already did for PC players.
 `Tools > Daggerfall Mobile > Run Self Test` verifies the input logic headlessly
 (31 checks) and exits non-zero on failure.
 
+**The side-by-side test app.** `DFU_IOS_TESTAPP=1` in the environment of the Unity build builds
+`net.codex64.daggerfall.test` ("DFU Test") instead of the real app, with its own container, its own
+`arena2` and its own saves, so a test build never overwrites a player's game. That one environment
+variable is the only source of the id: `MobileBuildSetup` writes it into the player settings and
+`MobileIOSPostProcess` writes the same value into the generated Xcode project's
+`PRODUCT_BUNDLE_IDENTIFIER` build setting, which is what `xcodebuild` matches a provisioning profile
+against. Pinning both is deliberate - when only the plist carried the test id, `xcodebuild` matched
+the *plain* profile and the signed `.ipa` installed over the real app instead of beside it.
+
 ## Installing the app
 
 Two routes. Either way the `.ipa` is unsigned and gets signed on the spot with **your own

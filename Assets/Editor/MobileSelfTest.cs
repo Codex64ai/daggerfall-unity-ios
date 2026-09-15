@@ -140,6 +140,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestMobileCRTSettingsEndToEnd();
             TestMobileCRTUI();
             TestMobileCRTCoverage();
+            TestMobileBundleIdPin();
             TestDebugStartCommands();
             TestWODBiomesPort();
             TestBiomesClimateKey();
@@ -1856,8 +1857,36 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     "MobileCRT native: no render target is allocated with no running game");
             }
             string native = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileCrtNative.cs"));
-            Check(native.Contains("target.Release()") && native.Contains("Object.Destroy(target)"),
+            Check(MethodBody(native, "static void DestroyTarget()").Contains("was.Release()")
+                  && MethodBody(native, "static void DestroyTarget()").Contains("Object.Destroy(was)"),
                 "MobileCRT native: the render target is released AND destroyed, not just dropped");
+
+            // MOBILE 2026-09-15: the grace period. Comparing two pictures means toggling, and every
+            // toggle used to free and rebuild a 15-21 MB texture. The teardown now DETACHES at once
+            // (the picture depends on that) and keeps the texture for ten seconds.
+            Check(native.Contains("const float GraceSeconds = 10f;"),
+                "MobileCRT native: the target is kept for a ten-second grace period after the filter goes off");
+            string graceStopBody = MethodBody(native, "static void Stop()");
+            Check(graceStopBody.Contains("Detach();") && !graceStopBody.Contains("Release();"),
+                "MobileCRT native: Stop detaches the cameras but does not free the texture");
+            Check(graceStopBody.Contains("graceUntil = Time.realtimeSinceStartup + GraceSeconds;"),
+                "MobileCRT native: Stop starts the grace clock");
+            // Placement, not presence: a collector outside the !wanted branch would run while the
+            // path is live, and one that only watched the clock would hold a dead scene's texture.
+            string notWantedBranch = MethodBody(MethodBody(native, "static void Tick()"), "if (!wanted)");
+            Check(notWantedBranch.Contains("DestroyTarget();"),
+                "MobileCRT native: the grace period is collected inside Tick's !wanted branch");
+            Check(notWantedBranch.Contains("presenter == null || Time.realtimeSinceStartup >= graceUntil"),
+                "MobileCRT native: the grace period ends on the clock OR on a scene change, whichever comes first");
+            Check(MethodBody(native, "static void Tick()").Contains("graceUntil = -1f;"),
+                "MobileCRT native: a toggle back on inside the window cancels the collection and reuses the texture");
+            Check(native.Contains("Application.lowMemory += OnLowMemory;")
+                  && native.Contains("Application.lowMemory -= OnLowMemory;"),
+                "MobileCRT native: the driver subscribes to (and unsubscribes from) iOS's low-memory warning");
+            Check(MethodBody(native, "static void OnLowMemory()").Contains("if (active || target == null)"),
+                "MobileCRT native: low memory drops a HELD target, never the one the player is looking at");
+            Check(MethodBody(native, "void OnDisable()").Contains("DestroyTarget();"),
+                "MobileCRT native: the driver going away frees the texture outright - nothing would be left to collect it");
             Check(CountOccurrences(native, "new RenderTexture(") == 1,
                 "MobileCRT native: exactly one render texture is ever created",
                 CountOccurrences(native, "new RenderTexture(") + " of 1");
@@ -1926,7 +1955,11 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
             // Camera.allCameras is documented as all ENABLED cameras, and a camera holding this
             // target while disabled is exactly the one that would keep a dangling reference.
-            string releaseBody = MethodBody(native, "static void Release()");
+            // MOBILE 2026-09-15: the old Release() is now two halves - Detach() hands everything that
+            // pointed at the target somewhere else (which must happen in the frame the path stops,
+            // grace period or not) and DestroyTarget() frees the texture. Everything these checks
+            // are about lives in the first half.
+            string releaseBody = MethodBody(native, "static void Detach()");
             Check(releaseBody.Contains("Resources.FindObjectsOfTypeAll<Camera>()") && !releaseBody.Contains("Camera.allCameras"),
                 "MobileCRT native: Release sweeps disabled cameras too, not only Camera.allCameras");
 
@@ -6178,6 +6211,68 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(buildSetupSrc.Contains("public static void EnsureTerrainDataTemplate()")
                   && MethodBody(buildSetupSrc, "public static void ApplyAll()").Contains("EnsureTerrainDataTemplate();"),
                 "TerrainData: ApplyAll regenerates the template if it is missing");
+
+            // MOBILE 2026-09-15: and the far terrain, which was the last `new TerrainData()` left in
+            // the project. It paints no details today, so this changes no picture - it is pinned so
+            // that the next thing which does paint them cannot rediscover Unity issue 10753 from the
+            // far side of a shipped build.
+            string distantSrc = File.Exists("Assets/Scripts/Game/Mobile/Ports/DistantTerrain/DistantTerrain.cs")
+                ? StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/Ports/DistantTerrain/DistantTerrain.cs")) : "";
+            Check(distantSrc.Length > 0, "TerrainData: DistantTerrain.cs is readable");
+            Check(distantSrc.Contains("MobileTerrainData.Create()"),
+                "TerrainData: the far terrain builds its TerrainData through MobileTerrainData.Create");
+            Check(!distantSrc.Contains("new TerrainData()"),
+                "TerrainData: no `new TerrainData()` survives in DistantTerrain either");
+        }
+
+        /// <summary>
+        /// THE BUNDLE ID, pinned in the generated Xcode project (2026-09-15). Unity writes the app
+        /// identity into Info.plist from PlayerSettings, but xcodebuild matches a provisioning
+        /// profile against the TARGET's PRODUCT_BUNDLE_IDENTIFIER build setting - and a generated
+        /// project carrying the plain id while the plist said `.test` is a signed ipa that installs
+        /// OVER the player's real app instead of beside it. There is no way to observe that from an
+        /// editor run (it needs a build, an Xcode project and a certificate), so what is checked is
+        /// that the id has exactly ONE source and that the post-process writes it.
+        /// </summary>
+        static void TestMobileBundleIdPin()
+        {
+            Type setup = typeof(MobileSelfTest).Assembly.GetType(
+                "DaggerfallWorkshop.Game.Mobile.EditorTools.MobileBuildSetup");
+            Check(setup != null, "Bundle id: MobileBuildSetup is reachable");
+            var prop = setup != null ? setup.GetProperty("BundleIdentifier", BindingFlags.Public | BindingFlags.Static) : null;
+            Check(prop != null, "Bundle id: MobileBuildSetup.BundleIdentifier is a public static property");
+            if (prop != null)
+            {
+                // DFU_IOS_TESTAPP is not set in an ordinary editor run, so this is the release id.
+                string id = (string)prop.GetValue(null, null);
+                Check(id == "net.codex64.daggerfall" || id == "net.codex64.daggerfall.test",
+                    "Bundle id: BundleIdentifier answers one of the two ids the port ships", id);
+                Check(id == (System.Environment.GetEnvironmentVariable("DFU_IOS_TESTAPP") == "1"
+                             ? "net.codex64.daggerfall.test" : "net.codex64.daggerfall"),
+                    "Bundle id: the id follows DFU_IOS_TESTAPP and nothing else", id);
+            }
+
+            string src = StripShaderComments(File.ReadAllText("Assets/Editor/MobileBuildSetup.cs"));
+            Check(MethodBody(src, "public static string BundleIdentifier").Contains("IsTestApp ? testBundleId : releaseBundleId"),
+                "Bundle id: BundleIdentifier is the same IsTestApp switch that sets the player settings");
+            Check(src.Contains("testApp ? testBundleId : releaseBundleId"),
+                "Bundle id: ApplyIOSSettings still writes the identity into the player settings");
+
+            string post = StripShaderComments(File.ReadAllText("Assets/Editor/MobileIOSPostProcess.cs"));
+            Check(post.Contains("MobileBuildSetup.BundleIdentifier"),
+                "Bundle id: the post-process takes the id from MobileBuildSetup, not from a second literal");
+            Check(post.Contains("SetBuildProperty(pbx.GetUnityMainTargetGuid(), \"PRODUCT_BUNDLE_IDENTIFIER\", bundleId)"),
+                "Bundle id: PRODUCT_BUNDLE_IDENTIFIER is written on the APP target, which is what xcodebuild matches a profile against");
+            // Order: the property has to be set before the project is written back out.
+            int iSet = post.IndexOf("PRODUCT_BUNDLE_IDENTIFIER", StringComparison.Ordinal);
+            int iWrite = post.IndexOf("pbx.WriteToFile(pbxPath)", StringComparison.Ordinal);
+            Check(iSet >= 0 && iWrite > iSet,
+                "Bundle id: the id is set before the pbxproj is written back", iSet + " -> " + iWrite);
+
+            // The recipe a human follows has to say the same thing the code does.
+            string readme = File.ReadAllText("README-iOS.md");
+            Check(readme.Contains("PRODUCT_BUNDLE_IDENTIFIER"),
+                "Bundle id: README-iOS's build recipe records that the id is pinned into the Xcode project");
         }
 
         static global::LocationLoader.LocationPrefab ParseLocationPrefabXml(string xml)

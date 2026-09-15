@@ -90,6 +90,16 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 pbx.SetBuildProperty(guid, "CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER", "NO");
             }
 
+            // --- the bundle id, pinned in the Xcode project --------------------------
+            // Unity writes the identity into Info.plist from PlayerSettings, but a provisioning
+            // profile is matched against the TARGET's PRODUCT_BUNDLE_IDENTIFIER build setting, and
+            // the generated project has carried the plain id while the plist said `.test`. The
+            // result is a signed ipa that installs OVER the real app instead of beside it - which
+            // is exactly what the side-by-side test app exists not to do. One source for the id
+            // (DFU_IOS_TESTAPP, through MobileBuildSetup.BundleIdentifier), written to both.
+            string bundleId = MobileBuildSetup.BundleIdentifier;
+            pbx.SetBuildProperty(pbx.GetUnityMainTargetGuid(), "PRODUCT_BUNDLE_IDENTIFIER", bundleId);
+
             // DFMobilePointer.mm uses GCMouse. Native plugins compile into UnityFramework,
             // so that is the target that has to link GameController.
             pbx.AddFrameworkToProject(pbx.GetUnityFrameworkTargetGuid(), "GameController.framework", false);
@@ -97,6 +107,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             pbx.WriteToFile(pbxPath);
 
             Debug.Log("[MobileIOSPostProcess] Info.plist + pbxproj updated:\n" +
+                      "  PRODUCT_BUNDLE_IDENTIFIER         = " + bundleId + "   (pinned on the app target, so xcodebuild picks the matching profile)\n" +
                       "  ENABLE_MODULE_VERIFIER            = NO    (Xcode 16+ rejects Unity 2022 framework headers)\n" +
                       "  ENABLE_USER_SCRIPT_SANDBOXING     = NO    (IL2CPP script phase needs file access)\n" +
                       "  UIFileSharingEnabled              = true  (Finder file sharing)\n" +

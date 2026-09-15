@@ -87,6 +87,18 @@ namespace DaggerfallWorkshop.Game.Mobile
         // jetsam kill. One attempt, one warning, then silence until the filter is switched off and on.
         static bool creationFailed;
 
+        // MOBILE 2026-09-15: the GRACE PERIOD. The target is 15-21 MB and takes a real allocation to
+        // build, and the two things a player does most with this feature - switching retro mode on
+        // and off to compare the pictures, switching the filter itself on and off - each freed it
+        // and rebuilt it, at 60 Hz of decision-making speed. So the teardown now DETACHES
+        // immediately (the cameras, the sky rig and the presenter all go back the moment the path
+        // stops, because those are what the picture depends on) but keeps the texture itself for ten
+        // seconds: a toggle inside that window reuses it and costs nothing. Anything that really
+        // means "let it go" - the ten seconds elapsing, the scene changing under it, iOS asking for
+        // memory back, the driver going away - destroys it at once.
+        const float GraceSeconds = 10f;
+        static float graceUntil = -1f;
+
         // Resolved once and cached, not per frame - see RouteSkyCamera. skyRigSearched is what
         // makes "this scene has no reachable sky rig" cost ONE search rather than one per frame;
         // ResolvePresenter clears it on the scene change that is the only thing able to change
@@ -205,6 +217,12 @@ namespace DaggerfallWorkshop.Game.Mobile
             {
                 if (active)
                     Stop();
+
+                // The grace period's collector. `presenter == null` is the scene change: the cached
+                // presenter is a component of the scene that was just unloaded, and a target held
+                // for a scene nobody is in any more is a leak with a timer on it, not a cache.
+                if (target != null && (presenter == null || Time.realtimeSinceStartup >= graceUntil))
+                    DestroyTarget();
                 // The player has switched the filter (or retro mode) off, so a later "on" is a new
                 // request and gets a fresh attempt. This is also the reset for the not-active case,
                 // where Stop() above did not run: after a latched failure the path never becomes
@@ -276,6 +294,9 @@ namespace DaggerfallWorkshop.Game.Mobile
             // does this for retro mode in its Update, which returns early while retro mode is off.
             RouteSkyCamera(target);
 
+            // Back in use inside the grace window: whatever was scheduled to collect this texture is
+            // no longer collecting it.
+            graceUntil = -1f;
             active = true;
         }
 
@@ -323,6 +344,17 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         static void Release()
         {
+            Detach();
+            DestroyTarget();
+        }
+
+        /// <summary>
+        /// Hands everything that was pointed at the target somewhere else, and leaves the texture
+        /// alive. This is the half of the old Release() the picture depends on: it has to happen in
+        /// the frame the path stops, whether or not the texture is being kept for the grace period.
+        /// </summary>
+        static void Detach()
+        {
             if (target == null)
                 return;
 
@@ -360,9 +392,24 @@ namespace DaggerfallWorkshop.Game.Mobile
                     other.targetTexture = successor;
             }
 
-            target.Release();
-            Object.Destroy(target);
+        }
+
+        /// <summary>
+        /// Frees the texture. Separate from <see cref="Detach"/> so the grace period can keep it
+        /// after everything else has let go of it - and so every "really let it go" caller (the
+        /// grace expiring, a scene change, iOS's low-memory warning, the driver being destroyed) is
+        /// one call rather than a repeated three lines.
+        /// </summary>
+        static void DestroyTarget()
+        {
+            graceUntil = -1f;
+            if (target == null)
+                return;
+
+            RenderTexture was = target;
             target = null;
+            was.Release();
+            Object.Destroy(was);
         }
 
         /// <summary>
@@ -373,7 +420,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         static void Stop()
         {
             active = false;
-            Release();
+            Detach();
+
+            // Kept, not freed - see GraceSeconds. Tick's own !wanted branch is what collects it when
+            // the ten seconds are up, and Recreate frees it outright if the viewport has changed
+            // size in the meantime (a target of the wrong size is not worth keeping).
+            if (target != null)
+                graceUntil = Time.realtimeSinceStartup + GraceSeconds;
 
             if (presenter != null)
             {
@@ -546,6 +599,11 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         class Driver : MonoBehaviour
         {
+            void OnEnable()
+            {
+                Application.lowMemory += OnLowMemory;
+            }
+
             void LateUpdate()
             {
                 Tick();
@@ -553,8 +611,26 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             void OnDisable()
             {
+                Application.lowMemory -= OnLowMemory;
                 if (active)
                     Stop();
+                // ...and then the grace period does not apply: the driver is going away, so nothing
+                // is left to collect the texture it would have kept.
+                DestroyTarget();
+            }
+
+            /// <summary>
+            /// iOS asking for memory back. A target being HELD for a toggle that may never come is
+            /// the first thing that should go; one that is actually in use is not - the player is
+            /// looking at it, and dropping it would black out the world rather than save the app.
+            /// </summary>
+            static void OnLowMemory()
+            {
+                if (active || target == null)
+                    return;
+
+                Debug.Log("[CRT] low memory - dropping the native target held for the grace period");
+                DestroyTarget();
             }
         }
     }
