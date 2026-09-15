@@ -34,6 +34,14 @@ making the game playable on iPhone and iPad without a keyboard or mouse.
 - **Real haptics** via the Taptic Engine (iPhone only; iPad has no motor)
 - **Autosave** - three rotating slots written on travel arrival, dungeon transitions and a
   timer, with guard rails so one is never taken mid-fight
+- **Weather that changes during a day** - stock Daggerfall Unity re-rolls the weather only
+  when the in-game date turns over (its 30-second poll has been commented out upstream since
+  2017), so a day that starts sunny is sunny until midnight. This re-rolls it from the same
+  climate and season table every few game hours while you are outdoors - `[Enhancements]`
+  `WeatherChanges` (default `True`) and `WeatherChangeHours` (default `6`, range 1..24), also
+  in *Pause -> Mobile Settings -> HUD* next to Sky haze. Resting and fast travel produce one
+  roll on arrival rather than a burst, and a loaded save keeps its own weather until the first
+  interval has passed.
 
 ## Engine footprint
 

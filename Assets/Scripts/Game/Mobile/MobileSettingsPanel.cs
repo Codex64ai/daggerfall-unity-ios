@@ -527,6 +527,38 @@ namespace DaggerfallWorkshop.Game.Mobile
                 },
                 null);
 
+            // MOBILE 2026-09-15: weather changes. Next to Sky haze because both are sky rows, and
+            // like it they own their persistence (null key) - the values live in settings.ini, not
+            // in this panel's PlayerPrefs. No apply call: MobileWeatherCycle reads both live.
+            AddNote(c, ref y, rowW,
+                "Stock Daggerfall Unity only re-rolls the weather at midnight, so a day stays sunny "
+                + "or rainy from start to end. This re-rolls it from the same climate table every N "
+                + "hours while you are outdoors.");
+
+            AddToggle(c, ref y, rowW, rowH, "Weather changes",
+                () => DaggerfallUnity.Settings.WeatherChanges,
+                v =>
+                {
+                    if (DaggerfallUnity.Settings.WeatherChanges == v)
+                        return;
+                    DaggerfallUnity.Settings.WeatherChanges = v;
+                    DaggerfallUnity.Settings.SaveSettings();
+                },
+                null);
+
+            AddSlider(c, ref y, rowW, rowH, "Every N hours",
+                MobileWeatherCycle.MinCadenceHours, MobileWeatherCycle.MaxCadenceHours,
+                () => MobileWeatherCycle.CadenceHours,
+                v =>
+                {
+                    int hours = MobileWeatherCycle.ClampCadence(Mathf.RoundToInt(v));
+                    if (DaggerfallUnity.Settings.WeatherChangeHours == hours)
+                        return;
+                    DaggerfallUnity.Settings.WeatherChangeHours = hours;
+                    DaggerfallUnity.Settings.SaveSettings();
+                },
+                null, "0");
+
             BuildDistantTerrainRows(c, ref y, rowW, rowH);
 
             FinishSection(c, y);

@@ -391,6 +391,15 @@ namespace DaggerfallWorkshop
         // one. See Assets/Scripts/Game/Mobile/MobileSkyHaze.cs.
         public bool SkyHaze { get; set; }
 
+        // MOBILE 2026-09-15 (weather changes): stock Daggerfall Unity re-rolls the weather only
+        // when the in-game DATE turns over - its 30-second poll has been commented out since
+        // upstream commit 5e98cf919 - so a day stays sunny or rainy from start to end. WeatherChanges
+        // re-rolls it from the same climate/season table every WeatherChangeHours game hours while
+        // the player is outdoors. The interval is clamped 1..24 on load.
+        // See Assets/Scripts/Game/Mobile/MobileWeatherCycle.cs.
+        public bool WeatherChanges { get; set; }
+        public int WeatherChangeHours { get; set; }
+
         // MOBILE 2026-09-14 (atmosphere round). AudioReverb puts one AudioReverbFilter on the
         // AudioListener and switches its preset on PlayerEnterExit transitions, so a dungeon stops
         // sounding exactly like a tavern. GrassWindFollowsWeather scales Real Grass's wind dials by
@@ -662,6 +671,11 @@ namespace DaggerfallWorkshop
             // hand-edited ini reaches the timer through this property and nothing else.
             AutosaveIntervalMinutes = GetInt(sectionEnhancements, "AutosaveIntervalMinutes", 0, 60);
             SkyHaze = GetBool(sectionEnhancements, "SkyHaze");   // MOBILE
+            WeatherChanges = GetBool(sectionEnhancements, "WeatherChanges");                      // MOBILE
+            // MOBILE: clamped here as well as in MobileWeatherCycle.ClampCadence, because a
+            // hand-edited ini reaches the roller through this property and nothing else - and a
+            // nonsense value must land on a working cadence rather than switching the feature off.
+            WeatherChangeHours = GetInt(sectionEnhancements, "WeatherChangeHours", 1, 24);        // MOBILE
             AudioReverb = GetBool(sectionEnhancements, "AudioReverb");                             // MOBILE
             GrassWindFollowsWeather = GetBool(sectionEnhancements, "GrassWindFollowsWeather");     // MOBILE
             LightningFlash = GetBool(sectionEnhancements, "LightningFlash");                       // MOBILE
@@ -874,6 +888,8 @@ namespace DaggerfallWorkshop
             SetBool(sectionEnhancements, "AutosaveOnDungeon", AutosaveOnDungeon);
             SetInt(sectionEnhancements, "AutosaveIntervalMinutes", AutosaveIntervalMinutes);
             SetBool(sectionEnhancements, "SkyHaze", SkyHaze);   // MOBILE
+            SetBool(sectionEnhancements, "WeatherChanges", WeatherChanges);                       // MOBILE
+            SetInt(sectionEnhancements, "WeatherChangeHours", WeatherChangeHours);                 // MOBILE
             SetBool(sectionEnhancements, "AudioReverb", AudioReverb);                              // MOBILE
             SetBool(sectionEnhancements, "GrassWindFollowsWeather", GrassWindFollowsWeather);      // MOBILE
             SetBool(sectionEnhancements, "LightningFlash", LightningFlash);                        // MOBILE

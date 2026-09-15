@@ -152,6 +152,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestDistantTerrainSliceBlit();
             TestRealGrassPort();
             TestSkyHaze();
+            TestWeatherCycle();
             TestAmbience();
             TestModConflictOrder();
             TestPortedModGate();
@@ -5183,6 +5184,91 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         /// (the skybox shader, the painted sky's promotion, the fog tick, the live dial push),
         /// none of which a headless test can render.
         /// </summary>
+        /// <summary>
+        /// MOBILE 2026-09-15: weather changes. Upstream's own 30-second poll is commented out
+        /// (WeatherManager.Update: //PollWeatherChanges();, commit 5e98cf919), so stock DFU rolls
+        /// the weather only when the in-game date turns over. This checks the setting round-trips,
+        /// the two pure decisions, and that the runtime half stays out of the engine's private path.
+        /// </summary>
+        static void TestWeatherCycle()
+        {
+            log.AppendLine("-- weather cycle --");
+
+            // ---- 1. the settings ----
+            PropertyInfo weatherProp = typeof(SettingsManager).GetProperty("WeatherChanges");
+            Check(weatherProp != null && weatherProp.PropertyType == typeof(bool) && weatherProp.CanWrite,
+                "WeatherCycle: WeatherChanges is a writable bool on SettingsManager");
+            PropertyInfo hoursProp = typeof(SettingsManager).GetProperty("WeatherChangeHours");
+            Check(hoursProp != null && hoursProp.PropertyType == typeof(int) && hoursProp.CanWrite,
+                "WeatherCycle: WeatherChangeHours is a writable int on SettingsManager");
+
+            string settingsSrcWeather = StripShaderComments(File.ReadAllText("Assets/Scripts/SettingsManager.cs"));
+            Check(settingsSrcWeather.Contains("WeatherChanges = GetBool(sectionEnhancements, \"WeatherChanges\")")
+                  && settingsSrcWeather.Contains("SetBool(sectionEnhancements, \"WeatherChanges\", WeatherChanges)"),
+                "WeatherCycle: WeatherChanges is read and written in [Enhancements], so it round-trips settings.ini");
+            Check(settingsSrcWeather.Contains("WeatherChangeHours = GetInt(sectionEnhancements, \"WeatherChangeHours\", 1, 24)")
+                  && settingsSrcWeather.Contains("SetInt(sectionEnhancements, \"WeatherChangeHours\", WeatherChangeHours)"),
+                "WeatherCycle: the interval round-trips too, and is clamped 1..24 on the way in - a bad ini must not switch the feature off");
+
+            string defaultsWeather = File.ReadAllText("Assets/Resources/defaults.ini.txt");
+            Check(defaultsWeather.Contains("WeatherChanges=True") && defaultsWeather.Contains("WeatherChangeHours=6"),
+                "WeatherCycle: on by default, every 6 game hours, in defaults.ini");
+
+            // ---- 2. the cadence clamp ----
+            Check(MobileWeatherCycle.ClampCadence(0) == 6 && MobileWeatherCycle.ClampCadence(25) == 6,
+                "WeatherCycle: out-of-range hours land on the 6-hour default, not on an edge - 0 must not mean 'every frame' or 'never'",
+                MobileWeatherCycle.ClampCadence(0) + " / " + MobileWeatherCycle.ClampCadence(25));
+            Check(MobileWeatherCycle.ClampCadence(1) == 1 && MobileWeatherCycle.ClampCadence(24) == 24
+                  && MobileWeatherCycle.ClampCadence(6) == 6,
+                "WeatherCycle: the ends of the panel's slider and its default pass through unchanged");
+            Check(MobileWeatherCycle.ClampCadence(int.MinValue) == 6 && MobileWeatherCycle.ClampCadence(int.MaxValue) == 6,
+                "WeatherCycle: a garbage interval cannot reach the roller");
+
+            // ---- 3. the roll decision ----
+            // A just-loaded save must keep the weather WeatherManager.OnLoad restored for it; the
+            // caller answers this false by arming the marker from now.
+            Check(!MobileWeatherCycle.ShouldRoll(100000L, -1L, 6),
+                "WeatherCycle: an unarmed marker never rolls - a loaded save keeps its own weather until the first cadence passes");
+            Check(MobileWeatherCycle.ShouldRoll(1000L + 6 * 60, 1000L, 6),
+                "WeatherCycle: exactly one cadence on the clock rolls");
+            Check(!MobileWeatherCycle.ShouldRoll(1000L + 6 * 60 - 1, 1000L, 6),
+                "WeatherCycle: one game minute short does not");
+            Check(MobileWeatherCycle.ShouldRoll(1000L + 3 * 24 * 60, 1000L, 6),
+                "WeatherCycle: three days of rest still says roll");
+            Check(!MobileWeatherCycle.ShouldRoll(1000L, 1000L, 6),
+                "WeatherCycle: and the frame right after a roll does not roll again");
+            // The single-roll contract: ShouldRoll counts nothing, so the caller can only ever act
+            // on it once per check. Twelve boundaries and one boundary are the same answer.
+            Check(MobileWeatherCycle.ShouldRoll(1000L + 3 * 24 * 60, 1000L, 6)
+                  == MobileWeatherCycle.ShouldRoll(1000L + 6 * 60, 1000L, 6),
+                "WeatherCycle: many boundaries and one boundary give the same single answer - a three-day rest is one roll, never a burst");
+            Check(MobileWeatherCycle.ShouldRoll(1000L, 2000L, 6),
+                "WeatherCycle: a clock that went backwards rolls rather than leaving the marker stranded in the future");
+            Check(MobileWeatherCycle.ShouldRoll(1000L + 6 * 60, 1000L, 0)
+                  && !MobileWeatherCycle.ShouldRoll(1000L + 60, 1000L, 0),
+                "WeatherCycle: ShouldRoll clamps the cadence itself, so a bad interval cannot reach it by another road");
+
+            // ---- 4. the runtime half ----
+            string cycleSrc = StripShaderComments(File.ReadAllText(
+                "Assets/Scripts/Game/Mobile/MobileWeatherCycle.cs"));
+            Check(cycleSrc.Contains("IsPlayerInside"),
+                "WeatherCycle: skips while the player is indoors, as WeatherManager.Update does");
+            Check(cycleSrc.Contains("SetWeather("),
+                "WeatherCycle: rolls through the engine's own WeatherManager.SetWeather");
+            Check(!cycleSrc.Contains("PollWeatherChanges"),
+                "WeatherCycle: and does NOT reach into the engine's private disabled poll");
+            Check(cycleSrc.Contains("WeatherTable.ParseJsonTable()"),
+                "WeatherCycle: the weather comes off the engine's own climate/season table, not a new one");
+            Check(cycleSrc.Contains("StreamingWorld.OnInitWorld +=") && cycleSrc.Contains("SaveLoadManager.OnLoad +=")
+                  && cycleSrc.Contains("StreamingWorld.OnInitWorld -=") && cycleSrc.Contains("SaveLoadManager.OnLoad -="),
+                "WeatherCycle: hooks the same two world-ready events WeatherManager.Awake hooks, and unhooks both");
+
+            string panelSrcWeather = StripShaderComments(File.ReadAllText(
+                "Assets/Scripts/Game/Mobile/MobileSettingsPanel.cs"));
+            Check(panelSrcWeather.Contains("\"Weather changes\"") && panelSrcWeather.Contains("\"Every N hours\""),
+                "WeatherCycle: both rows are in the settings panel");
+        }
+
         static void TestSkyHaze()
         {
             log.AppendLine("-- sky haze --");
