@@ -4490,6 +4490,17 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             string ifObj = StripShaderComments(File.ReadAllText(ifPath + "ImmersiveFootstepsObject.cs"));
             Check(ifObj.Contains("MobileJourneyPilot.Active") && !ifObj.Contains("SendModMessage(\"TravelOptions\""),
                 "Atmosphere: the 50 Hz autopilot check reads MobileJourneyPilot directly, not a mod message round trip");
+
+            // Immersive Footsteps played every sound through PlayerAdvanced's shared DaggerfallAudioSource
+            // peer, which is 3D. On the iPad the steps fired - the device log showed a surface line per step,
+            // logged immediately before the play call - and were silent. Stock PlayerFootsteps and Better
+            // Ambience's footsteps each add their own 2D AudioSource; this port now does the same.
+            Check(ifObj.Contains("AddComponent<AudioSource>()") && ifObj.Contains("spatialBlend = 0"),
+                "Atmosphere: Immersive Footsteps owns a dedicated 2D AudioSource, like the stock footsteps");
+            Check(CountOccurrences(ifObj, "dfAudioSource.AudioSource.PlayOneShot(") == 0,
+                "Atmosphere: no Immersive Footsteps sound is played through the player's shared 3D audio source");
+            Check(ifObj.Contains("[ImmersiveFootsteps] first step"),
+                "Atmosphere: Immersive Footsteps logs the first step it plays once, clip and source state included");
             string baPlayer = StripShaderComments(File.ReadAllText(baPath + "BetterFootstepsComponentPlayer.cs"));
             Check(baPlayer.Contains("MobileJourneyPilot.Active") && !baPlayer.Contains("SendModMessage("),
                 "Atmosphere: Better Ambience's player footsteps read the autopilot the same way");

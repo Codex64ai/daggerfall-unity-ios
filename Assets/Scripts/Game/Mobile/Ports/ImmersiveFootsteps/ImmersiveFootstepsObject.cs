@@ -37,7 +37,26 @@ namespace ImmersiveFootsteps
         public float volumeScale = 1f;
 
         GameObject playerAdvanced;
-        DaggerfallAudioSource dfAudioSource;
+
+        // MOBILE: our own AudioSource for every sound this component plays.
+        // Stock PlayerFootsteps (Assets/Scripts/Game/PlayerFootsteps.cs, customAudioSource) and Better
+        // Ambience's BetterFootstepsComponent each add their OWN AudioSource and play the player's steps
+        // through it, 2D (spatialBlend 0). Upstream Immersive Footsteps instead borrowed PlayerAdvanced's
+        // shared DaggerfallAudioSource peer, which is 3D (spatialBlend 1). On the iPad that produced no
+        // audible footsteps even though the play call ran every step: the device log showed
+        // "[ImmersiveFootsteps] attached to the player; vanilla footsteps disabled" plus a
+        // "[ImmersiveFootsteps] surface: ..." line for each step - LogSurface sits immediately before the
+        // PlayOneShot - with no null-clip warning, no failed asset load and no exception, while Better
+        // Ambience's identically-encoded clips from the same importer were audible through its own source.
+        // A dedicated 2D source is what the engine itself does for the player's own steps and drops the
+        // dependency on whatever state the shared source is left in. Every PlayOneShot in this file - the
+        // walking and swimming steps, the three armour sway sounds, the hard fall, the fall damage and the
+        // water landing - now goes through it, so upstream's dfAudioSource field is gone with them.
+        AudioSource footstepSource;
+
+        // MOBILE: guards the one-shot first-step diagnostic below.
+        static bool loggedFirstStep = false;
+
         PlayerMotor playerMotor;
         PlayerEnterExit playerEnterExit;
         TransportManager transportManager;
@@ -71,7 +90,15 @@ namespace ImmersiveFootsteps
             Instance = this;
 
             playerAdvanced = GameManager.Instance.PlayerObject;
-            dfAudioSource = playerAdvanced.GetComponent<DaggerfallAudioSource>();
+
+            // MOBILE: dedicated 2D source, settings copied from stock PlayerFootsteps.Start().
+            footstepSource = playerAdvanced.AddComponent<AudioSource>();
+            footstepSource.hideFlags = HideFlags.HideInInspector;
+            footstepSource.playOnAwake = false;
+            footstepSource.loop = false;
+            footstepSource.dopplerLevel = 0f;
+            footstepSource.spatialBlend = 0f;
+
             playerMotor = GetComponent<PlayerMotor>();
             playerEnterExit = GetComponent<PlayerEnterExit>();
             transportManager = GameManager.Instance.TransportManager;
@@ -194,7 +221,7 @@ namespace ImmersiveFootsteps
                         ImmersiveFootstepsMain.LogSurface(SurfaceName());
                     }
 
-                    dfAudioSource.AudioSource.PlayOneShot(RollRandomFootstepAudioClip(currentClimateFootsteps), volumeScale * IMFM.FootstepVolumeMulti * DaggerfallUnity.Settings.SoundVolume);
+                    footstepSource.PlayOneShot(RollRandomFootstepAudioClip(currentClimateFootsteps), volumeScale * IMFM.FootstepVolumeMulti * DaggerfallUnity.Settings.SoundVolume);
 
                     distance = 0f;
                 }
@@ -222,7 +249,32 @@ namespace ImmersiveFootsteps
 
                 if (IMFM.AllowFootstepSounds)
                 {
-                    dfAudioSource.AudioSource.PlayOneShot(RollRandomFootstepAudioClip(currentClimateFootsteps), volumeScale * IMFM.FootstepVolumeMulti * DaggerfallUnity.Settings.SoundVolume);
+                    // MOBILE: the roll is done once so the diagnostic below names the clip that was played.
+                    AudioClip clip = RollRandomFootstepAudioClip(currentClimateFootsteps);
+                    float volume = volumeScale * IMFM.FootstepVolumeMulti * DaggerfallUnity.Settings.SoundVolume;
+
+                    if (clip != null)
+                        footstepSource.PlayOneShot(clip, volume);
+
+                    // MOBILE: one line, once per session, at the first step actually taken - enough to tell
+                    // "silent because the clip never loaded" from "silent because the source is muted,
+                    // disabled, at zero volume or too far from the listener" without a second build.
+                    if (!loggedFirstStep)
+                    {
+                        loggedFirstStep = true;
+                        if (clip == null)
+                        {
+                            Debug.Log(string.Format("[ImmersiveFootsteps] first step: NULL CLIP for surface {0}", SurfaceName()));
+                        }
+                        else
+                        {
+                            AudioListener listener = FindObjectOfType<AudioListener>();
+                            float dist = (listener == null) ? -1f : Vector3.Distance(footstepSource.transform.position, listener.transform.position);
+                            Debug.Log(string.Format("[ImmersiveFootsteps] first step: clip {0} ({1:0.00}s, {2} Hz, {3}) volume {4:0.00} source enabled {5} mute {6} vol {7:0.00} listenerDist {8:0.0}",
+                                clip.name, clip.length, clip.frequency, clip.loadState, volume,
+                                footstepSource.enabled, footstepSource.mute, footstepSource.volume, dist));
+                        }
+                    }
                 }
 
                 // Reset the footstepTimer
@@ -236,7 +288,7 @@ namespace ImmersiveFootsteps
             if (leatherSwayTimer >= IMFM.leatherSwayInterval)
             {
                 if (IMFM.AllowArmorSwaySounds)
-                    dfAudioSource.AudioSource.PlayOneShot(RollRandomArmorSwayAudioClip(IMFM.LeatherSwaying), volumeScale * IMFM.ArmorSwayVolumeMulti * DaggerfallUnity.Settings.SoundVolume);
+                    footstepSource.PlayOneShot(RollRandomArmorSwayAudioClip(IMFM.LeatherSwaying), volumeScale * IMFM.ArmorSwayVolumeMulti * DaggerfallUnity.Settings.SoundVolume);
 
                 leatherSwayTimer = 0f;
                 IMFM.leatherSwayInterval = UnityEngine.Random.Range(IMFM.ArmorSwayFrequency + 0.1f, IMFM.ArmorSwayFrequency + 0.4f) - (IMFM.leatherWornSwayWeight * 0.02f);
@@ -245,7 +297,7 @@ namespace ImmersiveFootsteps
             if (chainSwayTimer >= IMFM.chainSwayInterval)
             {
                 if (IMFM.AllowArmorSwaySounds)
-                    dfAudioSource.AudioSource.PlayOneShot(RollRandomArmorSwayAudioClip(IMFM.ChainmailSwaying), volumeScale * IMFM.ArmorSwayVolumeMulti * DaggerfallUnity.Settings.SoundVolume);
+                    footstepSource.PlayOneShot(RollRandomArmorSwayAudioClip(IMFM.ChainmailSwaying), volumeScale * IMFM.ArmorSwayVolumeMulti * DaggerfallUnity.Settings.SoundVolume);
 
                 chainSwayTimer = 0f;
                 IMFM.leatherSwayInterval = UnityEngine.Random.Range(IMFM.ArmorSwayFrequency + 0.1f, IMFM.ArmorSwayFrequency + 0.4f) - (IMFM.leatherWornSwayWeight * 0.02f);
@@ -254,7 +306,7 @@ namespace ImmersiveFootsteps
             if (plateSwayTimer >= IMFM.plateSwayInterval)
             {
                 if (IMFM.AllowArmorSwaySounds)
-                    dfAudioSource.AudioSource.PlayOneShot(RollRandomArmorSwayAudioClip(IMFM.PlateSwaying), volumeScale * IMFM.ArmorSwayVolumeMulti * DaggerfallUnity.Settings.SoundVolume);
+                    footstepSource.PlayOneShot(RollRandomArmorSwayAudioClip(IMFM.PlateSwaying), volumeScale * IMFM.ArmorSwayVolumeMulti * DaggerfallUnity.Settings.SoundVolume);
 
                 plateSwayTimer = 0f;
                 IMFM.leatherSwayInterval = UnityEngine.Random.Range(IMFM.ArmorSwayFrequency + 0.1f, IMFM.ArmorSwayFrequency + 0.4f) - (IMFM.leatherWornSwayWeight * 0.02f);
@@ -535,23 +587,23 @@ namespace ImmersiveFootsteps
         private void ApplyPlayerFallDamage(float fallDistance)
         {
             // Play falling damage one-shot through normal audio source
-            if (dfAudioSource)
-                dfAudioSource.AudioSource.PlayOneShot(CheckToUseHardFallSounds(true), 4f * IMFM.FootstepVolumeMulti * DaggerfallUnity.Settings.SoundVolume);
+            if (footstepSource)
+                footstepSource.PlayOneShot(CheckToUseHardFallSounds(true), 4f * IMFM.FootstepVolumeMulti * DaggerfallUnity.Settings.SoundVolume);
         }
 
         // Capture this message so we can play hard fall sound
         private void HardFallAlert(float fallDistance)
         {
             // Play hard fall one-shot through normal audio source
-            if (dfAudioSource)
-                dfAudioSource.AudioSource.PlayOneShot(CheckToUseHardFallSounds(false), 4f * IMFM.FootstepVolumeMulti * DaggerfallUnity.Settings.SoundVolume);
+            if (footstepSource)
+                footstepSource.PlayOneShot(CheckToUseHardFallSounds(false), 4f * IMFM.FootstepVolumeMulti * DaggerfallUnity.Settings.SoundVolume);
         }
 
         // Capture this message so we can play large splash sound
         public void PlayLargeSplash()
         {
-            if (dfAudioSource)
-                dfAudioSource.AudioSource.PlayOneShot(IMFM.WaterLandingSound[0], 4f * IMFM.FootstepVolumeMulti * DaggerfallUnity.Settings.SoundVolume);
+            if (footstepSource)
+                footstepSource.PlayOneShot(IMFM.WaterLandingSound[0], 4f * IMFM.FootstepVolumeMulti * DaggerfallUnity.Settings.SoundVolume);
         }
 
         #endregion
