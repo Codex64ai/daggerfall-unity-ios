@@ -99,6 +99,38 @@ knows an app only by its bundle id, so an `.ipa` signed with the bare `.test` id
 `xcrun devicectl device copy from|to` needs to reach the container over the cable. Only the app
 target gets it: renaming `UnityFramework` as well makes the install fail with `DuplicateIdentifier`.
 
+**Every app build runs both steps, with the same environment.** `ApplyAll` and `BuildIOS` are one
+recipe, not two independent commands: `ApplyAll` is what refreshes the player settings, the touch
+HUD and the bundled mods inside `Assets/StreamingAssets/Mods`, and `BuildIOS` ships whatever that
+folder holds at the moment it runs. So both get `DFU_IOS_TESTAPP=1 DFU_BUNDLED_MODS=builtin` in
+their environment:
+
+```sh
+export DFU_IOS_TESTAPP=1 DFU_BUNDLED_MODS=builtin
+UNITY=/Applications/Unity/Hub/Editor/6000.3.23f1/Unity.app/Contents/MacOS/Unity
+
+"$UNITY" -batchmode -quit -buildTarget iOS -projectPath ~/dev/daggerfall-unity \
+  -executeMethod DaggerfallWorkshop.Game.Mobile.EditorTools.MobileBuildSetup.ApplyAll \
+  -logFile ~/dev/dfu-logs/applyall.log
+
+DFU_IOS_BUILD_PATH=$HOME/dev/dfu-ios-build "$UNITY" -batchmode -quit -buildTarget iOS \
+  -projectPath ~/dev/daggerfall-unity \
+  -executeMethod DaggerfallWorkshop.Game.Mobile.EditorTools.MobileBuildSetup.BuildIOS \
+  -logFile ~/dev/dfu-logs/device-build.log
+```
+
+`DFU_BUNDLED_MODS=builtin` is what makes `ApplyAll`'s bundled-mods step put only the three built-in
+data bundles in `Assets/StreamingAssets/Mods` - RoleplayRealism, RoleplayRealism-Items and
+Climates & Calories, the entries `tools/bundled-mods/mods.json` marks `"builtin": true`. Those are
+the mods whose *code* is compiled into the app, so their data has to ship with it; everything else
+is a download. Left unset, the same step builds all ~57 pack bundles into that folder, which is the
+**mod-pack zip** workflow, not an app build.
+
+Skipping `ApplyAll` does not mean "build with the defaults" - it means the app ships whatever that
+folder happens to hold from the last thing that wrote it. That is how a 208 MB test `.ipa` carrying
+all 57 pack bundles got built and released (since replaced): the folder still held the pack from a
+previous zip run.
+
 ## Installing the app
 
 Two routes. Either way the `.ipa` is unsigned and gets signed on the spot with **your own

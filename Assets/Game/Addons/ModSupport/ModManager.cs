@@ -176,6 +176,11 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
             MobilePortedMods.DefaultOff(this);
 
             LoadModSettings();
+            // MOBILE: and AFTER the saved settings, not before. A saved Enabled=true written by an
+            // older build that did not yet know the title is not the player's choice - it is that
+            // build discovering a newly copied bundle - so a title this device has never offered is
+            // forced off once, guarded by a PlayerPrefs seen-list.
+            MobilePortedMods.ForceOffFirstSeen(this);   // MOBILE: see MobilePortedMods
             SortMods();
         }
 

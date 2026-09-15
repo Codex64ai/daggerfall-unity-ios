@@ -790,13 +790,33 @@ void UpdateWorldTime() {
     //Dictionaries to store skybox settings
     private Dictionary<WeatherType, BLBSkyboxSetting[]> SkyboxSettings;
 
+    /// <summary>
+    /// MOBILE: an optional preset, looked up without a warning. Mod.GetAsset logs
+    /// "Failed to load asset: X" for anything it cannot find (Mod.cs) - right for a required
+    /// asset, noise for one the bundle is not expected to carry. HasAsset is asked with the name
+    /// as written AND with the name GetAsset itself would use (ModManager.GetAssetName lowercases;
+    /// HasAsset does not), so a preset that really is shipped still loads.
+    /// </summary>
+    private TextAsset OptionalPreset(string name) {
+        if (presetMod == null) return null;
+        if (!presetMod.HasAsset(name) && !presetMod.HasAsset(ModManager.GetAssetName(name))) return null;
+        return presetMod.GetAsset<TextAsset>(name, false);
+    }
+
     private void loadAllSkyboxSettings() {
         SkyboxSettings = new Dictionary<WeatherType, BLBSkyboxSetting[]>();
 
         string data = presetMod.GetAsset<TextAsset>("SkyboxSunny.json", false).text;
         loadSkyboxSettings(WeatherType.Sunny, data, 0);
 
-        TextAsset night = presetMod.GetAsset<TextAsset>("SkyboxSunnyNight.json", false);
+        // MOBILE: the seven *Night.json presets are OPTIONAL and in practice never shipped.
+        // Upstream drcarademono/dynamic-skies @ 04506e2 lists only the seven DAY presets in its
+        // manifest (SkyboxSettings/*.json) - its night JSONs sit in an unshipped Resources/ folder -
+        // and the DREAM sky preset bundle carries none either, so the desktop mod logs the same
+        // seven "Failed to load asset" warnings and loadSkyboxSettings below deliberately reuses
+        // the day preset at night (index 0 is copied into index 1). Asking HasAsset first drops
+        // seven warnings from every launch and changes nothing else.
+        TextAsset night = OptionalPreset("SkyboxSunnyNight.json");
         if(night) {
             data = night.text;
             loadSkyboxSettings(WeatherType.Sunny, data, 1);
@@ -805,7 +825,7 @@ void UpdateWorldTime() {
         data = presetMod.GetAsset<TextAsset>("SkyboxCloudy.json", false).text;
         loadSkyboxSettings(WeatherType.Cloudy, data, 0);
 
-        night = presetMod.GetAsset<TextAsset>("SkyboxCloudyNight.json", false);
+        night = OptionalPreset("SkyboxCloudyNight.json");
         if(night) {
             data = night.text;
             loadSkyboxSettings(WeatherType.Cloudy, data, 1);
@@ -814,7 +834,7 @@ void UpdateWorldTime() {
         data = presetMod.GetAsset<TextAsset>("SkyboxOvercast.json", false).text;
         loadSkyboxSettings(WeatherType.Overcast, data, 0);
 
-        night = presetMod.GetAsset<TextAsset>("SkyboxOvercastNight.json", false);
+        night = OptionalPreset("SkyboxOvercastNight.json");
         if(night) {
             data = night.text;
             loadSkyboxSettings(WeatherType.Overcast, data, 1);
@@ -823,7 +843,7 @@ void UpdateWorldTime() {
         data = presetMod.GetAsset<TextAsset>("SkyboxFog.json", false).text;
         loadSkyboxSettings(WeatherType.Fog, data, 0);
 
-        night = presetMod.GetAsset<TextAsset>("SkyboxFogNight.json", false);
+        night = OptionalPreset("SkyboxFogNight.json");
         if(night) {
             data = night.text;
             loadSkyboxSettings(WeatherType.Fog, data, 1);
@@ -832,7 +852,7 @@ void UpdateWorldTime() {
         data = presetMod.GetAsset<TextAsset>("SkyboxRain.json", false).text;
         loadSkyboxSettings(WeatherType.Rain, data, 0);
 
-        night = presetMod.GetAsset<TextAsset>("SkyboxRainNight.json", false);
+        night = OptionalPreset("SkyboxRainNight.json");
         if(night) {
             data = night.text;
             loadSkyboxSettings(WeatherType.Rain, data, 1);
@@ -841,7 +861,7 @@ void UpdateWorldTime() {
         data = presetMod.GetAsset<TextAsset>("SkyboxThunder.json", false).text;
         loadSkyboxSettings(WeatherType.Thunder, data, 0);
 
-        night = presetMod.GetAsset<TextAsset>("SkyboxThunderNight.json", false);
+        night = OptionalPreset("SkyboxThunderNight.json");
         if(night) {
             data = night.text;
             loadSkyboxSettings(WeatherType.Thunder, data, 1);
@@ -850,7 +870,7 @@ void UpdateWorldTime() {
         data = presetMod.GetAsset<TextAsset>("SkyboxSnow.json", false).text;
         loadSkyboxSettings(WeatherType.Snow, data, 0);
 
-        night = presetMod.GetAsset<TextAsset>("SkyboxSnowNight.json", false);
+        night = OptionalPreset("SkyboxSnowNight.json");
         if(night) {
             data = night.text;
             loadSkyboxSettings(WeatherType.Snow, data, 1);

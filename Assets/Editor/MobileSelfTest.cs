@@ -158,6 +158,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestPortedModGate();
             TestPortedModOrder();
             TestPortedModTitles();
+            TestPortedModFirstSeen();
             TestDEXPort();
             TestAtmosphereMods();
             TestLocationLoaderRmbObjects();
@@ -4801,6 +4802,81 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(installedSaidStarted && ranInstalled, "PortedMods: StartOne with an installed check runs Init and reports started when the mod installed");
             Check(!declinedSaidStarted, "PortedMods: StartOne with an installed check reports did not start when Init declined without throwing");
             Check(!overloadThrewSaidStarted, "PortedMods: StartOne with an installed check contains a throwing Init and reports not started");
+        }
+
+        /// <summary>
+        /// MOBILE: the once-per-title default-off guard. The bestiary came up enabled although
+        /// nobody enabled it: its bundle was copied to the device while a build that did not yet
+        /// list "Daggerfall Enemy Expansion" was installed, that build discovered the bundle as
+        /// Enabled=true and wrote Mods.json, and every later build then honoured the entry as the
+        /// player's saved choice. DefaultOff cannot see the difference - it runs BEFORE
+        /// LoadModSettings, by design, so a real choice wins. ForceOffFirstSeen runs after, and
+        /// tells the two apart from a PlayerPrefs list of titles this device has actually offered.
+        /// </summary>
+        static void TestPortedModFirstSeen()
+        {
+            string[] titles = { "A", "B", "C" };
+
+            // The first launch of a build that has the guard at all knows nothing about what the
+            // player chose, so it must touch nothing - an empty seen list is NOT "nothing is seen".
+            Check(!MobilePortedMods.FirstSeenTitles(titles, new HashSet<string>(), false).Any(),
+                "PortedMods: with no saved seen list nothing is first-seen - the arming launch leaves every choice alone");
+            Check(!MobilePortedMods.FirstSeenTitles(titles, new HashSet<string> { "A" }, false).Any(),
+                "PortedMods: seenListExists=false wins over the contents of the seen set");
+
+            var firstSeen = MobilePortedMods.FirstSeenTitles(titles, new HashSet<string> { "A", "B" }, true).ToArray();
+            Check(firstSeen.Length == 1 && firstSeen[0] == "C",
+                "PortedMods: a title missing from the seen list is first-seen, the ones in it are not",
+                string.Join(",", firstSeen));
+            Check(!MobilePortedMods.FirstSeenTitles(titles, new HashSet<string> { "A", "B", "C", "D" }, true).Any(),
+                "PortedMods: nothing is first-seen once the seen list covers every title");
+            Check(MobilePortedMods.FirstSeenTitles(titles, new HashSet<string>(), true).Count() == 3,
+                "PortedMods: an existing but empty seen list makes every title first-seen");
+
+            // The saved list is one string, so the separator must be something no ModTitle can
+            // contain: titles have spaces and apostrophes in them and both must survive intact.
+            string[] real = { MobilePortedMods.DEXTitle, MobilePortedMods.CCTitle, "Kokey's Temperate", "World of Daggerfall - Biomes" };
+            var round = MobilePortedMods.SplitSeen(MobilePortedMods.JoinSeen(real));
+            Check(round.Count == real.Length && real.All(round.Contains),
+                "PortedMods: the seen list round-trips titles with spaces, hyphens and an apostrophe",
+                MobilePortedMods.JoinSeen(real).Replace("\n", "|"));
+            Check(MobilePortedMods.SeenSeparator == '\n' && !MobilePortedMods.Titles.Any(t => t.IndexOf(MobilePortedMods.SeenSeparator) >= 0),
+                "PortedMods: the seen-list separator is a newline, which no shipped title contains");
+            Check(MobilePortedMods.SplitSeen("").Count == 0 && MobilePortedMods.SplitSeen(null).Count == 0 && MobilePortedMods.JoinSeen(null) == "",
+                "PortedMods: an empty or absent seen list is an empty set, not a one-entry one");
+            var everyTitle = MobilePortedMods.SplitSeen(MobilePortedMods.JoinSeen(MobilePortedMods.Titles));
+            Check(everyTitle.Count == MobilePortedMods.Titles.Length,
+                "PortedMods: every shipped title survives the seen-list round trip",
+                everyTitle.Count + " of " + MobilePortedMods.Titles.Length);
+
+            // Order in ModManager, from the source. DefaultOff must stay BEFORE LoadModSettings (a
+            // real saved choice wins) and the first-seen guard must run AFTER it (a saved choice a
+            // build never offered does not). Comments stripped, so a comment naming a call cannot
+            // satisfy a check for the call.
+            string managerSrc = StripShaderComments(File.ReadAllText("Assets/Game/Addons/ModSupport/ModManager.cs"));
+            int defaultOffAt = managerSrc.IndexOf("MobilePortedMods.DefaultOff(this)");
+            int loadSettingsAt = managerSrc.IndexOf("LoadModSettings();");
+            int forceOffAt = managerSrc.IndexOf("MobilePortedMods.ForceOffFirstSeen(this)");
+            Check(defaultOffAt >= 0 && loadSettingsAt > defaultOffAt,
+                "PortedMods: DefaultOff still runs before LoadModSettings, so a real saved choice still wins",
+                "defaultOff " + defaultOffAt + ", loadModSettings " + loadSettingsAt);
+            Check(forceOffAt > loadSettingsAt && loadSettingsAt >= 0,
+                "PortedMods: ForceOffFirstSeen runs after LoadModSettings, so a saved choice an older build never offered is undone",
+                "loadModSettings " + loadSettingsAt + ", forceOffFirstSeen " + forceOffAt);
+
+            // Dynamic Skies' night presets: optional, so they are asked for rather than demanded.
+            // Upstream ships only the seven DAY presets, the day setting is reused at night by
+            // design, and Mod.GetAsset warns for every miss - seven warnings a launch, for nothing.
+            string skyboxSrc = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/Ports/DynamicSkies/BLBSkybox.cs"));
+            Check(skyboxSrc.Contains("private TextAsset OptionalPreset(string name)")
+                  && skyboxSrc.Contains("presetMod.HasAsset(name)")
+                  && skyboxSrc.Contains("presetMod.GetAsset<TextAsset>(name, false)"),
+                "DynamicSkies: OptionalPreset asks HasAsset before GetAsset");
+            int nightLookups = Regex.Matches(skyboxSrc, "Night\\.json\\\"").Count;
+            int viaHelper = Regex.Matches(skyboxSrc, "OptionalPreset\\(\\\"Skybox\\w+Night\\.json\\\"\\)").Count;
+            Check(nightLookups == 7 && viaHelper == 7,
+                "DynamicSkies: all seven night presets go through OptionalPreset and none through a bare GetAsset",
+                nightLookups + " night names, " + viaHelper + " through the helper");
         }
 
         class FakeJourney : IJourneyState

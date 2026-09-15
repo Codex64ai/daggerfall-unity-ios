@@ -51,6 +51,7 @@
 // off or declined to install: the flag it asks is false, and the poll is the two-argument one.
 
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
 
@@ -182,12 +183,114 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// bundle the engine has just discovered defaults to enabled, but these are systems a player
         /// must choose, so they start off. A saved choice overrides this. Titles with no entry (Dynamic
         /// Skies until its bundle is installed) are skipped.
+        ///
+        /// MOBILE: this alone is not enough, and the bestiary is how we found out. Its bundle was
+        /// copied to the device while a build that did not yet list "Daggerfall Enemy Expansion" in
+        /// <see cref="Titles"/> was installed; that build discovered the bundle as Enabled=true and
+        /// wrote it to Mods.json, so every later build - the ones that DO list the title - honoured
+        /// that as the player's saved choice and the mod came up on without anyone enabling it.
+        /// <see cref="ForceOffFirstSeen"/> closes that hole after LoadModSettings.
         /// </summary>
         public static void DefaultOff(ModManager manager)
         {
             foreach (string title in Titles)
                 if (manager.GetModIndex(title) >= 0)
                     manager.GetMod(title).Enabled = false;
+        }
+
+        /// <summary>PlayerPrefs key holding the titles this device has already offered the player.</summary>
+        public const string SeenPrefsKey = "DFMobile.PortedModsSeen";
+
+        /// <summary>
+        /// Separator for the saved seen list. A newline cannot occur in a ModTitle, so no title can
+        /// be split in half or forge an extra entry.
+        /// </summary>
+        public const char SeenSeparator = '\n';
+
+        /// <summary>
+        /// Pure: which of <paramref name="titles"/> this device has never had a say about, and must
+        /// therefore be forced off regardless of what Mods.json says.
+        ///
+        /// When <paramref name="seenListExists"/> is false this is the first launch of a build that
+        /// has the guard at all: nothing is known about what the player did or did not choose, so
+        /// the answer is empty and no existing setting is touched. The caller arms the list instead.
+        /// </summary>
+        public static IEnumerable<string> FirstSeenTitles(IEnumerable<string> titles, ICollection<string> seen, bool seenListExists)
+        {
+            var first = new List<string>();
+            if (!seenListExists || titles == null)
+                return first;
+            foreach (string title in titles)
+                if (seen == null || !seen.Contains(title))
+                    first.Add(title);
+            return first;
+        }
+
+        /// <summary>Pure: the seen list as one PlayerPrefs string.</summary>
+        public static string JoinSeen(IEnumerable<string> titles)
+        {
+            var list = new List<string>();
+            if (titles != null)
+                foreach (string title in titles)
+                    if (!string.IsNullOrEmpty(title))
+                        list.Add(title);
+            return string.Join(SeenSeparator.ToString(), list.ToArray());
+        }
+
+        /// <summary>Pure: the inverse of <see cref="JoinSeen"/>. Empty entries are dropped.</summary>
+        public static HashSet<string> SplitSeen(string saved)
+        {
+            var set = new HashSet<string>();
+            if (string.IsNullOrEmpty(saved))
+                return set;
+            foreach (string title in saved.Split(SeenSeparator))
+                if (!string.IsNullOrEmpty(title))
+                    set.Add(title);
+            return set;
+        }
+
+        /// <summary>
+        /// Called by ModManager immediately AFTER LoadModSettings: a title this build has never
+        /// offered the player starts off even when Mods.json says it is on.
+        ///
+        /// This is the bestiary's lesson (see <see cref="DefaultOff"/>): a bundle copied onto the
+        /// device while an older build was installed gets discovered as enabled and saved, and from
+        /// then on every build reads that back as a deliberate choice. Only a record of which titles
+        /// this device has actually shown the player can tell the two apart, so one is kept in
+        /// PlayerPrefs under <see cref="SeenPrefsKey"/>. The launch that creates that record only
+        /// arms it - existing choices are never rewritten - and a title whose bundle is not installed
+        /// yet is left unseen, so it is still forced off on the launch its bundle first appears.
+        /// </summary>
+        public static void ForceOffFirstSeen(ModManager manager)
+        {
+            if (manager == null)
+                return;
+
+            if (!PlayerPrefs.HasKey(SeenPrefsKey))
+            {
+                PlayerPrefs.SetString(SeenPrefsKey, JoinSeen(Titles));
+                PlayerPrefs.Save();
+                Debug.Log("[PortedMods] default-off guard armed for " + Titles.Length + " titles");
+                return;
+            }
+
+            HashSet<string> seen = SplitSeen(PlayerPrefs.GetString(SeenPrefsKey, string.Empty));
+            bool forced = false;
+            foreach (string title in FirstSeenTitles(Titles, seen, true))
+            {
+                // Not installed on this device yet: it has not been offered, so it stays unseen and
+                // gets forced off on the launch that first finds its bundle.
+                if (manager.GetModIndex(title) < 0)
+                    continue;
+                manager.GetMod(title).Enabled = false;
+                seen.Add(title);
+                forced = true;
+                Debug.Log("[PortedMods] first seen, off by default: " + title);
+            }
+            PlayerPrefs.SetString(SeenPrefsKey, JoinSeen(seen));
+            PlayerPrefs.Save();
+            if (forced)
+                ModManager.WriteModSettings();
         }
 
         /// <summary>
