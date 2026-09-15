@@ -40,6 +40,14 @@ namespace SpellcastStudios.BetterFootsteps
             // the only evidence a sim pass can show that the mod took over footsteps at all.
             Debug.Log("[BetterAmbience] footsteps: replacing the built-in player footsteps");
 
+            // MOBILE: past the "enable" setting and about to silence PlayerFootsteps, so this module
+            // really is the one holding the player's footsteps. Immersive Footsteps reads this flag
+            // instead of looking the mod up by GUID, so its compatibility box only appears when there
+            // genuinely are two sets of footsteps running. BetterAmbiencePort's Bootstrap does not
+            // even attach this component when Immersive Footsteps is installed, so with both mods on
+            // the flag stays false and no box appears.
+            BetterAmbiencePort.FootstepsActive = true;
+
             DisableBuiltInFootsteps();
 
             if (footstepsComponent == null)

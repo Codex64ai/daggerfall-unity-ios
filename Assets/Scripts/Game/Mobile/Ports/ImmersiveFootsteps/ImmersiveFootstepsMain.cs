@@ -242,18 +242,20 @@ namespace ImmersiveFootsteps
         {
             // Better Ambience mod: https://www.nexusmods.com/daggerfallunity/mods/139
             // MOBILE: the GUID is right - better-ambience.dfmod keeps the author's own manifest GUID -
-            // so this check works here unchanged. It still matters: MobileModConflicts asks the player
-            // which of the two owns footsteps, but a player who answers "Immersive Footsteps" still has
-            // Better Ambience installed for its camera shake and dungeon fog, and this is how the mod
-            // notices that the other one's footstep module is also on.
+            // so the lookup works here unchanged, and it still matters: MobileModConflicts asks the
+            // player which of the two owns footsteps, and one who answers "Immersive Footsteps" still
+            // has Better Ambience installed for its camera shake and dungeon fog.
             Mod betterAmbience = ModManager.Instance.GetModFromGUID("d5655077-ba38-4dbc-a41f-2b358cb1d680");
-            if (betterAmbience != null)
-            {
-                BetterAmbienceCheck = true;
-                ModSettings betterAmbienceSettings = betterAmbience.GetSettings();
-                BetterAmbienceFootstepsModuleCheck = betterAmbienceSettings.GetBool("Better Footsteps", "enable");
-            }
-            else { BetterAmbienceCheck = false; }
+            BetterAmbienceCheck = betterAmbience != null;
+            // MOBILE: upstream read Better Ambience's "Better Footsteps/enable" SETTING here, which on
+            // iOS says what the player asked for and not what happened. Our Better Ambience port yields
+            // the player's footsteps to this mod whenever both are on - BetterAmbiencePort.Bootstrap
+            // never attaches BetterFootstepsMod, and logs "footsteps left to Immersive Footsteps" - so
+            // the setting can be on with nothing behind it, and the box below would be complaining
+            // about an overlap that no longer exists. Read the port's actual state instead. This runs
+            // in Start, before Better Ambience's Bootstrap has had a frame, so it is only the initial
+            // value; ReportModCompatibilityIssues re-reads it at the moment it would show the box.
+            BetterAmbienceFootstepsModuleCheck = BetterAmbienceCheck && SpellcastStudios.BetterAmbiencePort.FootstepsActive;
 
             // Tempered Interiors mod: https://www.nexusmods.com/daggerfallunity/mods/392
             Mod temperedInteriors = ModManager.Instance.GetModFromGUID("a1ec918d-fad6-4050-99ec-d07043a0308a");
@@ -457,9 +459,24 @@ namespace ImmersiveFootsteps
             }
         }
 
+        /// <summary>
+        /// MOBILE: the truth table behind the "Compatibility Issue Detected" box. The box is about ONE
+        /// thing - two sets of footsteps playing at once - so it is shown only when Better Ambience's
+        /// footsteps module is actually running, never merely because the mod is installed. With both
+        /// mods on, our Better Ambience port stands its footsteps module down and this stays false.
+        /// </summary>
+        public static bool WarnAboutBetterAmbienceFootsteps(bool warningsAllowed, bool ambiencePresent, bool ambienceFootstepsActive)
+        {
+            return warningsAllowed && ambiencePresent && ambienceFootstepsActive;
+        }
+
         public void ReportModCompatibilityIssues()
         {
-            if (AllowCompatibilityWarnings && BetterAmbienceCheck && BetterAmbienceFootstepsModuleCheck)
+            // MOBILE: re-read the live state. This is called at OnStartGame/OnLoad, long after Start,
+            // and by then Better Ambience's Bootstrap has run and settled who owns the footsteps.
+            BetterAmbienceFootstepsModuleCheck = BetterAmbienceCheck && SpellcastStudios.BetterAmbiencePort.FootstepsActive;
+
+            if (WarnAboutBetterAmbienceFootsteps(AllowCompatibilityWarnings, BetterAmbienceCheck, BetterAmbienceFootstepsModuleCheck))
             {
                 Debug.Log("[Warning] Immersive Footsteps: The 'Better Ambience' mod is currently active, more importantly, the 'Better Footsteps' module for that mod is also enabled.");
                 Debug.Log("While using the Immersive Footsteps mod, you should always have Better Ambience's 'Better Footsteps' setting disabled, otherwise you will be constantly...");

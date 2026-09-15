@@ -103,9 +103,11 @@ namespace DaggerfallWorkshop.Game.Mobile
             // not Exclusive on purpose: Better Ambience is three modules, and a player who gives the
             // footsteps to Immersive Footsteps should still keep its camera shake and dungeon fog, so
             // the loser stays installed. Upstream agrees about who should win when both are on -
-            // Immersive Footsteps declares Better Ambience as an OPTIONAL dependency and reads its
-            // "Better Footsteps/enable" setting to notice the clash - and MobilePortedMods starts
-            // them in that order so the answer is the same even if the player keeps both.
+            // Immersive Footsteps declares Better Ambience as an OPTIONAL dependency - and a player
+            // who keeps both anyway gets that same answer without being asked twice: with Immersive
+            // Footsteps installed, BetterAmbiencePort.FootstepsRun is false, its footsteps module is
+            // never attached, and Immersive Footsteps' own "Compatibility Issue Detected" box stays
+            // away because it reads BetterAmbiencePort.FootstepsActive rather than the mod's presence.
             new Group
             {
                 Id = "footsteps", Kind = Kind.Look,

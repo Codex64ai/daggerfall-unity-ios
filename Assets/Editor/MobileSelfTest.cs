@@ -4525,6 +4525,49 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && ported.IndexOf("StartOne(FootstepsTitle", StringComparison.Ordinal)
                      > ported.IndexOf("StartOne(AmbienceTitle", StringComparison.Ordinal),
                 "Atmosphere: Better Ambience starts before Immersive Footsteps, so with both on the latter owns the footsteps");
+
+            // ---- 5. who owns the footsteps, and who gets warned about it ----
+            // The truth table the device bug was about: with both mods on the player used to hear two
+            // sets of footsteps AND get Immersive Footsteps' "Compatibility Issue Detected" box telling
+            // them to switch Better Ambience's footsteps off. Now Better Ambience stands its footsteps
+            // module down on its own, and the box goes with it. The other two rows are unchanged.
+            Check(global::SpellcastStudios.BetterAmbiencePort.FootstepsRun(true, false),
+                "Footsteps: Better Ambience alone keeps its own footsteps");
+            Check(!global::SpellcastStudios.BetterAmbiencePort.FootstepsRun(true, true),
+                "Footsteps: with both on, Better Ambience yields its footsteps module to Immersive Footsteps");
+            Check(!global::SpellcastStudios.BetterAmbiencePort.FootstepsRun(false, true)
+                  && !global::SpellcastStudios.BetterAmbiencePort.FootstepsRun(false, false),
+                "Footsteps: Better Ambience's footsteps never run when Better Ambience itself did not start");
+            // The warning reads the port's ACTUAL state, so the yielded case cannot raise the box.
+            Check(!global::ImmersiveFootsteps.ImmersiveFootstepsMain.WarnAboutBetterAmbienceFootsteps(true, true, false),
+                "Footsteps: no compatibility box when Better Ambience is installed but its footsteps yielded");
+            Check(global::ImmersiveFootsteps.ImmersiveFootstepsMain.WarnAboutBetterAmbienceFootsteps(true, true, true),
+                "Footsteps: the compatibility box still appears if Better Ambience's footsteps really are running");
+            Check(!global::ImmersiveFootsteps.ImmersiveFootstepsMain.WarnAboutBetterAmbienceFootsteps(false, true, true)
+                  && !global::ImmersiveFootsteps.ImmersiveFootstepsMain.WarnAboutBetterAmbienceFootsteps(true, false, true),
+                "Footsteps: the box still obeys the mod's own warnings switch and Better Ambience's presence");
+            Check(!global::SpellcastStudios.BetterAmbiencePort.FootstepsActive,
+                "Footsteps: nothing owns the footsteps in the editor - no mod has been started");
+
+            // The two halves of the fix, pinned to their source lines. The yield is a decision in
+            // BetterAmbiencePort's Bootstrap (the component is never attached, so nothing to undo),
+            // and Immersive Footsteps' check reads the flag rather than Better Ambience's setting.
+            string baPortSrc = StripShaderComments(File.ReadAllText(baPath + "BetterAmbiencePort.cs"));
+            Check(baPortSrc.Contains("if (FootstepsRun(Installed, ImmersiveFootsteps.ImmersiveFootstepsMain.Installed))")
+                  && baPortSrc.Contains("gameObject.AddComponent<BetterFootsteps.BetterFootstepsMod>();"),
+                "Footsteps: Better Ambience's Bootstrap attaches its footsteps module only when FootstepsRun says so");
+            Check(baPortSrc.Contains("Debug.Log(\"[BetterAmbience] footsteps left to Immersive Footsteps\");"),
+                "Footsteps: the yield says so in the log, in the line the device pass greps for");
+            string baFootSrc = StripShaderComments(File.ReadAllText(baPath + "BetterFootstepsMod.cs"));
+            Check(baFootSrc.Contains("BetterAmbiencePort.FootstepsActive = true;"),
+                "Footsteps: Better Ambience's footsteps module is what raises FootstepsActive, past the enable setting");
+            string ifMainSrc = StripShaderComments(File.ReadAllText(ifPath + "ImmersiveFootstepsMain.cs"));
+            Check(!ifMainSrc.Contains("GetBool(\"Better Footsteps\", \"enable\")"),
+                "Footsteps: Immersive Footsteps no longer decides by reading Better Ambience's own setting");
+            Check(ifMainSrc.Contains("BetterAmbienceFootstepsModuleCheck = BetterAmbienceCheck && SpellcastStudios.BetterAmbiencePort.FootstepsActive;"),
+                "Footsteps: Immersive Footsteps reads BetterAmbiencePort.FootstepsActive instead");
+            Check(ifMainSrc.Contains("TemperedInteriorsCheck") && ifMainSrc.Contains("TravelOptionsCheck"),
+                "Footsteps: Immersive Footsteps' other compatibility checks are untouched");
         }
 
         static void TestPortedModTitles()

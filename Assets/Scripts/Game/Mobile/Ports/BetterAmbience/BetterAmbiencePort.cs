@@ -45,6 +45,33 @@ namespace SpellcastStudios
         /// <summary>True once Init created the driver. What MobilePortedMods' four-argument StartOne asks.</summary>
         public static bool Installed { get; private set; }
 
+        /// <summary>
+        /// MOBILE: true only while this port's footsteps module is the one holding the player's
+        /// footsteps - i.e. BetterFootstepsMod actually started AND its "Better Footsteps/enable"
+        /// setting was on. Immersive Footsteps reads THIS, not the mod's presence, to decide whether
+        /// its upstream "Compatibility Issue Detected" box has anything to complain about: with both
+        /// mods on this port yields (see FootstepsRun), so there is no overlap and no box. Set by
+        /// BetterFootstepsMod.Start, the one place that knows it took over.
+        /// </summary>
+        public static bool FootstepsActive { get; internal set; }
+
+        /// <summary>
+        /// MOBILE: the truth table for who owns the player's footsteps. Both mods replace footsteps
+        /// the same way - fetch PlayerFootsteps off the player object and silence it - so with both
+        /// on the player used to hear two sets out of step with each other, and Immersive Footsteps
+        /// raised its compatibility box about it. Immersive Footsteps wins that tie: upstream's own
+        /// manifest makes it an optional dependant of Better Ambience, i.e. its author expects his to
+        /// win, and it is the richer of the two (210 clips against 50, climate and armour aware).
+        /// Better Ambience keeps its other two modules either way - camera shake and dungeon fog -
+        /// which is why MobileModConflicts asks this as a Look question and not an Exclusive one.
+        /// The gate is mod-level enablement, not Immersive Footsteps' own volume settings: those are
+        /// loaded in its Start, which is not ordered against this port's Bootstrap.
+        /// </summary>
+        public static bool FootstepsRun(bool ambienceStarted, bool immersiveFootstepsInstalled)
+        {
+            return ambienceStarted && !immersiveFootstepsInstalled;
+        }
+
         static GameObject driver;
 
         /// <summary>
@@ -76,6 +103,7 @@ namespace SpellcastStudios
 
             mod.IsReady = true;
             Installed = true;
+            FootstepsActive = false;
             Debug.Log("[BetterAmbience] started: footsteps, camera shake, dungeon fog");
         }
 
@@ -98,7 +126,14 @@ namespace SpellcastStudios
                 if (gm.PlayerObject == null || gm.MainCamera == null || gm.PlayerEntityBehaviour == null)
                     return;
 
-                gameObject.AddComponent<BetterFootsteps.BetterFootstepsMod>();
+                // MOBILE: the footsteps module is the one module that can clash with another ported
+                // mod, so it is the one module that is conditional. By the time this runs both Inits
+                // have been through MobilePortedMods' synchronous start pass, so Installed is settled.
+                if (FootstepsRun(Installed, ImmersiveFootsteps.ImmersiveFootstepsMain.Installed))
+                    gameObject.AddComponent<BetterFootsteps.BetterFootstepsMod>();
+                else
+                    Debug.Log("[BetterAmbience] footsteps left to Immersive Footsteps");
+
                 gameObject.AddComponent<CameraShake.CameraShakeMod>();
                 gameObject.AddComponent<FoggyDungeons.FoggyDungeonsMod>();
                 Destroy(this);
