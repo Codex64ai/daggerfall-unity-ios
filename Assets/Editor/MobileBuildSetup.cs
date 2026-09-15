@@ -629,6 +629,30 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(one);
                 Debug.Log("[MobileBuildSetup] reimported one asset: " + one +
                     (tex != null ? " (" + tex.width + "x" + tex.height + " " + tex.format + ")" : ""));
+                // MOBILE: the line above is the EDITOR platform's result and will say RGBA32 even
+                // when the iPhone override is fine - it is the wrong probe for any question about
+                // what ships. ReadTextureImportInstructions is the API the importer inspector uses
+                // and it reports the FALLBACK Unity actually settled on, so a silent NPOT-with-mips
+                // refusal (desiredFormat ASTC_6x6, compressedFormat RGBA32) shows up here and only
+                // here.
+                var ti = AssetImporter.GetAtPath(one) as TextureImporter;
+                if (ti != null)
+                {
+                    TextureFormat iosFormat;
+                    ColorSpace iosColorSpace;
+                    int iosQuality;
+                    ti.ReadTextureImportInstructions(BuildTarget.iOS, out iosFormat, out iosColorSpace, out iosQuality);
+                    var iosSettings = ti.GetPlatformTextureSettings("iPhone");
+                    Debug.Log("[MobileBuildSetup] iOS override for " + one +
+                        ": resolved=" + iosFormat +
+                        " asked=" + iosSettings.format +
+                        " overridden=" + iosSettings.overridden +
+                        " maxSize=" + iosSettings.maxTextureSize +
+                        " colorSpace=" + iosColorSpace +
+                        " quality=" + iosQuality +
+                        " mips=" + ti.mipmapEnabled +
+                        " npotScale=" + ti.npotScale);
+                }
                 return;
             }
             int n = 0;

@@ -873,6 +873,21 @@ from a silent game. Known limits, in the order they bite:
   from the first replacement record and *silently drops* any record whose width, height or
   format differs, which would be a hole in the terrain rather than a visible error. Those
   keep exact dimensions, and therefore keep the uncompressed fallback: fat, but correct.
+
+  **Fetched packs take the other cure: no mipmaps.** Packs built from source under
+  `Assets/Game/Mods/<Pack>/` (`MobileBuildSetup.ApplyAll`) cannot round to a power of two at
+  all - Daggerfall Expanded Textures replaces 66 archives that have no classic `TEXTURE.NNNN`
+  behind them, so a billboard's world size comes from the replacement's own pixels and any
+  rescale would resize the enemy. So `MobileModPackTextureImporter` drops the **mip chain**
+  for non-power-of-two art instead, which is the other half of the pair Unity refuses, and
+  ASTC 6x6 then applies at 1:1. Measured on DEX's 7,341 sprites (not one of them
+  power-of-two): **636 MB resident and a 98.4 MB bundle, down to 53 MB resident and a 27.9 MB
+  bundle** - 12x the memory, 3.4x the download. Distant enemies alias a little more; DFU draws
+  them point-filtered anyway. Power-of-two pack art keeps its mips. **After changing any rule
+  in `MobileModPackTextureRules` or that importer, bump
+  `MobileModPackTextureImporter.GetVersion()` and run an unscoped `ReimportPacks` before
+  `ApplyAll`**, or every affected texture keeps a stale artifact and the bundle is silently
+  wrong on the device.
 - **Classic UI art keeps its exact dimensions and its format; world textures do not.** DFU
   does pixel-exact arithmetic on `.IMG`/`.CIF`/`.RCI` art: `DaggerfallTalkWindow` slices its
   background with `GetPixels` rects computed as classic 320x200 coordinates scaled by the

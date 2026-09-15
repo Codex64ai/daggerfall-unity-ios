@@ -8335,6 +8335,89 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(modBuilderSrc.Contains("if (maxSize != MobileModPackTextureRules.DefaultMaxTextureSize)")
                   && modBuilderSrc.Contains("importer.maxTextureSize = maxSize;"),
                 "PackTextureRules: a non-default clamp is applied to the editor platform as well, a default one is not");
+            // ---- the mip rule that lets ASTC apply to NPOT sprite art ----
+            // Unity silently hands back RGBA32 for a NON-POWER-OF-TWO texture that has mipmaps, so
+            // DEX's 7,341 sprites (not one of them POT) imported uncompressed: 636 MB resident
+            // against 71 MB. Mips come off for NPOT; POT art keeps its chain; 2D art never had one.
+            Check(MobileModPackTextureRules.MipsFor(true, false)
+                  && !MobileModPackTextureRules.MipsFor(false, false)
+                  && !MobileModPackTextureRules.MipsFor(true, true)
+                  && !MobileModPackTextureRules.MipsFor(false, true),
+                "PackTextureRules: MipsFor - mips only for power-of-two art that is not 2D");
+            Check(MobileModPackTextureRules.IsPowerOfTwo(1) && MobileModPackTextureRules.IsPowerOfTwo(64)
+                  && MobileModPackTextureRules.IsPowerOfTwo(1024) && MobileModPackTextureRules.IsPowerOfTwo(4096)
+                  && !MobileModPackTextureRules.IsPowerOfTwo(0) && !MobileModPackTextureRules.IsPowerOfTwo(-64)
+                  && !MobileModPackTextureRules.IsPowerOfTwo(126) && !MobileModPackTextureRules.IsPowerOfTwo(120)
+                  && !MobileModPackTextureRules.IsPowerOfTwo(876) && !MobileModPackTextureRules.IsPowerOfTwo(196),
+                "PackTextureRules: IsPowerOfTwo - 876 and 196 are multiples of 4 and 6 and still not POT (that is the discriminator)");
+            Check(modBuilderSrc.Contains("importer.mipmapEnabled = MobileModPackTextureRules.MipsFor(isPOT, twoD);")
+                  && modBuilderSrc.Contains("bool isPOT = SourceIsPowerOfTwo(path);")
+                  && !modBuilderSrc.Contains("importer.mipmapEnabled = !twoD;"),
+                "PackTextureRules: the default-rule importer takes its mip setting from MipsFor");
+            // npotScale stays None: it is what keeps DEX 1:1. ToNearest would resize 66 of its 73
+            // archives, whose world size comes from their own pixels (no classic TEXTURE.NNNN).
+            Check(modBuilderSrc.Contains("importer.npotScale = TextureImporterNPOTScale.None;")
+                  && !modBuilderSrc.Contains("TextureImporterNPOTScale.ToNearest"),
+                "PackTextureRules: pack textures stay 1:1 - npotScale None, never ToNearest");
+            // The version bump is the whole point: without it Unity keeps every stale artifact and
+            // the bundle is silently wrong on the device.
+            Check(modBuilderSrc.Contains("public override uint GetVersion() { return 4; }"),
+                "PackTextureRules: MobileModPackTextureImporter.GetVersion is 4 (the mip rule invalidates the cache)");
+            // The PNG header reader: the source size, read before any import exists (the .meta
+            // records the ceiling, not the result, and inside OnPreprocessTexture there is no
+            // Texture2D yet). Checked against a real DEX sprite and a real POT pack texture.
+            {
+                int pw, ph;
+                const string dexSprite = "Assets/Game/Mods/DEX/Textures/ARENA - Troll/1618_13-0.png";
+                if (File.Exists(dexSprite))
+                {
+                    Check(MobileModPackTextureImporter.TryReadPngSize(dexSprite, out pw, out ph) && pw == 126 && ph == 120,
+                        "PackTextureRules: the PNG header reader sizes a DEX sprite", pw + "x" + ph);
+                    Check(!MobileModPackTextureImporter.SourceIsPowerOfTwo(dexSprite)
+                          && !MobileModPackTextureRules.MipsFor(false, false),
+                        "PackTextureRules: that DEX sprite is not power-of-two, so it imports without mips and ASTC applies");
+                }
+                const string kokeysDir = "Assets/Game/Mods/VanillaEnhanced-KokeysTemperate";
+                if (Directory.Exists(kokeysDir))
+                    foreach (string f in Directory.GetFiles(kokeysDir, "*.png", SearchOption.AllDirectories))
+                    {
+                        string k = f.Replace('\\', '/');
+                        Check(MobileModPackTextureImporter.TryReadPngSize(k, out pw, out ph)
+                              && MobileModPackTextureImporter.SourceIsPowerOfTwo(k)
+                              && MobileModPackTextureRules.MipsFor(true, false),
+                            "PackTextureRules: Kokey's terrain records are power-of-two and keep their mips", pw + "x" + ph);
+                        break;
+                    }
+                // Anything that is not a PNG cannot be sized, and reports POT - which keeps the mip
+                // chain, i.e. the behaviour this rule replaced. No silent mip loss on a .psd.
+                Check(MobileModPackTextureImporter.SourceIsPowerOfTwo("Assets/Game/Mods/Nothing/here.psd")
+                      && !MobileModPackTextureImporter.TryReadPngSize("Assets/Game/Mods/Nothing/here.psd", out pw, out ph),
+                    "PackTextureRules: an unreadable / non-PNG source reports power-of-two and keeps its mips");
+            }
+            // PRECEDENCE: the mip rule lives in the DEFAULT branch only. RawData and LinearData
+            // return before it, so Biomes / Distant Terrain / Real Grass keep readable RGBA32 (or
+            // R8) and their own mip decisions whatever their pixel dimensions are.
+            {
+                int defaultBranch = modBuilderSrc.IndexOf("importer.mipmapEnabled = MobileModPackTextureRules.MipsFor(isPOT, twoD);", StringComparison.Ordinal);
+                int rawBranch = modBuilderSrc.IndexOf("raw.format = MobileModPackTextureRules.SingleChannel(path)", StringComparison.Ordinal);
+                int linBranch = modBuilderSrc.IndexOf("lin.format = TextureImporterFormat.RGBA32;", StringComparison.Ordinal);
+                Check(defaultBranch > 0 && rawBranch > 0 && linBranch > 0
+                      && rawBranch < defaultBranch && linBranch < defaultBranch,
+                    "PackTextureRules: the raw-data and linear-data branches return BEFORE the mip rule");
+            }
+            foreach (string rawMod in MobileModPackTextureRules.RawDataMods)
+                Check(MobileModPackTextureRules.For("Assets/Game/Mods/" + rawMod + "/Textures/anything_123x77.png")
+                        == MobileModPackTextureRules.Rule.RawData,
+                    "PackTextureRules: " + rawMod + " stays raw-data (readable, uncompressed) whatever the pixel size");
+            foreach (string linMod in MobileModPackTextureRules.LinearDataMods)
+                Check(MobileModPackTextureRules.For("Assets/Game/Mods/" + linMod + "/Assets/Maps/anything_123x77.png")
+                        == MobileModPackTextureRules.Rule.LinearData,
+                    "PackTextureRules: " + linMod + " stays linear-data whatever the pixel size");
+            foreach (string grassTex in RealGrassBillboards)
+                Check(MobileModPackTextureRules.For(grassTex) == MobileModPackTextureRules.Rule.RawData
+                      && !MobileModPackTextureRules.NoMips(grassTex),
+                    "PackTextureRules: Real Grass's billboards keep readable + mips, untouched by the NPOT mip rule");
+
             // MOBILE: the assumption the R8 override rests on. Texture2D.GetPixels32 documents a
             // limited format list; if R8 did not survive it, the carve would read zeros and every
             // far-terrain cell would become ocean. Cheaper to pin here than to find out on a device.

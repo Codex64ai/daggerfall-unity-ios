@@ -218,7 +218,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             bool twoD = false;
             foreach (string f in noMipFolders)
                 if (path.IndexOf(f, StringComparison.OrdinalIgnoreCase) >= 0) twoD = true;
-            importer.mipmapEnabled = !twoD;
+            // MOBILE: mips come off for NON-POWER-OF-TWO art, because Unity silently refuses to
+            // compress an NPOT texture that has a mip chain and hands back RGBA32 instead. See
+            // MobileModPackTextureRules.MipsFor for the measurement (DEX: 636 MB -> ~71 MB) and for
+            // why npotScale stays None. The size is read from the source file's own header: inside
+            // OnPreprocessTexture the imported Texture2D does not exist yet, and the .meta records
+            // the ceiling rather than the result.
+            bool isPOT = SourceIsPowerOfTwo(path);
+            importer.mipmapEnabled = MobileModPackTextureRules.MipsFor(isPOT, twoD);
             var ios = importer.GetPlatformTextureSettings("iPhone");
             ios.overridden = true;
             ios.format = TextureImporterFormat.ASTC_6x6;
@@ -250,7 +257,44 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // 2 -> 3: the raw-data iOS maxTextureSize became per-mod (MobileModPackTextureRules
         // .MaxTextureSize) - Real Grass's realistic textures import at 256, not 2048, because they
         // are detail prototypes and their sizes are what the detail atlas is built to.
-        public override uint GetVersion() { return 3; }
+        // 3 -> 4: DEFAULT-rule textures that are NOT power-of-two import without a mip chain
+        // (MobileModPackTextureRules.MipsFor), which is what finally lets ASTC_6x6 apply to them
+        // instead of Unity's silent RGBA32 fallback.
+        public override uint GetVersion() { return 4; }
+
+        /// <summary>
+        /// MOBILE: the source image's own pixel dimensions, power-of-two on BOTH sides.
+        ///
+        /// Read straight out of the PNG header (IHDR is fixed at bytes 16..23 of every PNG), because
+        /// this runs BEFORE the import: there is no Texture2D to measure, and TextureImporter's own
+        /// size accessor is internal. Every pack texture in this project is a PNG bar one .jpg and
+        /// three .psd; anything whose header cannot be read is reported power-of-two, which keeps
+        /// the mip chain and therefore the behaviour this rule replaced.
+        /// </summary>
+        internal static bool SourceIsPowerOfTwo(string assetPath)
+        {
+            int w, h;
+            if (!TryReadPngSize(assetPath, out w, out h)) return true;
+            return MobileModPackTextureRules.IsPowerOfTwo(w) && MobileModPackTextureRules.IsPowerOfTwo(h);
+        }
+
+        internal static bool TryReadPngSize(string assetPath, out int width, out int height)
+        {
+            width = height = 0;
+            try
+            {
+                if (!assetPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) return false;
+                var header = new byte[24];
+                using (var fs = File.OpenRead(assetPath))
+                    if (fs.Read(header, 0, 24) != 24) return false;
+                if (header[0] != 0x89 || header[1] != 'P' || header[2] != 'N' || header[3] != 'G') return false;
+                if (header[12] != 'I' || header[13] != 'H' || header[14] != 'D' || header[15] != 'R') return false;
+                width = (header[16] << 24) | (header[17] << 16) | (header[18] << 8) | header[19];
+                height = (header[20] << 24) | (header[21] << 16) | (header[22] << 8) | header[23];
+                return width > 0 && height > 0;
+            }
+            catch { return false; }
+        }
     }
 
     /// <summary>

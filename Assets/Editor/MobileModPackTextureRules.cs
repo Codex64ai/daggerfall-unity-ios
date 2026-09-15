@@ -162,6 +162,40 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         }
 
         /// <summary>
+        /// MOBILE: whether a DEFAULT-rule pack texture keeps a mip chain.
+        ///
+        /// Unity silently falls back to RGBA32 when it is asked to compress a NON-POWER-OF-TWO
+        /// texture that HAS MIPMAPS - no error, no warning, just an uncompressed result (the same
+        /// trap the converter documents at MobileModExtractor.cs "NON-POWER-OF-TWO IS WHY THE
+        /// COMPRESSION SILENTLY DID NOT HAPPEN"). Daggerfall Expanded Textures is 7,341 sprites and
+        /// NOT ONE of them is power-of-two, so every one of them imported RGBA32: 636 MB resident if
+        /// every archive were live, against 71 MB as ASTC_6x6.
+        ///
+        /// The cure has to keep the art 1:1 - npotScale ToNearest (the converter's cure, which works
+        /// because DREAM only replaces CLASSIC archives) would RESIZE DEX's enemies: billboard world
+        /// size comes from the classic record (MaterialReader.GetSize) and falls back to the
+        /// replacement's own pixels when there is no classic file, which is DEX's case for 66 of its
+        /// 73 archives. So the mip chain is what goes: dropping it is the only setting that is both
+        /// compressed and 1:1. Distant enemies alias slightly more (they are 75-300 px sprites DFU
+        /// draws point-filtered anyway) and the 33% mip tax is not paid either, so the saving is
+        /// nearer 12x than 9x.
+        ///
+        /// POT textures are unaffected - they compress fine WITH mips, and mips are what keeps a
+        /// 1024x1024 wall texture from shimmering at distance. 2D art (UI, inventory, paperdoll)
+        /// never had mips.
+        /// </summary>
+        public static bool MipsFor(bool isPowerOfTwo, bool twoD)
+        {
+            return !twoD && isPowerOfTwo;
+        }
+
+        /// <summary>MOBILE: true for a positive power of two. Both sides must pass for MipsFor.</summary>
+        public static bool IsPowerOfTwo(int value)
+        {
+            return value > 0 && (value & (value - 1)) == 0;
+        }
+
+        /// <summary>
         /// MOBILE: textures that carry data in ONE channel and should import as R8 rather than RGBA32.
         /// Only Distant Terrain's daggerfall_deriv_map.png qualifies: it is an 8-bit greyscale PNG and
         /// DistantTerrain.ApplyDerivativeHeightmap reads `pixels[i].r` alone, comparing it against a
