@@ -6267,18 +6267,20 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             {
                 // DFU_IOS_TESTAPP is not set in an ordinary editor run, so this is the release id.
                 string id = (string)prop.GetValue(null, null);
-                Check(id == "net.codex64.daggerfall" || id == "net.codex64.daggerfall.test",
-                    "Bundle id: BundleIdentifier answers one of the two ids the port ships", id);
+                Check(id == "net.codex64.daggerfall" || id == "net.codex64.daggerfall.test.K8RF7RDFB5",
+                    "Bundle id: BundleIdentifier answers one of the two ids the port signs", id);
                 Check(id == (System.Environment.GetEnvironmentVariable("DFU_IOS_TESTAPP") == "1"
-                             ? "net.codex64.daggerfall.test" : "net.codex64.daggerfall"),
+                             ? "net.codex64.daggerfall.test.K8RF7RDFB5" : "net.codex64.daggerfall"),
                     "Bundle id: the id follows DFU_IOS_TESTAPP and nothing else", id);
             }
 
             string src = StripShaderComments(File.ReadAllText("Assets/Editor/MobileBuildSetup.cs"));
-            Check(MethodBody(src, "public static string BundleIdentifier").Contains("IsTestApp ? testBundleId : releaseBundleId"),
-                "Bundle id: BundleIdentifier is the same IsTestApp switch that sets the player settings");
+            Check(src.Contains("const string testBundleIdOnDevice = testBundleId + \".K8RF7RDFB5\""),
+                "Bundle id: the test id the post-process pins is the suffixed one, derived from testBundleId");
+            Check(MethodBody(src, "public static string BundleIdentifier").Contains("IsTestApp ? testBundleIdOnDevice : releaseBundleId"),
+                "Bundle id: BundleIdentifier answers the suffixed test id, which is the container already on the device");
             Check(src.Contains("testApp ? testBundleId : releaseBundleId"),
-                "Bundle id: ApplyIOSSettings still writes the identity into the player settings");
+                "Bundle id: ApplyIOSSettings still writes the plain identity into the player settings");
 
             string post = StripShaderComments(File.ReadAllText("Assets/Editor/MobileIOSPostProcess.cs"));
             Check(post.Contains("MobileBuildSetup.BundleIdentifier"),
@@ -6295,6 +6297,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             string readme = File.ReadAllText("README-iOS.md");
             Check(readme.Contains("PRODUCT_BUNDLE_IDENTIFIER"),
                 "Bundle id: README-iOS's build recipe records that the id is pinned into the Xcode project");
+            Check(readme.Contains("net.codex64.daggerfall.test.K8RF7RDFB5"),
+                "Bundle id: README-iOS's build recipe names the suffixed id the installed test app uses");
         }
 
         static global::LocationLoader.LocationPrefab ParseLocationPrefabXml(string xml)

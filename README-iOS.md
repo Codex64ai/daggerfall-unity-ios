@@ -74,13 +74,22 @@ suppressing camera look mid-swing, which it already did for PC players.
 (31 checks) and exits non-zero on failure.
 
 **The side-by-side test app.** `DFU_IOS_TESTAPP=1` in the environment of the Unity build builds
-`net.codex64.daggerfall.test` ("DFU Test") instead of the real app, with its own container, its own
-`arena2` and its own saves, so a test build never overwrites a player's game. That one environment
-variable is the only source of the id: `MobileBuildSetup` writes it into the player settings and
-`MobileIOSPostProcess` writes the same value into the generated Xcode project's
-`PRODUCT_BUNDLE_IDENTIFIER` build setting, which is what `xcodebuild` matches a provisioning profile
-against. Pinning both is deliberate - when only the plist carried the test id, `xcodebuild` matched
-the *plain* profile and the signed `.ipa` installed over the real app instead of beside it.
+"DFU Test" instead of the real app, with its own container, its own `arena2` and its own saves, so a
+test build never overwrites a player's game. That one environment variable is the only source of the
+id: `MobileBuildSetup` writes `net.codex64.daggerfall.test` into the player settings, and
+`MobileIOSPostProcess` pins the id the build is *signed* with into the generated Xcode project's
+`PRODUCT_BUNDLE_IDENTIFIER` build setting on the app target - which is what `xcodebuild` matches a
+provisioning profile against, and what Xcode stamps into the built app's `Info.plist`. Pinning it is
+deliberate: when only the plist carried the test id, `xcodebuild` matched the *plain* profile and the
+signed `.ipa` installed over the real app instead of beside it.
+
+The signed id is **`net.codex64.daggerfall.test.K8RF7RDFB5`**, not the bare `.test`. Sideloadly
+appends the signing team id to whatever it re-signs, so the first sideloaded test build created that
+container - and that is where the tester's `arena2`, `Mods` and saves have lived ever since. iOS
+knows an app only by its bundle id, so an `.ipa` signed with the bare `.test` id installs as a
+*second* app with an empty Documents folder. The suffix is also the `--domain-identifier` that
+`xcrun devicectl device copy from|to` needs to reach the container over the cable. Only the app
+target gets it: renaming `UnityFramework` as well makes the install fail with `DuplicateIdentifier`.
 
 ## Installing the app
 

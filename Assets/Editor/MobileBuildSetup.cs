@@ -34,20 +34,37 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         const string releaseProductName = "Daggerfall Unity";
         const string testBundleId = "net.codex64.daggerfall.test";
 
+        // The id the test app ACTUALLY carries on the device. Sideloadly appends the signing
+        // team id to whatever bundle id it re-signs, so the very first sideload created the
+        // container `net.codex64.daggerfall.test.K8RF7RDFB5` - and that container is where the
+        // tester's arena2, Mods and saves have lived ever since. iOS identifies an app by its
+        // bundle id and nothing else, so an ipa signed with the PLAIN id is a DIFFERENT app: it
+        // installs BESIDE the one being tested, with an empty Documents folder, and the tester
+        // sees a first-run app with no game data. Pinning the suffixed id is what makes a new
+        // build replace the installed app instead of joining it - and it is also the identifier
+        // `xcrun devicectl ... --domain-identifier` needs to reach the container over the cable.
+        const string testBundleIdOnDevice = testBundleId + ".K8RF7RDFB5";
+
         /// <summary>
-        /// MOBILE 2026-09-15: the bundle id this build is for, as one public statement.
+        /// MOBILE 2026-09-15: the bundle id a SHIPPED build is signed with, as one public statement.
         ///
         /// PlayerSettings.SetApplicationIdentifier writes the identity into ProjectSettings and into
         /// the generated Info.plist, but Unity ALSO writes a PRODUCT_BUNDLE_IDENTIFIER build setting
         /// into the Xcode project, and that is what xcodebuild matches a provisioning profile
-        /// against. The two have come apart before - a generated project carrying the plain id while
-        /// the plist said `.test`, so xcodebuild picked the plain profile and the signed ipa
-        /// installed OVER the real app instead of beside it. MobileIOSPostProcess now pins the build
-        /// setting from this property, so the id has exactly one source: DFU_IOS_TESTAPP.
+        /// against - and what Xcode stamps back into the built app's Info.plist. The two have come
+        /// apart before - a generated project carrying the plain id while the plist said `.test`, so
+        /// xcodebuild picked the plain profile and the signed ipa installed OVER the real app
+        /// instead of beside it. MobileIOSPostProcess pins the build setting from this property.
+        ///
+        /// For the test app that value is the SUFFIXED id (see testBundleIdOnDevice): the installed
+        /// test app's container is `net.codex64.daggerfall.test.K8RF7RDFB5`, so signing the plain id
+        /// would land a second, empty app rather than replace the one being tested. The player
+        /// settings deliberately keep the plain id - Unity only needs a valid identity there, and
+        /// the suffix belongs to the signing team, not to the project.
         /// </summary>
         public static string BundleIdentifier
         {
-            get { return IsTestApp ? testBundleId : releaseBundleId; }
+            get { return IsTestApp ? testBundleIdOnDevice : releaseBundleId; }
         }
         const string testProductName = "DFU Test";
 

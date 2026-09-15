@@ -93,10 +93,18 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             // --- the bundle id, pinned in the Xcode project --------------------------
             // Unity writes the identity into Info.plist from PlayerSettings, but a provisioning
             // profile is matched against the TARGET's PRODUCT_BUNDLE_IDENTIFIER build setting, and
-            // the generated project has carried the plain id while the plist said `.test`. The
-            // result is a signed ipa that installs OVER the real app instead of beside it - which
-            // is exactly what the side-by-side test app exists not to do. One source for the id
-            // (DFU_IOS_TESTAPP, through MobileBuildSetup.BundleIdentifier), written to both.
+            // Xcode stamps that same setting back into the built app's Info.plist. The generated
+            // project has carried the plain id while the plist said `.test`. The result is a signed
+            // ipa that installs OVER the real app instead of beside it - which is exactly what the
+            // side-by-side test app exists not to do. One source for the id (DFU_IOS_TESTAPP,
+            // through MobileBuildSetup.BundleIdentifier).
+            //
+            // For the test app that id carries Sideloadly's team-id suffix - .K8RF7RDFB5 - because
+            // that is the container the installed test app already owns, holding the tester's
+            // arena2, Mods and saves. A plain-id ipa is a second app with an empty container.
+            //
+            // The APP target only. UnityFramework must keep the id Unity gave it: renaming it too
+            // makes the install fail with "DuplicateIdentifier" (the two targets would collide).
             string bundleId = MobileBuildSetup.BundleIdentifier;
             pbx.SetBuildProperty(pbx.GetUnityMainTargetGuid(), "PRODUCT_BUNDLE_IDENTIFIER", bundleId);
 
