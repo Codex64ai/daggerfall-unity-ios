@@ -523,10 +523,36 @@ namespace DaggerfallWorkshop.Game.Mobile
                 return;
             }
 
-            if (weapons.Sheathed == !drawn)
+            // Toggle only when it is not already where it should be. `Sheathed == !drawn` is the
+            // state we WANT, so the toggle is the other case - the first cut had this inverted and
+            // the weapon never came out (sim run 1, 2026-09-15).
+            if (weapons.Sheathed != !drawn)
                 weapons.ToggleSheath();
 
-            Debug.Log("[DebugStart] DrawWeapon " + drawn + ": sheathed=" + weapons.Sheathed);
+            var player = GameManager.HasInstance ? GameManager.Instance.PlayerEntity : null;
+            DaggerfallWorkshop.Game.Items.DaggerfallUnityItem hand =
+                player != null && player.ItemEquipTable != null
+                    ? player.ItemEquipTable.GetItem(DaggerfallWorkshop.Game.Items.EquipSlots.RightHand)
+                    : null;
+
+            // A drawn EMPTY hand is a fist sprite, which is still an IMGUI draw and still makes the
+            // point - but the screenshots this exists for are of a WEAPON under the filter, and the
+            // debug character carries one it has not equipped. First weapon in the pack, right hand.
+            if (drawn && hand == null && player != null && player.Items != null)
+            {
+                for (int i = 0; i < player.Items.Count; i++)
+                {
+                    DaggerfallWorkshop.Game.Items.DaggerfallUnityItem item = player.Items.GetItem(i);
+                    if (item == null || item.ItemGroup != DaggerfallWorkshop.Game.Items.ItemGroups.Weapons)
+                        continue;
+                    player.ItemEquipTable.EquipItem(item, true, false);
+                    hand = player.ItemEquipTable.GetItem(DaggerfallWorkshop.Game.Items.EquipSlots.RightHand);
+                    break;
+                }
+            }
+
+            Debug.Log("[DebugStart] DrawWeapon " + drawn + ": sheathed=" + weapons.Sheathed
+                      + " righthand=" + (hand != null ? hand.LongName : "(empty - fists)"));
         }
 
         /// <summary>
@@ -667,7 +693,12 @@ namespace DaggerfallWorkshop.Game.Mobile
                 // town gets the classic tutorial box (_TUTOR__), which sits over the middle of the
                 // screen - exactly where a `spawn` puts its enemy - and no pointer event reaches the
                 // app in the Simulator, so nothing on the Mac side can dismiss it.
-                if (journeyX >= 0 || spawnCommands.Count > 0)
+                // MOBILE 2026-09-15: `setCommands.Count > 0` too, and for the same reason PollTopBox
+                // now carries it - a run that is driving the game with `set` is a run that wants a
+                // picture of the result, and this is the gate the SECOND and later tutorial pages
+                // come through (PollTopBox only ever sees the first, because it catches the box that
+                // was already on top when the world came up).
+                if (journeyX >= 0 || spawnCommands.Count > 0 || setCommands.Count > 0)
                 {
                     pendingBox = box;
                     pendingBoxAt = Time.realtimeSinceStartup;
@@ -693,7 +724,14 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         static void PollTopBox()
         {
-            if (journeyX < 0 && spawnCommands.Count == 0)
+            // MOBILE 2026-09-15: `setCommands.Count > 0` as well. A scripted run's whole point is to
+            // put the game into a state and photograph it, and a modal message box - the new-game
+            // intro is one, and it is up the moment the world is - hides the touch HUD, hides the
+            // first-person weapon and covers the picture. The harness cannot tap it: there is no
+            // pointer in a headless simulator run. So any run that is driving the game with `set`
+            // answers boxes with their default button, exactly as the journey and spawn runs
+            // already did.
+            if (journeyX < 0 && spawnCommands.Count == 0 && setCommands.Count == 0)
                 return;
             if (!DaggerfallUI.HasInstance || DaggerfallUI.UIManager == null)
                 return;
