@@ -1194,6 +1194,176 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && repairTwoPass[2 + 2 * rw] == 20 && repairTwoPass[3 + 2 * rw] == 20
                   && Monobelisk.TerrainComputer.HoleRepairPasses == 2,
                 "WoDTerrain: the second repair pass closes a hole the first cannot reach, and there are two");
+
+            // MOBILE: (P1) COASTAL RAMP. Daggerfall city (map pixel 207,213) sat in a pit: the tiles
+            // around it sample max=0.11-0.15 while the city is flattened to 0.0218, because
+            // GetHeightSample lerps a PORT's locationHeight to portLocationHeight 0.021 and nothing
+            // lowers the land around the harbour. PortRampCap is the curve that does:
+            // min(height, lerp(portFloor, height, smoothstep(0, 1, d / R))). The four fixed points below
+            // are the whole contract - the port's own texel at the floor, the radius untouched, a
+            // smoothstep in between, and never a raise - and 103 is that smoothstep by hand: t = 0.5,
+            // s = 3t^2 - 2t^3 = 0.5, 6 + 0.5 * (200 - 6) = 103.
+            byte rampMid = Monobelisk.TerrainComputer.PortRampCap(200, 6, 2f, 4f);
+            Check(Monobelisk.TerrainComputer.PortRampCap(200, 6, 0f, 4f) == 6
+                  && Monobelisk.TerrainComputer.PortRampCap(200, 6, 4f, 4f) == 200
+                  && rampMid > 6 && rampMid < 200 && rampMid == 103
+                  && Monobelisk.TerrainComputer.PortRampCap(3, 6, 0f, 4f) == 3,
+                "WoDTerrain: the port ramp caps at the floor, is untouched at the radius, smoothsteps between, and never raises");
+
+            // The pass itself, on a 20x20 plateau of 200 with one port at (10,10), so every number is
+            // checkable by hand. 49 texels lie within Euclidean radius 4 of (10,10); the four at EXACTLY
+            // 4 ((10,6) (10,14) (6,10) (14,10)) are the ramp's untouched edge, so 45 are lowered. The
+            // deepest drop is the port's own texel, 200 -> 6.
+            const int prW = 20, prH = 20;
+            var rampMap = new byte[prW * prH];
+            for (int i = 0; i < rampMap.Length; i++) rampMap[i] = 200;
+            int rampDrop;
+            int rampLowered = Monobelisk.TerrainComputer.ApplyPortRamps(
+                rampMap, prW, prH, new List<(int x, int y)> { (10, 10) }, 6, 4f, out rampDrop);
+            int rampWithin = 0;
+            for (int dy = -4; dy <= 4; dy++)
+                for (int dx = -4; dx <= 4; dx++)
+                    if (dx * dx + dy * dy <= 16) rampWithin++;
+            Check(rampWithin == 49 && rampLowered == 45 && rampDrop == 194
+                  && rampMap[10 + 10 * prW] == 6
+                  && rampMap[14 + 10 * prW] == 200
+                  && rampMap[12 + 10 * prW] == 103,
+                "WoDTerrain: one port ramps 45 of the 49 texels inside radius 4, floor 6, max drop 194");
+
+            // Two overlapping ports take the LOWER of their two ramps, not the product of them: (11,10)
+            // is 1 from (10,10) and 2 from (13,10), so it must be PortRampCap(200, 6, 1, 4) = 36 and not
+            // the 21 a cap applied to an already-ramped byte would give. That is also what makes the
+            // result independent of the order the ports are listed in, which the reversed run pins.
+            var rampTwo = new byte[prW * prH];
+            var rampTwoRev = new byte[prW * prH];
+            for (int i = 0; i < rampTwo.Length; i++) { rampTwo[i] = 200; rampTwoRev[i] = 200; }
+            int twoDrop, revDrop;
+            Monobelisk.TerrainComputer.ApplyPortRamps(
+                rampTwo, prW, prH, new List<(int x, int y)> { (10, 10), (13, 10) }, 6, 4f, out twoDrop);
+            Monobelisk.TerrainComputer.ApplyPortRamps(
+                rampTwoRev, prW, prH, new List<(int x, int y)> { (13, 10), (10, 10) }, 6, 4f, out revDrop);
+            bool rampOrderFree = twoDrop == revDrop;
+            for (int i = 0; i < rampTwo.Length; i++) if (rampTwo[i] != rampTwoRev[i]) rampOrderFree = false;
+            Check(rampOrderFree && twoDrop == 194
+                  && rampTwo[11 + 10 * prW] == Monobelisk.TerrainComputer.PortRampCap(200, 6, 1f, 4f)
+                  && rampTwo[11 + 10 * prW] == 36
+                  && rampTwo[10 + 10 * prW] == 6 && rampTwo[13 + 10 * prW] == 6,
+                "WoDTerrain: overlapping port ramps take the lower ramp and the result does not depend on port order");
+
+            // A channel already at or under the floor is never re-written (the sea would move) and a
+            // short or missing buffer reports -1. The pass is deliberately NOT idempotent - the ramp is
+            // relative to the height it is handed, so a second application ramps its own output - and
+            // that is pinned here rather than left to be discovered: nothing may call it twice.
+            var rampSea = new byte[prW * prH];
+            for (int i = 0; i < rampSea.Length; i++) rampSea[i] = 4;
+            int seaDrop, againDrop, noDrop;
+            int seaLowered = Monobelisk.TerrainComputer.ApplyPortRamps(
+                rampSea, prW, prH, new List<(int x, int y)> { (10, 10) }, 6, 4f, out seaDrop);
+            int againLowered = Monobelisk.TerrainComputer.ApplyPortRamps(
+                rampMap, prW, prH, new List<(int x, int y)> { (10, 10) }, 6, 4f, out againDrop);
+            Check(seaLowered == 0 && seaDrop == 0 && rampSea[10 + 10 * prW] == 4
+                  && againLowered > 0 && rampMap[12 + 10 * prW] < 103
+                  && Monobelisk.TerrainComputer.ApplyPortRamps(null, prW, prH, new List<(int x, int y)> { (10, 10) }, 6, 4f, out noDrop) < 0
+                  && Monobelisk.TerrainComputer.ApplyPortRamps(new byte[10], prW, prH, new List<(int x, int y)> { (10, 10) }, 6, 4f, out noDrop) < 0
+                  && Monobelisk.TerrainComputer.ApplyPortRamps(new byte[prW * prH], prW, prH, null, 6, 4f, out noDrop) == 0,
+                "WoDTerrain: the port ramp leaves the floor alone, reports -1 for a bad buffer, and is not idempotent by design");
+
+            // THE FLOOR BYTE. DerivMap.b is not a height: heightSampling.cginc:144-145 turns it into
+            // loResBaseHeight and :228-231 uses THAT as the lerp factor between (BASEHEIGHT_MIN - 1) and
+            // BASEHEIGHT_MAX, so the byte a target ground height needs is solved through both steps. The
+            // shipped target is portLocationHeight 0.021 + 10 units = 0.023, which lands on byte 7
+            // (ground 0.02325 = 116 units - above OceanElevation's 100 and above the 105 the town itself
+            // is flattened to). The round trip is the assertion that matters: feed the derived byte back
+            // through the shader's own arithmetic and it must land in the 0.021-0.024 band it was
+            // solved for. Also pinned: the four constants are the ones the KERNELS are given, read off
+            // TerrainComputer.cs's own SetFloat calls, and BASEHEIGHT_MIN / BASEHEIGHT_MAX are the
+            // cginc's - if either drifts, the floor byte silently stops meaning 116 units.
+            const float nh = 5000f;
+            float derivTarget = Monobelisk.TerrainComputer.LocationFloor
+                                + Monobelisk.TerrainComputer.PortTargetGroundUnits / nh;
+            byte derivFloor = Monobelisk.TerrainComputer.DerivFloorByte(derivTarget, nh);
+            float derivRound = Monobelisk.TerrainComputer.DerivGroundHeight(derivFloor, nh);
+            string tcSrc = StripShaderComments(File.ReadAllText(
+                "Assets/Scripts/Game/Mobile/Ports/WorldOfDaggerfallTerrain/Models/TerrainComputer.cs"));
+            string cginc = File.ReadAllText("Assets/Resources/WoDTerrain/heightSampling.cginc");
+            Check(Mathf.Abs(derivTarget - 0.023f) < 1e-6f
+                  && derivFloor == 7
+                  && derivRound >= 0.021f && derivRound <= 0.024f
+                  && Monobelisk.TerrainComputer.DerivGroundHeight(0, nh) < 0.021f
+                  && Monobelisk.TerrainComputer.DerivGroundHeight(255, nh) > 0.15f
+                  && CountOccurrences(tcSrc, "SetFloat(\"maxTerrainHeight\", 2308.5f)") == 2
+                  && CountOccurrences(tcSrc, "SetFloat(\"scaledOceanElevation\", 27.2f)") == 2
+                  && CountOccurrences(tcSrc, "SetFloat(\"baseHeightScale\", 8f)") == 2
+                  && CountOccurrences(tcSrc, "SetFloat(\"noiseMapScale\", 4f)") == 2
+                  && Monobelisk.TerrainComputer.DerivMaxTerrainHeight == 2308.5f
+                  && Monobelisk.TerrainComputer.DerivScaledOceanElevation == 27.2f
+                  && Monobelisk.TerrainComputer.DerivBaseHeightScale == 8f
+                  && Monobelisk.TerrainComputer.DerivNoiseMapScale == 4f
+                  && cginc.Contains("#define BASEHEIGHT_MIN 100.0")
+                  && cginc.Contains("#define BASEHEIGHT_MAX 800.0")
+                  && Monobelisk.TerrainComputer.BaseHeightMinUnits == 100f
+                  && Monobelisk.TerrainComputer.BaseHeightMaxUnits == 800f,
+                "WoDTerrain: the deriv floor byte is 7 and round-trips to 0.021-0.024 through the shader's own constants");
+
+            // One byte of DerivMap.b is (800 - 99) * 12 / 2308.5 = 3.644 units of ground, and the log
+            // line's "units" is that times the drop. It is a RATE, not the difference of two
+            // DerivGroundHeight calls, because that function's low end is clamped (bytes 0-2 all give
+            // the same ground) and a drop near the floor would report as zero units. The third clause
+            // checks the rate against the real difference over a span that clears the clamp.
+            Check(Mathf.Abs(Monobelisk.TerrainComputer.DerivDropUnits(1) - 3.6439f) < 0.001f
+                  && Mathf.Abs(Monobelisk.TerrainComputer.DerivDropUnits(100)
+                               - 100f * Monobelisk.TerrainComputer.DerivDropUnits(1)) < 0.01f
+                  && Mathf.Abs(Monobelisk.TerrainComputer.DerivDropUnits(50)
+                               - (Monobelisk.TerrainComputer.DerivGroundHeight(60, nh)
+                                  - Monobelisk.TerrainComputer.DerivGroundHeight(10, nh)) * nh) < 0.01f,
+                "WoDTerrain: one deriv byte is 3.64 units of ground and the drop scales linearly");
+
+            // The geometry that lines the ramp up with the harbour. The two maps ship as the same
+            // 5000x2500 source and the iOS importer clamps both to 2048x1024, so 5 map pixels is
+            // 2048/1000 * 5 = 10.24 texels and 1024/500 * 5 is the same number. The offset is the one
+            // thing that is NOT free: the shader reads PortMap at worldUv + (-0.25, -1.1)/(999, 499) and
+            // DerivMap at plain worldUv, so a port mark applies to the world position +0.25/999 and
+            // +1.1/499 away - (+1, +2) texels at 2048x1024. Without it the ramp lands a map pixel north.
+            var derivOffset = Monobelisk.TerrainComputer.PortToDerivTexelOffset(2048, 1024);
+            Check(Mathf.Abs(Monobelisk.TerrainComputer.PortRampRadiusTexels(2048) - 10.24f) < 1e-4f
+                  && Monobelisk.TerrainComputer.PortRampTexelRadiiAgree(2048, 1024)
+                  && !Monobelisk.TerrainComputer.PortRampTexelRadiiAgree(2048, 512)
+                  && derivOffset.dx == 1 && derivOffset.dy == 2
+                  && Monobelisk.TerrainComputer.PortRampRadiusMapPixels == 5f,
+                "WoDTerrain: the ramp radius is 10.24 texels on both axes and the port-to-deriv texel offset is +1,+2");
+
+            // CollectPortTexels marks a texel when PortMap.r or PortMap.b is non-zero - exactly what
+            // GetHeightSample turns into portLerp and the seaHeight branch - and shifts it by that
+            // offset, clamped to the grid so a mark on the edge cannot walk off it.
+            var portTexels = new Color32[8 * 8];
+            for (int i = 0; i < portTexels.Length; i++) portTexels[i] = new Color32(0, 0, 0, 255);
+            portTexels[3 + 4 * 8] = new Color32(68, 0, 0, 255);      // a port
+            portTexels[6 + 1 * 8] = new Color32(0, 0, 255, 255);     // a sea-level location
+            portTexels[7 + 7 * 8] = new Color32(9, 0, 0, 255);       // the top-right corner, clamped
+            var found = Monobelisk.TerrainComputer.CollectPortTexels(portTexels, 8, 8, 1, 2);
+            Check(found.Count == 3
+                  && found.Contains((4, 6)) && found.Contains((7, 3)) && found.Contains((7, 7))
+                  && Monobelisk.TerrainComputer.CollectPortTexels(null, 8, 8, 1, 2).Count == 0
+                  && Monobelisk.TerrainComputer.CollectPortTexels(portTexels, 8, 8, 0, 0).Contains((3, 4)),
+                "WoDTerrain: CollectPortTexels finds red and blue marks, shifts them to deriv texels and clamps at the edge");
+
+            // WHERE THE RAMP IS APPLIED, pinned on the source because it is the whole fix. The FIRST
+            // attempt ramped the world heightmap and moved nothing: HandleBaseMapSampleParams fills the
+            // shm/lhm buffers with a constant 255, so heightSampling.cginc:144-149 lerps the height ALL
+            // the way to loResBaseHeight and DerivMap.b is the only thing the terrain reads.
+            // alteredHeightmapBuffer must therefore NOT be ramped (it only feeds the location flatten,
+            // and lowering it sank neighbouring towns further), the ramped copy must be built BEFORE the
+            // start-up dispatch binds DerivMap, and all three kernels must bind the same copy.
+            int atPrepare = tcSrc.IndexOf("PrepareRampedDerivMap();", StringComparison.Ordinal);
+            int atFirstBind = tcSrc.IndexOf("SetTexture(k, \"DerivMap\", DerivMapForCompute)", StringComparison.Ordinal);
+            Check(atPrepare > 0 && atFirstBind > atPrepare
+                  && CountOccurrences(tcSrc, "SetTexture(k, \"DerivMap\", DerivMapForCompute)") == 3
+                  && CountOccurrences(tcSrc, "SetTexture(k, \"DerivMap\", InterestingTerrains.derivMap)") == 0
+                  && !tcSrc.Contains("ApplyPortRamps(alteredHeightmapBuffer")
+                  && CountOccurrences(tcSrc, "ApplyPortRamps(") == 2   // the declaration and the one call
+                  && tcSrc.Contains("rampedDerivMap = null;"),
+                "WoDTerrain: the ramped deriv copy is built before the first bind, bound by all three kernels, and the world heightmap is not ramped");
+
             // MOBILE: (F2) Utility.ToBytes is the ONE conversion the mod's entire start-up world
             // heightmap passes through - the texture every location's flatten target is read from -
             // and upstream's `(byte)(uint)(f * 255f)` has no guard at all. NaN arrives as byte 0,

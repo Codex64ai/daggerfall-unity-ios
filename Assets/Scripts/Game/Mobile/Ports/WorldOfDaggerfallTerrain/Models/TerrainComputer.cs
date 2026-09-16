@@ -333,6 +333,490 @@ namespace Monobelisk
             return repaired;
         }
 
+        // MOBILE: (P1) COASTAL RAMP. THE BUG: with World of Daggerfall - Terrain on, Daggerfall city
+        // (map pixel 207,213) sat at the bottom of a pit walled by 400-600 units of terrain on every
+        // side - "the mountain around Daggerfall" on the iPad, and the simulator screenshot
+        // daggerfall-207-213-allon.png. The tile diagnostics say why: the tiles around the city sample
+        // max=0.11-0.15 (550-750 units of newHeight 5000) while the city itself is flattened to
+        // minFlat=0.0218 - 109 units, sea level. Daggerfall is a PORT, and GetHeightSample
+        // (TerrainComputer.compute:620-627) lerps a port's locationHeight all the way to
+        // portLocationHeight 0.021 wherever PortMap.r is set (the seaHeight/PortMap.b branch does the
+        // same for sea-level locations), which is correct - a harbour has to meet the water - and the
+        // MAX_LOCATION_SINK guard deliberately exempts ports so it cannot undo that. What nothing does
+        // is lower the LAND AROUND the harbour. Upstream ships the same shader, so this is upstream
+        // behaviour being improved, not a port regression.
+        //
+        // WHY THE DERIV MAP AND NOT THE WORLD HEIGHTMAP. The obvious fix - ramp the mod's own altered
+        // world heightmap, which is a byte per map pixel and which the locations' flatten target is
+        // read from - was built and MEASURED FIRST, and it moves nothing: every neighbouring tile's
+        // sampled min/max/step came back byte-identical. WoD Terrain's wilderness height does not come
+        // from that buffer at all. HandleBaseMapSampleParams (this file, "Replace with all zero values")
+        // fills the shm/lhm StructuredBuffers with a CONSTANT 255, so heightSampling.cginc's
+        // SampleBaseHeight saturates to 1.0 for every vertex, and :144-149 then lerps the result ALL THE
+        // WAY to loResBaseHeight:
+        //
+        //     loResBaseHeight = saturate((DerivMap.b * 255 * (baseHeightScale + noiseMapScale)
+        //                                 - scaledOceanElevation) / maxTerrainHeight)
+        //     baseHeight      = lerp(baseHeight, loResBaseHeight,
+        //                            saturate((baseHeight - 1.5/maxTerrainHeight) / (100/maxTerrainHeight)))
+        //
+        // - the lerp factor is 1 for any vertex above ~100 units. Terrain height in this mod is
+        // DerivMap.b and nothing else; the world heightmap only feeds mapPixelHeights, which
+        // TerrainComputer.compute reads at :270-271, :325, :334, :450 and :459 - all inside
+        // LocationWeight / PortLocationWeight, i.e. the location flatten target and the basemap
+        // fallback, never the wilderness. Lowering it therefore only sinks the TOWNS, which made
+        // neighbouring non-port locations sit deeper in their pits. So the ramp is applied to a copy of
+        // DerivMap's BLUE CHANNEL instead, and that copy is bound at all three kernels, so the start-up
+        // world heightmap and the per-tile heights stay in step with each other.
+        //
+        // THE TRADE-OFF: a genuine cliff-top harbour would be smoothed into a slope. No such location is
+        // known in classic data (the port flag marks sea-level harbours), and the pass only ever LOWERS,
+        // never raises, so the worst case is a gentler coast, never a new wall. The copy's .r/.g (the
+        // terrain DERIVATIVES, which feed w.deriv - a biome/shading weight, not a height) and .a are
+        // left as they were, so over a ramped area the normals describe the slope the mod originally
+        // had rather than the flatter one it now has. That is accepted: it tints biome blending on a few
+        // thousand coastal texels and costs nothing in geometry.
+
+        /// <summary>
+        /// MOBILE: (P1) COASTAL RAMP - the radius, in MAP PIXELS, over which DerivMap.b is pulled down
+        /// towards the port floor. 5 map pixels is about 4.1 km, roughly five terrain tiles: far enough
+        /// that the drop from the mod's inland height to the harbour is spread over several tiles
+        /// instead of one tile edge, and short enough that it cannot reach past the next location.
+        /// </summary>
+        public const float PortRampRadiusMapPixels = 5f;
+
+        /// <summary>
+        /// MOBILE: (P1) COASTAL RAMP - the ground height, normalised to newHeight, the ramp aims the
+        /// land at directly under a harbour: portLocationHeight 0.021 (TerrainComputer.compute:620, what
+        /// the town itself is flattened to) plus 10 units, so the ground the town is cut into is never
+        /// BELOW the height the town is flattened to. A heightmap under the flatten target would put the
+        /// harbour in a shallow bowl of its own.
+        /// </summary>
+        public const float PortTargetGroundUnits = 10f;
+
+        /// <summary>
+        /// MOBILE: (P1) the four shader constants that turn DerivMap.b into a height, mirrored from the
+        /// SetFloat calls in this file (baseHeightScale 8, noiseMapScale 4, scaledOceanElevation 27.2,
+        /// maxTerrainHeight 2308.5 - set identically on the start-up and the per-tile kernel) and used
+        /// by heightSampling.cginc:144-145. Named constants rather than literals at the call site so the
+        /// self test can assert they are the same numbers the kernels are given.
+        /// </summary>
+        public const float DerivBaseHeightScale = 8f;
+        public const float DerivNoiseMapScale = 4f;
+        public const float DerivScaledOceanElevation = 27.2f;
+        public const float DerivMaxTerrainHeight = 2308.5f;
+
+        /// <summary>
+        /// MOBILE: (P1) heightSampling.cginc's BASEHEIGHT_MIN / BASEHEIGHT_MAX (:7-8). GetBaseHeight
+        /// (:228-231) uses loResBaseHeight as the LERP FACTOR between (BASEHEIGHT_MIN - 1) / newHeight
+        /// and baseHeightMax / newHeight - it is not the height itself - so the byte a target ground
+        /// height needs has to be solved through BOTH steps. baseHeightMax is BASEHEIGHT_MAX on flat
+        /// land and rises to BASEHEIGHT_HILL / BASEHEIGHT_MNT with the biome weights; flat land is what
+        /// a harbour is, and it is also the case that needs the HIGHEST byte, so solving with
+        /// BASEHEIGHT_MAX puts a hill or mountain port very slightly lower than its target rather than
+        /// leaving it above the waterline it was supposed to meet.
+        /// </summary>
+        public const float BaseHeightMinUnits = 100f;
+        public const float BaseHeightMaxUnits = 800f;
+
+        /// <summary>
+        /// MOBILE: (P1) COASTAL RAMP - the ground height, normalised to newHeight, that one DerivMap.b
+        /// byte produces on flat land: heightSampling.cginc:144-145 then :228-231, in that order.
+        /// Pure, and the exact inverse of <see cref="DerivFloorByte"/>, so the self test can round-trip
+        /// the chosen floor byte back through the shader's own arithmetic.
+        /// </summary>
+        public static float DerivGroundHeight(int derivBlue, float newHeight)
+        {
+            float loRes = (derivBlue * (DerivBaseHeightScale + DerivNoiseMapScale) - DerivScaledOceanElevation)
+                          / DerivMaxTerrainHeight;
+            loRes = Mathf.Clamp01(loRes);
+
+            float min = (BaseHeightMinUnits - 1f) / newHeight;
+            float max = BaseHeightMaxUnits / newHeight;
+            return Mathf.Lerp(min, max, loRes);
+        }
+
+        /// <summary>
+        /// MOBILE: (P1) COASTAL RAMP - the DerivMap.b byte whose ground height is closest to
+        /// <paramref name="targetGroundHeight"/>: <see cref="DerivGroundHeight"/> solved backwards. For
+        /// the shipped target (0.021 + 10/5000 = 0.023) this is byte 7, whose ground height is 0.02325 =
+        /// 116 units - just above OceanElevation's 100 and just above the 105 units the town itself is
+        /// flattened to. Pure.
+        /// </summary>
+        public static byte DerivFloorByte(float targetGroundHeight, float newHeight)
+        {
+            float min = (BaseHeightMinUnits - 1f) / newHeight;
+            float max = BaseHeightMaxUnits / newHeight;
+            float loRes = Mathf.Clamp01((targetGroundHeight - min) / (max - min));
+
+            float b = (loRes * DerivMaxTerrainHeight + DerivScaledOceanElevation)
+                      / (DerivBaseHeightScale + DerivNoiseMapScale);
+            return (byte)Mathf.Clamp(Mathf.RoundToInt(b), 0, 255);
+        }
+
+        /// <summary>
+        /// MOBILE: (P1) COASTAL RAMP - how many world units of ground a drop of
+        /// <paramref name="dropBytes"/> DerivMap.b bytes is worth, for the log line. The byte-to-ground
+        /// mapping is linear between the two saturate() clamps, so this is a rate and does not depend on
+        /// where the drop started: one byte is (800 - 99) * 12 / 2308.5 = 3.64 units. newHeight cancels
+        /// (GetBaseHeight divides the two BASEHEIGHT constants by it and the result is multiplied back
+        /// up), so it is not a parameter. Expressed as the rate rather than as the difference of two
+        /// DerivGroundHeight calls because the low end of that function is clamped - byte 0, 1 and 2 all
+        /// give the same ground - which would report a drop near the floor as zero units. Pure.
+        /// </summary>
+        public static float DerivDropUnits(int dropBytes)
+        {
+            float unitsPerByte = (BaseHeightMaxUnits - (BaseHeightMinUnits - 1f))
+                                 * (DerivBaseHeightScale + DerivNoiseMapScale) / DerivMaxTerrainHeight;
+            return dropBytes * unitsPerByte;
+        }
+
+        /// <summary>
+        /// MOBILE: (P1) COASTAL RAMP - the ramp radius in TEXELS of a map that covers the whole world.
+        /// The port map and the deriv map are both 5000x2500 sources that the iOS importer clamps to
+        /// 2048x1024, and 2048/1000 and 1024/500 are the same number, so one radius serves both axes -
+        /// which <see cref="PortRampTexelRadiiAgree"/> is what checks. Pure.
+        /// </summary>
+        public static float PortRampRadiusTexels(int texWidth)
+        {
+            return PortRampRadiusMapPixels * texWidth / (float)WoodsFile.MapWidth;
+        }
+
+        /// <summary>
+        /// MOBILE: (P1) true when a world map of these dimensions has the same texels-per-map-pixel on
+        /// both axes, i.e. when one texel radius is honest in x and y. Pure, and the pass logs and
+        /// carries on with the x radius if it is ever false rather than ramping an ellipse silently.
+        /// </summary>
+        public static bool PortRampTexelRadiiAgree(int texWidth, int texHeight)
+        {
+            float x = texWidth / (float)WoodsFile.MapWidth;
+            float y = texHeight / (float)WoodsFile.MapHeight;
+            return Mathf.Abs(x - y) < 1e-4f;
+        }
+
+        /// <summary>
+        /// MOBILE: (P1) COASTAL RAMP - the texel offset from a PortMap texel to the DerivMap texel that
+        /// covers the SAME world position. The shader reads the two maps at different uvs for one vertex
+        /// (TerrainComputer.compute:574-576 vs heightSampling.cginc's plain worldUv):
+        ///
+        ///     portUv  = worldUv + (-0.25, -1.1) / (TERRAIN_X, TERRAIN_Y)
+        ///     derivUv = worldUv
+        ///
+        /// so a port mark sitting at portUv applies to the world position whose worldUv is
+        /// portUv - uvOffset, which is +0.25/999 in u and +1.1/499 in v - at 2048x1024, +0.51 and +2.26
+        /// texels, i.e. (+1, +2) once rounded. Without this the ramp would land about one map pixel
+        /// north of the harbour it is for. Pure. Returned in GetPixels32 order, where row 0 is the
+        /// BOTTOM and v runs the same way, so both offsets are positive in array indices.
+        /// </summary>
+        public static (int dx, int dy) PortToDerivTexelOffset(int texWidth, int texHeight)
+        {
+            return (Mathf.RoundToInt(0.25f / 999f * texWidth), Mathf.RoundToInt(1.1f / 499f * texHeight));
+        }
+
+        /// <summary>
+        /// MOBILE: (P1) COASTAL RAMP - one texel's new value: the smoothstep ramp from
+        /// <paramref name="portFloor"/> at the port itself back to the untouched
+        /// <paramref name="height"/> at <paramref name="radius"/>, clamped so it can only ever LOWER.
+        ///
+        /// cap(d) = lerp(portFloor, height, smoothstep(0, 1, d / radius)), result = min(height, cap(d)).
+        /// smoothstep rather than a linear lerp because a linear ramp meets the untouched terrain at a
+        /// crease - a visible ridge one texel wide all the way round the ramp - while smoothstep's zero
+        /// derivative at both ends joins the port floor and the mod's own hills without one.
+        ///
+        /// At or beyond the radius the height is returned untouched, so the ramp's edge is the radius and
+        /// not wherever the rounding happens to stop moving the byte; at or below portFloor it is
+        /// returned untouched too, so the pass can never deepen the sea or undercut a harbour that is
+        /// already at its floor.
+        ///
+        /// Pure: no Unity state, no texture, so the self test pins the curve itself.
+        /// </summary>
+        public static byte PortRampCap(byte height, byte portFloor, float distance, float radius)
+        {
+            if (radius <= 0f || distance >= radius || height <= portFloor)
+                return height;
+
+            float t = Mathf.Clamp01(distance / radius);
+            float s = t * t * (3f - 2f * t);
+            int cap = Mathf.RoundToInt(portFloor + (height - portFloor) * s);
+            return cap < height ? (byte)cap : height;
+        }
+
+        /// <summary>
+        /// MOBILE: (P1) COASTAL RAMP - applies <see cref="PortRampCap"/> to one byte channel of a
+        /// <paramref name="width"/> x <paramref name="height"/> grid around every port texel. Returns how
+        /// many DISTINCT texels were lowered (a texel inside two ports' radii counts once), -1 for a null
+        /// or short buffer, and reports the largest single drop in bytes through
+        /// <paramref name="maxDrop"/>.
+        ///
+        /// Cost: one pass over each port's (2R+1)^2 neighbourhood, not the grid per port.
+        ///
+        /// Pure: dimensions and port list passed in, no Unity state, so the self test pins it on a 20x20.
+        /// </summary>
+        public static int ApplyPortRamps(
+            byte[] channel, int width, int height, IList<(int x, int y)> portTexels,
+            byte portFloor, float radius, out int maxDrop)
+        {
+            maxDrop = 0;
+
+            if (channel == null || width < 1 || height < 1 || channel.Length < width * height)
+                return -1;
+            if (portTexels == null || portTexels.Count == 0 || radius <= 0f)
+                return 0;
+
+            // MOBILE: (P1) every cap is computed from `before` - the channel as it stood when the pass
+            // STARTED - and written as a min() into `channel`. That is what makes two overlapping ports
+            // take the LOWER of their two ramps rather than compounding: capping against the running
+            // value would apply smoothstep twice and give s(dA) * s(dB) * (h - floor), which is below
+            // both ramps and below anything either port asked for. It also makes the result independent
+            // of the order the ports are listed in, and `before` is what the lowered count and maxDrop
+            // are measured against at the end.
+            //
+            // NOT idempotent, deliberately: the ramp is RELATIVE to the height it is given, so feeding it
+            // its own output ramps again (floor + s^2 * (h - floor)). Nothing calls it twice - the deriv
+            // copy is built once per session from the untouched imported texture - and an absolute cap
+            // that WOULD be idempotent (a fixed slope, or a fixed byte per distance) cannot adapt to how
+            // high the mod put the land around THIS harbour, which is the whole job. The self test pins
+            // both halves of that so the behaviour is a decision, not an accident.
+            byte[] before = (byte[])channel.Clone();
+            int r = Mathf.CeilToInt(radius);
+            float rr = radius * radius;
+
+            for (int p = 0; p < portTexels.Count; p++)
+            {
+                var port = portTexels[p];
+                if (port.x < 0 || port.x >= width || port.y < 0 || port.y >= height)
+                    continue;
+
+                for (int dy = -r; dy <= r; dy++)
+                {
+                    int qy = port.y + dy;
+                    if (qy < 0 || qy >= height)
+                        continue;
+
+                    int row = qy * width;
+                    for (int dx = -r; dx <= r; dx++)
+                    {
+                        int qx = port.x + dx;
+                        if (qx < 0 || qx >= width)
+                            continue;
+
+                        float d2 = dx * dx + dy * dy;
+                        if (d2 > rr)
+                            continue;
+
+                        int i = qx + row;
+                        byte cap = PortRampCap(before[i], portFloor, Mathf.Sqrt(d2), radius);
+                        if (cap < channel[i])
+                            channel[i] = cap;
+                    }
+                }
+            }
+
+            int lowered = 0;
+            int n = width * height;
+            for (int i = 0; i < n; i++)
+            {
+                int drop = before[i] - channel[i];
+                if (drop <= 0)
+                    continue;
+                lowered++;
+                if (drop > maxDrop)
+                    maxDrop = drop;
+            }
+
+            return lowered;
+        }
+
+        /// <summary>
+        /// MOBILE: (P1) COASTAL RAMP - every DerivMap texel that a port or a sea-level location sits on:
+        /// PortMap.r &gt; 0 (portHeight, which GetHeightSample turns into
+        /// portLerp = saturate(portHeight * 10)) or PortMap.b &gt; 0 (seaHeight, whose branch sets
+        /// locationHeight to 0 outright), shifted by <see cref="PortToDerivTexelOffset"/> and clamped to
+        /// the grid. The two maps are the same size so this is a texel-for-texel walk, not a resample.
+        /// Pure.
+        /// </summary>
+        public static List<(int x, int y)> CollectPortTexels(
+            Color32[] portPixels, int texWidth, int texHeight, int dx, int dy)
+        {
+            var ports = new List<(int x, int y)>();
+            if (portPixels == null || texWidth < 1 || texHeight < 1 || portPixels.Length < texWidth * texHeight)
+                return ports;
+
+            for (int y = 0; y < texHeight; y++)
+            {
+                int row = y * texWidth;
+                for (int x = 0; x < texWidth; x++)
+                {
+                    Color32 c = portPixels[x + row];
+                    if (c.r == 0 && c.b == 0)
+                        continue;
+
+                    ports.Add((
+                        Mathf.Clamp(x + dx, 0, texWidth - 1),
+                        Mathf.Clamp(y + dy, 0, texHeight - 1)));
+                }
+            }
+
+            return ports;
+        }
+
+        /// <summary>
+        /// MOBILE: (P1) COASTAL RAMP - a world map's texels on the CPU. The importer rule for
+        /// WorldOfDaggerfallTerrain's maps is LinearData (MobileModPackTextureRules), which deliberately
+        /// leaves isReadable false - they are compute-shader inputs and a CPU copy would double their
+        /// memory - so the pixels are fetched through a temporary RenderTexture instead of changing the
+        /// import rule for the sake of one start-up pass. The RenderTexture is Linear because these are
+        /// linear data, not colour: an sRGB conversion either way would move every byte.
+        /// Returns null (and the pass is skipped) if the texture is missing or the readback fails.
+        /// </summary>
+        static Color32[] ReadTexturePixels(Texture2D texture, out int w, out int h)
+        {
+            w = 0;
+            h = 0;
+            if (texture == null)
+                return null;
+
+            w = texture.width;
+            h = texture.height;
+
+            if (texture.isReadable)
+            {
+                try { return texture.GetPixels32(); }
+                catch (Exception) { /* fall through to the blit */ }
+            }
+
+            RenderTexture rt = null;
+            RenderTexture previous = RenderTexture.active;
+            Texture2D copy = null;
+            try
+            {
+                rt = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+                Graphics.Blit(texture, rt);
+                RenderTexture.active = rt;
+                copy = new Texture2D(w, h, TextureFormat.RGBA32, false, true);
+                copy.ReadPixels(new Rect(0, 0, w, h), 0, 0);
+                copy.Apply(false);
+                return copy.GetPixels32();
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[WoDTerrain] " + texture.name + " readback failed, coastal ramps skipped: " + e.Message);
+                return null;
+            }
+            finally
+            {
+                RenderTexture.active = previous;
+                if (rt != null)
+                    RenderTexture.ReleaseTemporary(rt);
+                if (copy != null)
+                    UnityEngine.Object.Destroy(copy);
+            }
+        }
+
+        /// <summary>
+        /// MOBILE: (P1) COASTAL RAMP - the ramped copy of DerivMap, or null when the pass could not run
+        /// (a map missing, a readback that threw, or the two maps not being the same size). Destroyed by
+        /// <see cref="Cleanup"/>, which is the same teardown that nulls alteredHeightmapBuffer and
+        /// destroys baseHeightmap.
+        /// </summary>
+        public static Texture2D rampedDerivMap;
+
+        /// <summary>
+        /// MOBILE: (P1) what every kernel binds as "DerivMap": the ramped copy when there is one, the
+        /// mod's own texture otherwise. One accessor rather than three null checks, so a kernel cannot be
+        /// added that quietly reads the unramped map and disagrees with the others about where the
+        /// ground is.
+        /// </summary>
+        public static Texture2D DerivMapForCompute
+        {
+            get { return rampedDerivMap != null ? rampedDerivMap : InterestingTerrains.derivMap; }
+        }
+
+        /// <summary>
+        /// MOBILE: (P1) COASTAL RAMP - builds <see cref="rampedDerivMap"/>. Called once, before the
+        /// start-up world heightmap dispatch, so that dispatch and every per-tile dispatch read the same
+        /// ground. See the block comment above PortRampRadiusMapPixels for why this is the deriv map and
+        /// not the world heightmap.
+        ///
+        /// The two maps must be the same size - they ship as the same 5000x2500 source and the importer
+        /// clamps both the same way - because the port texels are used as deriv texels directly. If they
+        /// ever differ the pass logs and does nothing, leaving the mod exactly as upstream ships it,
+        /// rather than ramping the wrong texels.
+        /// </summary>
+        public static void PrepareRampedDerivMap()
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+
+            if (rampedDerivMap != null)
+            {
+                UnityEngine.Object.Destroy(rampedDerivMap);
+                rampedDerivMap = null;
+            }
+
+            int portW, portH, derivW, derivH;
+            var portPixels = ReadTexturePixels(InterestingTerrains.portMap, out portW, out portH);
+            var derivPixels = ReadTexturePixels(InterestingTerrains.derivMap, out derivW, out derivH);
+
+            if (portPixels == null || derivPixels == null)
+            {
+                Debug.Log(string.Format(
+                    "[WoDTerrain] port ramps (deriv map): skipped, port map {0}x{1} deriv map {2}x{3}, readback failed",
+                    portW, portH, derivW, derivH));
+                return;
+            }
+
+            if (portW != derivW || portH != derivH)
+            {
+                Debug.LogWarning(string.Format(
+                    "[WoDTerrain] port ramps (deriv map): skipped, port map is {0}x{1} but deriv map is {2}x{3} - "
+                    + "the ramp maps port texels to deriv texels 1:1 and cannot with different sizes",
+                    portW, portH, derivW, derivH));
+                return;
+            }
+
+            if (!PortRampTexelRadiiAgree(derivW, derivH))
+            {
+                Debug.LogWarning(string.Format(
+                    "[WoDTerrain] port ramps (deriv map): {0}x{1} is not the world's 2:1, using the x radius on both axes",
+                    derivW, derivH));
+            }
+
+            var offset = PortToDerivTexelOffset(derivW, derivH);
+            var ports = CollectPortTexels(portPixels, portW, portH, offset.dx, offset.dy);
+
+            int n = derivW * derivH;
+            var blue = new byte[n];
+            for (int i = 0; i < n; i++)
+                blue[i] = derivPixels[i].b;
+
+            byte floor = DerivFloorByte(LocationFloor + PortTargetGroundUnits / Constants.TERRAIN_HEIGHT,
+                                        Constants.TERRAIN_HEIGHT);
+            int maxDrop;
+            int lowered = ApplyPortRamps(
+                blue, derivW, derivH, ports, floor, PortRampRadiusTexels(derivW), out maxDrop);
+
+            for (int i = 0; i < n; i++)
+                derivPixels[i].b = blue[i];
+
+            rampedDerivMap = new Texture2D(derivW, derivH, TextureFormat.RGBA32, false, true);
+            rampedDerivMap.name = "daggerfall_deriv_map (port ramped)";
+            rampedDerivMap.filterMode = InterestingTerrains.derivMap.filterMode;
+            rampedDerivMap.wrapMode = InterestingTerrains.derivMap.wrapMode;
+            rampedDerivMap.SetPixels32(derivPixels);
+            rampedDerivMap.Apply(false, true);   // MOBILE: (P1) no mips, and release the CPU copy
+
+            watch.Stop();
+            Debug.Log(string.Format(
+                "[WoDTerrain] port ramps (deriv map): {0} port texels, {1} texels lowered, max drop {2} ({3:F0} units), {4} ms",
+                ports.Count, lowered, maxDrop, DerivDropUnits(maxDrop),
+                watch.ElapsedMilliseconds));
+            Debug.Log(string.Format(
+                "[WoDTerrain] deriv map {0}x{1} port map {2}x{3} floor byte {4} (ground {5:F0} units) radius {6:F2} texels offset {7},{8}",
+                derivW, derivH, portW, portH, floor,
+                DerivGroundHeight(floor, Constants.TERRAIN_HEIGHT) * Constants.TERRAIN_HEIGHT,
+                PortRampRadiusTexels(derivW), offset.dx, offset.dy));
+        }
+
         /// <summary>
         /// MOBILE: (D1) the height LocationWeight flattens one location TO, computed on the CPU exactly
         /// as TerrainComputer.compute:296-302 computes it on the GPU: floor the rect, take its centre,
@@ -577,6 +1061,10 @@ namespace Monobelisk
             // Task 8 measures it by. Timing only the loop would have understated the pause it names.
             var watch = System.Diagnostics.Stopwatch.StartNew();
 
+            // MOBILE: (P1) COASTAL RAMP - built FIRST, because the dispatch below binds DerivMap and the
+            // world heightmap it writes has to describe the same ground the per-tile kernel will.
+            PrepareRampedDerivMap();
+
             var woodsFile = DaggerfallUnity.Instance.ContentReader.WoodsFileReader;
             var original = woodsFile.Buffer;
             originalHeightmapBuffer = new byte[original.Length];
@@ -618,7 +1106,7 @@ namespace Monobelisk
                 cs.SetVector("terrainSize", new Vector2(StartupSampleDim, WoodsFile.MapHeight));
                 cs.SetVector("terrainPosition", Vector2.zero);
                 cs.SetTexture(k, "BiomeMap", InterestingTerrains.biomeMap);
-                cs.SetTexture(k, "DerivMap", InterestingTerrains.derivMap);
+                cs.SetTexture(k, "DerivMap", DerivMapForCompute);   // MOBILE: (P1) COASTAL RAMP
                 cs.SetBuffer(k, "Result", alteredHeights);
                 csParams.ApplyToCS(cs);     // MOBILE: (M2)
 
@@ -767,6 +1255,15 @@ namespace Monobelisk
         {
             loggedFirstTileLocations = false;    // MOBILE: (D1)
 
+            // MOBILE: (P1) COASTAL RAMP - the 8 MB ramped deriv copy. Destroyed here, in the same
+            // teardown that nulls alteredHeightmapBuffer and destroys baseHeightmap, so a refused or
+            // torn-down start leaves no texture behind that nothing can reach.
+            if (rampedDerivMap != null)
+            {
+                UnityEngine.Object.Destroy(rampedDerivMap);
+                rampedDerivMap = null;
+            }
+
             // MOBILE: (b)(c) release the location buffer only if it was ever created, and destroy the two
             // MOBILE: held ComputeShader clones - they are the leak the per-tile Instantiate used to be.
             if (locationHeightDataBuffer != null)
@@ -906,7 +1403,7 @@ namespace Monobelisk
             cs.SetVectorArray("locationSizes", LocationSizes);           // MOBILE: (d)(I1)
             cs.SetInt("locationCount", locationCount);                   // MOBILE: (d)
             cs.SetTexture(k, "BiomeMap", InterestingTerrains.biomeMap);
-            cs.SetTexture(k, "DerivMap", InterestingTerrains.derivMap);
+            cs.SetTexture(k, "DerivMap", DerivMapForCompute);   // MOBILE: (P1) COASTAL RAMP
             cs.SetTexture(k, "PortMap", InterestingTerrains.portMap);
             cs.SetTexture(k, "RoadMap", InterestingTerrains.roadMap);
             cs.SetTexture(k, "tileableNoise", InterestingTerrains.tileableNoise);
@@ -946,7 +1443,7 @@ namespace Monobelisk
 
             k = cs.FindKernel("TilemapComputer");
             cs.SetTexture(k, "BiomeMap", InterestingTerrains.biomeMap);
-            cs.SetTexture(k, "DerivMap", InterestingTerrains.derivMap);
+            cs.SetTexture(k, "DerivMap", DerivMapForCompute);   // MOBILE: (P1) COASTAL RAMP
             cs.SetBuffer(k, "heightmapBuffer", heightmapBuffers.heightmapBuffer);
             cs.SetBuffer(k, "tilemapData", heightmapBuffers.tilemapData);
             cs.SetBuffer(k, "rawNoise", heightmapBuffers.rawNoise);
