@@ -92,13 +92,21 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// <summary>
         /// Does this touch position (Unity screen coords, BOTTOM-left origin) land on the
         /// bar? Sticks and the look zone use this to leave bar touches alone.
+        ///
+        /// Takes the RAW finger position and does the CRT remap itself, so every caller gets the
+        /// same answer and none of them has to know the filter exists. The bar is IMGUI: it is
+        /// drawn inside the CRT frame pass's capture and therefore displaced toward the centre of
+        /// the tube by the barrel warp - about 60 px at the bottom of a 1668-row panel - while
+        /// Bar.Rectangle stays where the picture was drawn. ToSourcePoint is the identity whenever
+        /// the pass is not running.
         /// </summary>
         public static bool ContainsScreenPoint(Vector2 screenPos)
         {
             if (!BarVisible)
                 return false;
 
-            return Bar.Rectangle.Contains(new Vector2(screenPos.x, Screen.height - screenPos.y));
+            Vector2 p = MobileCrtFrame.ToSourcePoint(screenPos);
+            return Bar.Rectangle.Contains(new Vector2(p.x, Screen.height - p.y));
         }
 
         /// <summary>
@@ -143,7 +151,13 @@ namespace DaggerfallWorkshop.Game.Mobile
 
                     HUDLarge bar = Bar;
                     if (bar != null)
-                        bar.TriggerTap(new Vector2(t.position.x, Screen.height - t.position.y));
+                    {
+                        // Same remap as ContainsScreenPoint, and it has to be the same or the tap
+                        // that was accepted at the top of this block would fire on a different icon.
+                        // The travel test above stays in raw finger pixels: it measures the hand.
+                        Vector2 p = MobileCrtFrame.ToSourcePoint(t.position);
+                        bar.TriggerTap(new Vector2(p.x, Screen.height - p.y));
+                    }
                 }
                 else if (t.phase == TouchPhase.Canceled)
                 {

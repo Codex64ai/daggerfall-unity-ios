@@ -119,6 +119,52 @@ namespace DaggerfallWorkshop.Game.Mobile
             }
         }
 
+        // ---- where a finger really points ---------------------------------------------------
+        // "touch buttons are harder to hit when the CRT is on" (Ikram, 2026-09-16). While this pass
+        // runs, what the player sees is the captured frame pushed through MobileCRT.shader's barrel
+        // term, which shrinks the picture toward the middle - about 60 px at the bottom of a
+        // 1668-row panel at the default curvature. The game's own UI is DRAWN at the moved place
+        // and HIT-TESTED at the unmoved one, so a finger on a visible icon lands short of its box.
+        // MobileCrt.WarpScreenPoint is the shader's own mapping; these two say when to apply it.
+
+        /// <summary>
+        /// A raw touch (or pointer) position, moved to the pixel of the SOURCE frame it is really
+        /// over - the frame everything the game draws itself lives in: DaggerfallUI's HUD, the
+        /// classic bottom bar, every menu and message box. Identity when the pass is not running
+        /// this frame, so the filter being off costs nothing and changes nothing.
+        ///
+        /// ABSOLUTE POSITIONS ONLY. A relative path that adds a delta to MobileInput.CursorPosition
+        /// is building on a cursor this has already moved; remapping the delta's endpoints too
+        /// would apply the warp twice.
+        /// </summary>
+        public static Vector2 ToSourcePoint(Vector2 screenPx)
+        {
+            if (!active)
+                return screenPx;
+
+            return MobileCrt.WarpScreenPoint(screenPx,
+                MobileCrt.ClampCurvature(DaggerfallUnity.Settings.CRTCurvature),
+                Screen.width, Screen.height);
+        }
+
+        /// <summary>
+        /// The same, for the TOUCH CONTROLS - the joysticks, the action buttons and the look zone.
+        /// They are only inside the warp at coverage 2: at coverage 1 (the default) this pass
+        /// deliberately keeps them out of the capture and redraws them sharp through its own
+        /// camera, so they are already exactly where the finger says they are and remapping them
+        /// would be the bug rather than the fix.
+        /// </summary>
+        public static Vector2 ToControlPoint(Vector2 screenPx)
+        {
+            if (!active)
+                return screenPx;
+
+            if (MobileCrt.TouchControlsSharp(MobileCrt.ClampCoverage(DaggerfallUnity.Settings.CRTCoverage)))
+                return screenPx;
+
+            return ToSourcePoint(screenPx);
+        }
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Hook()
         {
@@ -201,7 +247,29 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (MobileCrt.TouchControlsSharp(coverage) && touchCamera != null && touchCanvas != null)
                 touchCamera.Render();
 
+            if (!active)
+                LogTouchRemap(coverage);
+
             active = true;
+        }
+
+        /// <summary>
+        /// One line per activation, with the real number on the real screen: how far the bottom of
+        /// the picture has moved, which is the same distance the taps down there have to move with
+        /// it. Reported as the displacement rather than as a curvature so it can be read against
+        /// what the player is complaining about.
+        /// </summary>
+        static void LogTouchRemap(int coverage)
+        {
+            float curvature = MobileCrt.ClampCurvature(DaggerfallUnity.Settings.CRTCurvature);
+            float w = Screen.width;
+            float h = Screen.height;
+            Vector2 bottomCentre = MobileCrt.WarpScreenPoint(new Vector2(w * 0.5f, 0f), curvature, w, h);
+
+            Debug.Log(string.Format(
+                "[CRT] touch remap on (curvature {0:0.###}, coverage {1}, {2}x{3}): bottom-centre tap maps 0 -> {4:0} px{5}",
+                curvature, coverage, (int)w, (int)h, bottomCentre.y,
+                MobileCrt.TouchControlsSharp(coverage) ? "; touch controls sharp, not remapped" : "; touch controls remapped too"));
         }
 
         /// <summary>

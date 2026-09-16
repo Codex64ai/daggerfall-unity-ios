@@ -655,7 +655,9 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             Vector2 hover;
             if (MobilePointer.TryGetHover(out hover))
-                MobileInput.SetCursorPosition(hover);
+                // A real pointer's SCREEN position, and the windows it points at are inside the CRT
+                // frame pass's capture like everything else DFU draws itself.
+                MobileInput.SetCursorPosition(MobileCrtFrame.ToSourcePoint(hover));
 
             MobileInput.SetLatched(0, MobilePointer.Left);
             MobileInput.SetLatched(1, MobilePointer.Right);

@@ -140,6 +140,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestMobileCRTSettingsEndToEnd();
             TestMobileCRTUI();
             TestMobileCRTCoverage();
+            TestMobileCRTTouchRemap();
             TestMobileBundleIdPin();
             TestDebugStartCommands();
             TestWODBiomesPort();
@@ -2807,6 +2808,191 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 "MobileCRT coverage: the command file's `set <t> DrawWeapon 1` readies the weapon for a screenshot");
             Check(MethodBody(debug, "static void DrawWeapon(bool drawn)").Contains("weapons.ToggleSheath()"),
                 "MobileCRT coverage: DrawWeapon goes through WeaponManager.ToggleSheath, the path the player's own button takes");
+        }
+
+        /// <summary>
+        /// THE TUBE'S WARP, APPLIED TO A FINGER (2026-09-16). "touch buttons are harder to hit when
+        /// the CRT is on" (Ikram). With the frame pass running, MobileCRT.shader displays at the
+        /// output pixel p the SOURCE pixel p*(1+k*r^2) in centred coordinates - the picture shrinks
+        /// toward the middle by k (0.08 by default) at the edges, about 60 px at the bottom of a
+        /// 1668-row iPad panel. Everything DFU draws itself is inside that picture, so the classic
+        /// bar's icons and every menu were DRAWN displaced and HIT-TESTED where they were not.
+        ///
+        /// MobileCrt.WarpScreenPoint is the shader's own expression in screen pixels, and it is the
+        /// one piece of this that a headless editor can execute - so it is executed here against
+        /// the numbers a 2420x1668 iPad actually produces, not merely inspected. What cannot be
+        /// executed (Screen.width, DaggerfallUnity.Settings and an end-of-frame pass) is pinned in
+        /// source at the sites where a remap silently going missing would bring the bug back.
+        /// </summary>
+        static void TestMobileCRTTouchRemap()
+        {
+            // The device this was reported on: a 2420x1668 iPad panel at the default curvature.
+            const float w = 2420f;
+            const float h = 1668f;
+            const float k = 0.08f;
+
+            // ---- curvature 0 is the identity, to the bit ----
+            // Written as an offset from the point rather than as the shader's multiply-and-recentre
+            // precisely so that this is exact: the filter off, or its slider at zero, must not move
+            // a single tap by even half a pixel.
+            foreach (Vector2 pt in new[] { new Vector2(0f, 0f), new Vector2(w, h), new Vector2(1210f, 834f),
+                                           new Vector2(37f, 1599f), new Vector2(w * 0.5f, 0f) })
+                Check(MobileCrt.WarpScreenPoint(pt, 0f, w, h) == pt,
+                    "MobileCRT touch: curvature 0 is the identity at " + pt,
+                    MobileCrt.WarpScreenPoint(pt, 0f, w, h).ToString());
+
+            // ---- the centre is a fixed point at any curvature ----
+            // r is 0 there, so the barrel term is 0: the middle of the tube is the one place the
+            // picture does not move, and the one place a tap needs no correction.
+            Vector2 centre = new Vector2(w * 0.5f, h * 0.5f);
+            foreach (float c in new[] { 0f, 0.02f, 0.08f, 0.15f, MobileCrt.MaxCurvature })
+                Check((MobileCrt.WarpScreenPoint(centre, c, w, h) - centre).magnitude < 1e-3f,
+                    "MobileCRT touch: the centre of the screen is a fixed point at curvature " + c,
+                    MobileCrt.WarpScreenPoint(centre, c, w, h).ToString());
+
+            // ---- the number the complaint is about ----
+            // Bottom centre: centred = (0,-1), r^2 = 1, so the source y is -k/2 of the screen's
+            // height - the bottom row of the picture is drawn 66.7 px ABOVE the bottom of the
+            // glass, and a finger on the bottom edge is pointing at a row that is off the picture.
+            Vector2 bottom = MobileCrt.WarpScreenPoint(new Vector2(w * 0.5f, 0f), k, w, h);
+            Check(Mathf.Abs(bottom.y - (-k * h * 0.5f)) < 0.5f,
+                "MobileCRT touch: a bottom-centre tap at curvature 0.08 maps to y = -66.7 on a 1668-row panel",
+                bottom.y.ToString("0.00"));
+            Check(Mathf.Abs(bottom.x - w * 0.5f) < 1e-3f,
+                "MobileCRT touch: a bottom-centre tap does not move sideways (x is on the axis)",
+                bottom.x.ToString("0.000"));
+
+            // Ten per cent up the screen - where the classic bar's icons live. centred.y = -0.8,
+            // r^2 = 0.64, so the source row is 132.6 rather than 166.8: the icon is drawn 34 px
+            // higher than its hit box, which is the miss the player feels.
+            Vector2 low = MobileCrt.WarpScreenPoint(new Vector2(w * 0.5f, h * 0.1f), k, w, h);
+            Check(Mathf.Abs(low.y - 132.6f) < 1f,
+                "MobileCRT touch: a tap a tenth of the way up maps outward, to y = 132.6",
+                low.y.ToString("0.00"));
+            Check(low.y < h * 0.1f,
+                "MobileCRT touch: the warp moves points AWAY from the centre (the picture shrinks inward)",
+                low.y + " < " + (h * 0.1f));
+
+            // ---- symmetry about the centre ----
+            // The mapping depends on the point only through the centred coordinate and its length,
+            // so a point and its antipode must come back as each other's mirror. A sign error
+            // anywhere in the y handling - the capture's flip is the obvious candidate - breaks
+            // this and nothing else in the file would notice.
+            foreach (Vector2 pt in new[] { new Vector2(300f, 200f), new Vector2(1210f, 100f), new Vector2(60f, 1500f) })
+            {
+                Vector2 a = MobileCrt.WarpScreenPoint(pt, k, w, h);
+                Vector2 b = MobileCrt.WarpScreenPoint(new Vector2(w - pt.x, h - pt.y), k, w, h);
+                Check(Mathf.Abs((w - b.x) - a.x) < 1e-2f && Mathf.Abs((h - b.y) - a.y) < 1e-2f,
+                    "MobileCRT touch: warping " + pt + " and its antipode gives mirror-symmetric results",
+                    a + " vs " + b);
+            }
+
+            // ---- a corner maps off the screen, and that is the answer ----
+            // There is no picture out there - it is the bezel - so the function does not clamp, and
+            // a caller's rectangle test failing is correct rather than a bug to paper over.
+            Vector2 corner = MobileCrt.WarpScreenPoint(new Vector2(0f, 0f), k, w, h);
+            Check(corner.x < 0f && corner.y < 0f,
+                "MobileCRT touch: the bottom-left corner maps outside the screen (the bezel), unclamped",
+                corner.ToString());
+            Vector2 farCorner = MobileCrt.WarpScreenPoint(new Vector2(w, h), k, w, h);
+            Check(farCorner.x > w && farCorner.y > h,
+                "MobileCRT touch: the top-right corner maps outside the screen too",
+                farCorner.ToString());
+
+            // ---- monotonic in the curvature ----
+            // The slider's meaning: more curve, more displacement, in one direction only.
+            float previous = 0f;
+            foreach (float c in new[] { 0f, 0.02f, 0.05f, 0.08f, 0.15f, MobileCrt.MaxCurvature })
+            {
+                float drop = -MobileCrt.WarpScreenPoint(new Vector2(w * 0.5f, 0f), c, w, h).y;
+                Check(c == 0f ? drop == 0f : drop > previous,
+                    "MobileCRT touch: a larger curvature moves the bottom-centre tap further out (k=" + c + ")",
+                    drop.ToString("0.00") + " px");
+                previous = drop;
+            }
+
+            // A zero screen cannot be divided by, and iOS reports 0x0 for a frame or two across a
+            // rotation - the same window MobileCrtFrame.Pass() already guards its capture against.
+            Check(MobileCrt.WarpScreenPoint(new Vector2(10f, 10f), k, 0f, 0f) == new Vector2(10f, 10f)
+                  && MobileCrt.WarpScreenPoint(new Vector2(10f, 10f), k, -1f, 100f) == new Vector2(10f, 10f),
+                "MobileCRT touch: a zero or negative screen size is the identity, not a division by zero");
+
+            // ---- MobileCrtFrame's two entry points ----
+            Type frameType = typeof(MobileCrt).Assembly.GetType("DaggerfallWorkshop.Game.Mobile.MobileCrtFrame");
+            Check(frameType != null, "MobileCRT touch: MobileCrtFrame exists");
+            if (frameType != null)
+            {
+                foreach (string m in new[] { "ToSourcePoint", "ToControlPoint" })
+                {
+                    var method = frameType.GetMethod(m, BindingFlags.Public | BindingFlags.Static);
+                    Check(method != null, "MobileCRT touch: MobileCrtFrame." + m + " is a public static remap");
+                    if (method == null)
+                        continue;
+                    // With no pass running - which is every headless editor - both are the identity,
+                    // and they must be: this is the path every desktop and editor session takes.
+                    var got = (Vector2)method.Invoke(null, new object[] { new Vector2(123f, 456f) });
+                    Check(got == new Vector2(123f, 456f),
+                        "MobileCRT touch: MobileCrtFrame." + m + " is the identity with the pass not running", got.ToString());
+                }
+            }
+
+            string frameSrc = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileCrtFrame.cs"));
+            Check(MethodBody(frameSrc, "public static Vector2 ToSourcePoint(Vector2 screenPx)").Contains("if (!active)"),
+                "MobileCRT touch: ToSourcePoint is the identity unless the frame pass is running");
+            Check(MethodBody(frameSrc, "public static Vector2 ToControlPoint(Vector2 screenPx)")
+                    .Contains("MobileCrt.TouchControlsSharp("),
+                "MobileCRT touch: ToControlPoint remaps the touch controls only when they are inside the warp (coverage 2)");
+            Check(frameSrc.Contains("[CRT] touch remap on"),
+                "MobileCRT touch: the pass logs the remap once per activation, with the real displacement");
+
+            // ---- the sites ----
+            // Each of these is silently survivable - the build compiles, the game runs, and one
+            // more thing is a few dozen pixels out from where the player can see it.
+            string cursor = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/VirtualMouseCursor.cs"));
+            Check(MethodBody(cursor, "void PollMouseFallback()").Contains("MobileCrtFrame.ToSourcePoint(Input.mousePosition)"),
+                "MobileCRT touch: the editor/desktop mouse path remaps its absolute position");
+            Check(MethodBody(cursor, "void BeginPrimary(Touch touch)").Contains("MobileCrtFrame.ToSourcePoint(touch.position)"),
+                "MobileCRT touch: a finger landing sets the cursor through the remap");
+            string movePrimary = MethodBody(cursor, "void MovePrimary(Touch touch)");
+            Check(movePrimary.Contains("MobileCrtFrame.ToSourcePoint(touch.position)"),
+                "MobileCRT touch: absolute mode's every-frame cursor update goes through the remap");
+            // THE ONE THAT MUST NOT: the relative branch adds a delta to a cursor the remap has
+            // already moved, so remapping here would apply the tube twice and the cursor would
+            // drift off the finger the longer the drag went on.
+            Check(!movePrimary.Contains("ToSourcePoint(MobileInput.CursorPosition")
+                  && movePrimary.Contains("MobileInput.SetCursorPosition(MobileInput.CursorPosition + delta * gain);"),
+                "MobileCRT touch: the RELATIVE cursor path is left raw - it builds on an already-remapped cursor");
+            string controller = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileInputController.cs"));
+            Check(MethodBody(controller, "void PumpPointerCursor()").Contains("MobileCrtFrame.ToSourcePoint(hover)"),
+                "MobileCRT touch: the native pointer's hover position is remapped like a finger");
+
+            string hud = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileClassicHud.cs"));
+            Check(MethodBody(hud, "public static bool ContainsScreenPoint(Vector2 screenPos)").Contains("ToSourcePoint"),
+                "MobileCRT touch: the classic bar's hit test remaps the finger (the bug's headline case)");
+            Check(MethodBody(hud, "public static void Poll()").Contains("ToSourcePoint"),
+                "MobileCRT touch: the tap handed to HUDLarge.TriggerTap is remapped too, or it would fire on a different icon");
+            // Consistency: the sticks and the look zone consult ContainsScreenPoint with the RAW
+            // position, because that method does the bar's remap itself. Passing an already-remapped
+            // point there would warp it twice and the bar would start stealing the wrong touches.
+            string stick = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/VirtualJoystick.cs"));
+            string look = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/TouchLookZone.cs"));
+            Check(stick.Contains("MobileClassicHud.ContainsScreenPoint(t.position)")
+                  && look.Contains("MobileClassicHud.ContainsScreenPoint(t.position)"),
+                "MobileCRT touch: the sticks and the look zone still ask the bar about the RAW position (no double warp)");
+
+            // Coverage 2: the controls are inside the picture as well, so their own hit tests move.
+            Check(stick.Contains("MobileCrtFrame.ToControlPoint(t.position)"),
+                "MobileCRT touch: a stick's claim and tracking use ToControlPoint (coverage 2)");
+            Check(look.Contains("MobileCrtFrame.ToControlPoint(t.position)"),
+                "MobileCRT touch: the look zone's claim tests use ToControlPoint (coverage 2)");
+            Check(MethodBody(look, "void Update()").Contains("directLastPos = t.position;"),
+                "MobileCRT touch: the look zone's delta stays in raw finger pixels - warping both ends would rescale the look speed");
+            string ugui = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileUGUIInput.cs"));
+            Check(ugui.Contains("public override Touch GetTouch(int index)") && ugui.Contains("ToControlPoint"),
+                "MobileCRT touch: the EventSystem's inputOverride remaps UGUI touches at coverage 2");
+            string probe = StripShaderComments(File.ReadAllText("Assets/Scripts/Game/Mobile/MobileControllerProbe.cs"));
+            Check(MethodBody(probe, "void PollProbeTouchButtons()").Contains("MobileCrtFrame.ToSourcePoint(t.position)"),
+                "MobileCRT touch: the controller probe's own IMGUI buttons are remapped (they are drawn inside the capture)");
         }
 
         static void TestMobileCRTSettingsEndToEnd()

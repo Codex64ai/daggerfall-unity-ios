@@ -223,6 +223,57 @@ namespace DaggerfallWorkshop.Game.Mobile
             return ClampCoverage(coverage) == CoverageFrame;
         }
 
+        // ---- the tube's warp, applied to a finger ------------------------------------------
+        // "touch buttons are harder to hit when the CRT is on" (Ikram, 2026-09-16). With the frame
+        // pass running (coverage 1 and 2) every pixel the player SEES has been moved by the
+        // shader's barrel term, and nothing moved the hit boxes to match. The shader's fragment
+        // stage (Assets/Shaders/Mobile/MobileCRT.shader, the "Barrel warp" block) reads
+        //
+        //     float2 centred = i.uv * 2.0 - 1.0;
+        //     float r2 = dot(centred, centred);
+        //     float2 uv = centred * (1.0 + _Curvature * r2) * 0.5 + 0.5;
+        //
+        // - the OUTPUT pixel at p displays the SOURCE pixel at p * (1 + k*r^2) in centred
+        // coordinates. The picture SHRINKS toward the middle, by k (CRTCurvature, 0.08 by default)
+        // at the edges: about 60 px at the bottom of a 1668-row iPad panel. Everything the game's
+        // own IMGUI draws - the classic bottom bar's icons, every menu, every message box - is
+        // inside the captured frame, so it is drawn displaced toward the centre while its
+        // hit-testing still reads the raw touch. This function is the missing half: given where the
+        // finger landed it returns the source pixel that is under it.
+        //
+        // The capture's vertical flip (MobileCrtFrame.CaptureIsFlipped) cancels out exactly rather
+        // than being ignored: the quad runs v backwards, so uv.y = 1 - y, the warp negates the
+        // centred y going in and the flipped sample negates it coming out, and what is left is this
+        // same expression in screen coordinates.
+        //
+        // Written as an OFFSET from the point rather than as the shader's multiply-and-recentre so
+        // that curvature 0 is the identity to the bit, not to a rounding error - the filter being
+        // off, or its curvature slider at zero, must not move a single tap by half a pixel.
+        //
+        // Deliberately NOT clamped to the screen. A point near a corner maps outside it, and that
+        // is the truth: what is out there is the bezel, and a caller's rectangle test failing is
+        // the correct answer for a finger on the black.
+
+        /// <summary>
+        /// The pixel of the SOURCE (unwarped) picture that the screen pixel <paramref name="screenPx"/>
+        /// displays, for a tube of the given barrel curvature on a screen of the given size. Bottom-left
+        /// origin, Unity's touch convention. Identity at curvature 0; the centre is a fixed point at any
+        /// curvature; a point may legitimately map off the screen (that is the bezel).
+        /// </summary>
+        public static Vector2 WarpScreenPoint(Vector2 screenPx, float curvature, float width, float height)
+        {
+            if (width <= 0f || height <= 0f)
+                return screenPx;
+
+            float cx = screenPx.x / width * 2f - 1f;
+            float cy = screenPx.y / height * 2f - 1f;
+            float r2 = cx * cx + cy * cy;
+            float push = curvature * r2 * 0.5f;
+
+            return new Vector2(screenPx.x + cx * push * width,
+                               screenPx.y + cy * push * height);
+        }
+
         /// <summary>
         /// Scanlines the frame pass draws, for a given live raster height.
         ///

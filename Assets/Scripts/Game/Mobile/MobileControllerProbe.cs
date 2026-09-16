@@ -441,7 +441,12 @@ namespace DaggerfallWorkshop.Game.Mobile
                 if (Time.frameCount - lastTouchFrame < 10)
                     continue;
 
-                Vector2 p = new Vector2(t.position.x, Screen.height - t.position.y);
+                // The probe's SKIP/BACK/RESTART buttons are drawn in its own OnGUI, so they are
+                // inside the CRT frame pass's capture and moved by the tube's warp exactly like
+                // DFU's own UI. Remap the finger before the y flip, or the buttons stop matching
+                // where they are drawn whenever the filter is on. Identity with it off.
+                Vector2 warped = MobileCrtFrame.ToSourcePoint(t.position);
+                Vector2 p = new Vector2(warped.x, Screen.height - warped.y);
 
                 if (skipRect.Contains(p))
                 {

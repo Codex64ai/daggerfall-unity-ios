@@ -118,14 +118,23 @@ namespace DaggerfallWorkshop.Game.Mobile
                 {
                     Touch t = Input.GetTouch(i);
                     // Touches on the classic bottom bar belong to its icons, never to a stick.
+                    // RAW: ContainsScreenPoint does the bar's own CRT remap, which is unconditional
+                    // (the bar is IMGUI, always inside the capture) and not this one.
                     if (t.phase == TouchPhase.Began && MobileClassicHud.ContainsScreenPoint(t.position))
                         continue;
 
                     if (t.phase != TouchPhase.Began || claimedFingers.Contains(t.fingerId))
                         continue;
 
-                    bool onStick = RectTransformUtility.RectangleContainsScreenPoint(rect, t.position, cam);
-                    bool inRegion = !onStick && InClaimRegion(t.position);
+                    // At CRTCoverage 2 the touch controls are inside the filtered frame too, so the
+                    // stick the player can see has been pulled toward the middle of the tube and
+                    // every test below has to be asked about the pixel under the finger rather than
+                    // about the finger. At coverage 1 (the default) the pass redraws the controls
+                    // sharp through its own camera and this is the identity.
+                    Vector2 p = MobileCrtFrame.ToControlPoint(t.position);
+
+                    bool onStick = RectTransformUtility.RectangleContainsScreenPoint(rect, p, cam);
+                    bool inRegion = !onStick && InClaimRegion(p);
                     if (!onStick && !inRegion)
                         continue;
 
@@ -133,7 +142,7 @@ namespace DaggerfallWorkshop.Game.Mobile
                     // action buttons live inside them (and the player can drag buttons
                     // anywhere with the layout editor) - a touch that lands on any
                     // interactive control belongs to that control, never to a stick.
-                    if (IsOverInteractive(t.position))
+                    if (IsOverInteractive(p))
                         continue;
 
                     directFingerId = t.fingerId;
@@ -141,12 +150,12 @@ namespace DaggerfallWorkshop.Game.Mobile
                     canvasGroup.alpha = 1f;
 
                     if (inRegion)
-                        RecenterUnder(t.position, cam);   // snap the stick to the thumb
+                        RecenterUnder(p, cam);           // snap the stick to the thumb
 
                     if (Debug.isDebugBuild) Debug.Log(string.Format("[Stick:{0}] claimed finger {1} at {2} ({3})",
-                        name, t.fingerId, t.position, inRegion ? "region" : "rect"));
+                        name, t.fingerId, p, inRegion ? "region" : "rect"));
 
-                    UpdateFromScreenPoint(t.position, cam);
+                    UpdateFromScreenPoint(p, cam);
                     break;
                 }
                 return;
@@ -162,7 +171,7 @@ namespace DaggerfallWorkshop.Game.Mobile
                 if (t.phase == TouchPhase.Ended || t.phase == TouchPhase.Canceled)
                     ForceRelease();
                 else
-                    UpdateFromScreenPoint(t.position, cam);
+                    UpdateFromScreenPoint(MobileCrtFrame.ToControlPoint(t.position), cam);
                 return;
             }
 

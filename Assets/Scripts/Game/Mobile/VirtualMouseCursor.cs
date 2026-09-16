@@ -159,7 +159,9 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         void PollMouseFallback()
         {
-            MobileInput.SetCursorPosition(Input.mousePosition);
+            // Absolute, so it goes through the CRT frame pass's warp like every other absolute
+            // position (MobileCrtFrame.ToSourcePoint) - identity when the pass is not running.
+            MobileInput.SetCursorPosition(MobileCrtFrame.ToSourcePoint(Input.mousePosition));
 
             // Latching from the physical button state lets TickButtons() derive the
             // down/up edges, so clicks behave identically to the touch path.
@@ -234,13 +236,19 @@ namespace DaggerfallWorkshop.Game.Mobile
         void BeginPrimary(Touch touch)
         {
             primaryFingerId = touch.fingerId;
+            // RAW on purpose: this is only ever the origin of a delta, and the relative branch of
+            // MovePrimary adds that delta to a cursor the warp has already moved.
             primaryLastPosition = touch.position;
             primaryStartTime = Time.unscaledTime;
             primaryTravel = 0f;
             buttonLatched = false;
 
+            // The cursor drives DFU's own IMGUI windows, which are drawn INSIDE the CRT frame
+            // pass's capture and therefore displaced toward the centre by the tube's warp. The
+            // finger's raw position is where the player is pointing on the glass; ToSourcePoint
+            // turns it into the pixel of the picture that is under it.
             if (absoluteMode)
-                MobileInput.SetCursorPosition(touch.position);
+                MobileInput.SetCursorPosition(MobileCrtFrame.ToSourcePoint(touch.position));
         }
 
         void MovePrimary(Touch touch)
@@ -251,7 +259,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             if (absoluteMode)
             {
-                MobileInput.SetCursorPosition(touch.position);
+                MobileInput.SetCursorPosition(MobileCrtFrame.ToSourcePoint(touch.position));
             }
             else if (delta.sqrMagnitude > 0f)
             {
@@ -261,6 +269,8 @@ namespace DaggerfallWorkshop.Game.Mobile
                 float accel = Mathf.Clamp01(speedFraction / Mathf.Max(accelReferenceSpeed, 0.01f));
                 float gain = baseGain + accelGain * accel;
 
+                // NOT remapped: the cursor this builds on is already in the source picture's
+                // coordinates, and warping the increment as well would apply the tube twice.
                 MobileInput.SetCursorPosition(MobileInput.CursorPosition + delta * gain);
             }
 

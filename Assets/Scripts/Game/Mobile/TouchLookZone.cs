@@ -133,16 +133,29 @@ namespace DaggerfallWorkshop.Game.Mobile
                     continue;
                 if (VirtualJoystick.IsFingerClaimed(t.fingerId))
                     continue;                          // a stick owns it
-                if (VirtualJoystick.IsOverInteractive(t.position))
+
+                // At CRTCoverage 2 the controls are inside the filtered frame, so "which control is
+                // under this finger" has to be asked of the pixel the finger is over, not of the
+                // finger. Identity at coverage 1 and with the filter off. ContainsScreenPoint is
+                // the exception below: the classic bar is IMGUI, always inside the capture, and
+                // does its own unconditional remap on the raw position.
+                Vector2 p = MobileCrtFrame.ToControlPoint(t.position);
+
+                if (VirtualJoystick.IsOverInteractive(p))
                     continue;                          // buttons win
                 if (MobileClassicHud.ContainsScreenPoint(t.position))
                     continue;                          // classic bar icons win too
-                if (IsInGripCorner(t.position))
+                if (IsInGripCorner(p))
                     continue;                          // resting thumb
-                if (!combatMode && t.position.x < Screen.width * ignoreLeftFraction)
+                if (!combatMode && p.x < Screen.width * ignoreLeftFraction)
                     continue;                          // left = move territory outside combat
 
                 directFingerId = t.fingerId;
+                // RAW from here on: both of these are only ever the origin of a difference - the
+                // look delta and the tap's travel - and a difference of two raw finger positions is
+                // what the hand actually did. Warping both ends would only rescale it by the local
+                // stretch of the tube, making the look speed depend on where on the glass the
+                // thumb happens to be.
                 directLastPos = t.position;
                 directDownPos = t.position;
                 directDownTime = Time.unscaledTime;
