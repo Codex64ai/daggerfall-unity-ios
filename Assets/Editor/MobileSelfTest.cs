@@ -167,6 +167,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestTravelOptionsBridge();
             TestTavernAlcohol();
             TestModSettingsSerialization();
+            TestModSettingsThreeSourceMerge();
             TestModLookupTolerantOfBuiltIns();
             TestFlcPathResolution();
             TestBuildStamp();
@@ -5372,6 +5373,42 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(merged.Count == 2 && merged[0].Title == "A",
                   "mod settings: current mods come first, in order",
                   merged.Count == 0 ? "empty" : merged[0].Title);
+        }
+
+        // Locked Non-MIT packs are never loaded, so their Mods.json entries are in neither mods nor prunedMods;
+        // the write merges the whole saved list in as a third source so one launch does not erase them.
+        static void TestModSettingsThreeSourceMerge()
+        {
+            Mod a = new Mod(); a.ModInfo.ModTitle = "A"; a.Enabled = true;
+            Mod b = new Mod(); b.ModInfo.ModTitle = "B"; b.Enabled = false;
+            List<Mod> saved = new List<Mod>();
+            fsResult r = new fsSerializer().TryDeserialize<List<Mod>>(fsJsonParser.Parse(
+                "[{\"Title\":\"A\",\"Enabled\":false,\"LoadPriority\":1},{\"Title\":\"B\",\"Enabled\":true,\"LoadPriority\":2}," +
+                "{\"Title\":\"dream - paperdoll\",\"Enabled\":true,\"LoadPriority\":9},{\"Title\":\"Distant Terrain\",\"Enabled\":false,\"LoadPriority\":4}]"), ref saved);
+            Check(!r.Failed && saved.Count == 4, "mod settings 3-way: the saved list deserializes", r.FormattedMessages);
+
+            List<Mod> merged = ModManager.MergeModSettings(new List<Mod> { a }, new List<Mod> { b }, saved.GetRange(0, 3));
+            Mod ma = merged.Find(m => m.Title == "A"), mb = merged.Find(m => m.Title == "B"), md = merged.Find(m => m.Title == "dream - paperdoll");
+            Check(merged.Count == 3, "mod settings 3-way: current + pruned + saved-only = 3 entries", merged.Count.ToString());
+            Check(ma != null && ma.Enabled, "mod settings 3-way: current wins over saved");
+            Check(mb != null && !mb.Enabled, "mod settings 3-way: pruned wins over saved");
+            Check(md != null && md.Enabled && md.LoadPriority == 9, "mod settings 3-way: a saved-only (locked pack) entry keeps its choice and priority");
+            Check(ModManager.MergeModSettings(new List<Mod> { a }, new List<Mod> { b }).Count == 2, "mod settings 3-way: the 2-arg overload still merges two sources");
+
+            // Rename: our -ios file has a different FileName but the same Title, so it merges by Title alone.
+            Mod dt = new Mod(); dt.ModInfo.ModTitle = "Distant Terrain";
+            var fileNameProp = typeof(Mod).GetProperty("FileName");
+            if (fileNameProp != null) fileNameProp.SetValue(dt, "distantterrain-ios", null);
+            List<Mod> renamed = ModManager.MergeModSettings(new List<Mod> { dt }, null, saved);
+            Check(renamed.FindAll(m => m.Title == "Distant Terrain").Count == 1 && renamed.Find(m => m.Title == "Distant Terrain") == dt,
+                  "mod settings 3-way: a renamed (-ios) file with the same Title takes one entry (Title only, FileName ignored)");
+
+            string src = File.ReadAllText(Path.Combine(Application.dataPath, "Game/Addons/ModSupport/ModManager.cs"));
+            string load = MethodBody(src, "public static bool LoadModSettings()");
+            Check(load.Contains("savedMods.Clear()") && load.Contains("savedMods.AddRange(temp)"), "mod settings 3-way: LoadModSettings keeps the whole saved list");
+            Check(load.Contains("GetModIndex(_mod.Title)"), "mod settings 3-way: saved values are applied by Title (renamed files keep their choices)");
+            Check(MethodBody(src, "public static bool WriteModSettings()").Contains("ModManager.Instance.savedMods)"),
+                  "mod settings 3-way: WriteModSettings merges the saved list as the third source");
         }
 
         /// <summary>

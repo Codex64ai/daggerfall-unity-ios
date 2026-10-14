@@ -46,6 +46,9 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
         // MOBILE: mods Init() removed from `mods` because the player had them switched off. Their
         // settings entries are still written, see MergeModSettings.
         readonly List<Mod> prunedMods           = new List<Mod>();
+        // MOBILE: the whole list LoadModSettings read from Mods.json (replaced on every load). Locked Non-MIT
+        // packs are not loaded, so without this third merge source one launch would erase their entries.
+        readonly List<Mod> savedMods            = new List<Mod>();
         [SerializeField]
         List<Mod> mods;
         public static readonly fsSerializer _serializer = new fsSerializer();
@@ -929,6 +932,13 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
         /// </summary>
         public static List<Mod> MergeModSettings(IList<Mod> current, IList<Mod> previous)
         {
+            return MergeModSettings(current, previous, null);
+        }
+
+        /// MOBILE: as above plus <paramref name="saved"/> (the last Mods.json read), lowest precedence: entries of
+        /// mods that are not loaded at all (locked Non-MIT packs) survive a write. Matched by Title only.
+        public static List<Mod> MergeModSettings(IList<Mod> current, IList<Mod> previous, IList<Mod> saved)
+        {
             List<Mod> merged = new List<Mod>();
             HashSet<string> titles = new HashSet<string>();
             for (int i = 0; current != null && i < current.Count; i++)
@@ -937,6 +947,9 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
             for (int i = 0; previous != null && i < previous.Count; i++)
                 if (previous[i] != null && !string.IsNullOrEmpty(previous[i].Title) && titles.Add(previous[i].Title))
                     merged.Add(previous[i]);
+            for (int i = 0; saved != null && i < saved.Count; i++)
+                if (saved[i] != null && !string.IsNullOrEmpty(saved[i].Title) && titles.Add(saved[i].Title))
+                    merged.Add(saved[i]);
             return merged;
         }
 
@@ -952,7 +965,7 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
                 // their entries instead of shrinking the file to the enabled mods. The guard is on
                 // the merged list, not on mods: with every mod switched off, mods is empty once
                 // Init has pruned it, but the pruned entries are exactly what has to be written.
-                List<Mod> entries = MergeModSettings(ModManager.Instance.mods, ModManager.Instance.prunedMods);
+                List<Mod> entries = MergeModSettings(ModManager.Instance.mods, ModManager.Instance.prunedMods, ModManager.Instance.savedMods);
                 if (entries.Count == 0)
                 {
                     return false;
@@ -1007,6 +1020,10 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
 
                 if (result.Failed || temp.Count <= 0)
                     return false;
+
+                // MOBILE: keep every saved entry (locked packs are not loaded; see savedMods).
+                ModManager.Instance.savedMods.Clear();
+                ModManager.Instance.savedMods.AddRange(temp);
 
                 foreach (Mod _mod in temp)
                 {
