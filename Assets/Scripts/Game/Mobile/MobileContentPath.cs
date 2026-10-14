@@ -89,7 +89,12 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (!Active)
                 return shippedPath;
 
-            return Remap(shippedPath, ShippedRoot, UserRoot, Exists);
+            string path = Remap(shippedPath, ShippedRoot, UserRoot, Exists);
+            // Original-mod unlock: one of our Non-MIT loose files (DREAM music/movies/extras) without its
+            // original's receipt counts as absent, so the shipped/vanilla content is used instead.
+            if (!string.Equals(path, shippedPath, StringComparison.Ordinal) && MobileOriginalMods.IsLooseLocked(path))
+                return shippedPath;
+            return path;
         }
 
         static bool Exists(string path)
@@ -158,8 +163,9 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             try
             {
-                return Directory.GetFiles(path, searchPattern,
-                    recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly);
+                // Original-mod unlock: our locked Non-MIT loose files are left out (see MobileOriginalModsLoose).
+                return MobileOriginalMods.WithoutLockedLoose(Directory.GetFiles(path, searchPattern,
+                    recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly));
             }
             catch (Exception ex)
             {

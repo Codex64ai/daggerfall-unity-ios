@@ -181,6 +181,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestOriginalModKnownOurs();
             TestOriginalModOurDesktopNamedFiles();
             TestOriginalModDreamTexturesSoundSky();
+            TestOriginalModLooseFiles();
             TestLockedModRows();
             TestNonMitPackNames();
             TestDebugStartModsWindow();
@@ -6109,6 +6110,91 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
         // Item F: ~/dev/dfu-mods/wod-biomes.dfmod (1,976,621 B) is byte-identical to our "world of daggerfall - biomes.dfmod"
         // build: an old name of WODBIOMES mapping onto the row's -ios file, and KnownOurs at its size.
+        // Loose files (DREAM music/movies/extras): our files by name + size are absent until the DREAM receipt.
+        static void TestOriginalModLooseFiles()
+        {
+            var fixture = new[]
+            {
+                new MobileOriginalMods.LooseFile("song_d1.ogg", 100L, "DREAM"),
+                new MobileOriginalMods.LooseFile("dream 2026.json", 531L, "DREAM"),
+                new MobileOriginalMods.LooseFile("dream 2026.json", 673L, "DREAM"),
+            };
+            var t = MobileOriginalMods.BuildLooseTable(fixture);
+            var none = new HashSet<string>();
+            var dream = new HashSet<string> { "DREAM" };
+            Check(MobileOriginalMods.LooseLocked("song_d1.ogg", 100L, t, none, false, false),
+                  "original mods loose: our DREAM file without a receipt is locked (release build)");
+            Check(MobileOriginalMods.LooseLocked("SONG_D1.OGG", 100L, t, none, false, false),
+                  "original mods loose: the name match ignores case");
+            Check(!MobileOriginalMods.LooseLocked("song_d1.ogg", 100L, t, dream, false, false),
+                  "original mods loose: the DREAM receipt unlocks it");
+            Check(!MobileOriginalMods.LooseLocked("song_d1.ogg", 101L, t, none, false, false),
+                  "original mods loose: the same name at another size is the player's own file (used)");
+            Check(!MobileOriginalMods.LooseLocked("song_mine.ogg", 100L, t, none, false, false)
+                  && !MobileOriginalMods.LooseLocked("ANIM0000.mp4", 100L, t, none, false, false),
+                  "original mods loose: an unrelated loose file is used");
+            Check(!MobileOriginalMods.LooseLocked("song_d1.ogg", 100L, t, none, true, false),
+                  "original mods loose: a test build without enforce-original-lock uses it");
+            Check(MobileOriginalMods.LooseLocked("song_d1.ogg", 100L, t, none, true, true),
+                  "original mods loose: a test build with enforce-original-lock locks it");
+            Check(MobileOriginalMods.LooseKeyFor("dream 2026.json", 531L, t) == "DREAM" && MobileOriginalMods.LooseKeyFor("dream 2026.json", 673L, t) == "DREAM"
+                  && MobileOriginalMods.LooseKeyFor("dream 2026.json", 600L, t) == null,
+                  "original mods loose: one name may ship at several sizes (both presets)");
+            Check(!MobileOriginalMods.LooseLocked(null, 0, t, none, false, false) && !MobileOriginalMods.LooseLocked("x", 1, null, none, false, false),
+                  "original mods loose: null name / table never locks");
+
+            // Off the device (MobileContentPath.Active false) nothing is ever gated.
+            string tmp = Path.Combine(Path.GetTempPath(), "dfu-loose-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tmp);
+            try
+            {
+                string f = Path.Combine(tmp, "song_d1.ogg");
+                File.WriteAllBytes(f, new byte[10]);
+                var arr = new[] { f };
+                Check(!MobileOriginalMods.IsLooseLocked(f) && MobileOriginalMods.LooseFileExists(f)
+                      && ReferenceEquals(MobileOriginalMods.WithoutLockedLoose(arr), arr),
+                      "original mods loose: editor/desktop (not Active) never gates a loose file");
+            }
+            finally { try { Directory.Delete(tmp, true); } catch (Exception) { } }
+
+            // The generated table: every DREAM loose file we ship, keyed to a real recognizer row; no READMEs.
+            var real = MobileOriginalMods.KnownOursLoose;
+            int ogg = real.Count(r => r.Name.EndsWith(".ogg")), mp4 = real.Count(r => r.Name.EndsWith(".mp4")),
+                flc = real.Count(r => r.Name.EndsWith(".flc")), png = real.Count(r => r.Name.EndsWith(".png")),
+                json = real.Count(r => r.Name.EndsWith(".json"));
+            Check(ogg == 81 && mp4 == 17 && flc == 16 && png == 4 && json == 2,
+                  "original mods loose: KnownOursLoose = 81 music .ogg, 17 .mp4, 16 Daedra .FLC, 4 spell icon atlases, 2 presets",
+                  string.Format("ogg {0} mp4 {1} flc {2} png {3} json {4}", ogg, mp4, flc, png, json));
+            Check(real.All(r => r.Key == "DREAM" && r.Name == r.Name.ToLowerInvariant() && r.Size > 0 && !r.Name.StartsWith("readme"))
+                  && MobileOriginalMods.Rows.Any(r => r.Key == "DREAM"),
+                  "original mods loose: every row is lower-case, sized, keyed DREAM (a real recognizer row), no README");
+            var rt = MobileOriginalMods.BuildLooseTable(real);
+            Check(MobileOriginalMods.LooseKeyFor("song_d1.ogg", 3706652L, rt) == "DREAM" && MobileOriginalMods.LooseKeyFor("ANIM0000.mp4", 18226159L, rt) == "DREAM"
+                  && MobileOriginalMods.LooseKeyFor("AZURA.FLC", 4506756L, rt) == "DREAM",
+                  "original mods loose: the real table carries DREAM's song_d1.ogg, ANIM0000.mp4 and AZURA.FLC at their sizes");
+
+            // Source pins: every loose-file lookup point goes through the gate.
+            string mcp = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Game/Mobile/MobileContentPath.cs"));
+            Check(MethodBody(mcp, "public static string Override(string shippedPath)").Contains("MobileOriginalMods.IsLooseLocked(path)"),
+                  "original mods loose: MobileContentPath.Override (sound, music, movies, books, text) treats a locked loose file as absent");
+            Check(MethodBody(mcp, "public static string[] UserFiles(").Contains("MobileOriginalMods.WithoutLockedLoose(Directory.GetFiles("),
+                  "original mods loose: MobileContentPath.UserFiles (SpellIcons, Presets, WorldData, quest lists) leaves locked loose files out");
+            string flcSrc = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Game/UserInterface/FLCPlayer.cs"));
+            Check(MethodBody(flcSrc, "public void Load(string filename)").Contains("MobileOriginalMods.LooseFileExists"),
+                  "original mods loose: FLCPlayer resolves Movies/*.FLC with LooseFileExists (locked -> arena2 original)");
+            string dm = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Game/Mobile/Ports/DynamicMusic/DynamicMusic.cs"));
+            Check(Regex.Matches(dm, @"WithoutLockedLoose\(\s*Directory\.GetFiles\(").Count == 2 && Regex.Matches(dm, @"Directory\.GetFiles\(").Count == 2,
+                  "original mods loose: both Dynamic Music playlist folder listings leave locked loose files out");
+            string om = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Game/Mobile/MobileOriginalMods.cs"));
+            string scan = MethodBody(om, "public static void RunScanForModManager(");
+            Check(scan.Contains("ResetLooseState(modDataDir)") && scan.IndexOf("ResetLooseState(", StringComparison.Ordinal) < scan.IndexOf("ScanOnce(", StringComparison.Ordinal),
+                  "original mods loose: each ModManager scan resets the cached receipt state (Refresh unlocks loose files)");
+            string loose = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Game/Mobile/MobileOriginalModsLoose.cs"));
+            Check(MethodBody(loose, "public static bool LooseLocked(").Contains("ApplyLockMode(Verdict.Locked, isTestBuild, enforceFileExists)")
+                  && !loose.Contains("DFU_IOS_TESTAPP") && MethodBody(loose, "public static bool IsLooseLocked(string path)").Contains("IsTestBuild"),
+                  "original mods loose: the same ApplyLockMode rules as the .dfmod gate, no define check of its own");
+        }
+
         static void TestOriginalModWodBiomesOldName()
         {
             string nn;

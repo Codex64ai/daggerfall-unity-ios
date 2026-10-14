@@ -575,6 +575,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (!MobileContentPath.Active) return;
             try { EnforceFilePresent = File.Exists(Path.Combine(modDataDir, EnforceLockFileName)); }
             catch (Exception) { EnforceFilePresent = false; }
+            ResetLooseState(modDataDir);  // a receipt written by this scan unlocks the loose files too
             string mode = LockModeLine(IsTestBuild, EnforceFilePresent);
             if (mode != null) UnityEngine.Debug.Log(mode);
             try

@@ -724,7 +724,9 @@ namespace DynamicMusic
                         }
                         else
                         {
-                            var files = Directory.GetFiles(Path.Combine(basePath, playlistName), fileSearchPattern);
+                            // MOBILE: locked Non-MIT loose files (DREAM music without its receipt) are left out.
+                            var files = DaggerfallWorkshop.Game.Mobile.MobileOriginalMods.WithoutLockedLoose(
+                                Directory.GetFiles(Path.Combine(basePath, playlistName), fileSearchPattern));
                             trackList = new List<string>();
                             if (files.Length > 0)
                             {
@@ -814,7 +816,9 @@ namespace DynamicMusic
                     continue;
                 }
 
-                var files = Directory.GetFiles(playlistPath, fileSearchPattern);
+                // MOBILE: locked Non-MIT loose files (DREAM music without its receipt) are left out.
+                var files = DaggerfallWorkshop.Game.Mobile.MobileOriginalMods.WithoutLockedLoose(
+                    Directory.GetFiles(playlistPath, fileSearchPattern));
                 if (files.Length == 0)
                     continue;
                 var trackList = new List<string>();

@@ -53,7 +53,8 @@ namespace DaggerfallWorkshop.Game.UserInterface
             // Seek from loose files Movies or Arena2 path
             // MOBILE: user content from the app's Documents folder (see MobileContentPath).
             string moviePath = MobileContentPath.Override(Path.Combine(Application.streamingAssetsPath, "Movies"));
-            string path = ResolvePath(filename, moviePath, DaggerfallUnity.Instance.Arena2Path, File.Exists);
+            // MOBILE: a locked Non-MIT loose file (DREAM's HD Daedra .FLC without the DREAM receipt) counts as absent.
+            string path = ResolvePath(filename, moviePath, DaggerfallUnity.Instance.Arena2Path, MobileOriginalMods.LooseFileExists);
             if (!flcFile.Load(path))
                 return;
 
