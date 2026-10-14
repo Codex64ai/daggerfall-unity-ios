@@ -13,9 +13,11 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using SharpCompress.Archives;
+using UnityEngine;
 
 namespace DaggerfallWorkshop.Game.Mobile
 {
@@ -211,6 +213,201 @@ namespace DaggerfallWorkshop.Game.Mobile
                             return r;
                         }
             return null;
+        }
+
+        #endregion
+
+        #region Receipts and the scan
+
+        /// <summary>One original seen on this device. MTime = DateTime.ToFileTimeUtc of the matched file.</summary>
+        [Serializable]
+        public class Receipt
+        {
+            public string Key, MatchedFile;
+            public long Size, MTime;
+            public string Date;
+        }
+
+        [Serializable]
+        public class ReceiptFile
+        {
+            public List<Receipt> Receipts = new List<Receipt>();
+        }
+
+        /// <summary>A greyed row in the MODS window. Url is null for "Couldn't read" rows.</summary>
+        public struct LockedEntry
+        {
+            public string Key, Label, Url;
+        }
+
+        public const string ReceiptFileName = "OriginalReceipts.json";
+
+        /// <summary>Rebuilt by every scan (and the gate's NoteVerdict); read by the MODS window.</summary>
+        public static readonly List<LockedEntry> Locked = new List<LockedEntry>();
+
+        /// <summary>Full paths of .dfmod files recognised as desktop ORIGINALS by the last scan (never loaded on iOS).</summary>
+        public static readonly HashSet<string> DesktopOriginals = new HashSet<string>(StringComparer.Ordinal);
+
+        static readonly string[] ScanExtensions = { ".zip", ".7z", ".rar", ".dfmod" };
+
+        /// <summary>Missing, truncated or garbage file -> an empty ReceiptFile. Never throws.</summary>
+        public static ReceiptFile LoadReceipts(string path)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(path) || !File.Exists(path)) return new ReceiptFile();
+                var f = JsonUtility.FromJson<ReceiptFile>(File.ReadAllText(path));
+                if (f == null) return new ReceiptFile();
+                if (f.Receipts == null) f.Receipts = new List<Receipt>();
+                f.Receipts.RemoveAll(r => r == null || string.IsNullOrEmpty(r.Key));
+                return f;
+            }
+            catch (Exception)
+            {
+                return new ReceiptFile();
+            }
+        }
+
+        /// <summary>Writes path+".tmp" then replaces path, so a kill mid-write never leaves half a file.</summary>
+        public static void SaveReceipts(string path, ReceiptFile f)
+        {
+            string dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            string tmp = path + ".tmp";
+            File.WriteAllText(tmp, JsonUtility.ToJson(f ?? new ReceiptFile(), true));
+            if (File.Exists(path)) File.Delete(path);
+            File.Move(tmp, path);
+        }
+
+        /// <summary>True when a receipt names this exact file (leaf name + size + mtime).</summary>
+        public static bool IsCovered(ReceiptFile f, string fileName, long size, long mtime)
+        {
+            if (f == null || f.Receipts == null) return false;
+            string leaf = Leaf(fileName);
+            foreach (Receipt r in f.Receipts)
+                if (r != null && string.Equals(r.MatchedFile, leaf, StringComparison.OrdinalIgnoreCase) && r.Size == size && r.MTime == mtime)
+                    return true;
+            return false;
+        }
+
+        public static HashSet<string> ReceiptKeys(ReceiptFile f)
+        {
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            if (f != null && f.Receipts != null)
+                foreach (Receipt r in f.Receipts)
+                    if (r != null && !string.IsNullOrEmpty(r.Key)) keys.Add(r.Key);
+            return keys;
+        }
+
+        /// <summary>
+        /// Looks at every zip/7z/rar/dfmod under modsDir (all subfolders) that no receipt covers, adds one receipt per
+        /// newly matched Key (first match wins) and saves only when something was added. listEntries returns null for an
+        /// unreadable archive. Rebuilds Locked ("Couldn't read" rows) and DesktopOriginals. Never throws.
+        /// </summary>
+        public static ReceiptFile ScanOnce(string modsDir, string receiptPath, Row[] rows,
+                                           Func<string, List<string>> listEntries, Action<string> log)
+        {
+            Locked.Clear();
+            DesktopOriginals.Clear();
+            ReceiptFile receipts = LoadReceipts(receiptPath);
+            if (log == null) log = _ => { };
+            if (rows == null || string.IsNullOrEmpty(modsDir)) return receipts;
+
+            string[] files;
+            try
+            {
+                if (!Directory.Exists(modsDir)) return receipts;
+                files = Directory.GetFiles(modsDir, "*", SearchOption.AllDirectories);
+            }
+            catch (Exception e)
+            {
+                log("[OriginalMods] scan failed: " + e.Message);
+                return receipts;
+            }
+
+            HashSet<string> have = ReceiptKeys(receipts);
+            bool added = false;
+            foreach (string path in files)
+            {
+                try
+                {
+                    string ext = Path.GetExtension(path).ToLowerInvariant();
+                    if (Array.IndexOf(ScanExtensions, ext) < 0) continue;
+                    string leaf = Path.GetFileName(path);
+                    var info = new FileInfo(path);
+                    long size = info.Length, mtime = info.LastWriteTimeUtc.ToFileTimeUtc();
+                    bool covered = IsCovered(receipts, leaf, size, mtime);
+                    var sw = Stopwatch.StartNew();
+
+                    if (ext == ".dfmod")
+                    {
+                        // Only files named like a desktop original are opened (8 bytes).
+                        string n = Normalize(leaf);
+                        List<Row> candidates = null;
+                        foreach (Row r in rows)
+                            if (r.DfmodMarkers != null)
+                                foreach (string m in r.DfmodMarkers)
+                                    if (Normalize(m) == n) { (candidates = candidates ?? new List<Row>()).Add(r); break; }
+                        if (candidates == null) continue;
+                        if (covered) { DesktopOriginals.Add(path); continue; }
+
+                        byte[] head = new byte[8];
+                        int read;
+                        using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                            read = fs.Read(head, 0, head.Length);
+                        if (read < head.Length) Array.Resize(ref head, read);
+                        foreach (Row r in candidates)
+                        {
+                            if (!MatchDfmod(r, leaf, head, size)) continue;
+                            DesktopOriginals.Add(path);
+                            if (have.Add(r.Key))
+                            {
+                                AddReceipt(receipts, r.Key, leaf, size, mtime);
+                                added = true;
+                                log(string.Format("[OriginalMods] receipt {0} <- {1} ({2} ms)", r.Key, leaf, sw.ElapsedMilliseconds));
+                            }
+                        }
+                        continue;
+                    }
+
+                    if (covered) continue;
+                    List<string> entries = listEntries != null ? listEntries(path) : null;
+                    if (entries == null)
+                    {
+                        Locked.Add(new LockedEntry { Key = null, Label = "Couldn't read " + leaf, Url = null });
+                        log("[OriginalMods] couldn't read " + leaf);
+                        continue;
+                    }
+                    foreach (Row r in rows)
+                    {
+                        if (have.Contains(r.Key) || !MatchArchive(r, entries)) continue;
+                        have.Add(r.Key);
+                        AddReceipt(receipts, r.Key, leaf, size, mtime);
+                        added = true;
+                        log(string.Format("[OriginalMods] receipt {0} <- {1} ({2} ms)", r.Key, leaf, sw.ElapsedMilliseconds));
+                    }
+                }
+                catch (Exception e)
+                {
+                    log("[OriginalMods] skipped " + Path.GetFileName(path) + ": " + e.Message);
+                }
+            }
+
+            if (added)
+            {
+                try { SaveReceipts(receiptPath, receipts); }
+                catch (Exception e) { log("[OriginalMods] could not save receipts: " + e.Message); }
+            }
+            return receipts;
+        }
+
+        static void AddReceipt(ReceiptFile f, string key, string leaf, long size, long mtime)
+        {
+            f.Receipts.Add(new Receipt
+            {
+                Key = key, MatchedFile = leaf, Size = size, MTime = mtime,
+                Date = DateTime.UtcNow.ToString("o"),
+            });
         }
 
         #endregion

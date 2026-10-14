@@ -172,6 +172,8 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestBuildStamp();
             TestOriginalModArchiveListing();
             TestOriginalModRecognizer();
+            TestOriginalModReceipts();
+            TestOriginalModScan();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -5570,6 +5572,171 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   dream == null ? "no DREAM row" : dream.Unlocks.Length + " unlocks");
             Check(MobileOriginalMods.Rows.Any(r => r.Key == "DREAMSKY" && r.Unlocks.Contains("dream-sky-ios.dfmod")),
                   "original mods: DREAM SKY row unlocks dream-sky-ios.dfmod");
+        }
+
+        static void TestOriginalModReceipts()
+        {
+            string dir = OrigModTempDir("receipts");
+            try
+            {
+                string path = Path.Combine(dir, "GameData", MobileOriginalMods.ReceiptFileName);
+                Check(MobileOriginalMods.LoadReceipts(path).Receipts.Count == 0, "original mods: missing receipt file loads as empty");
+
+                var f = new MobileOriginalMods.ReceiptFile();
+                f.Receipts.Add(new MobileOriginalMods.Receipt { Key = "DREAM", MatchedFile = "DREAM.7z", Size = 123, MTime = 456, Date = "d" });
+                MobileOriginalMods.SaveReceipts(path, f);
+                var back = MobileOriginalMods.LoadReceipts(path);
+                Check(back.Receipts.Count == 1 && back.Receipts[0].Key == "DREAM" && back.Receipts[0].MatchedFile == "DREAM.7z"
+                      && back.Receipts[0].Size == 123 && back.Receipts[0].MTime == 456,
+                      "original mods: receipts round-trip through the file");
+                Check(!File.Exists(path + ".tmp"), "original mods: no .tmp file is left after a save");
+
+                File.WriteAllText(path, "{garbage");
+                bool threw = false; MobileOriginalMods.ReceiptFile g = null;
+                try { g = MobileOriginalMods.LoadReceipts(path); } catch (Exception) { threw = true; }
+                Check(!threw && g != null && g.Receipts.Count == 0, "original mods: a garbage receipt file reads as no receipts, no throw");
+                MobileOriginalMods.SaveReceipts(path, f);
+                Check(MobileOriginalMods.LoadReceipts(path).Receipts.Count == 1, "original mods: a garbage receipt file is overwritten by the next save");
+
+                Check(MobileOriginalMods.IsCovered(back, "DREAM.7z", 123, 456)
+                      && !MobileOriginalMods.IsCovered(back, "DREAM.7z", 124, 456)
+                      && !MobileOriginalMods.IsCovered(back, "DREAM.7z", 123, 457)
+                      && !MobileOriginalMods.IsCovered(back, "other.7z", 123, 456),
+                      "original mods: a receipt covers only the same name + size + mtime");
+                Check(MobileOriginalMods.ReceiptKeys(back).SetEquals(new[] { "DREAM" }), "original mods: receipt keys");
+            }
+            finally { Directory.Delete(dir, true); }
+        }
+
+        static MobileOriginalMods.Row OrigModArchiveRow(string key)
+        {
+            // SharpCompress's MIT test archives share exe/test.exe and jpg/test.jpg.
+            return new MobileOriginalMods.Row
+            {
+                Key = key, DisplayName = key, Url = null,
+                ArchiveMarkers = new[] { "test.exe", "test.jpg" }, ArchiveThreshold = 2,
+                DfmodMarkers = new[] { "DREAM - SPRITES" }, DfmodMinBytes = 1024,
+                Unlocks = new[] { key.ToLowerInvariant() + "-ios.dfmod" }, OldNames = new string[0],
+            };
+        }
+
+        static List<string> OrigModList(string path)
+        {
+            List<string> e; string err;
+            return MobileOriginalMods.TryListEntries(path, out e, out err) ? e : null;
+        }
+
+        static void TestOriginalModScan()
+        {
+            string root = OrigModTempDir("scan");
+            string fixtures = Path.Combine(Application.dataPath, "Editor/TestFixtures/Archives");
+            Func<string, List<string>> list = OrigModList;
+            try
+            {
+                // Each case gets its own Mods/ tree and receipt file.
+                Func<string, string> mods = name => { string d = Path.Combine(root, name, "Mods"); Directory.CreateDirectory(Path.Combine(d, "sub")); return d; };
+                Func<string, string> rcpt = name => Path.Combine(root, name, "Mods", "GameData", MobileOriginalMods.ReceiptFileName);
+                var logs = new List<string>();
+                Action<string> log = logs.Add;
+
+                // (a) generated zip, two matching entries in a top folder.
+                string a = mods("a");
+                WriteOrigModZip(Path.Combine(a, "sub", "orig.zip"), "top/test.exe", "top/test.jpg", "top/readme.txt");
+                var ra = MobileOriginalMods.ScanOnce(a, rcpt("a"), new[] { OrigModArchiveRow("ZIP") }, list, log);
+                Check(MobileOriginalMods.ReceiptKeys(ra).Contains("ZIP") && File.Exists(rcpt("a")) && MobileOriginalMods.Locked.Count == 0,
+                      "original mods: scan writes a receipt for a matching zip in a subfolder", string.Join(" | ", logs));
+
+                // (b) committed 7z and rar fixtures.
+                string b7 = mods("b7"), br = mods("br");
+                File.Copy(Path.Combine(fixtures, "7Zip.LZMA.7z"), Path.Combine(b7, "orig.7z"));
+                File.Copy(Path.Combine(fixtures, "Rar.rar"), Path.Combine(br, "orig.rar"));
+                Check(MobileOriginalMods.ReceiptKeys(MobileOriginalMods.ScanOnce(b7, rcpt("b7"), new[] { OrigModArchiveRow("SEVENZ") }, list, log)).Contains("SEVENZ"),
+                      "original mods: scan writes a receipt for a matching 7z");
+                Check(MobileOriginalMods.ReceiptKeys(MobileOriginalMods.ScanOnce(br, rcpt("br"), new[] { OrigModArchiveRow("RAR") }, list, log)).Contains("RAR"),
+                      "original mods: scan writes a receipt for a matching rar");
+
+                // (c) one matching entry is below the threshold.
+                string c = mods("c");
+                WriteOrigModZip(Path.Combine(c, "half.zip"), "top/test.exe", "top/other.bin");
+                var rc = MobileOriginalMods.ScanOnce(c, rcpt("c"), new[] { OrigModArchiveRow("ZIP") }, list, log);
+                Check(rc.Receipts.Count == 0 && !File.Exists(rcpt("c")), "original mods: an archive below the threshold writes no receipt");
+
+                // (d) corrupt 7z.
+                string d = mods("d");
+                byte[] junk = new byte[64];
+                for (int i = 0; i < junk.Length; i++) junk[i] = 0xFF;
+                File.WriteAllBytes(Path.Combine(d, "x.7z"), junk);
+                bool threw = false; MobileOriginalMods.ReceiptFile rd = null;
+                try { rd = MobileOriginalMods.ScanOnce(d, rcpt("d"), new[] { OrigModArchiveRow("ZIP") }, list, log); } catch (Exception) { threw = true; }
+                Check(!threw && rd.Receipts.Count == 0 && MobileOriginalMods.Locked.Count == 1 && MobileOriginalMods.Locked[0].Label == "Couldn't read x.7z"
+                      && MobileOriginalMods.Locked[0].Url == null,
+                      "original mods: a corrupt archive shows one Couldn't read row and throws nothing");
+
+                // (e) rar with encrypted headers.
+                string e = mods("e");
+                File.Copy(Path.Combine(fixtures, "Rar.encrypted_filesAndHeader.rar"), Path.Combine(e, "enc.rar"));
+                threw = false; MobileOriginalMods.ReceiptFile re = null;
+                try { re = MobileOriginalMods.ScanOnce(e, rcpt("e"), new[] { OrigModArchiveRow("RAR") }, list, log); } catch (Exception) { threw = true; }
+                Check(!threw && re.Receipts.Count == 0 && MobileOriginalMods.Locked.Count == 1 && MobileOriginalMods.Locked[0].Label == "Couldn't read enc.rar",
+                      "original mods: an encrypted-header rar shows Couldn't read and throws nothing");
+
+                // (f) zip with cp437 entry names: completes either way.
+                string fdir = mods("f");
+                threw = false;
+                try
+                {
+                    var opts = new SharpCompress.Writers.Zip.ZipWriterOptions(SharpCompress.Common.CompressionType.Deflate)
+                    { ArchiveEncoding = new SharpCompress.Common.ArchiveEncoding { Default = Encoding.GetEncoding(437) } };
+                    using (var za = SharpCompress.Archives.Zip.ZipArchive.Create())
+                    {
+                        za.AddEntry("tést.dfmod", new MemoryStream(new byte[16]), true);
+                        using (var fs = File.Create(Path.Combine(fdir, "cp437.zip"))) za.SaveTo(fs, opts);
+                    }
+                }
+                catch (Exception) { File.WriteAllBytes(Path.Combine(fdir, "cp437.zip"), junk); }
+                try { MobileOriginalMods.ScanOnce(fdir, rcpt("f"), new[] { OrigModArchiveRow("ZIP") }, list, log); } catch (Exception) { threw = true; }
+                Check(!threw, "original mods: a cp437-named zip scans without an exception");
+
+                // (g) cache: a receipted archive is not listed again.
+                int calls = 0;
+                Func<string, List<string>> counting = p => { calls++; return OrigModList(p); };
+                MobileOriginalMods.ScanOnce(a, rcpt("a"), new[] { OrigModArchiveRow("ZIP") }, counting, log);
+                Check(calls == 0, "original mods: a second scan does not open the receipted archive", calls + " listings");
+
+                // (h) receipt survives deleting the original; deleting the receipt re-locks.
+                File.Delete(Path.Combine(a, "sub", "orig.zip"));
+                Check(MobileOriginalMods.ReceiptKeys(MobileOriginalMods.ScanOnce(a, rcpt("a"), new[] { OrigModArchiveRow("ZIP") }, list, log)).Contains("ZIP"),
+                      "original mods: the receipt survives deleting the original");
+                File.Delete(rcpt("a"));
+                Check(MobileOriginalMods.ReceiptKeys(MobileOriginalMods.LoadReceipts(rcpt("a"))).Count == 0,
+                      "original mods: deleting the receipt file re-locks");
+
+                // (i) desktop .dfmod originals.
+                string iGood = mods("i1"), iFake = mods("i2"), iEmpty = mods("i3");
+                byte[] big = new byte[2 << 20];
+                Encoding.ASCII.GetBytes("UnityFS\0").CopyTo(big, 0);
+                string goodPath = Path.Combine(iGood, "sub", "dream - sprites.dfmod");
+                File.WriteAllBytes(goodPath, big);
+                var ri = MobileOriginalMods.ScanOnce(iGood, rcpt("i1"), new[] { OrigModArchiveRow("DFM") }, list, log);
+                Check(MobileOriginalMods.ReceiptKeys(ri).Contains("DFM") && MobileOriginalMods.DesktopOriginals.Contains(goodPath),
+                      "original mods: a desktop .dfmod original writes a receipt and is marked a desktop original");
+                MobileOriginalMods.ScanOnce(iGood, rcpt("i1"), new[] { OrigModArchiveRow("DFM") }, list, log);
+                Check(MobileOriginalMods.DesktopOriginals.Contains(goodPath),
+                      "original mods: a receipted desktop .dfmod stays marked a desktop original on the next scan");
+                Encoding.ASCII.GetBytes("XXXXXXX\0").CopyTo(big, 0);
+                File.WriteAllBytes(Path.Combine(iFake, "dream - sprites.dfmod"), big);
+                var rf = MobileOriginalMods.ScanOnce(iFake, rcpt("i2"), new[] { OrigModArchiveRow("DFM") }, list, log);
+                Check(rf.Receipts.Count == 0 && MobileOriginalMods.DesktopOriginals.Count == 0, "original mods: a .dfmod with a fake header is nothing");
+                File.WriteAllBytes(Path.Combine(iEmpty, "dream - sprites.dfmod"), new byte[0]);
+                var rz = MobileOriginalMods.ScanOnce(iEmpty, rcpt("i3"), new[] { OrigModArchiveRow("DFM") }, list, log);
+                Check(rz.Receipts.Count == 0 && MobileOriginalMods.DesktopOriginals.Count == 0, "original mods: an empty renamed .dfmod is nothing");
+            }
+            finally
+            {
+                MobileOriginalMods.Locked.Clear();
+                MobileOriginalMods.DesktopOriginals.Clear();
+                Directory.Delete(root, true);
+            }
         }
 
         static void TestOriginalModArchiveListing()
