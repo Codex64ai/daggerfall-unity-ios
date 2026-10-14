@@ -65,14 +65,15 @@ Rules (all approved):
    names of zip/7z/rar. Check its IL2CPP/iOS behaviour first (no `System.Reflection.Emit`; add a `link.xml` entry if stripping
    removes readers). No archive code exists in the repo today.
 
-### File-name collisions (decision for Fable)
-Some of our pack files have the same file name as the desktop original (`distantterrain.dfmod`, `dynamic-skies.dfmod`, ...). If the
-player copies a desktop `.dfmod` in through Files, Files offers "Replace" and our iOS file is gone. The size check in the Gate keeps
-the game correct (receipt written, pack shows "Reinstall <file> from the Non-MIT Mod Pack"), but the player has to fetch our file
-again. Recommendation: (a) release notes and the locked-row text say "drop the downloaded archive as-is" - archives never collide;
-(b) from the next release, Non-MIT pack files carry an `-ios` suffix (DREAM already uses distinct `dream-*` names). (b) changes
-`FileName` in `Mods.json`, so it needs a one-time migration mapping old name -> new name to keep the player's enabled/priority
-choices. Fable to rule on (b).
+### File-name collisions: rename ours (decided by Ikram 2026-10-14)
+Some of our pack files have the same file name as the desktop original (`distantterrain.dfmod`, `dynamic-skies.dfmod`, ...). Copying a
+desktop `.dfmod` in through Files would offer "Replace" and wipe our iOS file. Decision: **every Non-MIT pack file gets an `-ios`
+suffix** (`distantterrain-ios.dfmod`; DREAM's `dream-*` names are already distinct but get the suffix too, for one rule). The pack
+build (`tools/bundled-mods` + the DREAM converter) emits the new names; `pack-index.json` and the recognizer `unlocks` lists use them.
+**Migration** (one-time, in `MobileOriginalMods`, before `LoadModSettings`): if `Mods.json` has an entry whose `FileName` is an old
+name (built-in old->new table) and a file with the new name exists, rewrite that entry's `FileName` to the new name, keeping
+`Enabled` and `LoadPriority`. If both old and new files are present, the old-name file is ignored by the Gate (logged once) so the mod
+never loads twice. Self-test: Mods.json with old names -> migrated, choices kept; both files present -> loads once.
 
 ## Out of scope
 Checking the original is a "real" download (signatures, hashes) - identity is enough by design. Extracting anything from the
