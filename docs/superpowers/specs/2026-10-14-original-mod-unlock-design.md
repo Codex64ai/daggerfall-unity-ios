@@ -95,6 +95,14 @@ the new-name file exists (recognizer `old names` table, logged once), so the mod
 duplicate-title drop at :683. Self-tests: old-name Mods.json + new-name file -> choices kept; both files present, both scan orders ->
 loads once.
 
+### Test-app builds do not enforce the lock (ruling 2026-10-14, Ikram: "just fix it")
+The first device build locked 8 mods on Ikram's real game (no originals on his iPad). In `DFU_IOS_TESTAPP` builds the Gate treats
+every Key as unlocked: pack files load and no `Needs ...` rows appear. Desktop originals are still skipped and the scan/receipts run
+and log as before, so the lock stays observable. Escape hatch: if `Documents/Mods/GameData/enforce-original-lock` exists, a test
+build enforces the lock exactly like a release build. One scan line says which: `[OriginalMods] test build: lock not enforced` /
+`... lock enforced (enforce-original-lock present)`. Release builds (no define) are unchanged and log no such line. The decision is
+the pure `ApplyLockMode(verdict, isTestBuild, enforceFileExists)`; the define sets only `IsTestBuild` (source-pinned).
+
 ## Out of scope
 Checking the original is a "real" download (signatures, hashes) - identity is enough by design. Extracting anything from the
 original. Any online check. Desktop/Android builds (Finder and Gate are `MobileContentPath.Active` only).

@@ -694,8 +694,10 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
                 // MOBILE: Non-MIT pack files load only next to the player's own original (receipt); desktop originals never load on iOS.
                 if (MobileContentPath.Active)
                 {
-                    var verdict = MobileOriginalMods.Decide(modFilePath, new FileInfo(modFilePath).Length, MobileOriginalMods.Rows,
-                        MobileOriginalMods.ReceiptKeys(gateReceipts), gatePackIndex, gateSiblings, MobileOriginalMods.DesktopOriginals.Contains(modFilePath));
+                    // Test-app builds load locked packs too unless GameData/enforce-original-lock exists (ApplyLockMode).
+                    var verdict = MobileOriginalMods.ApplyLockMode(MobileOriginalMods.Decide(modFilePath, new FileInfo(modFilePath).Length, MobileOriginalMods.Rows,
+                        MobileOriginalMods.ReceiptKeys(gateReceipts), gatePackIndex, gateSiblings, MobileOriginalMods.DesktopOriginals.Contains(modFilePath)),
+                        MobileOriginalMods.IsTestBuild, MobileOriginalMods.EnforceFilePresent);
                     if (verdict != MobileOriginalMods.Verdict.Load) { MobileOriginalMods.NoteVerdict(verdict, modFilePath); continue; }
                 }
 

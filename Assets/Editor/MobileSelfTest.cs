@@ -176,6 +176,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestOriginalModReceipts();
             TestOriginalModScan();
             TestOriginalModGate();
+            TestOriginalModTestBuildLock();
             TestOriginalModKnownOurs();
             TestOriginalModOurDesktopNamedFiles();
             TestOriginalModDreamTexturesSoundSky();
@@ -6058,6 +6059,51 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(n == 7, "non-MIT pack: seven private_only entries carry unlock keys", n.ToString());
             Check(MobileOriginalMods.IosName("World of Daggerfall - Biomes") == "world_of_daggerfall-biomes-ios.dfmod",
                   "non-MIT pack: IosName matches pack.py ios_name on the Biomes stem");
+        }
+
+        // Item E: test-app builds do not enforce the lock (locked packs load) unless GameData/enforce-original-lock exists;
+        // release builds always enforce. Desktop originals and superseded old names are still skipped either way.
+        static void TestOriginalModTestBuildLock()
+        {
+            var V = new[] { MobileOriginalMods.Verdict.Load, MobileOriginalMods.Verdict.Locked,
+                            MobileOriginalMods.Verdict.SkipDesktopOriginal, MobileOriginalMods.Verdict.SkipOldName };
+            Check(MobileOriginalMods.LockEnforced(false, false) && MobileOriginalMods.LockEnforced(false, true)
+                  && !MobileOriginalMods.LockEnforced(true, false) && MobileOriginalMods.LockEnforced(true, true),
+                  "original mods lock mode: release always enforces; a test build only with enforce-original-lock");
+            Check(MobileOriginalMods.ApplyLockMode(MobileOriginalMods.Verdict.Locked, true, false) == MobileOriginalMods.Verdict.Load,
+                  "original mods lock mode: a test build without the enforce file loads a locked pack");
+            bool same = true;
+            foreach (var v in V)
+            {
+                if (MobileOriginalMods.ApplyLockMode(v, false, false) != v || MobileOriginalMods.ApplyLockMode(v, false, true) != v
+                    || MobileOriginalMods.ApplyLockMode(v, true, true) != v) same = false;
+                if (v != MobileOriginalMods.Verdict.Locked && MobileOriginalMods.ApplyLockMode(v, true, false) != v) same = false;
+            }
+            Check(same, "original mods lock mode: release / enforce-file verdicts unchanged; the bypass touches only Locked (originals still skipped)");
+            Check(MobileOriginalMods.LockModeLine(true, false) == "[OriginalMods] test build: lock not enforced"
+                  && MobileOriginalMods.LockModeLine(true, true) == "[OriginalMods] test build: lock enforced (enforce-original-lock present)"
+                  && MobileOriginalMods.LockModeLine(false, false) == null && MobileOriginalMods.LockModeLine(false, true) == null,
+                  "original mods lock mode: one scan line for a test build, none for a release build");
+            Check(MobileOriginalMods.EnforceLockFileName == "enforce-original-lock", "original mods lock mode: enforce file name");
+
+            // Source pins: the define sets only IsTestBuild; the gate wraps Decide in ApplyLockMode; the scan reads the file and logs.
+            string src = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Game/Mobile/MobileOriginalMods.cs"));
+            int first = src.IndexOf("#if DFU_IOS_TESTAPP", StringComparison.Ordinal);
+            int end = first < 0 ? -1 : src.IndexOf("#endif", first, StringComparison.Ordinal);
+            string block = end < 0 ? "" : System.Text.RegularExpressions.Regex.Replace(src.Substring(first, end - first), @"\s+", " ").Trim();
+            Check(first >= 0 && src.IndexOf("#if DFU_IOS_TESTAPP", first + 1, StringComparison.Ordinal) < 0 && !src.Contains("#if !DFU_IOS_TESTAPP")
+                  && block == "#if DFU_IOS_TESTAPP public static readonly bool IsTestBuild = true; #else public static readonly bool IsTestBuild = false;",
+                  "original mods lock mode: the DFU_IOS_TESTAPP check wraps only IsTestBuild", block);
+            string scan = MethodBody(src, "public static void RunScanForModManager(");
+            Check(scan.Contains("File.Exists(Path.Combine(modDataDir, EnforceLockFileName))") && scan.Contains("LockModeLine(IsTestBuild, EnforceFilePresent)")
+                  && scan.IndexOf("LockModeLine(", StringComparison.Ordinal) < scan.IndexOf("ScanOnce(", StringComparison.Ordinal),
+                  "original mods lock mode: the scan reads the enforce file and logs the mode line before scanning");
+            string mm = StripShaderComments(File.ReadAllText("Assets/Game/Addons/ModSupport/ModManager.cs"));
+            string body = MethodBody(mm, "private void FindModsFromDirectory(bool refresh = false)");
+            Check(body.Contains("MobileOriginalMods.ApplyLockMode(MobileOriginalMods.Decide(")
+                  && body.Contains("MobileOriginalMods.IsTestBuild, MobileOriginalMods.EnforceFilePresent)")
+                  && !mm.Contains("DFU_IOS_TESTAPP"),
+                  "original mods lock mode: ModManager wraps Decide in ApplyLockMode and has no define check of its own");
         }
 
         static void TestOriginalModGate()

@@ -254,6 +254,16 @@ Prereq: Task 8 done (a real DREAM archive) OR, if still blocked, a zip built fro
 
 ---
 
+### Task 12 (item E): test-app builds bypass the lock (DONE 2026-10-14)
+
+Pure `LockEnforced` / `ApplyLockMode` / `LockModeLine` in `MobileOriginalMods` (red-first: 3 FAIL against stubs, then 2504/0);
+ModManager wraps `Decide` in `ApplyLockMode(..., IsTestBuild, EnforceFilePresent)`; the scan sets `EnforceFilePresent` from
+`GameData/enforce-original-lock` and logs the mode line. Self-test `TestOriginalModTestBuildLock` pins that `#if DFU_IOS_TESTAPP`
+wraps only `IsTestBuild` and ModManager has no define check. Device: `DFU-Test-unity6-origunlock2.ipa`, Player.log shows
+`lock not enforced`, receipt DREAM kept, no `locked` lines.
+
+---
+
 ### Task 11: Device verification (last)
 
 - [ ] **Step 1:** Push Ikram's DREAM archive to the iPad `Documents/Mods` FIRST (the iPad already holds the 25 files under their OLD names; the archive writes the DREAM receipt on first launch, so the old-name files keep loading until the `-ios` files are copied in). Then install the device ipa built per the README recipe (`DFU-Test-unity6-origunlock.ipa`, bundle id pinned), upload it `--clobber` to the draft.

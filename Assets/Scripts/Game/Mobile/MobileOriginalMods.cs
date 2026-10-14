@@ -524,10 +524,48 @@ namespace DaggerfallWorkshop.Game.Mobile
             return false;
         }
 
+        /// <summary>Documents/Mods/GameData/&lt;this&gt;: a test build that finds it enforces the lock exactly like a release build.</summary>
+        public const string EnforceLockFileName = "enforce-original-lock";
+
+        // Test-app builds (DFU_IOS_TESTAPP) do not enforce the lock. The define sets only this flag; the bypass is ApplyLockMode.
+#if DFU_IOS_TESTAPP
+        public static readonly bool IsTestBuild = true;
+#else
+        public static readonly bool IsTestBuild = false;
+#endif
+
+        /// <summary>Set by each ModManager scan: Documents/Mods/GameData/enforce-original-lock exists.</summary>
+        public static bool EnforceFilePresent;
+
+        /// <summary>Release builds always enforce; test builds only with the enforce file.</summary>
+        public static bool LockEnforced(bool isTestBuild, bool enforceFileExists)
+        {
+            return !isTestBuild || enforceFileExists;
+        }
+
+        /// <summary>The gate verdict after the build's lock mode: an unenforced lock turns Locked into Load, nothing else changes
+        /// (desktop originals and superseded old names are still skipped).</summary>
+        public static Verdict ApplyLockMode(Verdict v, bool isTestBuild, bool enforceFileExists)
+        {
+            return v == Verdict.Locked && !LockEnforced(isTestBuild, enforceFileExists) ? Verdict.Load : v;
+        }
+
+        /// <summary>The one scan-time log line for a test build; null for a release build (no line).</summary>
+        public static string LockModeLine(bool isTestBuild, bool enforceFileExists)
+        {
+            if (!isTestBuild) return null;
+            return enforceFileExists ? "[OriginalMods] test build: lock enforced (" + EnforceLockFileName + " present)"
+                                     : "[OriginalMods] test build: lock not enforced";
+        }
+
         /// <summary>IO: the scan for ModManager.FindModsFromDirectory. Only when MobileContentPath.Active; never throws.</summary>
         public static void RunScanForModManager(string modsDir, string modDataDir)
         {
             if (!MobileContentPath.Active) return;
+            try { EnforceFilePresent = File.Exists(Path.Combine(modDataDir, EnforceLockFileName)); }
+            catch (Exception) { EnforceFilePresent = false; }
+            string mode = LockModeLine(IsTestBuild, EnforceFilePresent);
+            if (mode != null) UnityEngine.Debug.Log(mode);
             try
             {
                 ScanOnce(modsDir, Path.Combine(modDataDir, ReceiptFileName), Rows, ListOrNull, UnityEngine.Debug.Log,

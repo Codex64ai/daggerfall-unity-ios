@@ -774,6 +774,12 @@ original is seen. **Refresh** in the MODS window re-runs the scan, so an origina
 is open unlocks its rows straight away (unlocked packs default on). Your on/off choices for a locked pack
 are kept in `Mods.json` while it is locked.
 
+**Test-app builds don't lock.** A `DFU_IOS_TESTAPP=1` build ("DFU Test") loads every pack file whether or not its original
+has been seen, and shows no `Needs ...` rows; desktop originals are still skipped and the scan still writes receipts and logs.
+Player.log says `[OriginalMods] test build: lock not enforced`. To test the lock on a test build, create an empty
+`Documents/Mods/GameData/enforce-original-lock`; the log then says `lock enforced (enforce-original-lock present)` and the
+build behaves exactly like a release build. Release builds always enforce the lock.
+
 **Building the pack** (maintainers): `python3 tools/bundled-mods/pack.py --private --mods-dir <bundles>
 --dream-dir <converted DREAM> --out <dir>/NonMIT-ModPack-ios.zip`. It refuses to build while
 `MobileOriginalModsKnownOurs.cs` is stale (`tools/known_ours.py --check`) and splits at `--split-mb`
