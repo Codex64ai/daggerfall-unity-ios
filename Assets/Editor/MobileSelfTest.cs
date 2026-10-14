@@ -180,6 +180,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestOriginalModOurDesktopNamedFiles();
             TestLockedModRows();
             TestNonMitPackNames();
+            TestDebugStartModsWindow();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -5930,6 +5931,25 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 MobileOriginalMods.DesktopOriginals.Clear();
                 Directory.Delete(root, true);
             }
+        }
+
+        // `modswindow [seconds]` in debug-newchar.txt: open the launcher's MODS window instead of the hands-free start
+        // (a simulator run cannot tap), and press its Refresh after <seconds> (0 = never).
+        static void TestDebugStartModsWindow()
+        {
+            int x, y;
+            List<KeyValuePair<float, string>> sets;
+            var errors = MobileDebugStart.ParseCommands("", out x, out y, out sets);
+            Check(MobileDebugStart.modsWindowRefreshAt < 0, "DebugStart: no `modswindow` line -> modsWindowRefreshAt < 0");
+            errors = MobileDebugStart.ParseCommands("modswindow\n", out x, out y, out sets);
+            Check(errors.Count == 0 && MobileDebugStart.modsWindowRefreshAt == 0f, "DebugStart: `modswindow` opens the window, no Refresh");
+            errors = MobileDebugStart.ParseCommands("modswindow 45\n", out x, out y, out sets);
+            Check(errors.Count == 0 && Mathf.Approximately(MobileDebugStart.modsWindowRefreshAt, 45f), "DebugStart: `modswindow 45` presses Refresh at +45 s");
+            errors = MobileDebugStart.ParseCommands("modswindow soon\n", out x, out y, out sets);
+            Check(errors.Count == 1 && MobileDebugStart.modsWindowRefreshAt < 0, "DebugStart: `modswindow soon` is reported");
+            string src = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Game/Mobile/MobileDebugStart.cs"));
+            Check(src.Contains("if (modsWindowRefreshAt >= 0f) { ModsWindowStep(); return; }") && src.Contains("\"RefreshButton_OnMouseClick\""),
+                  "DebugStart: the driver runs the MODS-window mode before the hands-free start and presses the real Refresh handler");
         }
 
         static void TestLockedModRows()

@@ -82,6 +82,13 @@ namespace DaggerfallWorkshop.Game.Mobile
         /// </summary>
         public static List<KeyValuePair<float, string>> spawns = new List<KeyValuePair<float, string>>();
 
+        /// <summary>
+        /// `modswindow [seconds]` from the command file: open the launcher's MODS window instead of the hands-free
+        /// start (a simulator run cannot tap) and press its Refresh <c>seconds</c> after it opened (0 = never).
+        /// -1 means the line was not present. Needs ShowOptionsAtStart = True so the launcher's options page shows.
+        /// </summary>
+        public static float modsWindowRefreshAt = -1f;
+
         static readonly HashSet<string> audited = new HashSet<string>();
 #if DFU_IOS_TESTAPP
         static int targetX = -1, targetY = -1;   // "pixel X Y" in the command file teleports there once in the world
@@ -153,6 +160,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             toX = -1;
             toY = -1;
             journeyFix = -1;
+            modsWindowRefreshAt = -1f;
             spawns = new List<KeyValuePair<float, string>>();
             sets = new List<KeyValuePair<float, string>>();
             List<string> errors = new List<string>();
@@ -195,6 +203,17 @@ namespace DaggerfallWorkshop.Game.Mobile
                     int wx;
                     if (int.TryParse(w[1], out wx) && wx >= 0 && wx <= 6) weatherOverride = wx;
                     else errors.Add(line);
+                    continue;
+                }
+
+                // `modswindow [seconds]` - see modsWindowRefreshAt.
+                if (w[0] == "modswindow")
+                {
+                    float rat = 0f;
+                    if (w.Length >= 2 && !(float.TryParse(w[1], System.Globalization.NumberStyles.Float,
+                                                          System.Globalization.CultureInfo.InvariantCulture, out rat) && rat >= 0f))
+                    { errors.Add(line); continue; }
+                    modsWindowRefreshAt = rat;
                     continue;
                 }
 
@@ -989,6 +1008,7 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             void Update()
             {
+                if (modsWindowRefreshAt >= 0f) { ModsWindowStep(); return; }
                 if (done) { RunSetCommands(); return; }
                 if (popped) { AfterStart(); return; }
                 var dfu = DaggerfallUnity.Instance;
@@ -1026,6 +1046,44 @@ namespace DaggerfallWorkshop.Game.Mobile
                         + " captured id=" + (MobileShaders.Find("Daggerfall/Default") ? MobileShaders.Find("Daggerfall/Default").GetInstanceID() : 0));
                     LogRenderState("after start");
                 }
+            }
+
+            float modsOpenedAt = -1f;
+            bool modsRefreshed;
+            global::ModLoaderInterfaceWindow modsWindow;
+
+            /// <summary>`modswindow`: once the launcher's options page is up, push the MODS window; later press Refresh.</summary>
+            void ModsWindowStep()
+            {
+                var ui = DaggerfallUI.UIManager;
+                if (modsWindow == null)
+                {
+                    if (!(ui.TopWindow is DaggerfallWorkshop.Game.UserInterfaceWindows.DaggerfallUnitySetupGameWizard)) return;
+                    if (readyAt < 0f) { readyAt = Time.realtimeSinceStartup; return; }
+                    if (Time.realtimeSinceStartup - readyAt < 2f) return;
+                    modsWindow = new global::ModLoaderInterfaceWindow(ui);
+                    ui.PushWindow(modsWindow);
+                    modsOpenedAt = Time.realtimeSinceStartup;
+                    Debug.Log("[DebugStart] MODS window opened; locked rows: " + LockedLabels());
+                    return;
+                }
+                if (modsRefreshed || modsWindowRefreshAt <= 0f || Time.realtimeSinceStartup - modsOpenedAt < modsWindowRefreshAt) return;
+                modsRefreshed = true;
+                try
+                {
+                    var m = typeof(global::ModLoaderInterfaceWindow).GetMethod("RefreshButton_OnMouseClick",
+                        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                    m.Invoke(modsWindow, new object[] { null, Vector2.zero });
+                    Debug.Log("[DebugStart] MODS Refresh pressed; locked rows: " + LockedLabels());
+                }
+                catch (System.Exception ex) { Debug.Log("[DebugStart] MODS Refresh failed: " + ex); }
+            }
+
+            static string LockedLabels()
+            {
+                var parts = new List<string>();
+                foreach (var l in MobileOriginalMods.Locked) parts.Add(l.Label);
+                return parts.Count == 0 ? "none" : string.Join(" | ", parts.ToArray());
             }
 
             float lastWaitLog;
