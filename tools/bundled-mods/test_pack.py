@@ -313,6 +313,32 @@ class NonMitPack(unittest.TestCase):
         finally:
             pack.MODS_DIR, pack.MODS_JSON = old
 
+    def test_private_takes_several_dream_dirs(self):
+        import json
+        import zipfile
+        root, mods, cfgp = self._private_fixture()
+        d1, d2 = os.path.join(root, "draft"), os.path.join(root, "ios")
+        for d, leaf in ((d1, "dream-mobs_1_of_6.dfmod"), (d2, "dream - textures (3 of 10).dfmod"), (d2, "dream - sky.dfmod")):
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, leaf), "wb") as fh:
+                fh.write(b"x" * 5)
+        old = (pack.MODS_DIR, pack.MODS_JSON)
+        pack.MODS_DIR, pack.MODS_JSON = mods, cfgp
+        try:
+            z = os.path.join(root, "out.zip")
+            self.assertEqual(pack.main(["--private", "--dream-dir", d1, "--dream-dir", d2, "--out", z]), 0)
+            with zipfile.ZipFile(z) as zf:
+                index = {r["file"]: r["key"] for r in json.loads(zf.read("pack-index.json"))}
+            self.assertEqual(index, {"Mods/dex-ios.dfmod": "DEX", "Mods/dream-mobs_1_of_6-ios.dfmod": "DREAM",
+                                     "Mods/dream-textures_3_of_10-ios.dfmod": "DREAM", "Mods/dream-sky-ios.dfmod": "DREAMSKY"})
+            # the same -ios name from two folders is refused
+            shutil_src = os.path.join(d2, "dream-mobs_1_of_6.dfmod")
+            with open(shutil_src, "wb") as fh:
+                fh.write(b"y")
+            self.assertEqual(pack.main(["--private", "--dream-dir", d1, "--dream-dir", d2, "--out", z]), 1)
+        finally:
+            pack.MODS_DIR, pack.MODS_JSON = old
+
     def test_private_refuses_a_stale_known_ours(self):
         root, mods, cfgp = self._private_fixture()
         old = (pack.MODS_DIR, pack.MODS_JSON)

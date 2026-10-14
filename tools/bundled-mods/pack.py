@@ -2,10 +2,10 @@
 """Zip the built MIT mod bundles into the release asset MIT-ModPack-ios.zip.
 
     python3 tools/bundled-mods/pack.py [--out ~/Desktop/MIT-ModPack-ios.zip]
-    python3 tools/bundled-mods/pack.py --private [--mods-dir DIR] [--dream-dir DIR] [--out ~/Desktop/NonMIT-ModPack-ios.zip]
+    python3 tools/bundled-mods/pack.py --private [--mods-dir DIR] [--dream-dir DIR ...] [--out ~/Desktop/NonMIT-ModPack-ios.zip]
 
 --private builds the Non-MIT pack instead: every private_only bundle (plus the converted DREAM files in
---dream-dir) as <stem>-ios.dfmod, and pack-index.json (file, size, unlock key) that the app's
+every --dream-dir) as <stem>-ios.dfmod, and pack-index.json (file, size, unlock key) that the app's
 MobileOriginalMods gate reads. Those files load only once the player's own original mod is in Documents/Mods.
 --mods-dir reads the private_only bundles from DIR instead of Assets/StreamingAssets/Mods. --private first runs
 tools/known_ours.py --check and refuses to pack while MobileOriginalModsKnownOurs.cs is stale. A private pack
@@ -254,14 +254,14 @@ def main_private(args, cfg):
         return 1
     paths, problems = private_bundle_paths(cfg, args.mods_dir or MODS_DIR)
     files = [(paths[s], ios_name(s), keys[s]) for s in sorted(keys)]
-    if args.dream_dir:
-        if not os.path.isdir(args.dream_dir):
-            problems.append("--dream-dir is not a folder: %s" % args.dream_dir)
+    for dream_dir in args.dream_dir or []:
+        if not os.path.isdir(dream_dir):
+            problems.append("--dream-dir is not a folder: %s" % dream_dir)
         else:
-            for leaf in sorted(os.listdir(args.dream_dir)):
+            for leaf in sorted(os.listdir(dream_dir)):
                 if leaf.lower().endswith(".dfmod") and leaf.lower().startswith("dream"):
                     stem = leaf[:-len(".dfmod")]
-                    files.append((os.path.join(args.dream_dir, leaf), ios_name(stem), dream_key(stem)))
+                    files.append((os.path.join(dream_dir, leaf), ios_name(stem), dream_key(stem)))
     seen = set()
     for _, name, _ in files:
         if name in seen:
@@ -312,7 +312,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--out", default=None)
     ap.add_argument("--private", action="store_true", help="build the Non-MIT pack (-ios names + pack-index.json)")
-    ap.add_argument("--dream-dir", default=None, help="folder of converted DREAM .dfmod files (with --private)")
+    ap.add_argument("--dream-dir", action="append", default=None,
+                    help="folder of converted DREAM .dfmod files (with --private; repeat for several folders)")
     ap.add_argument("--split-mb", type=float, default=1900,
                     help="with --private: split into <out>-partN.zip of at most this many MiB (GitHub assets must be < 2 GiB; 0 = one zip)")
     ap.add_argument("--mods-dir", default=None, help="folder of the private_only bundles (with --private; default StreamingAssets/Mods)")
