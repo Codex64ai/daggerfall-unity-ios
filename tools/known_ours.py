@@ -48,7 +48,7 @@ def table_names(cs_text):
     for stem in re.findall(r'StemRow\(\s*"[^"]*",\s*"[^"]*",\s*"[^"]*",\s*"([^"]+)"', cs_text, re.S):
         names.add(stem.lower() + ".dfmod")
         names.add(ios_name(stem))
-    for lit in re.findall(r'(?:Unlocks|OldNames)\s*=\s*new\[\]\s*\{([^}]*)\}', cs_text):
+    for lit in re.findall(r'(?:Unlocks|OldNames)\s*=\s*(?:Concat\(\w+,\s*)?new\[\]\s*\{([^}]*)\}', cs_text):
         for n in re.findall(r'"([^"]+)"', lit):
             names.add(n.lower())
     return names

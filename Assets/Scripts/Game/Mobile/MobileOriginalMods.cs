@@ -72,6 +72,14 @@ namespace DaggerfallWorkshop.Game.Mobile
             };
         }
 
+        static string[] Concat(string[] a, string[] b)
+        {
+            var r = new string[a.Length + b.Length];
+            Array.Copy(a, r, a.Length);
+            Array.Copy(b, 0, r, a.Length, b.Length);
+            return r;
+        }
+
         static Row DreamRow()
         {
             var unlocks = new string[DreamPackStems.Length];
@@ -86,7 +94,8 @@ namespace DaggerfallWorkshop.Game.Mobile
                 Key = "DREAM", DisplayName = "DREAM", Url = "https://www.nexusmods.com/daggerfallunity/mods/5",
                 ArchiveMarkers = DreamModules, ArchiveThreshold = 10,
                 DfmodMarkers = DreamModules, DfmodMinBytes = 8L << 20,
-                Unlocks = unlocks, OldNames = old,
+                // "dream - sound.dfmod": our earlier iOS build under the exact desktop name (KnownOurs at its size).
+                Unlocks = unlocks, OldNames = Concat(old, new[] { "dream - sound.dfmod" }),
             };
         }
 
@@ -100,7 +109,8 @@ namespace DaggerfallWorkshop.Game.Mobile
                 Key = "DREAMSKY", DisplayName = "DREAM SKY", Url = "https://www.nexusmods.com/daggerfallunity/mods/664",
                 ArchiveMarkers = new[] { "dream - sky" }, ArchiveThreshold = 1,
                 DfmodMarkers = new[] { "dream - sky" }, DfmodMinBytes = 1L << 20,
-                Unlocks = new[] { "dream-sky-ios.dfmod" }, OldNames = new[] { "dream-sky.dfmod" },
+                // "dream - sky.dfmod" is also our earlier iOS build under the exact desktop name (KnownOurs at its size).
+                Unlocks = new[] { "dream-sky-ios.dfmod" }, OldNames = new[] { "dream-sky.dfmod", "dream - sky.dfmod" },
             },
             StemRow("DEX", "Daggerfall Enemy Expansion", "https://www.nexusmods.com/daggerfallunity/mods/372",
                     "DaggerfallBestiaryProject", 1L << 20),

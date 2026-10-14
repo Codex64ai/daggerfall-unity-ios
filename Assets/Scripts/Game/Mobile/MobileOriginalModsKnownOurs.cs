@@ -10,6 +10,8 @@ namespace DaggerfallWorkshop.Game.Mobile
         {
             new KeyValuePair<string, long>("daggerfallbestiaryproject.dfmod", 29203878L),
             new KeyValuePair<string, long>("distantterrain.dfmod", 1051850L),
+            new KeyValuePair<string, long>("dream - sky.dfmod", 2486370L),
+            new KeyValuePair<string, long>("dream - sound.dfmod", 10602620L),
             new KeyValuePair<string, long>("dream-backgrounds.dfmod", 336274835L),
             new KeyValuePair<string, long>("dream-commoners_1_of_2.dfmod", 44329962L),
             new KeyValuePair<string, long>("dream-commoners_2_of_2.dfmod", 46302666L),

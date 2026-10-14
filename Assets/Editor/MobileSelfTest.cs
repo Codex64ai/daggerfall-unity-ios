@@ -177,6 +177,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestOriginalModScan();
             TestOriginalModGate();
             TestOriginalModKnownOurs();
+            TestOriginalModOurDesktopNamedFiles();
             TestLockedModRows();
             TestNonMitPackNames();
 
@@ -5875,6 +5876,53 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 string src = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Game/Mobile/MobileOriginalMods.cs"));
                 Check(MethodBody(src, "public static void RunScanForModManager(").Contains("LoadPackIndex(modsDir)"),
                       "original mods: the ModManager scan passes the loaded pack index");
+            }
+            finally
+            {
+                MobileOriginalMods.Locked.Clear();
+                MobileOriginalMods.DesktopOriginals.Clear();
+                Directory.Delete(root, true);
+            }
+        }
+
+        // Our earlier iOS builds "dream - sound.dfmod" / "dream - sky.dfmod" (~/dev/dfu-mods/iOS) carry the exact desktop
+        // names: they are OldNames of DREAM / DREAMSKY and KnownOurs at their sizes; the same names at another size are originals.
+        static void TestOriginalModOurDesktopNamedFiles()
+        {
+            var cases = new[] { new { Name = "dream - sound.dfmod", Size = 10602620L, Key = "DREAM", Ios = "dream-sound-ios.dfmod" },
+                                new { Name = "dream - sky.dfmod", Size = 2486370L, Key = "DREAMSKY", Ios = "dream-sky-ios.dfmod" } };
+            string iosDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "dev/dfu-mods/iOS");
+            string root = OrigModTempDir("ourdesktopnames");
+            try
+            {
+                Func<long, byte[]> unityFs = n => { var b = new byte[n]; Encoding.ASCII.GetBytes("UnityFS\0").CopyTo(b, 0); return b; };
+                Action<string> log = _ => { };
+                foreach (var c in cases)
+                {
+                    string nn;
+                    var row = MobileOriginalMods.RowForOldName(c.Name, MobileOriginalMods.Rows, out nn);
+                    Check(row != null && row.Key == c.Key && nn == c.Ios, "original mods: " + c.Name + " is an old name of " + c.Key, nn ?? "null");
+                    Check(MobileOriginalMods.IsKnownOurs(c.Name, c.Size, null), "original mods: " + c.Name + " at " + c.Size + " is KnownOurs");
+                    string real = Path.Combine(iosDir, c.Name);
+                    if (File.Exists(real))
+                        Check(MobileOriginalMods.IsKnownOurs(real, new FileInfo(real).Length, null),
+                              "original mods: our ~/dev/dfu-mods/iOS copy of " + c.Name + " is KnownOurs at its size");
+
+                    string ours = Path.Combine(root, c.Key + "_ours", "Mods"); Directory.CreateDirectory(ours);
+                    File.WriteAllBytes(Path.Combine(ours, c.Name), unityFs(c.Size));
+                    var ro = MobileOriginalMods.ScanOnce(ours, Path.Combine(ours, "GameData", MobileOriginalMods.ReceiptFileName),
+                                                         MobileOriginalMods.Rows, OrigModList, log);
+                    Check(ro.Receipts.Count == 0 && MobileOriginalMods.DesktopOriginals.Count == 0,
+                          "original mods: our " + c.Name + " at its known size writes no receipt");
+
+                    string other = Path.Combine(root, c.Key + "_orig", "Mods"); Directory.CreateDirectory(other);
+                    string op = Path.Combine(other, c.Name);
+                    File.WriteAllBytes(op, unityFs(c.Size + 4096));
+                    var rr = MobileOriginalMods.ScanOnce(other, Path.Combine(other, "GameData", MobileOriginalMods.ReceiptFileName),
+                                                         MobileOriginalMods.Rows, OrigModList, log);
+                    Check(MobileOriginalMods.ReceiptKeys(rr).Contains(c.Key) && MobileOriginalMods.DesktopOriginals.Contains(op),
+                          "original mods: " + c.Name + " at another size is still a desktop original of " + c.Key);
+                }
             }
             finally
             {
