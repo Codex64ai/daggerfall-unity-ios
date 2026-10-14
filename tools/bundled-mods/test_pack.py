@@ -325,6 +325,42 @@ class NonMitPack(unittest.TestCase):
         finally:
             pack.MODS_DIR, pack.MODS_JSON = old
 
+    def test_private_zip_splits_under_the_asset_limit(self):
+        import json
+        import zipfile
+        root, mods, cfgp = self._private_fixture()
+        dream = os.path.join(root, "dream")
+        os.makedirs(dream)
+        for leaf in ("dream - mobs (1 of 2).dfmod", "dream - mobs (2 of 2).dfmod"):
+            with open(os.path.join(dream, leaf), "wb") as fh:
+                fh.write(b"y" * 600000)
+        old = (pack.MODS_DIR, pack.MODS_JSON)
+        pack.MODS_DIR, pack.MODS_JSON = mods, cfgp
+        try:
+            z = os.path.join(root, "NonMIT-ModPack-ios.zip")
+            self.assertEqual(pack.main(["--private", "--dream-dir", dream, "--out", z, "--split-mb", "1"]), 0)
+            self.assertFalse(os.path.exists(z))
+            parts = [os.path.join(root, "NonMIT-ModPack-ios-part%d.zip" % i) for i in (1, 2)]
+            self.assertTrue(all(os.path.exists(p) for p in parts))
+            self.assertFalse(os.path.exists(os.path.join(root, "NonMIT-ModPack-ios-part3.zip")))
+            shipped = []
+            for p in parts:
+                with zipfile.ZipFile(p) as zf:
+                    names = zf.namelist()
+                    self.assertIn("README.txt", names)
+                    self.assertEqual(len(json.loads(zf.read("pack-index.json"))), 3)  # every part carries the full index
+                    shipped += [n for n in names if n.startswith("Mods/")]
+                self.assertLess(os.path.getsize(p), (1 << 20) + 4096)
+            self.assertEqual(sorted(shipped), ["Mods/dex-ios.dfmod", "Mods/dream-mobs_1_of_2-ios.dfmod",
+                                               "Mods/dream-mobs_2_of_2-ios.dfmod"])
+        finally:
+            pack.MODS_DIR, pack.MODS_JSON = old
+
+    def test_part_plan_is_greedy_in_order(self):
+        self.assertEqual(pack.split_parts([("a", 5), ("b", 5), ("c", 5)], 10), [["a", "b"], ["c"]])
+        self.assertEqual(pack.split_parts([("a", 15), ("b", 1)], 10), [["a"], ["b"]])
+        self.assertEqual(pack.split_parts([("a", 1)], None), [["a"]])
+
     def test_known_ours_check_runs_the_real_script(self):
         self.assertEqual(self._check[-2:], [os.path.join(pack.REPO_ROOT, "tools", "known_ours.py"), "--check"])
 

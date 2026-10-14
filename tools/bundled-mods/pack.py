@@ -8,7 +8,9 @@
 --dream-dir) as <stem>-ios.dfmod, and pack-index.json (file, size, unlock key) that the app's
 MobileOriginalMods gate reads. Those files load only once the player's own original mod is in Documents/Mods.
 --mods-dir reads the private_only bundles from DIR instead of Assets/StreamingAssets/Mods. --private first runs
-tools/known_ours.py --check and refuses to pack while MobileOriginalModsKnownOurs.cs is stale.
+tools/known_ours.py --check and refuses to pack while MobileOriginalModsKnownOurs.cs is stale. A private pack
+bigger than --split-mb (default 1900 MiB; GitHub release assets must be under 2 GiB) is written as
+<out>-part1.zip, <out>-part2.zip, ... - each with the README and the whole pack-index.json.
 
 Reads Assets/StreamingAssets/Mods/*.dfmod and Licenses/ (produced by MobileBuildSetup.BuildBundledMods)
 and tools/bundled-mods/mods.json (the pin list), and refuses to pack unless every pinned mod has a
@@ -271,15 +273,39 @@ def main_private(args, cfg):
         return 1
 
     entries = [("Mods/" + name, os.path.getsize(src), key) for src, name, key in files]
-    if os.path.exists(args.out):
-        os.remove(args.out)
-    with zipfile.ZipFile(args.out, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
-        z.writestr("README.txt", private_readme_text(entries))
-        z.writestr("pack-index.json", pack_index(entries))
-        for src, name, _ in files:
-            z.write(src, "Mods/" + name)
-    print("wrote %s (%d files, %.1f MB)" % (args.out, len(files), os.path.getsize(args.out) / 1e6))
+    limit = int(args.split_mb * (1 << 20)) if args.split_mb else None
+    parts = split_parts([((src, name), os.path.getsize(src)) for src, name, _ in files], limit)
+    if len(parts) == 1:
+        outs = [args.out]
+    else:
+        base, ext = os.path.splitext(args.out)
+        outs = ["%s-part%d%s" % (base, i + 1, ext) for i in range(len(parts))]
+    readme, index = private_readme_text(entries), pack_index(entries)
+    for out, part in zip(outs, parts):
+        if os.path.exists(out):
+            os.remove(out)
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
+            z.writestr("README.txt", readme)
+            z.writestr("pack-index.json", index)  # every part carries the whole index
+            for src, name in part:
+                z.write(src, "Mods/" + name)
+        print("wrote %s (%d files, %.1f MB)" % (out, len(part), os.path.getsize(out) / 1e6))
     return 0
+
+
+def split_parts(items, limit):
+    """[(item, size)] -> [[item, ...], ...]: greedy in order, a new part when the next item would pass limit
+    (None = one part). An item larger than limit gets a part of its own."""
+    parts, cur, total = [], [], 0
+    for item, size in items:
+        if cur and limit is not None and total + size > limit:
+            parts.append(cur)
+            cur, total = [], 0
+        cur.append(item)
+        total += size
+    if cur or not parts:
+        parts.append(cur)
+    return parts
 
 
 def main(argv=None):
@@ -287,6 +313,8 @@ def main(argv=None):
     ap.add_argument("--out", default=None)
     ap.add_argument("--private", action="store_true", help="build the Non-MIT pack (-ios names + pack-index.json)")
     ap.add_argument("--dream-dir", default=None, help="folder of converted DREAM .dfmod files (with --private)")
+    ap.add_argument("--split-mb", type=float, default=1900,
+                    help="with --private: split into <out>-partN.zip of at most this many MiB (GitHub assets must be < 2 GiB; 0 = one zip)")
     ap.add_argument("--mods-dir", default=None, help="folder of the private_only bundles (with --private; default StreamingAssets/Mods)")
     args = ap.parse_args(argv)
     with open(MODS_JSON, encoding="utf-8") as fh:
