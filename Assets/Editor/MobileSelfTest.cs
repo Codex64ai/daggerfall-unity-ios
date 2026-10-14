@@ -175,6 +175,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestOriginalModReceipts();
             TestOriginalModScan();
             TestOriginalModGate();
+            TestOriginalModKnownOurs();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -5731,6 +5732,80 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 File.WriteAllBytes(Path.Combine(iEmpty, "dream - sprites.dfmod"), new byte[0]);
                 var rz = MobileOriginalMods.ScanOnce(iEmpty, rcpt("i3"), new[] { OrigModArchiveRow("DFM") }, list, log);
                 Check(rz.Receipts.Count == 0 && MobileOriginalMods.DesktopOriginals.Count == 0, "original mods: an empty renamed .dfmod is nothing");
+            }
+            finally
+            {
+                MobileOriginalMods.Locked.Clear();
+                MobileOriginalMods.DesktopOriginals.Clear();
+                Directory.Delete(root, true);
+            }
+        }
+
+        static void TestOriginalModKnownOurs()
+        {
+            // Table: every KnownOurs name is an OldNames or Unlocks entry of some row.
+            bool allNamed = MobileOriginalMods.KnownOurs.Length > 0;
+            string bad = "";
+            foreach (var k in MobileOriginalMods.KnownOurs)
+            {
+                string nn;
+                if (MobileOriginalMods.RowForOldName(k.Key, MobileOriginalMods.Rows, out nn) == null &&
+                    MobileOriginalMods.RowForPackFile(k.Key, MobileOriginalMods.Rows) == null) { allNamed = false; bad += k.Key + " "; }
+            }
+            Check(allNamed, "original mods: every KnownOurs name is an OldNames or Unlocks name of a row", bad);
+
+            long ours = -1;
+            foreach (var k in MobileOriginalMods.KnownOurs) if (k.Key == "distantterrain.dfmod") ours = k.Value;
+            Check(ours >= (1L << 20), "original mods: KnownOurs carries our distantterrain.dfmod above the row's size floor", ours.ToString());
+            if (ours < 0) return;
+
+            string root = OrigModTempDir("knownours");
+            try
+            {
+                Func<string, string> mods = name => { string d = Path.Combine(root, name, "Mods"); Directory.CreateDirectory(d); return d; };
+                Func<string, string> rcpt = name => Path.Combine(root, name, "Mods", "GameData", MobileOriginalMods.ReceiptFileName);
+                Func<long, byte[]> unityFs = n => { var b = new byte[n]; Encoding.ASCII.GetBytes("UnityFS\0").CopyTo(b, 0); return b; };
+                Action<string> log = _ => { };
+                var rows = MobileOriginalMods.Rows;
+
+                Check(MobileOriginalMods.IsKnownOurs("DistantTerrain.dfmod", ours, null) &&
+                      !MobileOriginalMods.IsKnownOurs("distantterrain.dfmod", ours + 1, null),
+                      "original mods: IsKnownOurs is (leaf name ignoring case, exact size)");
+
+                // Our old-name file at its known size: not a desktop original, no receipt.
+                string a = mods("a");
+                File.WriteAllBytes(Path.Combine(a, "distantterrain.dfmod"), unityFs(ours));
+                var ra = MobileOriginalMods.ScanOnce(a, rcpt("a"), rows, OrigModList, log);
+                Check(ra.Receipts.Count == 0 && MobileOriginalMods.DesktopOriginals.Count == 0 && !File.Exists(rcpt("a")),
+                      "original mods: our old-name pack file at a known size never self-unlocks");
+
+                // Same name, different size, UnityFS: a desktop original.
+                string b = mods("b");
+                string bPath = Path.Combine(b, "distantterrain.dfmod");
+                File.WriteAllBytes(bPath, unityFs(ours + 4096));
+                var rb = MobileOriginalMods.ScanOnce(b, rcpt("b"), rows, OrigModList, log);
+                Check(MobileOriginalMods.ReceiptKeys(rb).Contains("DISTANTTERRAIN") && MobileOriginalMods.DesktopOriginals.Contains(bPath),
+                      "original mods: the same name at another size with UnityFS is a desktop original");
+
+                // pack-index entries: an -ios name and an old name at an unknown size, both matching size -> ignored.
+                string c = mods("c");
+                long other = ours + 8192;
+                File.WriteAllBytes(Path.Combine(c, "distantterrain-ios.dfmod"), unityFs(other));
+                File.WriteAllBytes(Path.Combine(c, "distantterrain.dfmod"), unityFs(other));
+                File.WriteAllText(Path.Combine(c, MobileOriginalMods.PackIndexFileName),
+                    "[{\"file\":\"Mods/distantterrain-ios.dfmod\",\"size\":" + other + ",\"key\":\"DISTANTTERRAIN\"}," +
+                    "{\"file\":\"distantterrain.dfmod\",\"size\":" + other + ",\"key\":\"DISTANTTERRAIN\"}]");
+                var idx = MobileOriginalMods.LoadPackIndex(c);
+                var rc = MobileOriginalMods.ScanOnce(c, rcpt("c"), rows, OrigModList, log, idx);
+                Check(idx.Count == 2 && rc.Receipts.Count == 0 && MobileOriginalMods.DesktopOriginals.Count == 0,
+                      "original mods: files listed in pack-index.json with a matching size are never desktop originals");
+                var rc2 = MobileOriginalMods.ScanOnce(c, rcpt("c2"), rows, OrigModList, log, null);
+                Check(MobileOriginalMods.ReceiptKeys(rc2).Contains("DISTANTTERRAIN"),
+                      "original mods: without the index the unknown-size old name is a desktop original (control)");
+
+                string src = File.ReadAllText(Path.Combine(Application.dataPath, "Scripts/Game/Mobile/MobileOriginalMods.cs"));
+                Check(MethodBody(src, "public static void RunScanForModManager(").Contains("LoadPackIndex(modsDir)"),
+                      "original mods: the ModManager scan passes the loaded pack index");
             }
             finally
             {
