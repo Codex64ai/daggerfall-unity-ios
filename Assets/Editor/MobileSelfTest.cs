@@ -171,6 +171,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestFlcPathResolution();
             TestBuildStamp();
             TestOriginalModArchiveListing();
+            TestOriginalModRecognizer();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -5482,6 +5483,93 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                     za.AddEntry(n, new MemoryStream(new byte[16]), true);
                 using (var fs = File.Create(path)) za.SaveTo(fs, new SharpCompress.Writers.WriterOptions(SharpCompress.Common.CompressionType.Deflate));
             }
+        }
+
+        static MobileOriginalMods.Row OrigModFixtureRow()
+        {
+            return new MobileOriginalMods.Row
+            {
+                Key = "FIX", DisplayName = "Fixture", Url = "https://example.invalid/fix",
+                ArchiveMarkers = new[] { "DREAM - A", "DREAM - B", "DREAM - C" }, ArchiveThreshold = 2,
+                DfmodMarkers = new[] { "DREAM - SPRITES" }, DfmodMinBytes = 1024,
+                Unlocks = new[] { "dream-hud-menu-ios.dfmod", "distantterrain-ios.dfmod" },
+                OldNames = new[] { "distantterrain.dfmod" },
+            };
+        }
+
+        static void TestOriginalModRecognizer()
+        {
+            Check(MobileOriginalMods.Normalize("DREAM 1.2/DREAM - HUD & MENU.dfmod") == "dreamhud&menu",
+                  "original mods: normalize keeps the leaf, lower-cases, drops spaces/dashes and .dfmod",
+                  MobileOriginalMods.Normalize("DREAM 1.2/DREAM - HUD & MENU.dfmod"));
+            Check(MobileOriginalMods.Normalize("dream_hud-MENU") == "dreamhudmenu", "original mods: normalize drops underscores and dashes");
+            Check(MobileOriginalMods.Normalize("x.DFMOD") == "x", "original mods: normalize strips an upper-case .DFMOD");
+
+            var row = OrigModFixtureRow();
+            Check(MobileOriginalMods.MatchArchive(row, new[] { "top/dream-a.dfmod", "DREAM_B.dfmod", "readme.txt" }),
+                  "original mods: archive matches at the threshold, entries in a top folder count (leaf name)");
+            Check(!MobileOriginalMods.MatchArchive(row, new[] { "top/dream-a.dfmod", "top/dream-a.dfmod" }),
+                  "original mods: a duplicated entry counts once (below threshold)");
+            Check(!MobileOriginalMods.MatchArchive(row, new string[0]), "original mods: an empty archive matches nothing");
+
+            byte[] good = Encoding.ASCII.GetBytes("UnityFS\0");
+            Check(MobileOriginalMods.MatchDfmod(row, "dream - sprites.dfmod", good, 4096), "original mods: desktop dfmod with name + UnityFS + size matches");
+            Check(!MobileOriginalMods.MatchDfmod(row, "dream - sprites.dfmod", Encoding.ASCII.GetBytes("XXXXXXX\0"), 4096), "original mods: a fake header does not match");
+            Check(!MobileOriginalMods.MatchDfmod(row, "dream - sprites.dfmod", good, 0), "original mods: a 0-byte file does not match");
+            Check(!MobileOriginalMods.MatchDfmod(row, "other.dfmod", good, 4096), "original mods: another name does not match");
+            Check(!MobileOriginalMods.MatchDfmod(row, "dream - sprites.dfmod", Encoding.ASCII.GetBytes("Unity"), 4096), "original mods: a head shorter than 7 bytes does not match");
+
+            var rows = new[] { row };
+            Check(MobileOriginalMods.RowForPackFile("DREAM-HUD-MENU-IOS.dfmod", rows) == row, "original mods: pack file lookup is case-insensitive");
+            Check(MobileOriginalMods.RowForPackFile("unknown.dfmod", rows) == null, "original mods: an unknown file is not ours");
+            string n;
+            Check(MobileOriginalMods.RowForOldName("distantterrain.dfmod", rows, out n) == row && n == "distantterrain-ios.dfmod",
+                  "original mods: old name maps to its -ios name", n);
+            Check(MobileOriginalMods.IosName("dream - mobs (2 of 6)") == "dream-mobs_2_of_6-ios.dfmod"
+                  && MobileOriginalMods.IosName("dream - hud & menu") == "dream-hud-menu-ios.dfmod"
+                  && MobileOriginalMods.IosName("DistantTerrain") == "distantterrain-ios.dfmod"
+                  && MobileOriginalMods.IosName("distantterrain-ios.dfmod") == "distantterrain-ios.dfmod",
+                  "original mods: IosName follows pack.py's ios_name rule and is idempotent");
+
+            // Shipped table self-consistency.
+            var keys = new HashSet<string>();
+            bool keysOk = true, unlocksOk = true, oldOk = true, noSelfMatch = true;
+            string detail = "";
+            foreach (var r in MobileOriginalMods.Rows)
+            {
+                if (!keys.Add(r.Key) || r.Key != r.Key.ToUpperInvariant()) { keysOk = false; detail += " key:" + r.Key; }
+                foreach (string u in r.Unlocks)
+                {
+                    if (!u.EndsWith("-ios.dfmod", StringComparison.Ordinal)) { unlocksOk = false; detail += " unlock:" + u; }
+                    foreach (string m in r.DfmodMarkers)
+                        if (MobileOriginalMods.Normalize(u) == MobileOriginalMods.Normalize(m)) { noSelfMatch = false; detail += " self:" + u; }
+                }
+                foreach (string o in r.OldNames)
+                {
+                    string nn;
+                    if (MobileOriginalMods.RowForOldName(o, MobileOriginalMods.Rows, out nn) != r || Array.IndexOf(r.Unlocks, nn) < 0) { oldOk = false; detail += " old:" + o; }
+                }
+            }
+            Check(keysOk, "original mods: shipped keys are unique and upper-case", detail);
+            Check(unlocksOk, "original mods: every shipped unlock ends with -ios.dfmod", detail);
+            Check(oldOk, "original mods: every shipped old name maps into its row's unlocks", detail);
+            Check(noSelfMatch, "original mods: no -ios pack file normalizes to its row's desktop marker", detail);
+
+            var dream = MobileOriginalMods.Rows.FirstOrDefault(r => r.Key == "DREAM");
+            string[] dream25 =
+            {
+                "dream-backgrounds", "dream-commoners_1_of_2", "dream-commoners_2_of_2", "dream-handheld", "dream-hud-menu",
+                "dream-mobs_1_of_6", "dream-mobs_2_of_6", "dream-mobs_3_of_6", "dream-mobs_4_of_6", "dream-mobs_5_of_6", "dream-mobs_6_of_6",
+                "dream-npcs_1_of_3", "dream-npcs_2_of_3", "dream-npcs_3_of_3",
+                "dream-paperdoll_1_of_8", "dream-paperdoll_2_of_8", "dream-paperdoll_3_of_8", "dream-paperdoll_4_of_8",
+                "dream-paperdoll_5_of_8", "dream-paperdoll_6_of_8", "dream-paperdoll_7_of_8", "dream-paperdoll_8_of_8",
+                "dream-portraits", "dream-sprites_1_of_2", "dream-sprites_2_of_2",
+            };
+            Check(dream != null && dream.ArchiveThreshold >= 10 && dream25.All(st => dream.Unlocks.Contains(st + "-ios.dfmod")),
+                  "original mods: DREAM row needs >= 10 modules and unlocks the 25 dream-*-ios files",
+                  dream == null ? "no DREAM row" : dream.Unlocks.Length + " unlocks");
+            Check(MobileOriginalMods.Rows.Any(r => r.Key == "DREAMSKY" && r.Unlocks.Contains("dream-sky-ios.dfmod")),
+                  "original mods: DREAM SKY row unlocks dream-sky-ios.dfmod");
         }
 
         static void TestOriginalModArchiveListing()
