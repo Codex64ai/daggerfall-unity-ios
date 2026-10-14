@@ -228,7 +228,9 @@ Note for Tasks 10/11: the sim/device unlock tests use the real `~/dev/dfu-mods/d
 
 ---
 
-### Task 9: Docs and the Non-MIT pack on the private draft
+### Task 9: Docs and the Non-MIT pack on the private draft (DONE 2026-10-14)
+
+Done: docs 11f5eb41e; pack.py `--mods-dir` + KnownOurs staleness check 212a314f1; split into `NonMIT-ModPack-ios-part1.zip` (1,891,822,092 B) / `-part2.zip` (1,106,355,783 B) d3a310c70 because the 3.0 GB pack passes GitHub's 2 GiB asset limit; both uploaded to the draft, release notes carry the DREAM 2026 line. The 25 DREAM files + 7 private bundles ship (dream-sky/-sound/-textures are not in the draft folder).
 
 **Files:** `README-iOS.md:634` (`### The mod pack`: new sub-section "Non-MIT Mod Pack and the original-mod unlock": three downloads, how to drop the original, receipts file path, "Needs <mod>" rows, Refresh behaviour, release-notes template with original URL + version); `UPSTREAM-PATCHES.md` (ModManager scan/gate/savedMods, ModLoaderInterfaceWindow locked rows); `THIRD-PARTY.md` (Non-MIT pack paragraph: every file gated on the player's own original).
 
@@ -238,7 +240,9 @@ Note for Tasks 10/11: the sim/device unlock tests use the real `~/dev/dfu-mods/d
 
 ---
 
-### Task 10: Simulator verification
+### Task 10: Simulator verification (DONE 2026-10-14)
+
+Done with the real `dream - textures.dfmod` + a zip fixture: evidence and ledger in `/Volumes/More data/AI projects/Daggerfall/dfu-mods/origunlock-evidence/` (LEDGER.txt). Driven by the new test-app command `modswindow [seconds]` (2171bdffa). Safari double-tap not testable in the sim.
 
 Prereq: Task 8 done (a real DREAM archive) OR, if still blocked, a zip built from the placeholder names (`cd $(mktemp -d) && for n in "DREAM - HUD & MENU" ... ; do head -c 16 /dev/zero > "$n.dfmod"; done; zip DREAM-fake.zip *.dfmod`) - say which was used in the ledger.
 
