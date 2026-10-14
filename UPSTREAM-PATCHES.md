@@ -391,6 +391,22 @@ Then, in order:
 4. **Device-test the input paths by hand.** Nothing automated covers doors opening, the
    soft keyboard, or classic-bar taps, and all three have broken before.
 
+### Original-mod unlock (2026-10-14) — `Game/Addons/ModSupport/{ModManager.cs (+41/-1),ModLoaderInterfaceWindow.cs (+43/-2)}`, `Game/Mobile/{MobileOriginalMods.cs,MobileOriginalModsKnownOurs.cs}` (new), `Assets/Plugins/SharpCompress/` (new)
+Non-MIT pack files (`*-ios.dfmod`, plus their pre-rename old names) load only once the player's own
+original mod has been seen in `Documents/Mods`. **ModManager:** `FindModsFromDirectory` first calls
+`MobileOriginalMods.RunScanForModManager` (lists archive entries, checks desktop `.dfmod`s, writes
+`GameData/OriginalReceipts.json`; never throws), then asks `MobileOriginalMods.Decide` per file and
+`continue`s on anything but `Load` (desktop originals are skipped, locked files noted for the MODS
+window). `Refresh` reaches the same path, so the scan re-runs there. A new `savedMods` list holds the
+whole Mods.json read by `LoadModSettings`, and `MergeModSettings` gains a third, lowest-precedence source
+so entries of locked (not loaded) packs survive a write. All of it is behind `MobileContentPath.Active`.
+**ModLoaderInterfaceWindow:** `GetLoadedMods` appends one greyed `Needs <mod>` row per locked key after
+the real rows; every handler that indexes `modSettings` returns early on a locked row
+(`MobileOriginalMods.IsLockedRow`), Save and Enable all loop over the real mods only, and
+`ModList_OnSelectItem` opens the row's URL when the already-selected locked row is tapped
+(`TapOpensUrl`). *Rebase risk: MEDIUM* - `FindModsFromDirectory` and `MergeModSettings` are hot upstream
+code; the self test pins each call site by source (`TestOriginalModGate`, `TestLockedModRows`).
+
 ## What a rebase cannot verify
 
 The port's hardest-won knowledge is about device behaviour, not code: the iPadOS phantom

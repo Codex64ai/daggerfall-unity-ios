@@ -1025,6 +1025,18 @@ streaming, and the cost is logged rather than asserted: `[RealGrass] detail data
 live terrains, so the measurement to take is after fast travel with Distant Terrain and WoD Terrain
 also on.
 
+## Non-MIT Mod Pack (private draft only, gated on the player's own original)
+
+The mods above marked "private draft only" (and DREAM / DREAM SKY) have no redistribution licence. Their
+iOS conversions are published only on the private test draft as `NonMIT-ModPack-ios-part1.zip` /
+`-part2.zip`, every file renamed `<stem>-ios.dfmod` and listed in `pack-index.json` with its unlock key.
+**No file in that pack loads on its own:** the app loads it only after it has seen the player's own copy
+of the original mod (the downloaded archive or the desktop `.dfmod`) in `Documents/Mods` and recorded a
+receipt (`Documents/Mods/GameData/OriginalReceipts.json`); until then the MODS window shows a greyed
+`Needs <mod>` row linking to the original's own page. Each upload's release notes name the original and
+the version it was built from (DREAM: built from DREAM 2026, Nexus daggerfallunity mods/5, Mac OSX build
+5-2-0). The pack never goes into a public release.
+
 ## SharpCompress (compiled in, MIT)
 
 - **Library:** SharpCompress 0.32.2 (netstandard2.0 build), https://www.nuget.org/packages/SharpCompress/0.32.2
