@@ -407,6 +407,16 @@ the real rows; every handler that indexes `modSettings` returns early on a locke
 (`TapOpensUrl`). *Rebase risk: MEDIUM* - `FindModsFromDirectory` and `MergeModSettings` are hot upstream
 code; the self test pins each call site by source (`TestOriginalModGate`, `TestLockedModRows`).
 
+### Original-mod unlock for loose files (2026-10-14) — `UserInterface/FLCPlayer.cs` (+2/-1), `Game/Mobile/{MobileContentPath.cs,MobileOriginalModsLoose.cs (new),MobileOriginalModsKnownOursLoose.cs (new, generated),Ports/DynamicMusic/DynamicMusic.cs}`
+DREAM's loose music/movies/extras follow the DREAM receipt. Our side: `MobileContentPath.Override` returns the shipped
+path when the user file it found is a locked Non-MIT loose file (`MobileOriginalMods.IsLooseLocked`: name + exact size in
+`KnownOursLoose`, no receipt for its key, lock enforced), and `UserFiles` leaves such files out - that covers every
+upstream loader already routed through them (SoundReplacement, VideoReplacement, TextAssetReader / mod Presets,
+SpellIconCollection, BookReplacement, WorldDataReplacement, quests). **FLCPlayer** (upstream) resolves `Movies/*.FLC`
+with `MobileOriginalMods.LooseFileExists` instead of `File.Exists`, so a locked DREAM Daedra animation falls back to the
+arena2 original. The Dynamic Music port filters its two playlist-folder listings the same way. *Rebase risk: LOW* - one
+predicate swap in `FLCPlayer.Load`; pinned by source in `TestOriginalModLooseFiles`.
+
 ## What a rebase cannot verify
 
 The port's hardest-won knowledge is about device behaviour, not code: the iPadOS phantom

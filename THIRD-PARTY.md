@@ -1036,6 +1036,10 @@ receipt (`Documents/Mods/GameData/OriginalReceipts.json`); until then the MODS w
 `Needs <mod>` row linking to the original's own page. Each upload's release notes name the original and
 the version it was built from (DREAM: built from DREAM 2026, Nexus daggerfallunity mods/5, Mac OSX build
 5-2-0). The pack never goes into a public release.
+DREAM's loose files (`DREAM-music-ios.zip`, `DREAM-movies-ios.zip`, `DREAM-extras-ios.zip`: music `.ogg`, HD cinematics
+`.mp4`, Daedra `.FLC`, spell icon atlases, settings presets) are gated by the same DREAM receipt: each is listed by name
+and exact size in `KnownOursLoose` (`tools/known_ours_loose.py`), and without the receipt the app treats it as absent
+and uses the vanilla content.
 
 ## SharpCompress (compiled in, MIT)
 
