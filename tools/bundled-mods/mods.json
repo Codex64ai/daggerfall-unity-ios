@@ -471,6 +471,7 @@
       "manifest": "dynamic-skies.dfmod.json",
       "strip_code": true,
       "private_only": true,
+      "unlock_key": "DYNAMICSKIES",
       "exclude_globs": [
         "*.shader",
         "*.cginc"
@@ -484,6 +485,7 @@
       "manifest": "WorldOfDaggerfall.dfmod.json",
       "strip_code": true,
       "private_only": true,
+      "unlock_key": "WOD",
       "extra_dirs": [
         "Meshes"
       ],
@@ -505,6 +507,7 @@
       "manifest": "World of Daggerfall - Biomes.dfmod.json",
       "strip_code": true,
       "private_only": true,
+      "unlock_key": "WODBIOMES",
       "exclude_globs": [
         "*.7z",
         "*.xcf"
@@ -521,6 +524,7 @@
       "manifest": "wod-terrain.dfmod.json",
       "strip_code": true,
       "private_only": true,
+      "unlock_key": "WODTERRAIN",
       "exclude_globs": [
         "*.compute",
         "*.cginc"
@@ -537,6 +541,7 @@
       "manifest": "distantterrain.dfmod.json",
       "strip_code": true,
       "private_only": true,
+      "unlock_key": "DISTANTTERRAIN",
       "rename_dirs": {
         "Resources": "ModResources"
       },
@@ -561,6 +566,7 @@
       "manifest_override": "manifests/RealGrass.dfmod.json",
       "strip_code": true,
       "private_only": true,
+      "unlock_key": "REALGRASS",
       "exclude_globs": [
         "*.fbx",
         "*.prefab",
@@ -624,6 +630,7 @@
       "manifest": "DaggerfallBestiaryProject.dfmod.json",
       "strip_code": true,
       "private_only": true,
+      "unlock_key": "DEX",
       "exclude_globs": [
         "1516_[5-9]-1[5-9].png",
         "1516_[5-9]-2[0-3].png"

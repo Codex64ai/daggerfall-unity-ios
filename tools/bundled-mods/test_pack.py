@@ -186,5 +186,94 @@ class Readme(unittest.TestCase):
         self.assertIn("THIRD-PARTY.md", txt)
 
 
+class NonMitPack(unittest.TestCase):
+    """--private: the Non-MIT zip ships every file as <stem>-ios.dfmod plus pack-index.json (the C#
+    MobileOriginalMods.LoadPackIndex reads a top-level JSON array of {file, size, key})."""
+
+    def test_ios_name(self):
+        self.assertEqual(pack.ios_name("dream - hud & menu"), "dream-hud-menu-ios.dfmod")
+        self.assertEqual(pack.ios_name("dream - mobs (2 of 6)"), "dream-mobs_2_of_6-ios.dfmod")
+        self.assertEqual(pack.ios_name("DistantTerrain"), "distantterrain-ios.dfmod")
+        self.assertEqual(pack.ios_name("World of Daggerfall - Biomes"), "world_of_daggerfall-biomes-ios.dfmod")  # the " of " rule, same as C# IosName
+        self.assertEqual(pack.ios_name("dream-hud-menu-ios.dfmod"), "dream-hud-menu-ios.dfmod")
+        self.assertEqual(pack.ios_name(pack.ios_name("dream - sky")), "dream-sky-ios.dfmod")
+
+    def test_private_stems_need_an_unlock_key(self):
+        cfg = {"dest_root": "x", "mods": CFG["mods"] + [
+            {"name": "DEX", "manifest": "DaggerfallBestiaryProject.dfmod.json", "private_only": True, "unlock_key": "DEX"},
+            {"name": "RR", "manifest": "RoleplayRealism.dfmod.json", "builtin": True, "private_only": True}]}
+        self.assertEqual(pack.private_stems(cfg), {"daggerfallbestiaryproject": "DEX"})
+        cfg["mods"].append({"name": "X", "manifest": "x.dfmod.json", "private_only": True})
+        with self.assertRaises(ValueError):
+            pack.private_stems(cfg)
+
+    def test_dream_key(self):
+        self.assertEqual(pack.dream_key("dream-sky"), "DREAMSKY")
+        self.assertEqual(pack.dream_key("dream - sky"), "DREAMSKY")
+        self.assertEqual(pack.dream_key("dream-mobs_1_of_6"), "DREAM")
+
+    def test_pack_index_is_a_sorted_array(self):
+        import json
+        rows = json.loads(pack.pack_index([("Mods/b-ios.dfmod", 2, "B"), ("Mods/a-ios.dfmod", 1, "A")]))
+        self.assertIsInstance(rows, list)
+        self.assertEqual([r["file"] for r in rows], ["Mods/a-ios.dfmod", "Mods/b-ios.dfmod"])
+        self.assertEqual(rows[0], {"file": "Mods/a-ios.dfmod", "size": 1, "key": "A"})
+
+    def test_shipped_private_entries_all_have_keys(self):
+        import json
+        with open(os.path.join(os.path.dirname(__file__), "mods.json"), encoding="utf-8") as fh:
+            cfg = json.load(fh)
+        self.assertEqual(sorted(pack.private_stems(cfg).values()),
+                         sorted(["DEX", "REALGRASS", "DYNAMICSKIES", "WOD", "WODBIOMES", "WODTERRAIN", "DISTANTTERRAIN"]))
+
+    def test_end_to_end_private_zip(self):
+        import json
+        import zipfile
+        root = tempfile.mkdtemp()
+        mods, dream = os.path.join(root, "Mods"), os.path.join(root, "dream")
+        os.makedirs(mods)
+        os.makedirs(dream)
+        for path, n in ((os.path.join(mods, "dex.dfmod"), 11), (os.path.join(dream, "dream - sky.dfmod"), 22),
+                        (os.path.join(dream, "dream - mobs (1 of 2).dfmod"), 33)):
+            with open(path, "wb") as fh:
+                fh.write(b"x" * n)
+        cfgp = os.path.join(root, "mods.json")
+        with open(cfgp, "w", encoding="utf-8") as fh:
+            json.dump({"dest_root": "x", "mods": CFG["mods"] + [
+                {"name": "DEX", "manifest": "dex.dfmod.json", "private_only": True, "unlock_key": "DEX"}]}, fh)
+        old = (pack.MODS_DIR, pack.MODS_JSON)
+        pack.MODS_DIR, pack.MODS_JSON = mods, cfgp
+        try:
+            z = os.path.join(root, "out.zip")
+            self.assertEqual(pack.main(["--private", "--dream-dir", dream, "--out", z]), 0)
+            with zipfile.ZipFile(z) as zf:
+                names = sorted(zf.namelist())
+                index = json.loads(zf.read("pack-index.json"))
+                readme = zf.read("README.txt").decode("utf-8")
+        finally:
+            pack.MODS_DIR, pack.MODS_JSON = old
+        self.assertEqual(names, sorted(["Mods/dex-ios.dfmod", "Mods/dream-sky-ios.dfmod",
+                                        "Mods/dream-mobs_1_of_2-ios.dfmod", "pack-index.json", "README.txt"]))
+        self.assertEqual({r["file"]: (r["size"], r["key"]) for r in index},
+                         {"Mods/dex-ios.dfmod": (11, "DEX"), "Mods/dream-sky-ios.dfmod": (22, "DREAMSKY"),
+                          "Mods/dream-mobs_1_of_2-ios.dfmod": (33, "DREAM")})
+        self.assertIn("dex-ios.dfmod", readme)
+        self.assertIn("Documents/Mods", readme)
+
+    def test_private_zip_refuses_a_missing_bundle(self):
+        import json
+        root = tempfile.mkdtemp()
+        cfgp = os.path.join(root, "mods.json")
+        with open(cfgp, "w", encoding="utf-8") as fh:
+            json.dump({"dest_root": "x", "mods": [
+                {"name": "DEX", "manifest": "dex.dfmod.json", "private_only": True, "unlock_key": "DEX"}]}, fh)
+        old = (pack.MODS_DIR, pack.MODS_JSON)
+        pack.MODS_DIR, pack.MODS_JSON = root, cfgp
+        try:
+            self.assertEqual(pack.main(["--private", "--out", os.path.join(root, "o.zip")]), 1)
+        finally:
+            pack.MODS_DIR, pack.MODS_JSON = old
+
+
 if __name__ == "__main__":
     unittest.main()

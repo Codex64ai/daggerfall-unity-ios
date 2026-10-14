@@ -178,6 +178,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestOriginalModGate();
             TestOriginalModKnownOurs();
             TestLockedModRows();
+            TestNonMitPackNames();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -5880,6 +5881,34 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(MethodBody(src, "void SaveAndCloseButton_OnMouseClick(").Contains("i < modSettings.Length") &&
                   MethodBody(src, "void EnableAllButton_OnMouseClick(").Contains("i < modSettings.Length"),
                   "locked rows: Save and Enable all loop over the real mods only");
+        }
+
+        [Serializable] class PinEntry { public string name; public string manifest; public string bundle; public bool private_only; public bool builtin; public string unlock_key; }
+        [Serializable] class PinFile { public List<PinEntry> mods; }
+
+        // tools/bundled-mods/mods.json and the C# recognizer table must agree: every private_only entry with an
+        // unlock_key has a row with that Key whose Unlocks carries pack.py's ios_name(stem).
+        static void TestNonMitPackNames()
+        {
+            string path = Path.GetFullPath(Path.Combine(Application.dataPath, "../tools/bundled-mods/mods.json"));
+            PinFile pins = JsonUtility.FromJson<PinFile>(File.ReadAllText(path));
+            int n = 0;
+            foreach (PinEntry e in pins.mods)
+            {
+                if (!e.private_only || e.builtin) continue;
+                Check(!string.IsNullOrEmpty(e.unlock_key), "non-MIT pack: private_only entry has an unlock_key", e.name);
+                if (string.IsNullOrEmpty(e.unlock_key)) continue;
+                n++;
+                string stem = !string.IsNullOrEmpty(e.bundle) ? Path.GetFileNameWithoutExtension(e.bundle)
+                                                             : e.manifest.Replace(".dfmod.json", "");
+                string want = MobileOriginalMods.IosName(stem.ToLowerInvariant());
+                MobileOriginalMods.Row row = Array.Find(MobileOriginalMods.Rows, r => r.Key == e.unlock_key);
+                Check(row != null && Array.IndexOf(row.Unlocks, want) >= 0,
+                      "non-MIT pack: row " + e.unlock_key + " unlocks " + want, row == null ? "no row" : string.Join(",", row.Unlocks));
+            }
+            Check(n == 7, "non-MIT pack: seven private_only entries carry unlock keys", n.ToString());
+            Check(MobileOriginalMods.IosName("World of Daggerfall - Biomes") == "world_of_daggerfall-biomes-ios.dfmod",
+                  "non-MIT pack: IosName matches pack.py ios_name on the Biomes stem");
         }
 
         static void TestOriginalModGate()
