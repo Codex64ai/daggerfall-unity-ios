@@ -412,6 +412,135 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         #endregion
 
+        #region Gate
+
+        public enum Verdict { Load, Locked, SkipDesktopOriginal, SkipOldName }
+
+        public const string PackIndexFileName = "pack-index.json";
+
+        [Serializable]
+        class PackIndexEntry { public string file; public long size; public string key; }
+
+        [Serializable]
+        class PackIndexWrapper { public List<PackIndexEntry> items; }
+
+        /// <summary>
+        /// First pack-index.json under modsDir (all subfolders): a JSON array of {file, size, key} -> file leaf name -> size.
+        /// Missing or malformed -> empty (the gate then decides by name alone and fails closed). Never throws.
+        /// </summary>
+        public static Dictionary<string, long> LoadPackIndex(string modsDir)
+        {
+            var index = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                if (string.IsNullOrEmpty(modsDir) || !Directory.Exists(modsDir)) return index;
+                string[] hits = Directory.GetFiles(modsDir, PackIndexFileName, SearchOption.AllDirectories);
+                if (hits.Length == 0) return index;
+                Array.Sort(hits, StringComparer.Ordinal);
+                string text = File.ReadAllText(hits[0]).Trim();
+                if (!text.StartsWith("[", StringComparison.Ordinal)) return index;
+                var w = JsonUtility.FromJson<PackIndexWrapper>("{\"items\":" + text + "}");
+                if (w == null || w.items == null) return index;
+                foreach (PackIndexEntry e in w.items)
+                    if (e != null && !string.IsNullOrEmpty(e.file))
+                        index[Leaf(e.file)] = e.size;
+            }
+            catch (Exception)
+            {
+                index.Clear();
+            }
+            return index;
+        }
+
+        /// <summary>
+        /// Whether one .dfmod may load. Order: desktop original -> skip; old name with its new name present -> skip;
+        /// not ours -> load; pack-index size mismatch -> load (not ours); receipt -> load; else locked.
+        /// Old names are gated exactly like the -ios names (via the row's OldNames).
+        /// </summary>
+        public static Verdict Decide(string filePath, long sizeBytes, Row[] rows, HashSet<string> receiptKeys,
+                                     Dictionary<string, long> packIndex, HashSet<string> siblingLeafNames, bool isDesktopOriginal)
+        {
+            if (isDesktopOriginal) return Verdict.SkipDesktopOriginal;
+            string leaf = Leaf(filePath);
+
+            string newName;
+            Row row = RowForOldName(leaf, rows, out newName);
+            if (row != null)
+            {
+                if (siblingLeafNames != null && ContainsIgnoreCase(siblingLeafNames, newName))
+                    return Verdict.SkipOldName;
+            }
+            else
+            {
+                row = RowForPackFile(leaf, rows);
+                if (row == null) return Verdict.Load;
+                long indexed;
+                if (packIndex != null && packIndex.TryGetValue(leaf, out indexed) && indexed != sizeBytes)
+                    return Verdict.Load;
+            }
+            if (receiptKeys != null && receiptKeys.Contains(row.Key)) return Verdict.Load;
+            return Verdict.Locked;
+        }
+
+        static bool ContainsIgnoreCase(HashSet<string> set, string name)
+        {
+            if (set.Contains(name)) return true;
+            foreach (string s in set)
+                if (string.Equals(s, name, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        /// <summary>IO: the scan for ModManager.FindModsFromDirectory. Only when MobileContentPath.Active; never throws.</summary>
+        public static void RunScanForModManager(string modsDir, string modDataDir)
+        {
+            if (!MobileContentPath.Active) return;
+            try
+            {
+                ScanOnce(modsDir, Path.Combine(modDataDir, ReceiptFileName), Rows, ListOrNull, UnityEngine.Debug.Log);
+            }
+            catch (Exception e)
+            {
+                UnityEngine.Debug.Log("[OriginalMods] scan failed: " + e.Message);
+            }
+        }
+
+        static List<string> ListOrNull(string path)
+        {
+            List<string> entries; string error;
+            return TryListEntries(path, out entries, out error) ? entries : null;
+        }
+
+        /// <summary>Records a non-Load verdict: one "Needs ..." locked row per Key, one log line per skipped file.</summary>
+        public static void NoteVerdict(Verdict v, string filePath)
+        {
+            string leaf = Leaf(filePath);
+            switch (v)
+            {
+                case Verdict.Locked:
+                {
+                    string ignored;
+                    Row row = RowForPackFile(leaf, Rows) ?? RowForOldName(leaf, Rows, out ignored);
+                    string key = row != null ? row.Key : "?";
+                    if (row != null && !Locked.Exists(l => l.Key == row.Key))
+                        Locked.Add(new LockedEntry { Key = row.Key, Label = "Needs " + row.DisplayName + " - tap for the download page", Url = row.Url });
+                    UnityEngine.Debug.Log(string.Format("[OriginalMods] locked {0} (needs {1})", leaf, key));
+                    break;
+                }
+                case Verdict.SkipDesktopOriginal:
+                    UnityEngine.Debug.Log("[OriginalMods] skipped desktop original " + leaf);
+                    break;
+                case Verdict.SkipOldName:
+                {
+                    string newName;
+                    RowForOldName(leaf, Rows, out newName);
+                    UnityEngine.Debug.Log(string.Format("[OriginalMods] skipped old name {0}, {1} present", leaf, newName));
+                    break;
+                }
+            }
+        }
+
+        #endregion
+
         /// <summary>
         /// Lists the entry names (full paths inside the archive, directories excluded) of a zip/7z/rar.
         /// Header-only (ArchiveFactory + Entries, never ReaderFactory). Any exception -> false with

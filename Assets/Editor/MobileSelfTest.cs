@@ -174,6 +174,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestOriginalModRecognizer();
             TestOriginalModReceipts();
             TestOriginalModScan();
+            TestOriginalModGate();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -5737,6 +5738,72 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 MobileOriginalMods.DesktopOriginals.Clear();
                 Directory.Delete(root, true);
             }
+        }
+
+        static void TestOriginalModGate()
+        {
+            var rows = new[] { OrigModFixtureRow() };     // FIX: unlocks dream-hud-menu-ios + distantterrain-ios; old name distantterrain.dfmod
+            var none = new HashSet<string>();
+            var fix = new HashSet<string> { "FIX" };
+            var noIndex = new Dictionary<string, long>();
+            var noSiblings = new HashSet<string>();
+            const string pack = "/docs/Mods/sub/dream-hud-menu-ios.dfmod";
+            Func<string, long, HashSet<string>, Dictionary<string, long>, HashSet<string>, bool, MobileOriginalMods.Verdict> decide =
+                (path, size, keys, index, sib, desk) => MobileOriginalMods.Decide(path, size, rows, keys, index, sib, desk);
+
+            Check(decide(pack, 100, none, noIndex, noSiblings, false) == MobileOriginalMods.Verdict.Locked,
+                  "original mods gate: our pack file without a receipt is locked (index missing -> fails closed)");
+            Check(decide(pack, 100, fix, noIndex, noSiblings, false) == MobileOriginalMods.Verdict.Load,
+                  "original mods gate: our pack file with a receipt loads");
+            Check(decide(pack, 100, fix, noIndex, noSiblings, true) == MobileOriginalMods.Verdict.SkipDesktopOriginal,
+                  "original mods gate: a desktop original is skipped even with a receipt");
+            Check(decide("/docs/Mods/vanilla-enhanced.dfmod", 100, none, noIndex, noSiblings, false) == MobileOriginalMods.Verdict.Load
+                  && decide("/docs/Mods/vanilla-enhanced.dfmod", 100, fix, noIndex, noSiblings, false) == MobileOriginalMods.Verdict.Load,
+                  "original mods gate: MIT / unknown files load with or without receipts");
+            var index = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase) { { "dream-hud-menu-ios.dfmod", 999 } };
+            Check(decide(pack, 100, none, index, noSiblings, false) == MobileOriginalMods.Verdict.Load,
+                  "original mods gate: a pack-index size mismatch means not ours (loads)");
+            index["dream-hud-menu-ios.dfmod"] = 100;
+            Check(decide(pack, 100, none, index, noSiblings, false) == MobileOriginalMods.Verdict.Locked,
+                  "original mods gate: a pack-index size match is still gated");
+
+            var siblings = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "distantterrain.dfmod", "DistantTerrain-ios.dfmod" };
+            Check(decide("/docs/Mods/old/distantterrain.dfmod", 100, fix, noIndex, siblings, false) == MobileOriginalMods.Verdict.SkipOldName,
+                  "original mods gate: an old name is skipped when its -ios name is present (any folder)");
+            var alone = new HashSet<string> { "distantterrain.dfmod" };
+            Check(decide("/docs/Mods/distantterrain.dfmod", 100, none, noIndex, alone, false) == MobileOriginalMods.Verdict.Locked,
+                  "original mods gate: an old name alone is gated like its -ios name (locked without a receipt)");
+            Check(decide("/docs/Mods/distantterrain.dfmod", 100, fix, noIndex, alone, false) == MobileOriginalMods.Verdict.Load,
+                  "original mods gate: an old name alone loads with its row's receipt");
+
+            string dir = OrigModTempDir("gate");
+            try
+            {
+                Check(MobileOriginalMods.LoadPackIndex(dir).Count == 0, "original mods gate: no pack-index.json -> empty index");
+                Directory.CreateDirectory(Path.Combine(dir, "pack"));
+                string idx = Path.Combine(dir, "pack", MobileOriginalMods.PackIndexFileName);
+                File.WriteAllText(idx, "[{\"file\":\"dex-ios.dfmod\",\"size\":42,\"key\":\"DEX\"}]");
+                var good = MobileOriginalMods.LoadPackIndex(dir);
+                Check(good.Count == 1 && good["DEX-IOS.dfmod"] == 42, "original mods gate: pack-index.json in a subfolder is read");
+                bool threw = false; Dictionary<string, long> bad = null;
+                File.WriteAllText(idx, "[{\"file\":\"dex-ios.dfmod\",\"si");
+                try { bad = MobileOriginalMods.LoadPackIndex(dir); } catch (Exception) { threw = true; }
+                Check(!threw && bad != null && bad.Count == 0, "original mods gate: a malformed pack-index.json reads as missing, no throw");
+                File.WriteAllText(idx, "{garbage");
+                threw = false;
+                try { bad = MobileOriginalMods.LoadPackIndex(dir); } catch (Exception) { threw = true; }
+                Check(!threw && bad != null && bad.Count == 0, "original mods gate: a non-array pack-index.json reads as missing");
+            }
+            finally { Directory.Delete(dir, true); }
+
+            string mm = StripShaderComments(File.ReadAllText("Assets/Game/Addons/ModSupport/ModManager.cs"));
+            string body = MethodBody(mm, "private void FindModsFromDirectory(bool refresh = false)");
+            int scan = body.IndexOf("MobileOriginalMods.RunScanForModManager(", StringComparison.Ordinal);
+            int list = body.IndexOf("Directory.GetFiles", StringComparison.Ordinal);
+            Check(scan >= 0 && list >= 0 && scan < list, "original mods gate: FindModsFromDirectory runs the scan before listing mods");
+            int gate = body.IndexOf("MobileOriginalMods.Decide(", StringComparison.Ordinal);
+            int dup = body.IndexOf("loadedModNames.Contains", StringComparison.Ordinal);
+            Check(gate >= 0 && dup >= 0 && gate < dup, "original mods gate: FindModsFromDirectory asks the gate before the loaded-name check");
         }
 
         static void TestOriginalModArchiveListing()

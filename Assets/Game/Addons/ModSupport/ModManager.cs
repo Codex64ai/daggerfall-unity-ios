@@ -638,6 +638,10 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
         /// <param name="refresh">Checks for mods to unload.</param>
         private void FindModsFromDirectory(bool refresh = false)
         {
+            // MOBILE: original-mod unlock - look for the player's originals and write receipts first
+            // (also re-run by the MODS window's Refresh). Never throws, never blocks start-up.
+            if (MobileContentPath.Active) MobileOriginalMods.RunScanForModManager(ModDirectory, ModDataDirectory);
+
             // MOBILE: on iOS the player's Documents/Mods and the app's shipped Mods folder are
             // both scanned, player first (see MergeModFiles). Off iOS ShippedModDirectory IS
             // ModDirectory, so nothing is merged and behaviour is unchanged.
@@ -660,6 +664,17 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
             var modFileNames = new string[modFiles.Length];
             var loadedModNames = GetAllModFileNames();
 
+            // MOBILE: inputs for the original-mod gate, computed once (null off iOS).
+            MobileOriginalMods.ReceiptFile gateReceipts = null;
+            Dictionary<string, long> gatePackIndex = null;
+            HashSet<string> gateSiblings = null;
+            if (MobileContentPath.Active)
+            {
+                gateReceipts = MobileOriginalMods.LoadReceipts(Path.Combine(ModDataDirectory, MobileOriginalMods.ReceiptFileName));
+                gatePackIndex = MobileOriginalMods.LoadPackIndex(ModDirectory);
+                gateSiblings = new HashSet<string>(modFiles.Select(f => Path.GetFileName(f)), StringComparer.OrdinalIgnoreCase);
+            }
+
             for (int i = 0; i < modFiles.Length; i++)
             {
                 string modFilePath = modFiles[i];
@@ -671,6 +686,14 @@ namespace DaggerfallWorkshop.Game.Utility.ModSupport
                 {
                     Debug.Log("failed to get name of mod");
                     continue;
+                }
+
+                // MOBILE: Non-MIT pack files load only next to the player's own original (receipt); desktop originals never load on iOS.
+                if (MobileContentPath.Active)
+                {
+                    var verdict = MobileOriginalMods.Decide(modFilePath, new FileInfo(modFilePath).Length, MobileOriginalMods.Rows,
+                        MobileOriginalMods.ReceiptKeys(gateReceipts), gatePackIndex, gateSiblings, MobileOriginalMods.DesktopOriginals.Contains(modFilePath));
+                    if (verdict != MobileOriginalMods.Verdict.Load) { MobileOriginalMods.NoteVerdict(verdict, modFilePath); continue; }
                 }
 
                 //prevent trying to re-load same asset bundles on refresh
