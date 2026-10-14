@@ -214,15 +214,17 @@ Done when: the private zip carries only `-ios` names + index and the C# table ag
 
 ---
 
-### Task 8: BLOCKED-ON-DOWNLOAD - real DREAM / DREAM SKY archive markers
+### Task 8: Real DREAM / DREAM SKY markers (DONE 2026-10-14, no download needed)
 
-Blocked until Ikram's fresh Nexus download of DREAM (mods/5) and, if he has it, DREAM SKY (`DREAM - SKY-664-1-2-*.rar`; not in `~/Downloads` on 2026-10-14). Nothing else depends on this task.
+Unblocked by the planner: real DREAM 2026 desktop originals are one file per module named `dream - <module>.dfmod` inside a `Mods/` folder; the 13 modules are textures, paperdoll, mobs, npcs, cinematics, backgrounds, commoners, music, handheld, sprites, portraits, hud & menu, sound. DREAM SKY original = `dream - sky.dfmod` (from `DREAM - SKY-664-1-2-*.rar`).
 
-**Files:** `MobileOriginalMods.cs` (the two placeholder rows), `MobileSelfTest.cs` (the DREAM-row assertions in `TestOriginalModRecognizer`)
+**Files:** `MobileOriginalMods.cs` (the two rows), `MobileSelfTest.cs` (`TestOriginalModRecognizer`)
 
-- [ ] **Step 1:** List the real archive: `DFU_ARCHIVE="<path>" Unity ... -executeMethod DaggerfallWorkshop.Game.Mobile.EditorTools.MobileOriginalModsProbe.ListFromEnv -logFile "$LOG"; grep "\[OriginalModsProbe\]" "$LOG"` (zip: `unzip -l` works too). Record every `*.dfmod` leaf name.
-- [ ] **Step 2:** Replace the placeholder `ArchiveMarkers`/`DfmodMarkers` with the real names (keep threshold = max(10, count - 3)); remove the PLACEHOLDER comments. Update the test's expected marker count. Self-test -> 0 failed.
-- [ ] **Step 3:** Commit `Original-mod unlock: DREAM markers from the Nexus download (<version>)`. Record "built from DREAM <version>, Nexus mods/5" for the release notes in README-iOS (Task 9 section).
+- [x] **Step 1:** Module names taken from the planner ruling above (no archive listing needed). A real Mac-build original is read-only at `~/dev/dfu-mods/dream-src/dream - textures.dfmod` (1.8 GB).
+- [x] **Step 2:** `ArchiveMarkers`/`DfmodMarkers` = the 13 `dream - <module>` names, threshold 10; DREAM SKY markers `dream - sky`; PLACEHOLDER comments removed. Tests: 13 markers + threshold, 10-of-13 archive match / 9 no match, DREAM SKY archive match, and MatchDfmod on the real file yields DREAM and the file is not in KnownOurs (skipped with a logged note when the file is absent).
+- [x] **Step 3:** Committed `Original-mod unlock: real DREAM 2026 module markers (13) and DREAM SKY`.
+
+Note for Tasks 10/11: the sim/device unlock tests use the real `~/dev/dfu-mods/dream-src/dream - textures.dfmod` (copied into `Documents/Mods`; it is a desktop original, matched by name + UnityFS + size) instead of a Nexus archive; the fake-zip prerequisite in Task 10 is no longer needed.
 
 ---
 

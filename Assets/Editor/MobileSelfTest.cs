@@ -5613,6 +5613,36 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   dream == null ? "no DREAM row" : dream.Unlocks.Length + " unlocks");
             Check(MobileOriginalMods.Rows.Any(r => r.Key == "DREAMSKY" && r.Unlocks.Contains("dream-sky-ios.dfmod")),
                   "original mods: DREAM SKY row unlocks dream-sky-ios.dfmod");
+
+            // Task 8: the real DREAM 2026 module names (13) and the DREAM SKY original.
+            string[] modules = { "textures", "paperdoll", "mobs", "npcs", "cinematics", "backgrounds", "commoners",
+                                 "music", "handheld", "sprites", "portraits", "hud & menu", "sound" };
+            Check(dream != null && dream.ArchiveMarkers.Length == 13 && dream.ArchiveThreshold == 10 &&
+                  modules.All(m => dream.ArchiveMarkers.Contains("dream - " + m) && dream.DfmodMarkers.Contains("dream - " + m)),
+                  "original mods: DREAM markers are the 13 real modules, threshold 10",
+                  dream == null ? "no DREAM row" : string.Join(",", dream.ArchiveMarkers));
+            Check(dream != null && MobileOriginalMods.MatchArchive(dream, modules.Take(10).Select(m => "DREAM/Mods/dream - " + m + ".dfmod")) &&
+                  !MobileOriginalMods.MatchArchive(dream, modules.Take(9).Select(m => "Mods/dream - " + m + ".dfmod")),
+                  "original mods: a DREAM archive needs 10 of the 13 module files (in a Mods/ folder)");
+            var sky = MobileOriginalMods.Rows.FirstOrDefault(r => r.Key == "DREAMSKY");
+            Check(sky != null && MobileOriginalMods.MatchArchive(sky, new[] { "Mods/dream - sky.dfmod" }),
+                  "original mods: DREAM SKY archive matches on dream - sky.dfmod");
+
+            // The real Mac-build original (read-only, 1.8 GB; never copied into the repo).
+            string real = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "dev/dfu-mods/dream-src/dream - textures.dfmod");
+            if (!File.Exists(real))
+            {
+                Debug.Log("[MobileSelfTest] note: real DREAM original absent, skipped: " + real);
+            }
+            else
+            {
+                byte[] head = new byte[8];
+                using (var fs = new FileStream(real, FileMode.Open, FileAccess.Read, FileShare.Read)) fs.Read(head, 0, head.Length);
+                long size = new FileInfo(real).Length;
+                Check(dream != null && MobileOriginalMods.MatchDfmod(dream, real, head, size),
+                      "original mods: the real 'dream - textures.dfmod' matches the DREAM row", size.ToString());
+                Check(!MobileOriginalMods.IsKnownOurs(real, size, null), "original mods: the real DREAM original is not in KnownOurs");
+            }
         }
 
         static void TestOriginalModReceipts()

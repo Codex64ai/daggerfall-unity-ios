@@ -39,12 +39,12 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         public static readonly byte[] UnityFsMagic = Encoding.ASCII.GetBytes("UnityFS");
 
-        // PLACEHOLDER - verify against the Nexus download (Task 8)
+        // DREAM 2026 desktop originals: one "dream - <module>.dfmod" per module inside a Mods/ folder (13 modules).
         static readonly string[] DreamModules =
         {
-            "DREAM - HUD & MENU", "DREAM - PAPERDOLL", "DREAM - SPRITES", "DREAM - MOBS", "DREAM - NPCS",
-            "DREAM - COMMONERS", "DREAM - PORTRAITS", "DREAM - BACKGROUNDS", "DREAM - HANDHELD", "DREAM - SOUND",
-            "DREAM - MUSIC", "DREAM - TEXTURES", "DREAM - MOVIES",
+            "dream - textures", "dream - paperdoll", "dream - mobs", "dream - npcs", "dream - cinematics",
+            "dream - backgrounds", "dream - commoners", "dream - music", "dream - handheld", "dream - sprites",
+            "dream - portraits", "dream - hud & menu", "dream - sound",
         };
 
         // Our DREAM pack file stems (the converter's names), each shipped as "<stem>-ios.dfmod".
@@ -96,10 +96,10 @@ namespace DaggerfallWorkshop.Game.Mobile
             DreamRow(),
             new Row
             {
-                // PLACEHOLDER - verify against the Nexus download (Task 8)
+                // DREAM SKY original: "dream - sky.dfmod" (from DREAM - SKY-664-1-2-*.rar).
                 Key = "DREAMSKY", DisplayName = "DREAM SKY", Url = "https://www.nexusmods.com/daggerfallunity/mods/664",
-                ArchiveMarkers = new[] { "DREAM - SKY" }, ArchiveThreshold = 1,
-                DfmodMarkers = new[] { "DREAM - SKY" }, DfmodMinBytes = 1L << 20,
+                ArchiveMarkers = new[] { "dream - sky" }, ArchiveThreshold = 1,
+                DfmodMarkers = new[] { "dream - sky" }, DfmodMinBytes = 1L << 20,
                 Unlocks = new[] { "dream-sky-ios.dfmod" }, OldNames = new[] { "dream-sky.dfmod" },
             },
             StemRow("DEX", "Daggerfall Enemy Expansion", "https://www.nexusmods.com/daggerfallunity/mods/372",
