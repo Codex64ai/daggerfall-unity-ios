@@ -56,7 +56,10 @@ namespace DaggerfallWorkshop.Game.Mobile
             "dream-paperdoll_1_of_8", "dream-paperdoll_2_of_8", "dream-paperdoll_3_of_8", "dream-paperdoll_4_of_8",
             "dream-paperdoll_5_of_8", "dream-paperdoll_6_of_8", "dream-paperdoll_7_of_8", "dream-paperdoll_8_of_8",
             "dream-portraits", "dream-sprites_1_of_2", "dream-sprites_2_of_2",
-            "dream-sound", "dream-textures",
+            "dream-sound",
+            "dream-textures_1_of_10", "dream-textures_2_of_10", "dream-textures_3_of_10", "dream-textures_4_of_10",
+            "dream-textures_5_of_10", "dream-textures_6_of_10", "dream-textures_7_of_10", "dream-textures_8_of_10",
+            "dream-textures_9_of_10", "dream-textures_10_of_10",
         };
 
         static Row StemRow(string key, string displayName, string url, string manifestStem, long minBytes)
@@ -95,7 +98,12 @@ namespace DaggerfallWorkshop.Game.Mobile
                 ArchiveMarkers = DreamModules, ArchiveThreshold = 10,
                 DfmodMarkers = DreamModules, DfmodMinBytes = 8L << 20,
                 // "dream - sound.dfmod": our earlier iOS build under the exact desktop name (KnownOurs at its size).
-                Unlocks = unlocks, OldNames = Concat(old, new[] { "dream - sound.dfmod" }),
+                // "dream - textures (N of 10).dfmod": the same builds' texture parts (~/dev/dfu-mods/iOS names).
+                Unlocks = unlocks, OldNames = Concat(old, new[] { "dream - sound.dfmod",
+                    "dream - textures (1 of 10).dfmod", "dream - textures (2 of 10).dfmod", "dream - textures (3 of 10).dfmod",
+                    "dream - textures (4 of 10).dfmod", "dream - textures (5 of 10).dfmod", "dream - textures (6 of 10).dfmod",
+                    "dream - textures (7 of 10).dfmod", "dream - textures (8 of 10).dfmod", "dream - textures (9 of 10).dfmod",
+                    "dream - textures (10 of 10).dfmod" }),
             };
         }
 

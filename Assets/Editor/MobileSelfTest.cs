@@ -178,6 +178,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestOriginalModGate();
             TestOriginalModKnownOurs();
             TestOriginalModOurDesktopNamedFiles();
+            TestOriginalModDreamTexturesSoundSky();
             TestLockedModRows();
             TestNonMitPackNames();
             TestDebugStartModsWindow();
@@ -5931,6 +5932,56 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 MobileOriginalMods.DesktopOriginals.Clear();
                 Directory.Delete(root, true);
             }
+        }
+
+        // Item D: our DREAM textures (10 parts), sound and sky conversions are gated and shipped under -ios names; their
+        // old names (draft "dream-textures_N_of_10", ~/dev/dfu-mods/iOS "dream - textures (N of 10)", dream-sound/-sky)
+        // map onto them, and the only old names that normalize onto a desktop marker are the known ones below.
+        static void TestOriginalModDreamTexturesSoundSky()
+        {
+            var dream = MobileOriginalMods.Rows.FirstOrDefault(r => r.Key == "DREAM");
+            var sky = MobileOriginalMods.Rows.FirstOrDefault(r => r.Key == "DREAMSKY");
+            var want = Enumerable.Range(1, 10).Select(i => "dream-textures_" + i + "_of_10-ios.dfmod").Concat(new[] { "dream-sound-ios.dfmod" }).ToArray();
+            Check(dream != null && want.All(w => dream.Unlocks.Contains(w)) && !dream.Unlocks.Contains("dream-textures-ios.dfmod"),
+                  "original mods: DREAM unlocks the 10 texture parts and dream-sound (no single dream-textures)",
+                  dream == null ? "no DREAM row" : string.Join(",", dream.Unlocks));
+            Check(sky != null && sky.Unlocks.Contains(MobileOriginalMods.IosName("dream-sky")),
+                  "original mods: DREAM SKY unlocks IosName(dream-sky)");
+
+            var olds = new List<KeyValuePair<string, string>>();   // (old name, expected -ios name)
+            for (int i = 1; i <= 10; i++)
+            {
+                string ios = "dream-textures_" + i + "_of_10-ios.dfmod";
+                olds.Add(new KeyValuePair<string, string>("dream-textures_" + i + "_of_10.dfmod", ios));
+                olds.Add(new KeyValuePair<string, string>("dream - textures (" + i + " of 10).dfmod", ios));
+            }
+            olds.Add(new KeyValuePair<string, string>("dream-sound.dfmod", "dream-sound-ios.dfmod"));
+            olds.Add(new KeyValuePair<string, string>("dream - sound.dfmod", "dream-sound-ios.dfmod"));
+            olds.Add(new KeyValuePair<string, string>("dream-sky.dfmod", "dream-sky-ios.dfmod"));
+            olds.Add(new KeyValuePair<string, string>("dream - sky.dfmod", "dream-sky-ios.dfmod"));
+            var bad = new List<string>();
+            foreach (var o in olds)
+            {
+                string nn;
+                var row = MobileOriginalMods.RowForOldName(o.Key, MobileOriginalMods.Rows, out nn);
+                string key = o.Value.StartsWith("dream-sky") ? "DREAMSKY" : "DREAM";
+                if (row == null || row.Key != key || nn != o.Value) bad.Add(o.Key + "->" + (row == null ? "null" : row.Key + ":" + nn));
+            }
+            Check(bad.Count == 0, "original mods: every DREAM textures/sound/sky old name maps to its -ios name", string.Join(" ", bad));
+
+            // Which of these normalize onto a desktop marker of any row; each such name except dream-sound.dfmod (never
+            // built under that name, so no size to pin) must be KnownOurs by name.
+            var markers = new HashSet<string>(MobileOriginalMods.Rows.Where(r => r.DfmodMarkers != null)
+                                              .SelectMany(r => r.DfmodMarkers).Select(MobileOriginalMods.Normalize));
+            var collide = olds.Select(o => o.Key).Concat(want).Concat(new[] { "dream-sky-ios.dfmod" })
+                              .Where(n => markers.Contains(MobileOriginalMods.Normalize(n))).Distinct().OrderBy(n => n).ToArray();
+            Check(collide.SequenceEqual(new[] { "dream - sky.dfmod", "dream - sound.dfmod", "dream-sky.dfmod", "dream-sound.dfmod" }),
+                  "original mods: only dream(-| - )sound/sky old names normalize onto a desktop marker", string.Join(",", collide));
+            var knownNames = new HashSet<string>(MobileOriginalMods.KnownOurs.Select(k => k.Key));
+            Check(collide.Where(n => n != "dream-sound.dfmod").All(knownNames.Contains),
+                  "original mods: the colliding DREAM old names (but dream-sound.dfmod) are KnownOurs");
+            Check(Enumerable.Range(1, 10).All(i => knownNames.Contains("dream - textures (" + i + " of 10).dfmod")),
+                  "original mods: KnownOurs carries the 10 ~/dev/dfu-mods/iOS texture parts");
         }
 
         // `modswindow [seconds]` in debug-newchar.txt: open the launcher's MODS window instead of the hands-free start
