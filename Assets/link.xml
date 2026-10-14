@@ -42,4 +42,9 @@
     <type fullname="System.Collections.Generic.List`1" preserve="all" />
   </assembly>
 
+  <!-- SharpCompress (MIT, 0.32.2): used only to list zip/7z/rar entry names for the original-mod
+       unlock (MobileOriginalMods.TryListEntries). Archive formats are picked by reflection-free
+       factories, but preserving the whole assembly is cheap insurance under IL2CPP stripping. -->
+  <assembly fullname="SharpCompress" preserve="all" />
+
 </linker>

@@ -1025,6 +1025,21 @@ streaming, and the cost is logged rather than asserted: `[RealGrass] detail data
 live terrains, so the measurement to take is after fast travel with Distant Terrain and WoD Terrain
 also on.
 
+## SharpCompress (compiled in, MIT)
+
+- **Library:** SharpCompress 0.32.2 (netstandard2.0 build), https://www.nuget.org/packages/SharpCompress/0.32.2
+  (source https://github.com/adamhathcock/sharpcompress, tag 0.32.2)
+- **Copyright:** (c) 2014 Adam Hathcock
+- **License:** MIT - full text in `Assets/Plugins/SharpCompress/LICENSE.txt`
+- **Shipped as:** `Assets/Plugins/SharpCompress/SharpCompress.dll` (unmodified, from the NuGet package's
+  `lib/netstandard2.0/`), preserved in `Assets/link.xml`.
+- **Used for:** the original-mod unlock (`Assets/Scripts/Game/Mobile/MobileOriginalMods.cs`) - used ONLY to
+  list the entry names of a zip/7z/rar the player drops into `Documents/Mods`; nothing is extracted.
+- **No extra DLLs.** The package's netstandard2.0 dependencies (`System.Memory`,
+  `System.Text.Encoding.CodePages`) are provided by Unity's own class libraries (the .NET Framework profile
+  has both; the editor compiles and runs it with no extra DLL), so neither is copied in.
+  0.32.2 is pinned because 0.33+ adds a `ZstdSharp` dependency.
+
 ## Mobile CRT filter (ours, no third-party code)
 
 There is no CRT mod for Daggerfall Unity, and nothing was ported to make one. The filter is

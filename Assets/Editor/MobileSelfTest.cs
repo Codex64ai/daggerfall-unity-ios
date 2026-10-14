@@ -170,6 +170,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestModLookupTolerantOfBuiltIns();
             TestFlcPathResolution();
             TestBuildStamp();
+            TestOriginalModArchiveListing();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -5461,6 +5462,59 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && stamp.Contains("net.codex64.daggerfall.test") && stamp.Contains("abc123")
                   && stamp.Contains("6000.3.23f1") && stamp.Contains("1.1.1"),
                   "build stamp: names product, version, bundle id, build guid, Unity and DFU versions", stamp);
+        }
+
+        // ---- Original-mod unlock (docs/superpowers/specs/2026-10-14-original-mod-unlock-design.md) ----
+
+        static string OrigModTempDir(string test)
+        {
+            string dir = Path.Combine(Path.GetTempPath(), "dfu_origmod_" + test);
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+            Directory.CreateDirectory(dir);
+            return dir;
+        }
+
+        static void WriteOrigModZip(string path, params string[] entryNames)
+        {
+            using (var za = SharpCompress.Archives.Zip.ZipArchive.Create())
+            {
+                foreach (string n in entryNames)
+                    za.AddEntry(n, new MemoryStream(new byte[16]), true);
+                using (var fs = File.Create(path)) za.SaveTo(fs, new SharpCompress.Writers.WriterOptions(SharpCompress.Common.CompressionType.Deflate));
+            }
+        }
+
+        static void TestOriginalModArchiveListing()
+        {
+            string dir = OrigModTempDir("listing");
+            try
+            {
+                string zip = Path.Combine(dir, "fixture.zip");
+                using (var za = SharpCompress.Archives.Zip.ZipArchive.Create())
+                {
+                    za.AddEntry("DREAM 1.2/DREAM - PAPERDOLL.dfmod", new MemoryStream(new byte[16]), true);
+                    za.AddEntry("readme.txt", new MemoryStream(new byte[4]), true);
+                    using (var fs = File.Create(zip)) za.SaveTo(fs, new SharpCompress.Writers.WriterOptions(SharpCompress.Common.CompressionType.Deflate));
+                }
+                List<string> e; string err;
+                bool ok = MobileOriginalMods.TryListEntries(zip, out e, out err);
+                Check(ok && e.Count == 2 && e.Contains("DREAM 1.2/DREAM - PAPERDOLL.dfmod"),
+                      "original mods: zip entries are listed", ok ? string.Join(" | ", e) : err);
+
+                string bad = Path.Combine(dir, "bad.7z");
+                byte[] junk = new byte[64];
+                for (int i = 0; i < junk.Length; i++) junk[i] = 0xFF;
+                File.WriteAllBytes(bad, junk);
+                bool threw = false; ok = true; err = null;
+                try { ok = MobileOriginalMods.TryListEntries(bad, out e, out err); } catch (Exception) { threw = true; }
+                Check(!threw && !ok && !string.IsNullOrEmpty(err),
+                      "original mods: a corrupt archive reports an error and throws nothing", err);
+
+                threw = false; ok = true;
+                try { ok = MobileOriginalMods.TryListEntries(Path.Combine(dir, "missing.zip"), out e, out err); } catch (Exception) { threw = true; }
+                Check(!threw && !ok, "original mods: a missing archive path returns false", err);
+            }
+            finally { Directory.Delete(dir, true); }
         }
 
         /// <summary>
