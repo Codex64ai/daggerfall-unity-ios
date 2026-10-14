@@ -186,9 +186,20 @@ class Readme(unittest.TestCase):
         self.assertIn("THIRD-PARTY.md", txt)
 
 
+OK_CHECK = [sys.executable, "-c", "import sys; sys.exit(0)"]
+STALE_CHECK = [sys.executable, "-c", "import sys; sys.exit(1)"]
+
+
 class NonMitPack(unittest.TestCase):
     """--private: the Non-MIT zip ships every file as <stem>-ios.dfmod plus pack-index.json (the C#
     MobileOriginalMods.LoadPackIndex reads a top-level JSON array of {file, size, key})."""
+
+    def setUp(self):
+        self._check = pack.KNOWN_OURS_CHECK
+        pack.KNOWN_OURS_CHECK = OK_CHECK
+
+    def tearDown(self):
+        pack.KNOWN_OURS_CHECK = self._check
 
     def test_ios_name(self):
         self.assertEqual(pack.ios_name("dream - hud & menu"), "dream-hud-menu-ios.dfmod")
@@ -273,6 +284,49 @@ class NonMitPack(unittest.TestCase):
             self.assertEqual(pack.main(["--private", "--out", os.path.join(root, "o.zip")]), 1)
         finally:
             pack.MODS_DIR, pack.MODS_JSON = old
+
+    def _private_fixture(self):
+        import json
+        root = tempfile.mkdtemp()
+        mods = os.path.join(root, "elsewhere")
+        os.makedirs(mods)
+        with open(os.path.join(mods, "dex.dfmod"), "wb") as fh:
+            fh.write(b"x" * 44)
+        cfgp = os.path.join(root, "mods.json")
+        with open(cfgp, "w", encoding="utf-8") as fh:
+            json.dump({"dest_root": "x", "mods": [
+                {"name": "DEX", "manifest": "dex.dfmod.json", "private_only": True, "unlock_key": "DEX"}]}, fh)
+        return root, mods, cfgp
+
+    def test_private_reads_bundles_from_mods_dir(self):
+        import json
+        import zipfile
+        root, mods, cfgp = self._private_fixture()
+        old = (pack.MODS_DIR, pack.MODS_JSON)
+        pack.MODS_DIR, pack.MODS_JSON = os.path.join(root, "empty"), cfgp
+        try:
+            z = os.path.join(root, "out.zip")
+            self.assertEqual(pack.main(["--private", "--mods-dir", mods, "--out", z]), 0)
+            with zipfile.ZipFile(z) as zf:
+                index = json.loads(zf.read("pack-index.json"))
+            self.assertEqual(index, [{"file": "Mods/dex-ios.dfmod", "size": 44, "key": "DEX"}])
+        finally:
+            pack.MODS_DIR, pack.MODS_JSON = old
+
+    def test_private_refuses_a_stale_known_ours(self):
+        root, mods, cfgp = self._private_fixture()
+        old = (pack.MODS_DIR, pack.MODS_JSON)
+        pack.MODS_DIR, pack.MODS_JSON = mods, cfgp
+        pack.KNOWN_OURS_CHECK = STALE_CHECK
+        try:
+            z = os.path.join(root, "out.zip")
+            self.assertNotEqual(pack.main(["--private", "--out", z]), 0)
+            self.assertFalse(os.path.exists(z))
+        finally:
+            pack.MODS_DIR, pack.MODS_JSON = old
+
+    def test_known_ours_check_runs_the_real_script(self):
+        self.assertEqual(self._check[-2:], [os.path.join(pack.REPO_ROOT, "tools", "known_ours.py"), "--check"])
 
 
 if __name__ == "__main__":

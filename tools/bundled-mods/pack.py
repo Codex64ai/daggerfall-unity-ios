@@ -2,11 +2,13 @@
 """Zip the built MIT mod bundles into the release asset MIT-ModPack-ios.zip.
 
     python3 tools/bundled-mods/pack.py [--out ~/Desktop/MIT-ModPack-ios.zip]
-    python3 tools/bundled-mods/pack.py --private [--dream-dir DIR] [--out ~/Desktop/NonMIT-ModPack-ios.zip]
+    python3 tools/bundled-mods/pack.py --private [--mods-dir DIR] [--dream-dir DIR] [--out ~/Desktop/NonMIT-ModPack-ios.zip]
 
 --private builds the Non-MIT pack instead: every private_only bundle (plus the converted DREAM files in
 --dream-dir) as <stem>-ios.dfmod, and pack-index.json (file, size, unlock key) that the app's
 MobileOriginalMods gate reads. Those files load only once the player's own original mod is in Documents/Mods.
+--mods-dir reads the private_only bundles from DIR instead of Assets/StreamingAssets/Mods. --private first runs
+tools/known_ours.py --check and refuses to pack while MobileOriginalModsKnownOurs.cs is stale.
 
 Reads Assets/StreamingAssets/Mods/*.dfmod and Licenses/ (produced by MobileBuildSetup.BuildBundledMods)
 and tools/bundled-mods/mods.json (the pin list), and refuses to pack unless every pinned mod has a
@@ -16,6 +18,7 @@ ride along. The README inside the zip is generated from the same pin list.
 import argparse
 import json
 import os
+import subprocess
 import sys
 import zipfile
 
@@ -23,6 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 MODS_DIR = os.path.join(REPO_ROOT, "Assets", "StreamingAssets", "Mods")
 MODS_JSON = os.path.join(HERE, "mods.json")
+KNOWN_OURS_CHECK = [sys.executable, os.path.join(REPO_ROOT, "tools", "known_ours.py"), "--check"]
 THIRD_PARTY_URL = "https://github.com/Codex64ai/daggerfall-unity-ios/blob/unity6-upgrade/THIRD-PARTY.md"
 
 
@@ -232,13 +236,21 @@ def private_bundle_paths(cfg, mods_dir):
     return paths, problems
 
 
+def known_ours_fresh():
+    """True when tools/known_ours.py --check says MobileOriginalModsKnownOurs.cs is up to date."""
+    return subprocess.call(KNOWN_OURS_CHECK) == 0
+
+
 def main_private(args, cfg):
+    if not known_ours_fresh():
+        print("PROBLEM: MobileOriginalModsKnownOurs.cs is stale; run python3 tools/known_ours.py and commit it")
+        return 1
     try:
         keys = private_stems(cfg)
     except ValueError as e:
         print("PROBLEM:", e)
         return 1
-    paths, problems = private_bundle_paths(cfg, MODS_DIR)
+    paths, problems = private_bundle_paths(cfg, args.mods_dir or MODS_DIR)
     files = [(paths[s], ios_name(s), keys[s]) for s in sorted(keys)]
     if args.dream_dir:
         if not os.path.isdir(args.dream_dir):
@@ -275,6 +287,7 @@ def main(argv=None):
     ap.add_argument("--out", default=None)
     ap.add_argument("--private", action="store_true", help="build the Non-MIT pack (-ios names + pack-index.json)")
     ap.add_argument("--dream-dir", default=None, help="folder of converted DREAM .dfmod files (with --private)")
+    ap.add_argument("--mods-dir", default=None, help="folder of the private_only bundles (with --private; default StreamingAssets/Mods)")
     args = ap.parse_args(argv)
     with open(MODS_JSON, encoding="utf-8") as fh:
         cfg = json.load(fh)
