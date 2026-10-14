@@ -75,6 +75,13 @@ namespace DaggerfallWorkshop.Game.Mobile
             };
         }
 
+        /// <summary>Extra old names for a row (tools/known_ours.py reads the string arguments).</summary>
+        static Row WithOldNames(Row r, params string[] more)
+        {
+            r.OldNames = Concat(r.OldNames, more);
+            return r;
+        }
+
         static string[] Concat(string[] a, string[] b)
         {
             var r = new string[a.Length + b.Length];
@@ -128,8 +135,9 @@ namespace DaggerfallWorkshop.Game.Mobile
                     "dynamic-skies", 64L << 10),
             StemRow("WOD", "World of Daggerfall", "https://github.com/drcarademono/world-of-daggerfall",
                     "WorldOfDaggerfall", 1L << 20),
-            StemRow("WODBIOMES", "World of Daggerfall - Biomes", "https://github.com/drcarademono/wod-biomes",
-                    "World of Daggerfall - Biomes", 1L << 20),
+            // "wod-biomes.dfmod": our earlier build under another name (byte-identical, ~/dev/dfu-mods; KnownOurs at its size).
+            WithOldNames(StemRow("WODBIOMES", "World of Daggerfall - Biomes", "https://github.com/drcarademono/wod-biomes",
+                    "World of Daggerfall - Biomes", 1L << 20), "wod-biomes.dfmod"),
             StemRow("WODTERRAIN", "World of Daggerfall - Terrain", "https://github.com/drcarademono/wod-terrain",
                     "wod-terrain", 64L << 10),
             StemRow("DISTANTTERRAIN", "Distant Terrain of the World of Daggerfall", "https://www.nexusmods.com/daggerfallunity/mods/1284",
@@ -216,7 +224,8 @@ namespace DaggerfallWorkshop.Game.Mobile
             return null;
         }
 
-        /// <summary>Row whose OldNames contains the file's leaf name (case-insensitive); newName = its "-ios" name.</summary>
+        /// <summary>Row whose OldNames contains the file's leaf name (case-insensitive); newName = its "-ios" name (or the
+        /// row's only pack file when that name is not one of its Unlocks).</summary>
         public static Row RowForOldName(string fileName, Row[] rows, out string newName)
         {
             newName = null;
@@ -227,7 +236,9 @@ namespace DaggerfallWorkshop.Game.Mobile
                     foreach (string o in r.OldNames)
                         if (string.Equals(o, leaf, StringComparison.OrdinalIgnoreCase))
                         {
+                            // An alias whose own -ios name is not shipped maps onto the row's single pack file.
                             newName = IosName(o);
+                            if (r.Unlocks != null && r.Unlocks.Length == 1 && Array.IndexOf(r.Unlocks, newName) < 0) newName = r.Unlocks[0];
                             return r;
                         }
             return null;

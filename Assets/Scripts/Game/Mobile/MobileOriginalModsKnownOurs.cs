@@ -50,6 +50,7 @@ namespace DaggerfallWorkshop.Game.Mobile
             new KeyValuePair<string, long>("dream-sprites_2_of_2.dfmod", 65256348L),
             new KeyValuePair<string, long>("dynamic-skies.dfmod", 5750556L),
             new KeyValuePair<string, long>("realgrass.dfmod", 612340L),
+            new KeyValuePair<string, long>("wod-biomes.dfmod", 1976621L),
             new KeyValuePair<string, long>("wod-terrain.dfmod", 3035011L),
             new KeyValuePair<string, long>("world of daggerfall - biomes.dfmod", 1976621L),
             new KeyValuePair<string, long>("worldofdaggerfall.dfmod", 57598839L),

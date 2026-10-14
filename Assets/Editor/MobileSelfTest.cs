@@ -177,6 +177,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestOriginalModScan();
             TestOriginalModGate();
             TestOriginalModTestBuildLock();
+            TestOriginalModWodBiomesOldName();
             TestOriginalModKnownOurs();
             TestOriginalModOurDesktopNamedFiles();
             TestOriginalModDreamTexturesSoundSky();
@@ -6104,6 +6105,26 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                   && body.Contains("MobileOriginalMods.IsTestBuild, MobileOriginalMods.EnforceFilePresent)")
                   && !mm.Contains("DFU_IOS_TESTAPP"),
                   "original mods lock mode: ModManager wraps Decide in ApplyLockMode and has no define check of its own");
+        }
+
+        // Item F: ~/dev/dfu-mods/wod-biomes.dfmod (1,976,621 B) is byte-identical to our "world of daggerfall - biomes.dfmod"
+        // build: an old name of WODBIOMES mapping onto the row's -ios file, and KnownOurs at its size.
+        static void TestOriginalModWodBiomesOldName()
+        {
+            string nn;
+            var row = MobileOriginalMods.RowForOldName("wod-biomes.dfmod", MobileOriginalMods.Rows, out nn);
+            Check(row != null && row.Key == "WODBIOMES" && nn == "world_of_daggerfall-biomes-ios.dfmod",
+                  "original mods: wod-biomes.dfmod is an old name of WODBIOMES -> world_of_daggerfall-biomes-ios.dfmod", nn ?? "null");
+            var dt = MobileOriginalMods.RowForOldName("distantterrain.dfmod", MobileOriginalMods.Rows, out nn);
+            Check(dt != null && nn == "distantterrain-ios.dfmod", "original mods: stem old names still map to IosName(stem)", nn ?? "null");
+            Check(MobileOriginalMods.IsKnownOurs("wod-biomes.dfmod", 1976621L, null), "original mods: wod-biomes.dfmod at 1976621 is KnownOurs");
+            string real = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "dev/dfu-mods/wod-biomes.dfmod");
+            if (File.Exists(real))
+                Check(MobileOriginalMods.IsKnownOurs(real, new FileInfo(real).Length, null), "original mods: the real ~/dev/dfu-mods/wod-biomes.dfmod is KnownOurs");
+            var sib = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "wod-biomes.dfmod", "world_of_daggerfall-biomes-ios.dfmod" };
+            Check(MobileOriginalMods.Decide("/d/Mods/wod-biomes.dfmod", 1976621L, MobileOriginalMods.Rows, new HashSet<string>(),
+                      new Dictionary<string, long>(), sib, false) == MobileOriginalMods.Verdict.SkipOldName,
+                  "original mods: wod-biomes.dfmod is skipped when the -ios biomes file is present");
         }
 
         static void TestOriginalModGate()

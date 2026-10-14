@@ -390,6 +390,19 @@ class NonMitPack(unittest.TestCase):
     def test_known_ours_check_runs_the_real_script(self):
         self.assertEqual(self._check[-2:], [os.path.join(pack.REPO_ROOT, "tools", "known_ours.py"), "--check"])
 
+    def test_known_ours_reads_with_old_names_aliases(self):
+        import importlib.util
+        path = os.path.join(pack.REPO_ROOT, "tools", "known_ours.py")
+        spec = importlib.util.spec_from_file_location("known_ours", path)
+        ko = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ko)
+        cs = 'WithOldNames(StemRow("K", "D", "https://x", "World of Daggerfall - Biomes", 1L << 20), "wod-biomes.dfmod"),'
+        names = ko.table_names(cs)
+        self.assertIn("wod-biomes.dfmod", names)
+        self.assertIn("world of daggerfall - biomes.dfmod", names)
+        with open(ko.CS_TABLE, encoding="utf-8") as fh:
+            self.assertIn("wod-biomes.dfmod", ko.table_names(fh.read()))
+
 
 if __name__ == "__main__":
     unittest.main()
