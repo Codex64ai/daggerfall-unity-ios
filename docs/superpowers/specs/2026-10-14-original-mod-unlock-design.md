@@ -1,7 +1,7 @@
 # Original-mod unlock: our iOS conversions run only next to the player's own copy of the original
 
 Date: 2026-10-14. Design approved in conversation by Ikram (both parts: release layout and in-app unlock). Opus wrote this draft
-from the approved design; Fable reviews and rules; Opus implements.
+from the approved design; Fable reviewed it 2026-10-14 (approve with changes - all folded in below); Opus implements.
 
 ## Why
 Several mods we convert for iOS (DREAM, DEX, Real Grass art, Dynamic Skies data, the other `private_only` entries in
@@ -32,7 +32,7 @@ Rules (all approved):
 
 ### Components
 1. **Original Finder** - new `Assets/Scripts/Game/Mobile/MobileOriginalMods.cs`. Called from `ModManager.FindModsFromDirectory`
-   (`Assets/Game/Addons/ModSupport/ModManager.cs:639`) as its first statement, so both start-up (`Awake` :169) and the MODS window's
+   (`Assets/Game/Addons/ModSupport/ModManager.cs:639`) as its first statement (scan + receipts only; the per-file Gate is separate, below), so both start-up (`Awake` :169) and the MODS window's
    Refresh button (`Refresh` :629) re-run it. Scans `Documents/Mods` (all subfolders) for `*.zip|*.7z|*.rar|*.dfmod`. Skips files
    already covered by a receipt with the same name+size+mtime (so a 3 GB archive is read once, not every launch). Only runs when
    `MobileContentPath.Active`.
@@ -44,36 +44,56 @@ Rules (all approved):
      case-insensitive and ignores spaces, `-`, `_` and the `.dfmod` extension, so renamed versions still match;
    - **dfmod markers**: normalized file-name patterns + the file must start with the `UnityFS` header + a minimum size (stops an
      empty file renamed to `DREAM - SPRITES.dfmod`);
-   - **unlocks**: the list of our pack filenames this original unlocks (e.g. all 25 `dream-*.dfmod`).
+   - **unlocks**: the list of our pack filenames this original unlocks (e.g. all 25 `dream-*-ios.dfmod`). This list, not
+     `pack-index.json`, decides what is "ours", so the Gate fails CLOSED if the index is missing;
+   - **old names**: our pre-rename file names (old -> new), used by the both-files rule in the collisions section.
    Rows are added only for mods actually in the Non-MIT pack. Fill the DREAM row from the real Nexus download (Ikram re-downloads;
    the old 7z was deleted 2026-09) and the DREAM SKY row from `~/Downloads/DREAM - SKY-664-1-2-*.rar` if still present.
 3. **Receipts** - `Documents/Mods/GameData/OriginalReceipts.json`: `[{Key, MatchedFile, Size, MTime, Date}]`. Written once per Key.
-   Lives next to `Mods.json`, so it survives deleting the original. Deleting the receipt simply re-locks until an original is seen
+   Lives next to `Mods.json` (= `ModDataDirectory`), so it survives deleting the original. Written to a temp file + rename so a kill
+   mid-write cannot leave half a file. Deleting the receipt simply re-locks until an original is seen
    again.
-4. **Gate** - in `FindModsFromDirectory`, before `LoadModAssetBundle` (:737) for each file:
+4. **Gate** - in `FindModsFromDirectory`'s per-file loop, after `modFileNames[i]` is set (:668) and before the `loadedModNames`
+   check (:679), so before `LoadModAssetBundle` (:737):
    - our pack file whose Key has no receipt -> not loaded; added as a locked entry instead (below);
    - a file the Finder recognized as a desktop ORIGINAL `.dfmod` -> always skipped (a desktop bundle cannot load on iOS; today it
      just logs a Unity error - skipping it is quieter and saves the load attempt);
    - everything else (MIT pack, built-ins, unknown mods) -> unchanged behaviour.
-   "Our pack file" = listed in `pack-index.json` (shipped inside the Non-MIT pack; `{file, size, key}`) by file name + size. Size
-   tells our iOS file apart from a desktop original that happens to share its file name.
-5. **Locked entries in the MODS window** (`ModLoaderInterfaceWindow.cs:382`, where each mod is added to the list): one greyed row per
-   locked Key, using the existing `disabledModTextColor`, not toggleable. Text: "Needs DREAM - tap for the download page" (tap opens
-   the URL with `Application.OpenURL`; that is the only outward action and it is the player's tap). An archive that matched nothing
+   "Our pack file" = named in a recognizer row's `unlocks` list. `pack-index.json` (shipped in the Non-MIT pack, `{file, size, key}`,
+   first hit anywhere under `Documents/Mods`) only adds a size check, to tell our file from a desktop original of the same name; if it
+   is missing the name alone decides.
+   Refresh behaviour (accepted, stated so nobody files it as a bug): a loaded pack whose receipt is deleted stays loaded until relaunch;
+   a pack unlocked by Refresh loads with DFU's discovery defaults (enabled, no saved priority) because Refresh does not re-run
+   `LoadModSettings`/`DefaultOff` - the same as any mod dropped in mid-session today. Relaunch restores saved choices.
+4b. **Keep saved choices for locked packs** - today `WriteModSettings` (:926) writes only `mods` + `prunedMods`, and `LoadModSettings`
+   (:983) throws away entries for titles that are not loaded, so one launch with DREAM locked would erase its 25 enabled/priority
+   entries. Fix: `LoadModSettings` keeps the whole deserialized list (`savedMods`); `MergeModSettings` (:907) takes it as a third source,
+   priority current > pruned > saved (matched by Title, as today). Self-test it.
+5. **Locked entries in the MODS window** (`ModLoaderInterfaceWindow.cs:382`): locked Keys live in `MobileOriginalMods.Locked`, a static
+   list of a small struct, never a `Mod`, so Mods.json never sees them. The window appends one greyed row per locked Key AFTER the real
+   rows, in `disabledModTextColor`. The window is index-coupled (`modSettings[modList.SelectedIndex]` at :361/:407, priority swap
+   :587-609, Enable/Disable All :702-725, SaveAndClose :631), so every index handler guards `i < modSettings.Length`, and locked rows
+   cannot be enabled, re-prioritised or saved. Text: "Needs DREAM - tap for the download page"; the URL opens (`Application.OpenURL`)
+   only on a tap of the row that is ALREADY selected, so scrolling past it never launches Safari. That is the only outward action. An archive that matched nothing
    or could not be read shows "Couldn't read <file>" once, greyed, so the player knows the drop was seen.
 6. **Archive listing** - SharpCompress (MIT) added as a managed DLL under `Assets/Plugins/SharpCompress/`, used ONLY to list entry
-   names of zip/7z/rar. Check its IL2CPP/iOS behaviour first (no `System.Reflection.Emit`; add a `link.xml` entry if stripping
-   removes readers). No archive code exists in the repo today.
+   names of zip/7z/rar. Pin 0.32.2 (0.33+ pulls in a `ZstdSharp` DLL), netstandard2.0 build (no Reflection.Emit; fine on IL2CPP). Add
+   `<assembly fullname="SharpCompress" preserve="all"/>` to `Assets/link.xml`. Use `ArchiveFactory.Open(FileStream)` and enumerate
+   `Entries` only - header-only for zip/7z/rar, cheap even for a multi-GB solid 7z. Never `ReaderFactory` (forward-only, decompresses).
+   Everything wrapped in try/catch: non-UTF8 zip names (`Encoding.GetEncoding`, missing I18N on IL2CPP) and encrypted 7z headers throw
+   -> "Couldn't read". No archive code exists in the repo today.
 
 ### File-name collisions: rename ours (decided by Ikram 2026-10-14)
 Some of our pack files have the same file name as the desktop original (`distantterrain.dfmod`, `dynamic-skies.dfmod`, ...). Copying a
 desktop `.dfmod` in through Files would offer "Replace" and wipe our iOS file. Decision: **every Non-MIT pack file gets an `-ios`
 suffix** (`distantterrain-ios.dfmod`; DREAM's `dream-*` names are already distinct but get the suffix too, for one rule). The pack
 build (`tools/bundled-mods` + the DREAM converter) emits the new names; `pack-index.json` and the recognizer `unlocks` lists use them.
-**Migration** (one-time, in `MobileOriginalMods`, before `LoadModSettings`): if `Mods.json` has an entry whose `FileName` is an old
-name (built-in old->new table) and a file with the new name exists, rewrite that entry's `FileName` to the new name, keeping
-`Enabled` and `LoadPriority`. If both old and new files are present, the old-name file is ignored by the Gate (logged once) so the mod
-never loads twice. Self-test: Mods.json with old names -> migrated, choices kept; both files present -> loads once.
+**No Mods.json migration needed** (Fable, verified in code): Mods.json is matched by mod **Title** (`LoadModSettings` :983,
+`MergeModSettings` :907) and per-mod settings by GUID; `FileName` is written but never read back. Renaming a file keeps enabled,
+load order and settings as-is. **Both files present** (old name left over next to the new one): the Gate skips the old name whenever
+the new-name file exists (recognizer `old names` table, logged once), so the mod loads once and no AssetBundle is leaked by the
+duplicate-title drop at :683. Self-tests: old-name Mods.json + new-name file -> choices kept; both files present, both scan orders ->
+loads once.
 
 ## Out of scope
 Checking the original is a "real" download (signatures, hashes) - identity is enough by design. Extracting anything from the
@@ -90,7 +110,12 @@ original. Any online check. Desktop/Android builds (Finder and Gate are `MobileC
      files untouched; pack-index size mismatch -> treated as not-ours;
    - receipt survives the original being deleted; deleting the receipt re-locks;
    - corrupt archive -> "Couldn't read", no exception escapes, start-up continues;
-   - name+size+mtime cache: second scan does not open the archive.
+   - name+size+mtime cache: second scan does not open the archive;
+   - pack-index.json missing -> pack still gated by name (fails closed);
+   - locked pack across a launch + SaveAndClose -> its Mods.json entries kept (4b);
+   - MODS window with 0 real mods and 1 locked row (SelectedIndex 0 path); index handlers never touch a locked row;
+   - 7z with encrypted header and zip with cp437 names -> "Couldn't read", no exception;
+   - Refresh with a freshly dropped archive writes the receipt; ported titles still default off after relaunch.
 2. **Simulator**: real DREAM archive (Ikram's fresh download) in Documents/Mods with our 25 `dream-*` files: first launch writes the
    receipt and DREAM loads; delete the archive, relaunch, still loads; delete the receipt, relaunch, 25 files locked and one greyed
    "Needs DREAM" row; time the first-launch archive listing (log ms) - must not add a noticeable stall.
