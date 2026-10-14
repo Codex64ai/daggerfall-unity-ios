@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """python3 -m unittest tools/bundled-mods/test_pack.py"""
+import json
 import os
 import sys
 import tempfile
@@ -9,8 +10,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 import pack  # noqa: E402
 
 CFG = {"dest_root": "Assets/Game/Mods", "mods": [
-    {"name": "JOTG", "manifest": "JobsOfTheThievesGuild.dfmod.json"},
-    {"name": "SkyrimsAdventures", "manifest": "Skyrim's Adventures.dfmod.json"},
+    {"name": "JOTG", "authors": ["Cliffworms"], "manifest": "JobsOfTheThievesGuild.dfmod.json"},
+    {"name": "SkyrimsAdventures", "authors": ["Cliffworms"], "manifest": "Skyrim's Adventures.dfmod.json"},
 ]}
 
 
@@ -177,13 +178,51 @@ class RealGrassIsPrivateOnly(unittest.TestCase):
 class Readme(unittest.TestCase):
     def test_lists_every_mod_with_its_title(self):
         txt = pack.readme_text(CFG, {"jobsofthethievesguild": "Jobs of the Thieves Guild"})
-        self.assertIn("2 mods by Cliffworms", txt)
+        self.assertIn("2 mods by Cliffworms.", txt)
         cfg2 = {"dest_root": "x", "mods": CFG["mods"] + [{"name": "JH", "manifest": "JH.dfmod.json", "generate": {"author": "Jay_H"}}]}
-        self.assertIn("3 mods by Cliffworms and Jay_H", pack.readme_text(cfg2, {}))
+        self.assertIn("3 mods by Cliffworms and Jay_H.", pack.readme_text(cfg2, {}))
         self.assertIn("jobsofthethievesguild.dfmod", txt)
-        self.assertIn("Jobs of the Thieves Guild", txt)
+        self.assertIn("Jobs of the Thieves Guild - by Cliffworms (MIT)", txt)
         self.assertIn("skyrim's adventures.dfmod", txt)
         self.assertIn("THIRD-PARTY.md", txt)
+
+    def test_credits_every_author_most_mods_first(self):
+        cfg = {"dest_root": "x", "mods": CFG["mods"] + [
+            {"name": "BA", "authors": ["Josh Steinhauer"], "manifest": "BA.dfmod.json"},
+            {"name": "VE", "authors": ["drcarademono", "Kokey"], "manifest": "VE.dfmod.json",
+             "licence": "permission:PERMISSION PENDING - x"},
+            {"name": "UB", "authors": ["XJDHDR"], "manifest": "UB.dfmod.json", "licence_accept": "CC BY-NC-SA 4.0"}]}
+        txt = pack.readme_text(cfg, {"ve": "Vanilla Enhanced"})
+        self.assertIn("5 mods by Cliffworms, Josh Steinhauer, drcarademono, Kokey and XJDHDR.", txt)
+        self.assertIn("Vanilla Enhanced - by drcarademono and Kokey (permission pending)", txt)
+        self.assertIn("(CC BY-NC-SA 4.0)", txt)
+        self.assertNotIn("MIT for Cliffworms", txt)
+
+    def test_pinned_mod_without_authors_cannot_be_packed(self):
+        d = tempfile.mkdtemp()
+        os.makedirs(os.path.join(d, "Licenses"))
+        for stem in ("x",):
+            open(os.path.join(d, stem + ".dfmod"), "w").close()
+            open(os.path.join(d, "Licenses", stem + "-LICENSE.txt"), "w").close()
+        cfg = {"dest_root": "x", "mods": [{"name": "X", "manifest": "X.dfmod.json"}]}
+        self.assertTrue(any("no authors" in p for p in pack.check_bundles(cfg, d)))
+
+    def test_real_pin_list_credits_more_than_two_authors(self):
+        with open(pack.MODS_JSON, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+        self.assertEqual([m["name"] for m in cfg["mods"] if not pack.authors_of(m)], [])
+        line = pack.authors_line(cfg)
+        for who in ("Cliffworms", "Jay_H", "drcarademono", "Kokey", "XJDHDR", "Ninelan", "Josh Steinhauer",
+                    "Kirk.O", "numidium", "DunnyOfPenwick"):
+            self.assertIn(who, line)
+
+    def test_private_readme_credits_the_original_authors(self):
+        with open(pack.MODS_JSON, encoding="utf-8") as fh:
+            cfg = json.load(fh)
+        txt = pack.private_readme_text([("Mods/dream-hud-menu-ios.dfmod", 1, "DREAM"),
+                                        ("Mods/daggerfallbestiaryproject-ios.dfmod", 2, "DEX")], cfg)
+        self.assertIn("DREAM by King of Worms", txt)
+        self.assertIn("Daggerfall Enemy Expansion by Kamer and Kab", txt)
 
 
 OK_CHECK = [sys.executable, "-c", "import sys; sys.exit(0)"]

@@ -3,66 +3,101 @@
   "mods": [
     {
       "name": "FixedDungeonExteriors",
+      "authors": [
+        "Cliffworms"
+      ],
       "repo": "https://github.com/Cliffworms/FixedDungeonExteriors.git",
       "commit": "f384bb3f26aca8844615ce7c42a51ba999a52c0b",
       "manifest": "FixedDungeonExteriors.dfmod.json"
     },
     {
       "name": "VariedWealthyHomes",
+      "authors": [
+        "Cliffworms"
+      ],
       "repo": "https://github.com/Cliffworms/VariedWealthyHomes.git",
       "commit": "085a9f2aee56a58555d5848a58448ad4c185f3b3",
       "manifest": "VariedWealthyHomes.dfmod.json"
     },
     {
       "name": "AquaticSprites",
+      "authors": [
+        "Cliffworms"
+      ],
       "repo": "https://github.com/Cliffworms/AquaticSprites.git",
       "commit": "ea195e77a707cce4bd2a36a96b024534cd420ebb",
       "manifest": "UnderwaterSprites.dfmod.json"
     },
     {
       "name": "SmallerMQDungeons",
+      "authors": [
+        "Cliffworms"
+      ],
       "repo": "https://github.com/Cliffworms/SmallerMQDungeons.git",
       "commit": "51dc8db3449f33b0e1837be68b8305fe8c0d9b3e",
       "manifest": "Smaller Main Quest Dungeons.dfmod.json"
     },
     {
       "name": "LevelingInspiration",
+      "authors": [
+        "Cliffworms",
+        "RebornZA"
+      ],
       "repo": "https://github.com/Cliffworms/LevelingInspiration.git",
       "commit": "37aefbbec5cf0b063959507d7cd0c7d4571400ee",
       "manifest": "Leveling Inspiration.dfmod.json"
     },
     {
       "name": "SkyrimsAdventures",
+      "authors": [
+        "Cliffworms"
+      ],
       "repo": "https://github.com/Cliffworms/SkyrimsAdventures.git",
       "commit": "e5083f298e46d9c761701407c9352fc023dd8a78",
       "manifest": "Skyrim's Adventures.dfmod.json"
     },
     {
       "name": "JOTG",
+      "authors": [
+        "Cliffworms"
+      ],
       "repo": "https://github.com/Cliffworms/JOTG.git",
       "commit": "701440f383eece827ce8bbdc7ff39dd2a21709a5",
       "manifest": "JobsOfTheThievesGuild.dfmod.json"
     },
     {
       "name": "ArenasAdventures",
+      "authors": [
+        "Cliffworms"
+      ],
       "repo": "https://github.com/Cliffworms/ArenasAdventures.git",
       "commit": "9352a9288113607c5efbf5f51a3e1a7d6bb7687a",
       "manifest": "Arena's Adventures.dfmod.json"
     },
     {
       "name": "TownGreetingsIliacBay",
+      "authors": [
+        "Cliffworms"
+      ],
       "repo": "https://github.com/Cliffworms/TownGreetingsIliacBay.git",
       "commit": "203f9d2a7426995d8400e00112ac1c929fc58a02",
       "manifest": "Town Greetings of the Iliac Bay.dfmod.json"
     },
     {
       "name": "RumorsOfTheIliacBay",
+      "authors": [
+        "Cliffworms",
+        "Deepfighter"
+      ],
       "repo": "https://github.com/Cliffworms/RumorsOfTheIliacBay.git",
       "commit": "b5641cd12a47b65b374401825bebd00dfa96ede2",
       "manifest": "RumorsOfTheIliacBay.dfmod.json"
     },
     {
       "name": "JH-QuestPack1",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "QP1",
@@ -76,6 +111,9 @@
     },
     {
       "name": "JH-RandomLittleQuests",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "Random Little Quests",
@@ -89,6 +127,9 @@
     },
     {
       "name": "JH-ImmersionRoles",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "Immersion Roles",
@@ -102,6 +143,9 @@
     },
     {
       "name": "JH-ReputationConsequences",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "ReputationConsequences",
@@ -115,6 +159,9 @@
     },
     {
       "name": "JH-ChronicleOfTheGreatKnight",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "chronicle-great-knight",
@@ -128,6 +175,9 @@
     },
     {
       "name": "JH-TheTaleContinues",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "thetalecontinues",
@@ -141,6 +191,9 @@
     },
     {
       "name": "JH-BattleCreatures",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "Battle Creatures",
@@ -154,6 +207,9 @@
     },
     {
       "name": "JH-MundaneJobs",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "Mundane Jobs",
@@ -167,6 +223,9 @@
     },
     {
       "name": "JH-MedicalEmergency",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "medicalemergency",
@@ -180,6 +239,9 @@
     },
     {
       "name": "JH-BecomeDarkBrotherhood",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "becomedarkb",
@@ -193,6 +255,9 @@
     },
     {
       "name": "JH-BecomeThief",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "becomethieves",
@@ -206,6 +271,9 @@
     },
     {
       "name": "JH-BecomeVampire",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "becomevampire",
@@ -219,6 +287,9 @@
     },
     {
       "name": "JH-BecomeWereboar",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "becomewereboar",
@@ -232,6 +303,9 @@
     },
     {
       "name": "JH-BecomeWerewolf",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "becomewerewolf",
@@ -245,6 +319,9 @@
     },
     {
       "name": "JH-CheatArmory",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "cheatarmory",
@@ -258,6 +335,9 @@
     },
     {
       "name": "JH-WeatherItems",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "Weather-Items",
@@ -271,6 +351,9 @@
     },
     {
       "name": "JH-RandomMonsterNoises",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "Random Monster Noises",
@@ -284,6 +367,9 @@
     },
     {
       "name": "JH-MQRepFix",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "MQrepfix",
@@ -297,6 +383,9 @@
     },
     {
       "name": "JH-IronmanMadnessInfighting",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "JH Ironman Madness INFIGHTING",
@@ -313,6 +402,9 @@
     },
     {
       "name": "JH-IronmanMadnessNoInfighting",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfunity-questpacks.git",
       "commit": "0dd7c6fb7b3cbc3f0cc3f3d43f6731ae16468796",
       "subdir": "JH Ironman Madness NO INFIGHTING",
@@ -329,6 +421,9 @@
     },
     {
       "name": "JH-StartingDungeonRandomizer",
+      "authors": [
+        "Jay_H"
+      ],
       "repo": "https://github.com/JayH2971/dfu-starting-dungeon-randomizer.git",
       "commit": "72276305b60a7a8b80a4609ee3d019deb07ff047",
       "manifest": "JH-StartingDungeonRandomizer.dfmod.json",
@@ -341,6 +436,10 @@
     },
     {
       "name": "VanillaEnhanced",
+      "authors": [
+        "drcarademono",
+        "Kokey"
+      ],
       "repo": "https://github.com/drcarademono/vanilla-enhanced.git",
       "commit": "c0c9041c101ba8b57feb93258dda7a37be1b9433",
       "manifest": "Vanilla Enhanced - Base.dfmod.json",
@@ -351,6 +450,10 @@
     },
     {
       "name": "VanillaEnhanced-MaskedRoads",
+      "authors": [
+        "drcarademono",
+        "Kokey"
+      ],
       "repo": "https://github.com/drcarademono/vanilla-enhanced.git",
       "commit": "c0c9041c101ba8b57feb93258dda7a37be1b9433",
       "manifest": "Vanilla Enhanced - Masked Roads.dfmod.json",
@@ -361,6 +464,10 @@
     },
     {
       "name": "VanillaEnhanced-SnowlessSwamps",
+      "authors": [
+        "drcarademono",
+        "Kokey"
+      ],
       "repo": "https://github.com/drcarademono/vanilla-enhanced.git",
       "commit": "c0c9041c101ba8b57feb93258dda7a37be1b9433",
       "manifest": "Vanilla Enhanced - Snowless Swamps and Jungles.dfmod.json",
@@ -371,6 +478,11 @@
     },
     {
       "name": "VanillaEnhanced-WinterTracks",
+      "authors": [
+        "drcarademono",
+        "Kokey",
+        "Hazelnut"
+      ],
       "repo": "https://github.com/drcarademono/vanilla-enhanced.git",
       "commit": "c0c9041c101ba8b57feb93258dda7a37be1b9433",
       "manifest": "Vanilla Enhanced - Winter Tracks.dfmod.json",
@@ -381,6 +493,10 @@
     },
     {
       "name": "VanillaEnhanced-KokeysTemperate",
+      "authors": [
+        "Kokey",
+        "drcarademono"
+      ],
       "repo": "https://github.com/drcarademono/vanilla-enhanced.git",
       "commit": "c0c9041c101ba8b57feb93258dda7a37be1b9433",
       "manifest": "Kokey's Temperate.dfmod.json",
@@ -391,6 +507,9 @@
     },
     {
       "name": "UBLaMF-BuildingOverrides",
+      "authors": [
+        "XJDHDR"
+      ],
       "repo": "https://github.com/XJDHDR/DFU_UBLaMF.git",
       "commit": "21ed9c878f33e510901c947c5eca71f532854081",
       "subdir": "Editor_files",
@@ -400,6 +519,9 @@
     },
     {
       "name": "UBLaMF-DungeonBlocks",
+      "authors": [
+        "XJDHDR"
+      ],
       "repo": "https://github.com/XJDHDR/DFU_UBLaMF.git",
       "commit": "21ed9c878f33e510901c947c5eca71f532854081",
       "subdir": "Editor_files",
@@ -409,6 +531,9 @@
     },
     {
       "name": "UBLaMF-Locations",
+      "authors": [
+        "XJDHDR"
+      ],
       "repo": "https://github.com/XJDHDR/DFU_UBLaMF.git",
       "commit": "21ed9c878f33e510901c947c5eca71f532854081",
       "subdir": "Editor_files",
@@ -418,6 +543,9 @@
     },
     {
       "name": "UBLaMF-MapBlocks",
+      "authors": [
+        "XJDHDR"
+      ],
       "repo": "https://github.com/XJDHDR/DFU_UBLaMF.git",
       "commit": "21ed9c878f33e510901c947c5eca71f532854081",
       "subdir": "Editor_files",
@@ -427,6 +555,9 @@
     },
     {
       "name": "UBLaMF-Models",
+      "authors": [
+        "XJDHDR"
+      ],
       "repo": "https://github.com/XJDHDR/DFU_UBLaMF.git",
       "commit": "21ed9c878f33e510901c947c5eca71f532854081",
       "subdir": "Editor_files",
@@ -440,6 +571,9 @@
     },
     {
       "name": "UBLaMF-Textures",
+      "authors": [
+        "XJDHDR"
+      ],
       "repo": "https://github.com/XJDHDR/DFU_UBLaMF.git",
       "commit": "21ed9c878f33e510901c947c5eca71f532854081",
       "subdir": "Editor_files",
@@ -450,12 +584,18 @@
     },
     {
       "name": "DaggerfallExpandedTextures",
+      "authors": [
+        "Ninelan"
+      ],
       "bundle": "~/dev/dfu-mods/iOS/daggerfall expanded textures.dfmod",
       "title": "Daggerfall Expanded Textures (Standard)",
       "licence": "permission:Daggerfall Expanded Textures by Ninelan (Ninelan_Ruinar). Converted for iOS from the author's macOS release (Nexus 307, Standard edition) with the author's permission, granted to Ikram Massabini in September 2026. Not for reuse outside this pack."
     },
     {
       "name": "DetailedDungeonExteriors",
+      "authors": [
+        "Cliffworms"
+      ],
       "repo": "https://github.com/Cliffworms/DetailedDungeonExteriors.git",
       "commit": "6d886ad9261601d58a931573125bdddcf36ed09c",
       "manifest": "DetailedDungeonExteriors.dfmod.json",
@@ -466,6 +606,10 @@
     },
     {
       "name": "DynamicSkies",
+      "authors": [
+        "BadLuckBurt",
+        "carademono"
+      ],
       "repo": "https://github.com/drcarademono/dynamic-skies.git",
       "commit": "04506e2ef65aff27e4882ec07ed29a6fc7a4be6b",
       "manifest": "dynamic-skies.dfmod.json",
@@ -480,6 +624,12 @@
     },
     {
       "name": "WorldOfDaggerfall",
+      "authors": [
+        "KABoissonneault",
+        "Cliffworms",
+        "Kamer",
+        "carademono"
+      ],
       "repo": "https://github.com/drcarademono/world-of-daggerfall.git",
       "commit": "3bf8837402cce41421dcb36c64a3a2c4f27d0448",
       "manifest": "WorldOfDaggerfall.dfmod.json",
@@ -502,6 +652,10 @@
     },
     {
       "name": "WorldOfDaggerfallBiomes",
+      "authors": [
+        "carademono",
+        "Kab the Bird Ranger"
+      ],
       "repo": "https://github.com/drcarademono/wod-biomes.git",
       "commit": "40449fc5fc55c85c8089b068acefe1db4b61534c",
       "manifest": "World of Daggerfall - Biomes.dfmod.json",
@@ -519,6 +673,12 @@
     },
     {
       "name": "WorldOfDaggerfallTerrain",
+      "authors": [
+        "monobelisk",
+        "Freak2121",
+        "carademono",
+        "Ninelan"
+      ],
       "repo": "https://github.com/drcarademono/wod-terrain.git",
       "commit": "9aeb1bcc5de5343ccb7a6b09062559ad871e9d40",
       "manifest": "wod-terrain.dfmod.json",
@@ -536,6 +696,10 @@
     },
     {
       "name": "DistantTerrainWoD",
+      "authors": [
+        "Nystul",
+        "MaoDeVaca"
+      ],
       "repo": "https://github.com/somestupidgirl/Distant-Terrain-of-the-World-of-Daggerfall.git",
       "commit": "d454b30af12c9f22c9ab5ef8ad5dbd9171d1cf1f",
       "manifest": "distantterrain.dfmod.json",
@@ -559,6 +723,10 @@
     },
     {
       "name": "RealGrass",
+      "authors": [
+        "Uncanny_Valley",
+        "TheLacus"
+      ],
       "repo": "https://github.com/TheLacus/daggerfall-unity-mods.git",
       "commit": "556ef6e1dd0f2da95aa34275a30861daf58fee86",
       "subdir": "RealGrassAssets",
@@ -585,6 +753,9 @@
     },
     {
       "name": "RoleplayRealism",
+      "authors": [
+        "Hazelnut"
+      ],
       "repo": "https://github.com/ajrb/dfunity-mods.git",
       "commit": "0af2ec99b5ad7e6722ddc9ce284987d4d6fa262d",
       "subdir": "RoleplayRealism",
@@ -595,6 +766,10 @@
     },
     {
       "name": "RoleplayRealismItems",
+      "authors": [
+        "Hazelnut",
+        "Ralzar"
+      ],
       "repo": "https://github.com/ajrb/dfunity-mods.git",
       "commit": "0af2ec99b5ad7e6722ddc9ce284987d4d6fa262d",
       "subdir": "RoleplayRealismItems",
@@ -605,6 +780,9 @@
     },
     {
       "name": "ClimatesCalories",
+      "authors": [
+        "Ralzar"
+      ],
       "repo": "https://github.com/Ralzar81/Climates-Calories.git",
       "commit": "c33a04f8d200615b01d09987262b1ed318e7615a",
       "subdir": "Climates & Calories",
@@ -625,6 +803,10 @@
     },
     {
       "name": "DEX",
+      "authors": [
+        "Kamer",
+        "Kab"
+      ],
       "repo": "https://github.com/SquidKamer/DaggerfallBestiaryProject.git",
       "commit": "fa21b07331e914d9e622aeaef65a4d8ab9496872",
       "manifest": "DaggerfallBestiaryProject.dfmod.json",
@@ -639,6 +821,9 @@
     },
     {
       "name": "BetterAmbience",
+      "authors": [
+        "Josh Steinhauer"
+      ],
       "repo": "https://github.com/joshcamas/daggerfall-unity-mods.git",
       "commit": "c59e2aa9085734df3aefd19b5dd8c0b49cfcaade",
       "subdir": "BetterAmbience",
@@ -651,6 +836,9 @@
     },
     {
       "name": "ImmersiveFootsteps",
+      "authors": [
+        "Kirk.O"
+      ],
       "repo": "https://github.com/magicono43/DFU-Mod_Immersive-Footsteps.git",
       "commit": "ac03581ca5b336eac0802af654b35c90af534290",
       "manifest": "ImmersiveFootsteps.dfmod.json",
@@ -662,6 +850,9 @@
     },
     {
       "name": "DynamicMusic",
+      "authors": [
+        "numidium"
+      ],
       "repo": "https://github.com/numidium/dfu-mods.git",
       "commit": "da1bf32f8a26a82627a16b2b3e72ba0bc5704845",
       "subdir": "DynamicMusic",
@@ -671,6 +862,9 @@
     },
     {
       "name": "FirstPersonLighting",
+      "authors": [
+        "DunnyOfPenwick"
+      ],
       "repo": "https://github.com/DunnyOfPenwick/First-Person-Lighting.git",
       "commit": "7084736201e9a5eeec223d6a4352696f0542eb86",
       "manifest": "First-Person-Lighting.dfmod.json",

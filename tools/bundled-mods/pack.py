@@ -92,6 +92,9 @@ def check_bundles(cfg, mods_dir):
     # private_only keeps such an entry out of pack_mods, but that is a single boolean one merge or
     # rebase can drop; this is the second line of defence, applied to whatever WOULD be packed.
     for m in pack_mods(cfg):
+        if not authors_of(m):
+            problems.append("pinned mod has no authors in mods.json (the README credits them): %s" % m["name"])
+    for m in pack_mods(cfg):
         if str(m.get("licence", "")).startswith("pending:"):
             problems.append("pinned mod has a pending licence and cannot ship in the public pack: %s"
                             % m["name"])
@@ -103,34 +106,68 @@ def prebuilt_licence_text(lic):
     return ("Permission\n\n" if lic.startswith("permission:") else "") + body + "\n"
 
 
+def authors_of(m):
+    """The mod's authors from the pin list ("authors": [...]); fall back to generate.author. Empty when
+    neither is set - check_bundles refuses to pack such an entry, so the README never guesses."""
+    a = m.get("authors")
+    if a:
+        return list(a)
+    g = (m.get("generate") or {}).get("author")
+    return [g] if g else []
+
+
+def join_names(names):
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1] if names else ""
+
+
 def authors_line(cfg):
-    seen = []
+    """Every author of the packed mods, most mods first (ties keep pin-list order)."""
+    count, order = {}, []
     for m in pack_mods(cfg):
-        a = (m.get("generate") or {}).get("author") or "Cliffworms"
-        if a not in seen:
-            seen.append(a)
-    return " and ".join(seen) if len(seen) <= 2 else ", ".join(seen[:-1]) + " and " + seen[-1]
+        for a in authors_of(m):
+            if a not in count:
+                order.append(a)
+                count[a] = 0
+            count[a] += 1
+    return join_names(sorted(order, key=lambda a: (-count[a], order.index(a))))
+
+
+def licence_kind(m):
+    """One-word licence class for the README list."""
+    lic = str(m.get("licence", ""))
+    if m.get("licence_accept"):
+        return m["licence_accept"]
+    if lic.startswith("text:MIT") or not lic:
+        return "MIT"
+    if "PERMISSION PENDING" in lic:
+        return "permission pending"
+    if lic.startswith("permission:"):
+        return "by permission"
+    return "see licence file"
 
 
 def readme_text(cfg, titles):
+    mods = pack_mods(cfg)
     lines = [
         "Daggerfall Unity iOS - MIT mod pack",
         "",
-        "%d mods by %s. Built for iOS from the authors' GitHub repositories with the port's mod builder;" % (len(pack_mods(cfg)), authors_line(cfg)),
-        "the data is the authors' work, unmodified. Each mod's licence or permission record is in Mods/Licenses/.",
+        "%d mods by %s." % (len(mods), authors_line(cfg)),
+        "Built for iOS from each author's published release with the port's mod builder; the data is the",
+        "authors' work, unmodified. Each mod's licence or permission record is in Mods/Licenses/.",
         "",
         "INSTALL: copy the .dfmod files you want from Mods/ into the app's Documents/Mods folder with",
         "the Files app (On My iPad > Daggerfall Unity > Mods), then restart the app. Each mod appears in",
         "the launcher's MODS window, switched on; untick any you do not want. Install one, some or all.",
         "",
-        "Mods in this pack:",
+        "Mods in this pack (file, title, authors, licence):",
     ]
-    for m in pack_mods(cfg):
+    for m in mods:
         stem = stem_of(m)
-        lines.append("  %-40s %s" % (stem + ".dfmod", titles.get(stem, m["name"])))
+        lines.append("  %-40s %s - by %s (%s)" % (stem + ".dfmod", titles.get(stem, m["name"]),
+                                               join_names(authors_of(m)) or "?", licence_kind(m)))
     lines += [
         "",
-        "Licences: Mods/Licenses/ - MIT for Cliffworms' mods; Jay_H's are redistributed with his permission.",
+        "Licences: Mods/Licenses/<file>-LICENSE.txt holds each mod's licence text or the author's permission record.",
         "Sources, pinned versions and what was deliberately left out: " + THIRD_PARTY_URL,
     ]
     return "\n".join(lines) + "\n"
@@ -205,7 +242,24 @@ def pack_index(entries):
     return json.dumps(rows, indent=1) + "\n"
 
 
-def private_readme_text(entries):
+# Authors of the originals without a mods.json entry (the DREAM files come from the converter, not the pin list).
+ORIGINAL_AUTHORS = {"DREAM": ["King of Worms"], "DREAMSKY": ["King of Worms"]}
+
+
+def original_authors(cfg, key):
+    """Authors credited for an unlock key: ORIGINAL_AUTHORS, else the mods.json entries carrying that unlock_key."""
+    if key in ORIGINAL_AUTHORS:
+        return ORIGINAL_AUTHORS[key]
+    out = []
+    for m in (cfg or {}).get("mods", []):
+        if m.get("unlock_key") == key:
+            for a in authors_of(m):
+                if a not in out:
+                    out.append(a)
+    return out
+
+
+def private_readme_text(entries, cfg=None):
     lines = [
         "Daggerfall Unity iOS - Non-MIT mod pack (private test draft)",
         "",
@@ -221,6 +275,10 @@ def private_readme_text(entries):
         name, url = ORIGINALS.get(key, (key, ""))
         lines.append("  %-44s %-15s needs the original %s from %s in Documents/Mods"
                      % (os.path.basename(f), key, name, url))
+    lines += ["", "Credits - every mod here is its authors' work; we only converted it for iOS:"]
+    for key in sorted(set(k for _, _, k in entries)):
+        name, url = ORIGINALS.get(key, (key, ""))
+        lines.append("  %s by %s (%s)" % (name, join_names(original_authors(cfg, key)) or "see the original page", url))
     return "\n".join(lines) + "\n"
 
 
@@ -280,7 +338,7 @@ def main_private(args, cfg):
     else:
         base, ext = os.path.splitext(args.out)
         outs = ["%s-part%d%s" % (base, i + 1, ext) for i in range(len(parts))]
-    readme, index = private_readme_text(entries), pack_index(entries)
+    readme, index = private_readme_text(entries, cfg), pack_index(entries)
     for out, part in zip(outs, parts):
         if os.path.exists(out):
             os.remove(out)
