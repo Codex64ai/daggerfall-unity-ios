@@ -15,6 +15,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using DaggerfallWorkshop.Game;
+using DaggerfallWorkshop.Game.Mobile;
 using DaggerfallWorkshop.Game.UserInterface;
 using DaggerfallWorkshop.Game.UserInterfaceWindows;
 using DaggerfallWorkshop.Game.Utility.ModSupport;
@@ -155,6 +156,7 @@ public class ModLoaderInterfaceWindow : DaggerfallPopupWindow
         modList.SelectedShadowPosition = DaggerfallUI.DaggerfallDefaultShadowPos;
         modList.SelectedShadowColor = Color.black;
         modList.OnScroll += ModList_OnScroll;
+        modList.OnSelectItem += ModList_OnSelectItem;
         ModListPanel.Components.Add(modList);
 
         modListScrollBar.Size = new Vector2(5, 115);
@@ -355,7 +357,8 @@ public class ModLoaderInterfaceWindow : DaggerfallPopupWindow
 
     bool GetModSettings(ref ModSettings ms)
     {
-         if (modList.SelectedIndex < 0 || modList.SelectedIndex > modSettings.Count())
+         // MOBILE: locked rows sit after the real mods (this also fixes the old '>' off-by-one).
+         if (modList.SelectedIndex < 0 || MobileOriginalMods.IsLockedRow(modList.SelectedIndex, modSettings.Length))
             return false;
 
          ms = modSettings[modList.SelectedIndex];
@@ -383,6 +386,13 @@ public class ModLoaderInterfaceWindow : DaggerfallPopupWindow
             item.textColor = modsett.enabled ? unselectedTextColor : disabledModTextColor;
         }
 
+        // MOBILE: greyed rows for Non-MIT packs waiting on the player's original mod (and unreadable archives).
+        foreach (var l in MobileOriginalMods.Locked)
+        {
+            modList.AddItem(l.Label, out ListBox.ListItem lockedItem);
+            lockedItem.textColor = disabledModTextColor;
+        }
+
         if (modList.SelectedIndex < 0 || modList.SelectedIndex >= modList.Count)
         {
             modList.SelectedIndex = 0;
@@ -403,6 +413,8 @@ public class ModLoaderInterfaceWindow : DaggerfallPopupWindow
         {
             return;
         }
+        if (MobileOriginalMods.IsLockedRow(modList.SelectedIndex, modSettings.Length))
+            return;     // MOBILE: a locked row has no mod; the labels stay cleared
 
         ModSettings ms = modSettings[modList.SelectedIndex];
 
@@ -583,6 +595,9 @@ public class ModLoaderInterfaceWindow : DaggerfallPopupWindow
             return;
         else if (modList.SelectedIndex == modList.Count - 1)    //last index already
             return;
+        else if (MobileOriginalMods.IsLockedRow(modList.SelectedIndex, modSettings.Length) ||
+                 MobileOriginalMods.IsLockedRow(modList.SelectedIndex + 1, modSettings.Length))
+            return;     // MOBILE: locked rows never swap
 
         modList.SwapItems(modList.SelectedIndex, modList.SelectedIndex + 1);
 
@@ -599,6 +614,9 @@ public class ModLoaderInterfaceWindow : DaggerfallPopupWindow
             return;
         else if (modList.SelectedIndex == 0)    //first priority already
             return;
+        else if (MobileOriginalMods.IsLockedRow(modList.SelectedIndex, modSettings.Length) ||
+                 MobileOriginalMods.IsLockedRow(modList.SelectedIndex - 1, modSettings.Length))
+            return;     // MOBILE: locked rows never swap
 
         modList.SwapItems(modList.SelectedIndex, modList.SelectedIndex - 1);
 
@@ -607,6 +625,23 @@ public class ModLoaderInterfaceWindow : DaggerfallPopupWindow
         modSettings[modList.SelectedIndex - 1] = temp;
 
         modList.SelectedIndex--;
+    }
+
+    // MOBILE: a second tap on a selected locked row opens the original mod's download page. currentSelection is
+    // only updated in Update() after the change, so on the first tap it still holds the previous row.
+    void ModList_OnSelectItem()
+    {
+        int real = modSettings == null ? 0 : modSettings.Length;
+        if (MobileOriginalMods.TapOpensUrl(modList.SelectedIndex, currentSelection, real))
+        {
+            int at = modList.SelectedIndex - real;
+            if (at < MobileOriginalMods.Locked.Count)
+            {
+                var l = MobileOriginalMods.Locked[at];
+                if (!string.IsNullOrEmpty(l.Url))
+                    Application.OpenURL(l.Url);
+            }
+        }
     }
 
     void RefreshButton_OnMouseClick(BaseScreenComponent sender, Vector2 position)
@@ -642,7 +677,7 @@ public class ModLoaderInterfaceWindow : DaggerfallPopupWindow
 
     void ExtractFilesButton_OnMouseClick(BaseScreenComponent sender, Vector2 position)
     {
-        if (modSettings.Length < 1)
+        if (modSettings.Length < 1 || MobileOriginalMods.IsLockedRow(modList.SelectedIndex, modSettings.Length))
             return;
 
         Mod mod = ModManager.Instance.GetMod(modSettings[modList.SelectedIndex].modInfo.ModTitle);
@@ -751,6 +786,8 @@ public class ModLoaderInterfaceWindow : DaggerfallPopupWindow
     {
         if (modSettings == null || modSettings.Length < 1)
             return;
+        else if (currentSelection < 0 || MobileOriginalMods.IsLockedRow(currentSelection, modSettings.Length))
+            return;
         else if (string.IsNullOrWhiteSpace(modSettings[currentSelection].modInfo.ModDescription))
             return;
 
@@ -767,6 +804,8 @@ public class ModLoaderInterfaceWindow : DaggerfallPopupWindow
 
     void ModSettingsButton_OnMouseClick(BaseScreenComponent sender, Vector2 position)
     {
+        if (modSettings == null || modList.SelectedIndex < 0 || MobileOriginalMods.IsLockedRow(modList.SelectedIndex, modSettings.Length))
+            return;
         Mod mod = ModManager.Instance.GetMod(modSettings[modList.SelectedIndex].modInfo.ModTitle);
         ModSettingsWindow modSettingsWindow = new ModSettingsWindow(DaggerfallUI.UIManager, mod);
         DaggerfallUI.UIManager.PushWindow(modSettingsWindow);
@@ -775,6 +814,8 @@ public class ModLoaderInterfaceWindow : DaggerfallPopupWindow
     void ModEnabledCheckBox_OnToggleState()
     {
         if (modSettings == null || modSettings.Length < 1)
+            return;
+        if (MobileOriginalMods.IsLockedRow(modList.SelectedIndex, modSettings.Length))
             return;
 
         ModSettings ms = modSettings[modList.SelectedIndex];

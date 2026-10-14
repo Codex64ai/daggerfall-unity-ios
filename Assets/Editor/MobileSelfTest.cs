@@ -177,6 +177,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestOriginalModScan();
             TestOriginalModGate();
             TestOriginalModKnownOurs();
+            TestLockedModRows();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -5850,6 +5851,35 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 MobileOriginalMods.DesktopOriginals.Clear();
                 Directory.Delete(root, true);
             }
+        }
+
+        static void TestLockedModRows()
+        {
+            Check(MobileOriginalMods.IsLockedRow(0, 0), "locked rows: with 0 real mods row 0 is locked (Review Focus 5)");
+            Check(!MobileOriginalMods.IsLockedRow(2, 3), "locked rows: a real row is not locked");
+            Check(MobileOriginalMods.IsLockedRow(3, 3), "locked rows: the first row after the real ones is locked");
+            Check(MobileOriginalMods.TapOpensUrl(3, 3, 3), "locked rows: tapping the selected locked row opens the page");
+            Check(!MobileOriginalMods.TapOpensUrl(3, 1, 3), "locked rows: the first tap on a locked row only selects it");
+            Check(!MobileOriginalMods.TapOpensUrl(1, 1, 3), "locked rows: tapping a selected real row opens nothing");
+
+            string src = File.ReadAllText(Path.Combine(Application.dataPath, "Game/Addons/ModSupport/ModLoaderInterfaceWindow.cs"));
+            string loaded = MethodBody(src, "void GetLoadedMods()");
+            int loop = loaded.IndexOf("for (int i = 0; i < mods.Length; i++)", StringComparison.Ordinal);
+            int locked = loaded.IndexOf("MobileOriginalMods.Locked", StringComparison.Ordinal);
+            Check(loop >= 0 && locked > loop && loaded.IndexOf("disabledModTextColor", locked, StringComparison.Ordinal) > locked,
+                  "locked rows: GetLoadedMods appends greyed locked rows after the real rows");
+            foreach (string sig in new[] { "bool GetModSettings(", "void UpdateModPanel()", "void DecreaseLoadOrderButton_OnMouseClick(",
+                                           "void IncreaseLoadOrderButton_OnMouseClick(", "void ExtractFilesButton_OnMouseClick(",
+                                           "void ShowModDescriptionPopUp_OnMouseClick(", "void ModSettingsButton_OnMouseClick(",
+                                           "void ModEnabledCheckBox_OnToggleState(" })
+                Check(MethodBody(src, sig).Contains("MobileOriginalMods.IsLockedRow("), "locked rows: " + sig + " guards a locked row");
+            string tap = MethodBody(src, "void ModList_OnSelectItem(");
+            Check(tap.Contains("MobileOriginalMods.TapOpensUrl(") && tap.Contains("Application.OpenURL("),
+                  "locked rows: ModList_OnSelectItem opens the download page through TapOpensUrl");
+            Check(src.Contains("modList.OnSelectItem += ModList_OnSelectItem;"), "locked rows: the list's OnSelectItem is subscribed");
+            Check(MethodBody(src, "void SaveAndCloseButton_OnMouseClick(").Contains("i < modSettings.Length") &&
+                  MethodBody(src, "void EnableAllButton_OnMouseClick(").Contains("i < modSettings.Length"),
+                  "locked rows: Save and Enable all loop over the real mods only");
         }
 
         static void TestOriginalModGate()

@@ -528,6 +528,18 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         /// <summary>Records a non-Load verdict: one "Needs ..." locked row per Key, one log line per skipped file.</summary>
+        /// <summary>MODS window: rows at or after the real mods are locked rows (never index modSettings with one).</summary>
+        public static bool IsLockedRow(int index, int realCount)
+        {
+            return index >= realCount;
+        }
+
+        /// <summary>MODS window: a tap on a locked row that was already selected opens its download page.</summary>
+        public static bool TapOpensUrl(int selectedIndex, int previousSelection, int realCount)
+        {
+            return IsLockedRow(selectedIndex, realCount) && selectedIndex == previousSelection;
+        }
+
         public static void NoteVerdict(Verdict v, string filePath)
         {
             string leaf = Leaf(filePath);
