@@ -203,6 +203,30 @@ ORIGINALS = {
     "WODBIOMES": ("World of Daggerfall - Biomes", "https://github.com/drcarademono/wod-biomes"),
     "WODTERRAIN": ("World of Daggerfall - Terrain", "https://github.com/drcarademono/wod-terrain"),
     "DISTANTTERRAIN": ("Distant Terrain of the World of Daggerfall", "https://www.nexusmods.com/daggerfallunity/mods/1284"),
+    # Gate-33: the Jay_H / UBLaMF / Vanilla Enhanced / DET PackRows.
+    "JH_QP1": ("Daggerfall Unity Quest Pack 1", "https://www.nexusmods.com/daggerfallunity/mods/2"),
+    "JH_RLQ": ("Random Little Quests", "https://www.nexusmods.com/daggerfallunity/mods/204"),
+    "JH_ROLES": ("Immersion Roles", "https://www.nexusmods.com/daggerfallunity/mods/228"),
+    "JH_REPCON": ("Reputation Consequences", "https://www.nexusmods.com/daggerfallunity/mods/902"),
+    "JH_CGK": ("Chronicle of the Great Knight", "https://www.nexusmods.com/daggerfallunity/mods/493"),
+    "JH_TTC": ("The Tale Continues", "https://www.nexusmods.com/daggerfallunity/mods/913"),
+    "JH_BC": ("Jay_H's Battle Creatures", "https://www.nexusmods.com/daggerfallunity/mods/196"),
+    "JH_MUNDANE": ("Mundane Jobs", "https://www.nexusmods.com/daggerfallunity/mods/356"),
+    "JH_MEDEM": ("Medical Emergency", "https://www.nexusmods.com/daggerfallunity/mods/897"),
+    "JH_INVITE_DB": ("Receive a Dark Brotherhood Invitation", "https://www.nexusmods.com/daggerfallunity/mods/917"),
+    "JH_INVITE_TG": ("Receive a Thieves Guild Invitation", "https://www.nexusmods.com/daggerfallunity/mods/917"),
+    "JH_VAMPIRE": ("Become a Vampire", "https://www.nexusmods.com/daggerfallunity/mods/721"),
+    "JH_WEREBOAR": ("Become a Wereboar", "https://www.nexusmods.com/daggerfallunity/mods/721"),
+    "JH_WEREWOLF": ("Become a Werewolf", "https://www.nexusmods.com/daggerfallunity/mods/721"),
+    "JH_CHEAT": ("The Cheater's Armory", "https://www.nexusmods.com/daggerfallunity/mods/899"),
+    "JH_WEATHER": ("Weather Items", "https://www.nexusmods.com/daggerfallunity/mods/133"),
+    "JH_NOISES": ("Jay_H's Random Monster Noises Mod", "https://www.nexusmods.com/daggerfallunity/mods/271"),
+    "JH_MQREP": ("Main Quest Reputation Fix", "https://www.nexusmods.com/daggerfallunity/mods/898"),
+    "JH_IRONMAN": ("Ironman Madness", "https://www.nexusmods.com/daggerfallunity/mods/237"),
+    "JH_SDR": ("Starting Dungeon Randomizer", "https://www.nexusmods.com/daggerfallunity/mods/17"),
+    "UBLAMF": ("Unofficial Block, Location and Model Fixes", "https://www.nexusmods.com/daggerfallunity/mods/100"),
+    "VE": ("Vanilla Enhanced", "https://www.nexusmods.com/daggerfallunity/mods/273"),
+    "DET": ("Daggerfall Expanded Textures", "https://www.nexusmods.com/daggerfallunity/mods/307"),
 }
 
 
@@ -261,11 +285,13 @@ def original_authors(cfg, key):
 
 def private_readme_text(entries, cfg=None):
     lines = [
-        "Daggerfall Unity iOS - Non-MIT mod pack (private test draft)",
+        "Daggerfall Unity iOS - Non-MIT mod pack",
         "",
-        "These are iOS conversions of mods whose authors have not (yet) given a redistribution licence.",
-        "Each file loads only once the app has seen your own copy of the original mod in Documents/Mods",
-        "(the downloaded archive or the desktop .dfmod); until then it shows as a greyed row in MODS.",
+        "These mods are not under an open licence: some are redistributed with the author's permission,",
+        "some are non-commercial (CC BY-NC-SA), some are pending the author's answer. To respect every",
+        "author, each file loads only once the app has seen your own copy of the original mod in",
+        "Documents/Mods (the download as-is, the desktop .dfmod, or an extracted quest-pack folder);",
+        "until then it shows as a greyed row in MODS.",
         "",
         "INSTALL: copy Mods/*.dfmod and pack-index.json into Documents/Mods with the Files app, add the",
         "original mods you own beside them, then restart the app.",

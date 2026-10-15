@@ -271,6 +271,19 @@ class NonMitPack(unittest.TestCase):
         self.assertEqual([r["file"] for r in rows], ["Mods/a-ios.dfmod", "Mods/b-ios.dfmod"])
         self.assertEqual(rows[0], {"file": "Mods/a-ios.dfmod", "size": 1, "key": "A"})
 
+    def test_originals_cover_every_unlock_key(self):
+        import json
+        with open(os.path.join(os.path.dirname(__file__), "mods.json"), encoding="utf-8") as fh:
+            cfg = json.load(fh)
+        keys = {m["unlock_key"] for m in cfg["mods"] if m.get("unlock_key")} | {"DREAM", "DREAMSKY"}
+        self.assertEqual(sorted(keys - set(pack.ORIGINALS)), [])
+        self.assertEqual(len(pack.ORIGINALS), 32)
+
+    def test_private_readme_wording(self):
+        txt = pack.private_readme_text([("Mods/jh-questpack1-ios.dfmod", 1, "JH_QP1")])
+        self.assertIn("author's permission", txt)
+        self.assertNotIn("have not (yet) given a redistribution licence", txt)
+
     def test_shipped_private_entries_all_have_keys(self):
         import json
         with open(os.path.join(os.path.dirname(__file__), "mods.json"), encoding="utf-8") as fh:
