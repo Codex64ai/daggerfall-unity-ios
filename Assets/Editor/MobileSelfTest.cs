@@ -184,6 +184,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestOriginalModLooseFiles();
             TestOriginalModGate33Table();
             TestOriginalModArchiveSizeRule();
+            TestOriginalModLooseQuests();
             TestLockedModRows();
             TestNonMitPackNames();
             TestDebugStartModsWindow();
@@ -6194,6 +6195,79 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 bool ok = MobileOriginalMods.TryListEntries(Path.Combine(b1, "ours.zip"), out le, out lerr);
                 Check(ok && le.Count == 1 && le[0].Size == 16 && le[0].Name == "Mods/x.dfmod", "archive size rule: listing reports the 16-byte size",
                       ok ? le.Count.ToString() : lerr);
+            }
+            finally { Directory.Delete(root, true); }
+        }
+
+        // Gate-33 Task 4: an extracted quest-pack folder (loose .txt names) counts as the original.
+        static void TestOriginalModLooseQuests()
+        {
+            string root = OrigModTempDir("loosequests");
+            try
+            {
+                var row = new MobileOriginalMods.Row
+                {
+                    Key = "L", DisplayName = "L", Url = "https://example.invalid/l",
+                    ArchiveMarkers = new[] { "QuestList-L.txt", "LINIT.txt" }, ArchiveThreshold = 1, DfmodMarkers = new string[0],
+                    DfmodMinBytes = 1, Unlocks = new[] { "l-ios.dfmod" }, OldNames = new string[0],
+                };
+                var rows = new[] { row };
+                Func<string, List<string>> list = OrigModList;
+                Func<string, string> mods = name => { string d = Path.Combine(root, name, "Mods"); Directory.CreateDirectory(d); return d; };
+                Func<string, string> rcpt = name => Path.Combine(root, name, "Mods", "GameData", MobileOriginalMods.ReceiptFileName);
+                Action<string, int> write = (path, n) => { Directory.CreateDirectory(Path.GetDirectoryName(path)); File.WriteAllBytes(path, new byte[n]); };
+                var logs = new List<string>();
+
+                // (a) Mods/QuestPacks/L/QuestList-L.txt (20 bytes).
+                string a = mods("a");
+                write(Path.Combine(a, "QuestPacks", "L", "QuestList-L.txt"), 20);
+                var ra = MobileOriginalMods.ScanOnce(a, rcpt("a"), rows, list, logs.Add);
+                Check(MobileOriginalMods.ReceiptKeys(ra).Contains("L") && ra.Receipts.Count == 1 && ra.Receipts[0].MatchedFile == "QuestList-L.txt"
+                      && ra.Receipts[0].Size == 20 && logs.Exists(l => l.Contains("loose quest files")),
+                      "loose quests: an extracted QuestList file writes the receipt", string.Join(" | ", logs.ToArray()));
+                // (b) empty file.
+                string b = mods("b");
+                write(Path.Combine(b, "QuestPacks", "L", "QuestList-L.txt"), 0);
+                Check(MobileOriginalMods.ScanOnce(b, rcpt("b"), rows, list, null).Receipts.Count == 0, "loose quests: an empty marker file does not unlock");
+                // (c) our READMEs and licences.
+                string c = mods("c");
+                write(Path.Combine(c, "README.txt"), 10);
+                write(Path.Combine(c, "Licenses", "jh-x-LICENSE.txt"), 10);
+                Check(MobileOriginalMods.ScanOnce(c, rcpt("c"), rows, list, null).Receipts.Count == 0, "loose quests: README / licence files never match");
+                // (d) a receipted key is skipped.
+                Check(MobileOriginalMods.MatchLooseQuests(rows, new[] { "/x/QuestList-L.txt" }, new HashSet<string> { "L" }).Count == 0
+                      && MobileOriginalMods.MatchLooseQuests(rows, new[] { "/x/QuestList-L.txt" }, new HashSet<string>()).Count == 1,
+                      "loose quests: a key that already has a receipt is not matched again");
+                // (e) extraLooseFiles outside modsDir (Documents/QuestPacks).
+                string e = mods("e");
+                string outside = Path.Combine(root, "e", "QuestPacks", "L", "LINIT.txt");
+                write(outside, 5);
+                var re = MobileOriginalMods.ScanOnce(e, rcpt("e"), rows, list, null, null, new[] { outside });
+                Check(MobileOriginalMods.ReceiptKeys(re).Contains("L") && re.Receipts[0].MatchedFile == "LINIT.txt",
+                      "loose quests: a quest folder in Documents/QuestPacks writes the receipt");
+                // (f) real table: no .txt marker is one of our own pack's text files.
+                bool clean = true; string bad = "";
+                string[] ours = { "README.txt", "README-DREAM-extras.txt", "pack-index.json" };
+                foreach (var r in MobileOriginalMods.Rows)
+                    foreach (string m in r.ArchiveMarkers ?? new string[0])
+                    {
+                        if (!m.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) continue;
+                        string n = MobileOriginalMods.Normalize(m);
+                        if (n.EndsWith("license.txt", StringComparison.Ordinal)) { clean = false; bad = m; }
+                        foreach (string o in ours) if (n == MobileOriginalMods.Normalize(o)) { clean = false; bad = m; }
+                    }
+                Check(clean, "loose quests: no real .txt marker is a README, licence or pack-index name", bad);
+                // (g) a .json / .dfmod leaf is not a loose quest file.
+                var row2 = new MobileOriginalMods.Row
+                {
+                    Key = "J", DisplayName = "J", Url = "https://example.invalid/j",
+                    ArchiveMarkers = new[] { "QuestList-L.json" }, ArchiveThreshold = 1, DfmodMarkers = new string[0],
+                    DfmodMinBytes = 1, Unlocks = new[] { "j-ios.dfmod" }, OldNames = new string[0],
+                };
+                string g = mods("g");
+                write(Path.Combine(g, "QuestList-L.json"), 10);
+                Check(MobileOriginalMods.ScanOnce(g, rcpt("g"), new[] { row2 }, list, null).Receipts.Count == 0,
+                      "loose quests: only .txt files are loose quest files");
             }
             finally { Directory.Delete(root, true); }
         }

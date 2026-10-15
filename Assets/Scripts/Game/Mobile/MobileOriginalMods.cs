@@ -7,6 +7,9 @@
 //   one-time, and nothing here may block start-up. Spec:
 //   docs/superpowers/specs/2026-10-14-original-mod-unlock-design.md
 //
+//   An extracted quest-pack folder (QuestList-*.txt etc. in Documents/Mods or Documents/QuestPacks) also counts as
+//   the original: only file names are compared, nothing is opened.
+//
 //   Pure functions take their data as parameters so the editor self-test can run them
 //   (MobileContentPath.Active is false in the editor). SharpCompress is used ONLY to list archive
 //   entry names; nothing is ever extracted.
@@ -426,13 +429,37 @@ namespace DaggerfallWorkshop.Game.Mobile
         }
 
         /// <summary>
+        /// Pure: for each row without a receipt (not in haveKeys) whose ArchiveMarkers match the leaf names of txtPaths
+        /// (MatchArchive), the row and the first matching path. An extracted quest-pack folder counts as the original.
+        /// </summary>
+        public static List<KeyValuePair<Row, string>> MatchLooseQuests(Row[] rows, IEnumerable<string> txtPaths, HashSet<string> haveKeys)
+        {
+            var result = new List<KeyValuePair<Row, string>>();
+            if (rows == null || txtPaths == null) return result;
+            var paths = new List<string>(txtPaths);
+            if (paths.Count == 0) return result;
+            foreach (Row r in rows)
+            {
+                if (r.ArchiveMarkers == null || (haveKeys != null && haveKeys.Contains(r.Key))) continue;
+                if (!MatchArchive(r, paths)) continue;
+                var markers = new HashSet<string>();
+                foreach (string m in r.ArchiveMarkers) markers.Add(Normalize(m));
+                foreach (string p in paths)
+                    if (markers.Contains(Normalize(p))) { result.Add(new KeyValuePair<Row, string>(r, p)); break; }
+            }
+            return result;
+        }
+
+        /// <summary>
         /// Looks at every zip/7z/rar/dfmod under modsDir (all subfolders) that no receipt covers, adds one receipt per
         /// newly matched Key (first match wins) and saves only when something was added. listEntries returns null for an
-        /// unreadable archive. Rebuilds Locked ("Couldn't read" rows) and DesktopOriginals. Never throws.
+        /// unreadable archive. Then the loose quest files: every non-empty .txt under modsDir plus extraLooseFiles (the
+        /// Documents/QuestPacks folder) is matched by leaf name against the receipt-less rows' ArchiveMarkers (names only,
+        /// nothing opened). Rebuilds Locked ("Couldn't read" rows) and DesktopOriginals. Never throws.
         /// </summary>
         public static ReceiptFile ScanOnce(string modsDir, string receiptPath, Row[] rows,
                                            Func<string, List<string>> listEntries, Action<string> log,
-                                           Dictionary<string, long> packIndex = null)
+                                           Dictionary<string, long> packIndex = null, IEnumerable<string> extraLooseFiles = null)
         {
             Locked.Clear();
             DesktopOriginals.Clear();
@@ -454,11 +481,17 @@ namespace DaggerfallWorkshop.Game.Mobile
 
             HashSet<string> have = ReceiptKeys(receipts);
             bool added = false;
+            var loose = new List<string>();
             foreach (string path in files)
             {
                 try
                 {
                     string ext = Path.GetExtension(path).ToLowerInvariant();
+                    if (ext == ".txt")
+                    {
+                        if (new FileInfo(path).Length > 0) loose.Add(path);
+                        continue;
+                    }
                     if (Array.IndexOf(ScanExtensions, ext) < 0) continue;
                     string leaf = Path.GetFileName(path);
                     var info = new FileInfo(path);
@@ -521,6 +554,36 @@ namespace DaggerfallWorkshop.Game.Mobile
                     log("[OriginalMods] skipped " + Path.GetFileName(path) + ": " + e.Message);
                 }
             }
+
+            if (extraLooseFiles != null)
+            {
+                try
+                {
+                    foreach (string path in extraLooseFiles)
+                    {
+                        try
+                        {
+                            if (string.Equals(Path.GetExtension(path), ".txt", StringComparison.OrdinalIgnoreCase) && new FileInfo(path).Length > 0)
+                                loose.Add(path);
+                        }
+                        catch (Exception) { }
+                    }
+                }
+                catch (Exception e) { log("[OriginalMods] loose quest folder skipped: " + e.Message); }
+            }
+            try
+            {
+                foreach (var m in MatchLooseQuests(rows, loose, have))
+                {
+                    var info = new FileInfo(m.Value);
+                    string leaf = Path.GetFileName(m.Value);
+                    have.Add(m.Key.Key);
+                    AddReceipt(receipts, m.Key.Key, leaf, info.Length, info.LastWriteTimeUtc.ToFileTimeUtc());
+                    added = true;
+                    log("[OriginalMods] receipt " + m.Key.Key + " <- " + leaf + " (loose quest files)");
+                }
+            }
+            catch (Exception e) { log("[OriginalMods] loose quest scan skipped: " + e.Message); }
 
             if (added)
             {
@@ -681,12 +744,19 @@ namespace DaggerfallWorkshop.Game.Mobile
                 // Archive entries that are our own pack files (leaf name + exact size) never count as an original.
                 ScanOnce(modsDir, Path.Combine(modDataDir, ReceiptFileName), Rows,
                          p => { List<ArchiveEntry> e; string err; return TryListEntries(p, out e, out err) ? FilterKnownOurs(e, index) : null; },
-                         UnityEngine.Debug.Log, index);
+                         UnityEngine.Debug.Log, index, LooseQuestFolderFiles());
             }
             catch (Exception e)
             {
                 UnityEngine.Debug.Log("[OriginalMods] scan failed: " + e.Message);
             }
+        }
+
+        /// <summary>Every .txt under Documents/QuestPacks (where DFU's instructions say to extract a quest pack); null on failure.</summary>
+        static string[] LooseQuestFolderFiles()
+        {
+            try { return MobileContentPath.UserFiles("QuestPacks", "*.txt", true); }
+            catch (Exception) { return null; }
         }
 
         /// <summary>Records a non-Load verdict: one "Needs ..." locked row per Key, one log line per skipped file.</summary>
