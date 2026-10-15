@@ -12,7 +12,7 @@ writes the feed. Nothing here signs or uploads an .ipa.
 
 Rules, and why:
   * Draft releases are never listed. The testapp draft carries third-party content.
-  * Only tags shaped like vX.Y.Z-prealpha are listed; a version needs exactly one .ipa asset.
+  * Only tags shaped like vX.Y.Z-prealpha or vX.Y.Z-alpha are listed; a version needs exactly one .ipa asset.
   * Versions before 0.1.9 are excluded: their Info.plist reports CFBundleShortVersionString
     1.0.0 (fixed in 436d7d826), so AltStore would treat them all as one version and refuse
     to see them as updates of each other.
@@ -50,7 +50,7 @@ TINT = "#8B5A2B"
 MIN_OS = "15.0"            # Unity 6 floor; every listed build is a Unity 6 build
 BUILD_VERSION = "0"        # CFBundleVersion in every ipa so far
 FIRST_FEED_VERSION = (0, 1, 9)
-TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)-prealpha$")
+TAG_RE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)-(?:pre)?alpha$")
 NOTES_LIMIT = 1500
 
 SUBTITLE = "The 1996 RPG on iPad and iPhone, with touch, controller and mods."
@@ -58,7 +58,7 @@ DESCRIPTION = (
     "An iOS/iPadOS port of Daggerfall Unity, the open-source recreation of The Elder Scrolls II. "
     "Free, non-commercial and source-only. You supply your own copy of Daggerfall's arena2 folder; "
     "no game data is distributed.\n\n"
-    "Pre-alpha: expect rough edges. Touch layout, controller and keyboard/mouse support, real "
+    "Alpha: expect rough edges. Touch layout, controller and keyboard/mouse support, real "
     "travel along roads, and loose-file mods are in. Full instructions and the mod guide live in "
     "README-iOS.md in the repository."
 )
@@ -77,7 +77,7 @@ def ipa_asset(release):
 
 
 def select_releases(releases):
-    """Published, versioned pre-alphas with exactly one .ipa, newest first."""
+    """Published, versioned (pre-)alphas with exactly one .ipa, newest first."""
     keep = []
     for r in releases:
         if r.get("draft"):
@@ -140,8 +140,8 @@ def build_source(releases, icon_url):
     return {
         "name": "Daggerfall Unity iOS",
         "identifier": "net.codex64.daggerfall.source",
-        "subtitle": "Pre-alpha builds of the Daggerfall Unity iOS port",
-        "description": "Sideloadable pre-alpha builds of the Daggerfall Unity iOS/iPadOS port. "
+        "subtitle": "Alpha builds of the Daggerfall Unity iOS port",
+        "description": "Sideloadable alpha builds of the Daggerfall Unity iOS/iPadOS port. "
                        "Unsigned; SideStore or AltStore signs them with your own Apple ID.",
         "iconURL": icon_url,
         "website": f"https://github.com/{REPO}",

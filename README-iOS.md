@@ -1,6 +1,6 @@
 # Daggerfall Unity - iOS touch port
 
-> **PRE-ALPHA.** This is an early, playable build - expect rough edges, missing
+> **ALPHA.** This is an early, playable build - expect rough edges, missing
 > conveniences, and the occasional bug. Core gameplay (exploration, combat, doors,
 > menus, saving) is verified working on an iPad Pro 11" (M4), iPadOS 26. Feedback and
 > issue reports are very welcome.
@@ -140,7 +140,7 @@ Apple ID**; a free Apple ID's signature lasts 7 days, and both stores below re-s
 before it runs out.
 
 **SideStore or AltStore source (recommended).** Add this source once and the store shows
-every pre-alpha from 0.1.9 on, installs with one tap, and offers each new release as an
+every release from 0.1.9 on, installs with one tap, and offers each new release as an
 in-app update. Tap the link for the store you use, or paste the feed URL into its
 Sources tab:
 

@@ -26,6 +26,11 @@ class SelectReleases(unittest.TestCase):
         drafts = [release("testapp-unity6", draft=True, published=None)]
         self.assertEqual(src.select_releases(drafts), [])
 
+    def test_alpha_tag_listed_after_prealphas(self):
+        rels = [release("v0.1.9-prealpha"), release("v0.2.0-alpha")]
+        tags = [r["tag_name"] for r in src.select_releases(rels)]
+        self.assertEqual(tags, ["v0.2.0-alpha", "v0.1.9-prealpha"])
+
     def test_only_prealpha_version_tags(self):
         rels = [release("v0.1.9-prealpha"), release("nightly"), release("v0.2"),
                 release("testapp-unity6", draft=True, published=None)]
