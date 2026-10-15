@@ -785,13 +785,25 @@ namespace DaggerfallWorkshop.Utility
             {
                 DFSize sz;
                 Color32[] colors;
+                int width, height;
                 if (TextureReplacement.TryImportTexture(archive, record, 0, out texture))
+                {
                     colors = TextureReplacement.EnsureReadable(texture).GetPixels32();    // Import custom texture (MOBILE: bundle textures are not readable)
+                    width = texture.width;
+                    height = texture.height;
+                }
                 else
+                {
                     colors = textureFile.GetColor32(record, 0, -1, 0, out sz);      // Create base image with gutter
+                    width = sz.Width;
+                    height = sz.Height;
+                }
 
                 // Insert into texture array
-                textureArray.SetPixels32(colors, record, 0);
+                // MOBILE: a pack may replace only some records (VE Masked Roads ships 303_46/47/55 at 256x256
+                // over 64x64 vanilla tiles), so a slice can differ from the array size set by record 0;
+                // SetPixels32 then threw for the whole archive and the terrain lost its material. Fit it.
+                textureArray.SetPixels32(FitTerrainSlice(colors, width, height, textureArray.width, textureArray.height), record, 0);
             }
             textureArray.Apply(true);
 
@@ -803,6 +815,41 @@ namespace DaggerfallWorkshop.Utility
         }
 
         #region Helpers
+
+        /// <summary>
+        /// MOBILE: scales a terrain tile to a texture array slice size. Box-averages when shrinking,
+        /// nearest when growing (keeps vanilla pixel look). Returns the input when sizes already match.
+        /// </summary>
+        public static Color32[] FitTerrainSlice(Color32[] src, int srcWidth, int srcHeight, int dstWidth, int dstHeight)
+        {
+            if (src == null || (srcWidth == dstWidth && srcHeight == dstHeight))
+                return src;
+
+            Color32[] dst = new Color32[dstWidth * dstHeight];
+            for (int y = 0; y < dstHeight; y++)
+            {
+                int y0 = y * srcHeight / dstHeight;
+                int y1 = Mathf.Max(y0 + 1, (y + 1) * srcHeight / dstHeight);
+                for (int x = 0; x < dstWidth; x++)
+                {
+                    int x0 = x * srcWidth / dstWidth;
+                    int x1 = Mathf.Max(x0 + 1, (x + 1) * srcWidth / dstWidth);
+                    int r = 0, g = 0, b = 0, a = 0;
+                    for (int sy = y0; sy < y1; sy++)
+                    {
+                        int row = sy * srcWidth;
+                        for (int sx = x0; sx < x1; sx++)
+                        {
+                            Color32 c = src[row + sx];
+                            r += c.r; g += c.g; b += c.b; a += c.a;
+                        }
+                    }
+                    int n = (y1 - y0) * (x1 - x0);
+                    dst[y * dstWidth + x] = new Color32((byte)(r / n), (byte)(g / n), (byte)(b / n), (byte)(a / n));
+                }
+            }
+            return dst;
+        }
 
         // Textures that should receive emission map
         // TODO: Consider setting this from an external list

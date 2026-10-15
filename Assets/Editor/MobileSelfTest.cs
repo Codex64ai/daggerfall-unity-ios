@@ -188,6 +188,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestLockedModRows();
             TestNonMitPackNames();
             TestDebugStartModsWindow();
+            TestTerrainArrayMixedSlices();
 
             log.AppendLine();
             log.AppendLine(string.Format("=== {0} passed, {1} failed ===", passed, failed));
@@ -6343,6 +6344,32 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         // Item F: ~/dev/dfu-mods/wod-biomes.dfmod (1,976,621 B) is byte-identical to our "world of daggerfall - biomes.dfmod"
         // build: an old name of WODBIOMES mapping onto the row's -ios file, and KnownOurs at its size.
         // Loose files (DREAM music/movies/extras): our files by name + size are absent until the DREAM receipt.
+        // A replacement pack can cover only some records of a terrain archive (VE Masked Roads ships
+        // 303_46/47/55 at 256x256 while the rest stay 64x64 vanilla). GetTerrainTextureArray sizes the
+        // array from record 0, so every other slice must be scaled to it or SetPixels32 throws.
+        static void TestTerrainArrayMixedSlices()
+        {
+            Color32[] big = new Color32[256 * 256];
+            for (int i = 0; i < big.Length; i++)
+                big[i] = new Color32(200, 100, 50, 255);
+            Color32[] down = TextureReader.FitTerrainSlice(big, 256, 256, 64, 64);
+            Check(down != null && down.Length == 64 * 64, "TerrainArray: 256 slice fits a 64 array", down == null ? "null" : down.Length.ToString());
+            Check(down != null && down[0].r == 200 && down[4095].b == 50, "TerrainArray: downscaled colour kept", down == null ? "" : down[0].ToString());
+
+            Color32[] small = new Color32[2 * 2] { new Color32(1, 0, 0, 255), new Color32(2, 0, 0, 255), new Color32(3, 0, 0, 255), new Color32(4, 0, 0, 255) };
+            Color32[] up = TextureReader.FitTerrainSlice(small, 2, 2, 4, 4);
+            Check(up.Length == 16 && up[0].r == 1 && up[3].r == 2 && up[12].r == 3 && up[15].r == 4, "TerrainArray: upscale is nearest", string.Join(",", up.Select(c => c.r)));
+            Check(ReferenceEquals(TextureReader.FitTerrainSlice(small, 2, 2, 2, 2), small), "TerrainArray: same size passes through");
+
+            // The real call: SetPixels32 into a 64x64 array slice must not throw with a fitted 256 slice
+            Texture2DArray arr = new Texture2DArray(64, 64, 2, TextureFormat.ARGB32, true);
+            bool threw = false;
+            try { arr.SetPixels32(down, 1, 0); arr.Apply(true); }
+            catch (Exception e) { threw = true; Debug.Log(e.Message); }
+            Check(!threw, "TerrainArray: fitted slice accepted by Texture2DArray");
+            UnityEngine.Object.DestroyImmediate(arr);
+        }
+
         static void TestOriginalModLooseFiles()
         {
             var fixture = new[]
