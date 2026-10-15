@@ -162,3 +162,60 @@ original. Any online check. Desktop/Android builds (Finder and Gate are `MobileC
 3. **Device**: same as the simulator on the iPad (swipe-away relaunch before reading Player.log - a suspended app never re-scans).
    The iPad already holds our DREAM files; it needs the receipt or the original before this build goes on, or DREAM locks. Ship the
    device build with Ikram's DREAM archive pushed first.
+
+## 2026-10-15: the 33 non-MIT mods join the gate
+
+Approved by Ikram 2026-10-15 ("only true-MIT mods stay in the open MIT pack"). Plan:
+`docs/superpowers/plans/2026-10-15-nonmit-gate-33.md`. Research (identity, links, download forms, markers):
+`docs/superpowers/specs/2026-10-15-nonmit-originals-research.md`.
+
+**The rule.** The MIT pack keeps only the 15 true-MIT mods (11 Cliffworms + Better Ambience, Immersive Footsteps,
+Dynamic Music, First-Person Lighting). The other 33 (21 Jay_H quest packs, 6 UBLaMF modules, Vanilla Enhanced Base /
+Masked Roads / Snowless Swamps and Jungles / Winter Tracks, Kokey's Temperate, Daggerfall Expanded Textures) move to the
+Non-MIT pack and load only next to the player's own original. Builtins (Roleplay & Realism, RR Items, Climates & Calories)
+are MIT and stay ungated. Every Non-MIT pack file gets the `-ios` name (`IosName`), not only the 10 that collide with a
+desktop name; the old names become `OldNames` of their row (gated the same way, skipped when the `-ios` sibling exists).
+No Mods.json migration (keyed by Title). Consequence: old-name files from the earlier MIT pack lock until the original is seen.
+
+**23 new rows** (`PackRow`, research section B; 32 rows in total): `JH_QP1 JH_RLQ JH_ROLES JH_REPCON JH_CGK JH_TTC JH_BC
+JH_MUNDANE JH_MEDEM JH_INVITE_DB JH_INVITE_TG JH_VAMPIRE JH_WEREBOAR JH_WEREWOLF JH_CHEAT JH_WEATHER JH_NOISES JH_MQREP
+JH_IRONMAN JH_SDR UBLAMF VE DET`. `JH_IRONMAN` unlocks both Ironman files, `UBLAMF` the 6 modules, `VE` 5 files.
+Rulings on research section D: extracted loose quest folders count as the original; any one Immersion Roles download
+unlocks the 8-role file (threshold 1); the Nexus Vanilla Enhanced download also unlocks Winter Tracks and Kokey's
+Temperate; Android `.dfmod` downloads count; DET 1.3's inner name is unconfirmed, so the row uses
+`daggerfall expanded textures`. UBLAMF and VE archive markers deliberately exclude the names we ship (a second line of
+defence behind the size rule below). DET cannot: its real archive's only entry is `daggerfall expanded textures.dfmod`,
+our v0.2.0 name, so that name is a DET archive marker and the size rule alone tells our copy from the original.
+
+**Archive self-exclusion is (name, size).** Before marker matching, archive entries whose leaf name and uncompressed
+size match `KnownOurs` or `pack-index.json` are dropped, so our own v0.2.0 MIT zip (which holds the 10 desktop-named
+files) can never unlock anything. An entry with the same name at another size is kept: a real desktop
+`daggerfall expanded textures.dfmod` unlocks DET.
+
+**Loose quest folders.** The scan also collects every non-empty `*.txt` under `Documents/Mods` (recursive) and
+`Documents/QuestPacks` (recursive) and matches their leaf names against each receipt-less row's `ArchiveMarkers`
+(`MatchLooseQuests`). Names only, nothing opened, never blocks start-up. Empty files, our `README.txt` /
+`README-DREAM-extras.txt` and `*-LICENSE.txt` never match (pinned by test). `Documents/QuestPacks` is included because
+DFU's own instructions extract quest packs there (open for Ikram; trivial to drop).
+
+**KnownOurs sources.** `tools/known_ours.py` reads the `PackRow(...)` stems, emits the `-ios` alias of every file it
+finds (same size), and reads the frozen `release/v0.2.0/mitpack-dl/Mods/` (the v0.2.0 MIT zip's exact bytes).
+`Assets/StreamingAssets/Mods` is not a source (its contents change during builtin app builds).
+
+**DfmodMinBytes floors.** Jay_H rows 1 KB; UBLAMF 64 KB; VE 64 KB (masked roads is about 300 KB on desktop); DET 1 MB.
+
+**Private pack README.** "Not under an open licence: some are redistributed with the author's permission, some are
+non-commercial (CC BY-NC-SA), some are pending the author's answer."
+
+**Verification.** Editor self-test pins the table (32 rows, distinct keys, no shipped name normalizes to a marker, the
+10 colliding names are `OldNames`/`DfmodMarkers`, archive markers only for DET), the (name, size) filter with the real `Rows` and `KnownOurs`, and
+the loose scan. Simulator (plan Task 7, scenarios S1-S7, lock enforced) checks: locked rows for the moved mods; our v0.2.0 MIT
+zip does not unlock; a Jay_H zip, loose quest folders in `Documents/Mods/QuestPacks` and `Documents/QuestPacks`, and
+UBLaMF / VE / DET fixtures with the real inner names do; an old-name file is gated. Results and log lines go in
+`dfu-mods/origunlock-evidence/gate33/LEDGER.txt`. Run 2026-10-15 on the iPad Pro 11 (M5) simulator: S1-S6 passed
+(6 "Needs ..." rows; the v0.2.0 MIT zip wrote no receipt; `receipt JH_RLQ <- Random Little Quests-204-1-15a.zip`;
+`receipt JH_WEATHER` / `JH_NOISES ... (loose quest files)`; UBLAMF / VE / DET receipts and all 9 files loading; the DET
+desktop `.dfmod` path; the old name `jh-questpack1.dfmod` locked, then skipped beside its `-ios` file). S7: no
+TypeLoad / MissingMethod; the in-world runs with the unlocked texture mods log a terrain `Texture2DArray.SetPixels32`
+ArgumentException (a texture-mod content issue, not the gate; open). Real UBLaMF / VE / DET downloads and the device
+are not yet verified.
