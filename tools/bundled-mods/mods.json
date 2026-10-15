@@ -107,7 +107,9 @@
         "author": "Jay_H",
         "description": "Jay_H's Quest Pack 1: about 300 new quests across the guilds, temples, nobles, commoners, Dark Brotherhood, vampires and witches. Note: 16 quests use the 'reduce player health' action, which this port does not yet provide; those quests load but do nothing."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_QP1"
     },
     {
       "name": "JH-RandomLittleQuests",
@@ -123,7 +125,9 @@
         "author": "Jay_H",
         "description": "Over a hundred small quests offered by commoners and at specific locations. Six use the 'reduce player health' action, not yet provided by this port."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_RLQ"
     },
     {
       "name": "JH-ImmersionRoles",
@@ -139,7 +143,9 @@
         "author": "Jay_H",
         "description": "Eight role quest lines: Cursed of Mephala, Dark Brotherhood Initiate, Escaped Slave, Headhunter, Noble Child, Outlaw, Speaker for the Dead, Vindicator."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_ROLES"
     },
     {
       "name": "JH-ReputationConsequences",
@@ -155,7 +161,9 @@
         "author": "Jay_H",
         "description": "Your reputation has consequences: quests that react to how factions see you. One quest uses 'reduce player health', not yet provided by this port."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_REPCON"
     },
     {
       "name": "JH-ChronicleOfTheGreatKnight",
@@ -171,7 +179,9 @@
         "author": "Jay_H",
         "description": "A knightly quest line."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_CGK"
     },
     {
       "name": "JH-TheTaleContinues",
@@ -187,7 +197,9 @@
         "author": "Jay_H",
         "description": "Follow-on quests after the main story."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_TTC"
     },
     {
       "name": "JH-BattleCreatures",
@@ -203,7 +215,9 @@
         "author": "Jay_H",
         "description": "Creature-hunting quests."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_BC"
     },
     {
       "name": "JH-MundaneJobs",
@@ -219,7 +233,9 @@
         "author": "Jay_H",
         "description": "Everyday work: courier runs and tree felling."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_MUNDANE"
     },
     {
       "name": "JH-MedicalEmergency",
@@ -235,7 +251,9 @@
         "author": "Jay_H",
         "description": "A medical emergency quest."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_MEDEM"
     },
     {
       "name": "JH-BecomeDarkBrotherhood",
@@ -251,7 +269,9 @@
         "author": "Jay_H",
         "description": "Join the Dark Brotherhood by quest."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_INVITE_DB"
     },
     {
       "name": "JH-BecomeThief",
@@ -267,7 +287,9 @@
         "author": "Jay_H",
         "description": "Join the Thieves Guild by quest."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_INVITE_TG"
     },
     {
       "name": "JH-BecomeVampire",
@@ -283,7 +305,9 @@
         "author": "Jay_H",
         "description": "Seek out vampirism by quest."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_VAMPIRE"
     },
     {
       "name": "JH-BecomeWereboar",
@@ -299,7 +323,9 @@
         "author": "Jay_H",
         "description": "Seek out the wereboar curse by quest."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_WEREBOAR"
     },
     {
       "name": "JH-BecomeWerewolf",
@@ -315,7 +341,9 @@
         "author": "Jay_H",
         "description": "Seek out the werewolf curse by quest."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_WEREWOLF"
     },
     {
       "name": "JH-CheatArmory",
@@ -331,7 +359,9 @@
         "author": "Jay_H",
         "description": "A cheat: an armory of gear on request."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_CHEAT"
     },
     {
       "name": "JH-WeatherItems",
@@ -347,7 +377,9 @@
         "author": "Jay_H",
         "description": "Items that change the weather."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_WEATHER"
     },
     {
       "name": "JH-RandomMonsterNoises",
@@ -363,7 +395,9 @@
         "author": "Jay_H",
         "description": "Ambient monster noises as a fun surprise."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_NOISES"
     },
     {
       "name": "JH-MQRepFix",
@@ -379,7 +413,9 @@
         "author": "Jay_H",
         "description": "Fixes reputation after main quest events."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_MQREP"
     },
     {
       "name": "JH-IronmanMadnessInfighting",
@@ -398,7 +434,9 @@
           "IronmanMadness": "IronmanMadnessInfighting"
         }
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_IRONMAN"
     },
     {
       "name": "JH-IronmanMadnessNoInfighting",
@@ -417,7 +455,9 @@
           "IronmanMadness": "IronmanMadnessNoInfighting"
         }
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_IRONMAN"
     },
     {
       "name": "JH-StartingDungeonRandomizer",
@@ -432,7 +472,9 @@
         "author": "Jay_H",
         "description": "Start a new character in a random dungeon instead of Privateer's Hold."
       },
-      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971"
+      "licence": "permission:Redistributed with the permission of Jay_H (JayH2971), granted to Ikram Massabini for the Daggerfall Unity iOS port, September 2026. Source: https://github.com/JayH2971",
+      "private_only": true,
+      "unlock_key": "JH_SDR"
     },
     {
       "name": "VanillaEnhanced",
@@ -446,7 +488,9 @@
       "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object.",
       "exclude_globs": [
         "*TexArray.asset"
-      ]
+      ],
+      "private_only": true,
+      "unlock_key": "VE"
     },
     {
       "name": "VanillaEnhanced-MaskedRoads",
@@ -460,7 +504,9 @@
       "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object.",
       "exclude_globs": [
         "*TexArray.asset"
-      ]
+      ],
+      "private_only": true,
+      "unlock_key": "VE"
     },
     {
       "name": "VanillaEnhanced-SnowlessSwamps",
@@ -474,7 +520,9 @@
       "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object.",
       "exclude_globs": [
         "*TexArray.asset"
-      ]
+      ],
+      "private_only": true,
+      "unlock_key": "VE"
     },
     {
       "name": "VanillaEnhanced-WinterTracks",
@@ -489,7 +537,9 @@
       "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object.",
       "exclude_globs": [
         "*TexArray.asset"
-      ]
+      ],
+      "private_only": true,
+      "unlock_key": "VE"
     },
     {
       "name": "VanillaEnhanced-KokeysTemperate",
@@ -503,7 +553,9 @@
       "licence": "permission:PERMISSION PENDING - Vanilla Enhanced is by drcarademono and Kokey; no licence is declared and the authors have not yet been asked. Included at Ikram Massabini's request (2026-09-02) pending their answer; remove if they object.",
       "exclude_globs": [
         "*TexArray.asset"
-      ]
+      ],
+      "private_only": true,
+      "unlock_key": "VE"
     },
     {
       "name": "UBLaMF-BuildingOverrides",
@@ -515,7 +567,9 @@
       "subdir": "Editor_files",
       "manifest": "UBLaMF - Building Overrides.dfmod.json",
       "licence_file": "License.md",
-      "licence_accept": "CC BY-NC-SA 4.0"
+      "licence_accept": "CC BY-NC-SA 4.0",
+      "private_only": true,
+      "unlock_key": "UBLAMF"
     },
     {
       "name": "UBLaMF-DungeonBlocks",
@@ -527,7 +581,9 @@
       "subdir": "Editor_files",
       "manifest": "UBLaMF - Dungeon Blocks.dfmod.json",
       "licence_file": "License.md",
-      "licence_accept": "CC BY-NC-SA 4.0"
+      "licence_accept": "CC BY-NC-SA 4.0",
+      "private_only": true,
+      "unlock_key": "UBLAMF"
     },
     {
       "name": "UBLaMF-Locations",
@@ -539,7 +595,9 @@
       "subdir": "Editor_files",
       "manifest": "UBLaMF - Locations.dfmod.json",
       "licence_file": "License.md",
-      "licence_accept": "CC BY-NC-SA 4.0"
+      "licence_accept": "CC BY-NC-SA 4.0",
+      "private_only": true,
+      "unlock_key": "UBLAMF"
     },
     {
       "name": "UBLaMF-MapBlocks",
@@ -551,7 +609,9 @@
       "subdir": "Editor_files",
       "manifest": "UBLaMF - Map Blocks.dfmod.json",
       "licence_file": "License.md",
-      "licence_accept": "CC BY-NC-SA 4.0"
+      "licence_accept": "CC BY-NC-SA 4.0",
+      "private_only": true,
+      "unlock_key": "UBLAMF"
     },
     {
       "name": "UBLaMF-Models",
@@ -567,7 +627,9 @@
       "extra_roots": [
         "Models",
         "Materials"
-      ]
+      ],
+      "private_only": true,
+      "unlock_key": "UBLAMF"
     },
     {
       "name": "UBLaMF-Textures",
@@ -580,7 +642,9 @@
       "manifest": "UBLaMF - Textures.dfmod.json",
       "licence_file": "License.md",
       "licence_accept": "CC BY-NC-SA 4.0",
-      "extra_roots": []
+      "extra_roots": [],
+      "private_only": true,
+      "unlock_key": "UBLAMF"
     },
     {
       "name": "DaggerfallExpandedTextures",
@@ -589,7 +653,9 @@
       ],
       "bundle": "~/dev/dfu-mods/iOS/daggerfall expanded textures.dfmod",
       "title": "Daggerfall Expanded Textures (Standard)",
-      "licence": "permission:Daggerfall Expanded Textures by Ninelan (Ninelan_Ruinar). Converted for iOS from the author's macOS release (Nexus 307, Standard edition) with the author's permission, granted to Ikram Massabini in September 2026. Not for reuse outside this pack."
+      "licence": "permission:Daggerfall Expanded Textures by Ninelan (Ninelan_Ruinar). Converted for iOS from the author's macOS release (Nexus 307, Standard edition) with the author's permission, granted to Ikram Massabini in September 2026. Not for reuse outside this pack.",
+      "private_only": true,
+      "unlock_key": "DET"
     },
     {
       "name": "DetailedDungeonExteriors",

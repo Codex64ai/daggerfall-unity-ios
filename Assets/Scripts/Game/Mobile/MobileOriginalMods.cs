@@ -75,6 +75,27 @@ namespace DaggerfallWorkshop.Game.Mobile
             };
         }
 
+        // Non-MIT rows whose bundles we build ourselves: stems are the StreamingAssets bundle names; tools/known_ours.py parses this call.
+        // Unlocks = IosName(stem) each; OldNames = "<stem>.dfmod" each (same order).
+        static Row PackRow(string key, string displayName, string url, string[] stems, string[] archiveMarkers, string[] dfmodMarkers,
+                           long minBytes, int threshold = 1)
+        {
+            var unlocks = new string[stems.Length];
+            var old = new string[stems.Length];
+            for (int i = 0; i < stems.Length; i++)
+            {
+                unlocks[i] = IosName(stems[i]);
+                old[i] = stems[i].ToLowerInvariant() + ".dfmod";
+            }
+            return new Row
+            {
+                Key = key, DisplayName = displayName, Url = url,
+                ArchiveMarkers = archiveMarkers, ArchiveThreshold = threshold,
+                DfmodMarkers = dfmodMarkers ?? new string[0], DfmodMinBytes = minBytes,
+                Unlocks = unlocks, OldNames = old,
+            };
+        }
+
         /// <summary>Extra old names for a row (tools/known_ours.py reads the string arguments).</summary>
         static Row WithOldNames(Row r, params string[] more)
         {
@@ -114,7 +135,9 @@ namespace DaggerfallWorkshop.Game.Mobile
             };
         }
 
-        /// <summary>The shipped table: one row per private_only entry in tools/bundled-mods/mods.json, plus DREAM and DREAM SKY.</summary>
+        /// <summary>The shipped table (32 rows): one row per unlock_key in tools/bundled-mods/mods.json (7 single-mod rows,
+        /// 23 PackRows for the 33 Jay_H / UBLaMF / Vanilla Enhanced / DET bundles), plus DREAM and DREAM SKY.
+        /// Markers per docs/superpowers/specs/2026-10-15-nonmit-originals-research.md section B.</summary>
         public static readonly Row[] Rows =
         {
             DreamRow(),
@@ -142,6 +165,79 @@ namespace DaggerfallWorkshop.Game.Mobile
                     "wod-terrain", 64L << 10),
             StemRow("DISTANTTERRAIN", "Distant Terrain of the World of Daggerfall", "https://www.nexusmods.com/daggerfallunity/mods/1284",
                     "distantterrain", 1L << 20),
+            // Jay_H quest packs (QPrepo 0dd7c6f): desktop "Mods/<title>.dfmod", Android "qp-*.dfmod", or loose QuestPacks/*.txt.
+            PackRow("JH_QP1", "Daggerfall Unity Quest Pack 1", "https://www.nexusmods.com/daggerfallunity/mods/2", new[] { "jh-questpack1" },
+                    new[] { "quest pack 1", "qp-questpack1", "QP1Readme.txt", "JHDBC01.txt" },
+                    new[] { "quest pack 1", "qp-questpack1" }, 1L << 10),
+            PackRow("JH_RLQ", "Random Little Quests", "https://www.nexusmods.com/daggerfallunity/mods/204", new[] { "jh-randomlittlequests" },
+                    new[] { "random little quests", "qp-random-little-quests", "QuestList-RLQ.txt" },
+                    new[] { "random little quests", "qp-random-little-quests" }, 1L << 10),
+            PackRow("JH_ROLES", "Immersion Roles", "https://www.nexusmods.com/daggerfallunity/mods/228", new[] { "jh-immersionroles" },
+                    new[] { "QuestList-Headhunter.txt", "QuestList-NobleChild.txt", "QuestList-Outlaw.txt", "QuestList-CursedM.txt", "QuestList-EscapedSlave.txt", "QuestList-Vindicator.txt", "QuestList-DarkB.txt", "QuestList-SpeakDead.txt" },
+                    null, 1L << 10),
+            PackRow("JH_REPCON", "Reputation Consequences", "https://www.nexusmods.com/daggerfallunity/mods/902", new[] { "jh-reputationconsequences" },
+                    new[] { "reputation consequences", "JHRCinit.txt" },
+                    new[] { "reputation consequences" }, 1L << 10),
+            PackRow("JH_CGK", "Chronicle of the Great Knight", "https://www.nexusmods.com/daggerfallunity/mods/493", new[] { "jh-chronicleofthegreatknight" },
+                    new[] { "chronicle of the great knight", "qp-chronicle-great-knight", "JH_CGK1.txt" },
+                    new[] { "chronicle of the great knight", "qp-chronicle-great-knight" }, 1L << 10),
+            PackRow("JH_TTC", "The Tale Continues", "https://www.nexusmods.com/daggerfallunity/mods/913", new[] { "jh-thetalecontinues" },
+                    new[] { "the tale continues", "QuestList-TTC.txt" },
+                    new[] { "the tale continues" }, 1L << 10),
+            PackRow("JH_BC", "Jay_H's Battle Creatures", "https://www.nexusmods.com/daggerfallunity/mods/196", new[] { "jh-battlecreatures" },
+                    new[] { "qp-battle-creatures", "QuestList-BC.txt", "battlecreaturesinit.txt" },
+                    new[] { "qp-battle-creatures" }, 1L << 10),
+            PackRow("JH_MUNDANE", "Mundane Jobs", "https://www.nexusmods.com/daggerfallunity/mods/356", new[] { "jh-mundanejobs" },
+                    new[] { "QuestList-Courier.txt", "QuestList-Treefeller.txt" },
+                    null, 1L << 10),
+            PackRow("JH_MEDEM", "Medical Emergency", "https://www.nexusmods.com/daggerfallunity/mods/897", new[] { "jh-medicalemergency" },
+                    new[] { "medical emergency", "QuestList-medicalemergency.txt" },
+                    new[] { "medical emergency" }, 1L << 10),
+            PackRow("JH_INVITE_DB", "Receive a Dark Brotherhood Invitation", "https://www.nexusmods.com/daggerfallunity/mods/917", new[] { "jh-becomedarkbrotherhood" },
+                    new[] { "receive a dark brotherhood invitation", "QuestList-becomedb.txt" },
+                    new[] { "receive a dark brotherhood invitation" }, 1L << 10),
+            PackRow("JH_INVITE_TG", "Receive a Thieves Guild Invitation", "https://www.nexusmods.com/daggerfallunity/mods/917", new[] { "jh-becomethief" },
+                    new[] { "receive a thieves guild invitation", "QuestList-becomethieves.txt" },
+                    new[] { "receive a thieves guild invitation" }, 1L << 10),
+            PackRow("JH_VAMPIRE", "Become a Vampire", "https://www.nexusmods.com/daggerfallunity/mods/721", new[] { "jh-becomevampire" },
+                    new[] { "become a vampire", "qp-become-a-vampire", "QuestList-becomevampire.txt" },
+                    new[] { "become a vampire", "qp-become-a-vampire" }, 1L << 10),
+            PackRow("JH_WEREBOAR", "Become a Wereboar", "https://www.nexusmods.com/daggerfallunity/mods/721", new[] { "jh-becomewereboar" },
+                    new[] { "become a wereboar", "qp-become-a-wereboar", "QuestList-becomewereboar.txt" },
+                    new[] { "become a wereboar", "qp-become-a-wereboar" }, 1L << 10),
+            PackRow("JH_WEREWOLF", "Become a Werewolf", "https://www.nexusmods.com/daggerfallunity/mods/721", new[] { "jh-becomewerewolf" },
+                    new[] { "become a werewolf", "qp-become-a-werewolf", "QuestList-becomewerewolf.txt" },
+                    new[] { "become a werewolf", "qp-become-a-werewolf" }, 1L << 10),
+            PackRow("JH_CHEAT", "The Cheater's Armory", "https://www.nexusmods.com/daggerfallunity/mods/899", new[] { "jh-cheatarmory" },
+                    new[] { "the cheater's armory", "QuestList-cheatarmory.txt" },
+                    new[] { "the cheater's armory" }, 1L << 10),
+            PackRow("JH_WEATHER", "Weather Items", "https://www.nexusmods.com/daggerfallunity/mods/133", new[] { "jh-weatheritems" },
+                    new[] { "QuestList-WeatherItems.txt", "WITEMS.txt" },
+                    null, 1L << 10),
+            PackRow("JH_NOISES", "Jay_H's Random Monster Noises Mod", "https://www.nexusmods.com/daggerfallunity/mods/271", new[] { "jh-randommonsternoises" },
+                    new[] { "QuestList-FunSurpriseMod.txt", "FunSurpriseMod.txt" },
+                    null, 1L << 10),
+            PackRow("JH_MQREP", "Main Quest Reputation Fix", "https://www.nexusmods.com/daggerfallunity/mods/898", new[] { "jh-mqrepfix" },
+                    new[] { "main quest reputation fix", "QuestList-MQrepfix.txt" },
+                    new[] { "main quest reputation fix" }, 1L << 10),
+            PackRow("JH_IRONMAN", "Ironman Madness", "https://www.nexusmods.com/daggerfallunity/mods/237", new[] { "jh-ironmanmadnessinfighting", "jh-ironmanmadnessnoinfighting" },
+                    new[] { "QuestList-IronmanMadness.txt", "JHIronmanMadness.txt" },
+                    null, 1L << 10),
+            PackRow("JH_SDR", "Starting Dungeon Randomizer", "https://www.nexusmods.com/daggerfallunity/mods/17", new[] { "jh-startingdungeonrandomizer" },
+                    new[] { "QuestList-Rando.txt", "READMEdfuRAND.txt", "RANDO1.txt" },
+                    null, 1L << 10),
+            // UBLaMF v2026.04.0: archive markers ONLY names we never ship (our v0.2.0 MIT zip held the 6 shipped names).
+            PackRow("UBLAMF", "Unofficial Block, Location and Model Fixes", "https://www.nexusmods.com/daggerfallunity/mods/100", new[] { "ublamf - building overrides", "ublamf - dungeon blocks", "ublamf - locations", "ublamf - map blocks", "ublamf - models", "ublamf - textures" },
+                    new[] { "ublamf - scripting", "unofficial block, location and model fixes", "ublamf - map blocks addon", "Unofficial Block, Location and Model Fixes readme.url" },
+                    new[] { "ublamf - building overrides", "ublamf - dungeon blocks", "ublamf - locations", "ublamf - map blocks", "ublamf - models", "ublamf - scripting", "ublamf - textures", "unofficial block, location and model fixes", "ublamf - map blocks addon" }, 64L << 10),
+            // Vanilla Enhanced: one download unlocks all five of our files (Winter Tracks and Kokey's Temperate are GitHub-only).
+            PackRow("VE", "Vanilla Enhanced", "https://www.nexusmods.com/daggerfallunity/mods/273", new[] { "vanilla enhanced - base", "vanilla enhanced - masked roads", "vanilla enhanced - snowless swamps and jungles", "vanilla enhanced - winter tracks", "kokey's temperate" },
+                    new[] { "vanilla enhanced - animated people", "vanilla enhanced - villagers", "vanilla enhanced - villains & monsters", "Vanilla Enhanced - Base.dfmod.json", "Vanilla Enhanced - Winter Tracks.dfmod.json", "Kokey's Temperate.dfmod.json" },
+                    new[] { "vanilla enhanced - animated people", "vanilla enhanced - base", "vanilla enhanced - masked roads", "vanilla enhanced - snowless swamps and jungles", "vanilla enhanced - villagers", "vanilla enhanced - villains & monsters" }, 64L << 10),
+            // DET: the main archive entry has our v0.2.0 name; the (name, size) rule tells them apart.
+            PackRow("DET", "Daggerfall Expanded Textures", "https://www.nexusmods.com/daggerfallunity/mods/307", new[] { "daggerfall expanded textures" },
+                    new[] { "daggerfall expanded textures legacy" },
+                    new[] { "daggerfall expanded textures", "daggerfall expanded textures legacy" }, 1L << 20),
         };
 
         #endregion

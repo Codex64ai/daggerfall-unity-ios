@@ -182,6 +182,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestOriginalModOurDesktopNamedFiles();
             TestOriginalModDreamTexturesSoundSky();
             TestOriginalModLooseFiles();
+            TestOriginalModGate33Table();
             TestLockedModRows();
             TestNonMitPackNames();
             TestDebugStartModsWindow();
@@ -6040,6 +6041,71 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
 
         // tools/bundled-mods/mods.json and the C# recognizer table must agree: every private_only entry with an
         // unlock_key has a row with that Key whose Unlocks carries pack.py's ios_name(stem).
+        // Gate-33 (2026-10-15): the 23 PackRows for the Jay_H / UBLaMF / Vanilla Enhanced / DET bundles are self-consistent.
+        static void TestOriginalModGate33Table()
+        {
+            var rows = MobileOriginalMods.Rows;
+            var keys = new HashSet<string>();
+            foreach (var r in rows) keys.Add(r.Key);
+            Check(rows.Length == 32 && keys.Count == 32, "gate33 table: 32 rows with distinct keys", rows.Length + "/" + keys.Count);
+            string[] newKeys = { "JH_QP1", "JH_RLQ", "JH_ROLES", "JH_REPCON", "JH_CGK", "JH_TTC", "JH_BC", "JH_MUNDANE", "JH_MEDEM",
+                                 "JH_INVITE_DB", "JH_INVITE_TG", "JH_VAMPIRE", "JH_WEREBOAR", "JH_WEREWOLF", "JH_CHEAT", "JH_WEATHER",
+                                 "JH_NOISES", "JH_MQREP", "JH_IRONMAN", "JH_SDR", "UBLAMF", "VE", "DET" };
+            Func<string, MobileOriginalMods.Row> row = k => Array.Find(rows, r => r.Key == k);
+            bool allIos = true; string badIos = "";
+            foreach (var r in rows)
+                foreach (string u in r.Unlocks)
+                    if (!u.EndsWith("-ios.dfmod", StringComparison.Ordinal)) { allIos = false; badIos = u; }
+            Check(allIos, "gate33 table: every Unlocks name ends -ios.dfmod", badIos);
+            bool pairs = true; string badPair = "";
+            foreach (string k in newKeys)
+            {
+                var r = row(k);
+                if (r == null) { pairs = false; badPair = k + " missing"; continue; }
+                if (r.OldNames.Length != r.Unlocks.Length) { pairs = false; badPair = k + " lengths"; continue; }
+                for (int i = 0; i < r.Unlocks.Length; i++)
+                    if (r.Unlocks[i] != MobileOriginalMods.IosName(r.OldNames[i])) { pairs = false; badPair = k + " " + r.OldNames[i]; }
+            }
+            Check(pairs, "gate33 table: each new row's Unlocks[i] == IosName(OldNames[i])", badPair);
+            var unlockNorm = new HashSet<string>();
+            foreach (var r in rows) foreach (string u in r.Unlocks) unlockNorm.Add(MobileOriginalMods.Normalize(u));
+            bool noSelf = true; string badSelf = "";
+            foreach (var r in rows)
+            {
+                foreach (string m in r.ArchiveMarkers ?? new string[0])
+                    if (unlockNorm.Contains(MobileOriginalMods.Normalize(m))) { noSelf = false; badSelf = r.Key + " " + m; }
+                foreach (string m in r.DfmodMarkers ?? new string[0])
+                    if (unlockNorm.Contains(MobileOriginalMods.Normalize(m))) { noSelf = false; badSelf = r.Key + " " + m; }
+            }
+            Check(noSelf, "gate33 table: no marker normalizes to any shipped -ios name", badSelf);
+            var colliding = new[]
+            {
+                new[] { "UBLAMF", "ublamf - building overrides" }, new[] { "UBLAMF", "ublamf - dungeon blocks" },
+                new[] { "UBLAMF", "ublamf - locations" }, new[] { "UBLAMF", "ublamf - map blocks" },
+                new[] { "UBLAMF", "ublamf - models" }, new[] { "UBLAMF", "ublamf - textures" },
+                new[] { "VE", "vanilla enhanced - base" }, new[] { "VE", "vanilla enhanced - masked roads" },
+                new[] { "VE", "vanilla enhanced - snowless swamps and jungles" }, new[] { "DET", "daggerfall expanded textures" },
+            };
+            bool coll = true; string badColl = "";
+            foreach (var c in colliding)
+            {
+                var r = row(c[0]);
+                if (r == null || Array.IndexOf(r.OldNames, c[1] + ".dfmod") < 0 || Array.IndexOf(r.DfmodMarkers, c[1]) < 0) { coll = false; badColl = c[1]; continue; }
+                foreach (string m in r.ArchiveMarkers)
+                    if (MobileOriginalMods.Normalize(m) == MobileOriginalMods.Normalize(c[1])) { coll = false; badColl = c[1] + " in archive markers"; }
+            }
+            Check(coll, "gate33 table: the 10 colliding names are OldNames + DfmodMarkers, never ArchiveMarkers", badColl);
+            var roles = row("JH_ROLES"); var ve = row("VE"); var ub = row("UBLAMF"); var iron = row("JH_IRONMAN");
+            Check(roles != null && roles.ArchiveThreshold == 1, "gate33 table: any one Immersion Roles marker unlocks");
+            Check(ve != null && ve.Unlocks.Length == 5 && ub != null && ub.Unlocks.Length == 6 && iron != null && iron.Unlocks.Length == 2,
+                  "gate33 table: VE unlocks 5, UBLAMF 6, JH_IRONMAN 2");
+            string nn;
+            var qp = MobileOriginalMods.RowForOldName("jh-questpack1.dfmod", rows, out nn);
+            Check(qp != null && qp.Key == "JH_QP1" && nn == "jh-questpack1-ios.dfmod", "gate33 table: old name jh-questpack1.dfmod -> JH_QP1 -ios", nn);
+            var kk = MobileOriginalMods.RowForPackFile("kokey's-temperate-ios.dfmod", rows);
+            Check(kk != null && kk.Key == "VE", "gate33 table: kokey's-temperate-ios.dfmod is unlocked by VE");
+        }
+
         static void TestNonMitPackNames()
         {
             string path = Path.GetFullPath(Path.Combine(Application.dataPath, "../tools/bundled-mods/mods.json"));
@@ -6058,7 +6124,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
                 Check(row != null && Array.IndexOf(row.Unlocks, want) >= 0,
                       "non-MIT pack: row " + e.unlock_key + " unlocks " + want, row == null ? "no row" : string.Join(",", row.Unlocks));
             }
-            Check(n == 7, "non-MIT pack: seven private_only entries carry unlock keys", n.ToString());
+            Check(n == 40, "non-MIT pack: forty private_only entries carry unlock keys", n.ToString());
             Check(MobileOriginalMods.IosName("World of Daggerfall - Biomes") == "world_of_daggerfall-biomes-ios.dfmod",
                   "non-MIT pack: IosName matches pack.py ios_name on the Biomes stem");
         }

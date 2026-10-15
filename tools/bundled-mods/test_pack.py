@@ -212,9 +212,11 @@ class Readme(unittest.TestCase):
             cfg = json.load(fh)
         self.assertEqual([m["name"] for m in cfg["mods"] if not pack.authors_of(m)], [])
         line = pack.authors_line(cfg)
-        for who in ("Cliffworms", "Jay_H", "drcarademono", "Kokey", "XJDHDR", "Ninelan", "Josh Steinhauer",
-                    "Kirk.O", "numidium", "DunnyOfPenwick"):
+        for who in ("Cliffworms", "Josh Steinhauer", "Kirk.O", "numidium", "DunnyOfPenwick", "RebornZA", "Deepfighter"):
             self.assertIn(who, line)
+        # Gate-33: the Jay_H / UBLaMF / Vanilla Enhanced / DET mods moved to the Non-MIT pack.
+        for who in ("Jay_H", "drcarademono", "Kokey", "XJDHDR", "Ninelan"):
+            self.assertNotIn(who, line)
 
     def test_private_readme_credits_the_original_authors(self):
         with open(pack.MODS_JSON, encoding="utf-8") as fh:
@@ -274,7 +276,11 @@ class NonMitPack(unittest.TestCase):
         with open(os.path.join(os.path.dirname(__file__), "mods.json"), encoding="utf-8") as fh:
             cfg = json.load(fh)
         self.assertEqual(sorted(pack.private_stems(cfg).values()),
-                         sorted(["DEX", "REALGRASS", "DYNAMICSKIES", "WOD", "WODBIOMES", "WODTERRAIN", "DISTANTTERRAIN"]))
+                         sorted(["DEX", "REALGRASS", "DYNAMICSKIES", "WOD", "WODBIOMES", "WODTERRAIN", "DISTANTTERRAIN"]
+                                + ["JH_QP1", "JH_RLQ", "JH_ROLES", "JH_REPCON", "JH_CGK", "JH_TTC", "JH_BC", "JH_MUNDANE",
+                                   "JH_MEDEM", "JH_INVITE_DB", "JH_INVITE_TG", "JH_VAMPIRE", "JH_WEREBOAR", "JH_WEREWOLF",
+                                   "JH_CHEAT", "JH_WEATHER", "JH_NOISES", "JH_MQREP", "JH_IRONMAN", "JH_IRONMAN", "JH_SDR",
+                                   "DET"] + ["UBLAMF"] * 6 + ["VE"] * 5))
 
     def test_end_to_end_private_zip(self):
         import json
