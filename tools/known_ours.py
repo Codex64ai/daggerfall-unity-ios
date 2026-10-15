@@ -4,6 +4,9 @@
 KnownOurs = (leaf name lower-case, exact byte size) of every pack .dfmod we have built whose name is an
 OldNames or Unlocks entry of some recognizer row in MobileOriginalMods.cs. ScanOnce never treats such a file
 as a desktop original (our old-name files carry UnityFS and pass the size floor, so they would self-unlock).
+Every file found also adds its "-ios" alias at the same size (when that alias is a table name): a renamed copy of
+our own bundle is still ours. Sources include the frozen release/v0.2.0/mitpack-dl/Mods folder (the exact bytes of
+the v0.2.0 MIT zip); Assets/StreamingAssets/Mods is NOT a source (builtin app builds change it).
 
 Usage: python3 tools/known_ours.py [--check] [DIR ...]
   DIRs default to the folders below; each is read at the top level only, read-only.
@@ -23,6 +26,7 @@ DEFAULT_DIRS = [
     os.path.join(HOME, "dev/dfu-mods/dream-ios-draft"),
     os.path.join(HOME, "dev/dfu-mods"),
     os.path.join(HOME, "dev/dfu-mods/iOS"),
+    "/Volumes/More data/AI projects/Daggerfall/release/v0.2.0/mitpack-dl/Mods",
 ]
 
 
@@ -48,6 +52,10 @@ def table_names(cs_text):
     for stem in re.findall(r'StemRow\(\s*"[^"]*",\s*"[^"]*",\s*"[^"]*",\s*"([^"]+)"', cs_text, re.S):
         names.add(stem.lower() + ".dfmod")
         names.add(ios_name(stem))
+    for lit in re.findall(r'PackRow\(\s*"[^"]*",\s*"[^"]*",\s*"[^"]*",\s*new\[\]\s*\{([^}]*)\}', cs_text, re.S):
+        for stem in re.findall(r'"([^"]+)"', lit):
+            names.add(stem.lower() + ".dfmod")
+            names.add(ios_name(stem))
     for extra in re.findall(r'WithOldNames\(StemRow\(.*?\)\s*,\s*((?:"[^"]+"\s*,?\s*)+)\)', cs_text, re.S):
         for n in re.findall(r'"([^"]+)"', extra):
             names.add(n.lower())
@@ -66,7 +74,10 @@ def collect(dirs, allowed):
             p = os.path.join(d, leaf)
             low = leaf.lower()
             if low.endswith(".dfmod") and low in allowed and os.path.isfile(p):
-                found.add((low, os.path.getsize(p)))
+                size = os.path.getsize(p)
+                found.add((low, size))
+                if ios_name(low) in allowed:
+                    found.add((ios_name(low), size))
     return sorted(found)
 
 
