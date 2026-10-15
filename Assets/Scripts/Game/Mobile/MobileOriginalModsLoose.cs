@@ -12,7 +12,7 @@
 //
 //   Same lock-mode rules as the .dfmod gate: release builds enforce; test-app builds (IsTestBuild) only when
 //   Documents/Mods/GameData/enforce-original-lock exists (ApplyLockMode / LockEnforced). Never throws; one log line
-//   per key and decision. Cost: one dictionary lookup per resolved user file; a stat only on a name hit; the
+//   per key, decision and file type. Cost: one dictionary lookup per resolved user file; a stat only on a name hit; the
 //   receipt file is read once and re-read only after a ModManager scan (which may have added a receipt).
 //   Spec: docs/superpowers/specs/2026-10-14-original-mod-unlock-design.md, "Loose files".
 
@@ -130,10 +130,11 @@ namespace DaggerfallWorkshop.Game.Mobile
                 bool locked = LooseLocked(leaf, fi.Length, table, keys, IsTestBuild, enforce);
                 lock (looseSync)
                 {
-                    if (looseLogged.Add(key + (locked ? "+L" : "+U")))
+                    string ext = Path.GetExtension(leaf).ToLowerInvariant();
+                    if (looseLogged.Add(key + (locked ? "+L" : "+U") + ext))   // one line per key, decision and file type
                         UnityEngine.Debug.Log(locked
-                            ? string.Format("[OriginalMods] loose {0} files ignored (needs {0}), first: {1}", key, leaf)
-                            : string.Format("[OriginalMods] loose {0} files used, first: {1}", key, leaf));
+                            ? string.Format("[OriginalMods] loose {0} files ignored (needs {0}), first {2}: {1}", key, leaf, ext)
+                            : string.Format("[OriginalMods] loose {0} files used, first {2}: {1}", key, leaf, ext));
                 }
                 return locked;
             }

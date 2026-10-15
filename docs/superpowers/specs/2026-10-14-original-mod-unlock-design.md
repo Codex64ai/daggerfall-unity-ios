@@ -121,7 +121,8 @@ treated as **absent** (vanilla music/movies/icons); with the receipt they work a
   case-insensitive dictionary lookup on the leaf name (no stat, no allocation beyond `Path.GetFileName`); a name hit costs one
   `FileInfo`. Receipt keys and the enforce file are read once and re-read only after each `RunScanForModManager` (which may
   have written a receipt, e.g. on Refresh). Any exception -> not locked (the file is used, as before) + one log line. One log
-  line per key and decision: `[OriginalMods] loose DREAM files ignored (needs DREAM), first: <file>` / `... used, first: <file>`.
+  line per key, decision and file type: `[OriginalMods] loose DREAM files ignored (needs DREAM), first .ogg: <file>` /
+  `... used, first .ogg: <file>`.
 - **Lookup points** (every place a loose file is resolved):
   1. `MobileContentPath.Override` - a found user file that is locked returns the shipped path instead. Covers SoundReplacement
      (music `.ogg` incl. the iOS preload, `.wav`, MIDI bytes), the Better Ambience port's SoundList, VideoReplacement (`.mp4`),
