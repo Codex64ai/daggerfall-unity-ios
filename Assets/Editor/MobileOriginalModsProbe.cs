@@ -19,16 +19,17 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
         {
             string path = System.Environment.GetEnvironmentVariable("DFU_ARCHIVE");
             if (string.IsNullOrEmpty(path)) { Debug.Log("[OriginalModsProbe] set DFU_ARCHIVE to an archive path"); return; }
-            List<string> entries; string error;
+            List<MobileOriginalMods.ArchiveEntry> full; string error;
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            if (!MobileOriginalMods.TryListEntries(path, out entries, out error))
+            if (!MobileOriginalMods.TryListEntries(path, out full, out error))
             {
                 Debug.Log("[OriginalModsProbe] couldn't read " + path + ": " + error);
                 return;
             }
+            var entries = full.ConvertAll(x => x.Name);
             Debug.Log("[OriginalModsProbe] " + entries.Count + " entries in " + sw.ElapsedMilliseconds + " ms: " + path);
-            foreach (string e in entries)
-                Debug.Log("[OriginalModsProbe] entry " + e + " -> " + MobileOriginalMods.Normalize(e));
+            foreach (var e in full)
+                Debug.Log("[OriginalModsProbe] entry " + e.Name + " (" + e.Size + " B) -> " + MobileOriginalMods.Normalize(e.Name));
             foreach (var row in MobileOriginalMods.Rows)
                 Debug.Log("[OriginalModsProbe] row " + row.Key + (MobileOriginalMods.MatchArchive(row, entries) ? " MATCHES" : " no match"));
         }

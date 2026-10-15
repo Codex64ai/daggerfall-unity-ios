@@ -183,6 +183,7 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             TestOriginalModDreamTexturesSoundSky();
             TestOriginalModLooseFiles();
             TestOriginalModGate33Table();
+            TestOriginalModArchiveSizeRule();
             TestLockedModRows();
             TestNonMitPackNames();
             TestDebugStartModsWindow();
@@ -6091,10 +6092,14 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             {
                 var r = row(c[0]);
                 if (r == null || Array.IndexOf(r.OldNames, c[1] + ".dfmod") < 0 || Array.IndexOf(r.DfmodMarkers, c[1]) < 0) { coll = false; badColl = c[1]; continue; }
+                bool inArchive = false;
                 foreach (string m in r.ArchiveMarkers)
-                    if (MobileOriginalMods.Normalize(m) == MobileOriginalMods.Normalize(c[1])) { coll = false; badColl = c[1] + " in archive markers"; }
+                    if (MobileOriginalMods.Normalize(m) == MobileOriginalMods.Normalize(c[1])) inArchive = true;
+                // UBLaMF / VE: never an archive marker (their real archives hold other names). DET: the real archive's only
+                // entry IS this name, so it must be an archive marker; FilterKnownOurs drops our own file by size.
+                if (inArchive != (c[0] == "DET")) { coll = false; badColl = c[1] + (inArchive ? " in" : " not in") + " archive markers"; }
             }
-            Check(coll, "gate33 table: the 10 colliding names are OldNames + DfmodMarkers, never ArchiveMarkers", badColl);
+            Check(coll, "gate33 table: the 10 colliding names are OldNames + DfmodMarkers; ArchiveMarkers only for DET", badColl);
             var roles = row("JH_ROLES"); var ve = row("VE"); var ub = row("UBLAMF"); var iron = row("JH_IRONMAN");
             Check(roles != null && roles.ArchiveThreshold == 1, "gate33 table: any one Immersion Roles marker unlocks");
             Check(ve != null && ve.Unlocks.Length == 5 && ub != null && ub.Unlocks.Length == 6 && iron != null && iron.Unlocks.Length == 2,
@@ -6104,6 +6109,93 @@ namespace DaggerfallWorkshop.Game.Mobile.EditorTools
             Check(qp != null && qp.Key == "JH_QP1" && nn == "jh-questpack1-ios.dfmod", "gate33 table: old name jh-questpack1.dfmod -> JH_QP1 -ios", nn);
             var kk = MobileOriginalMods.RowForPackFile("kokey's-temperate-ios.dfmod", rows);
             Check(kk != null && kk.Key == "VE", "gate33 table: kokey's-temperate-ios.dfmod is unlocked by VE");
+        }
+
+        static void WriteOrigModZipSized(string path, params KeyValuePair<string, long>[] entries)
+        {
+            using (var za = SharpCompress.Archives.Zip.ZipArchive.Create())
+            {
+                foreach (var e in entries)
+                    za.AddEntry(e.Key, new MemoryStream(new byte[e.Value]), true);
+                using (var fs = File.Create(path)) za.SaveTo(fs, new SharpCompress.Writers.WriterOptions(SharpCompress.Common.CompressionType.Deflate));
+            }
+        }
+
+        // Gate-33 Task 3: archive entries that are our own pack files (leaf name + exact size) never match a marker.
+        static void TestOriginalModArchiveSizeRule()
+        {
+            string root = OrigModTempDir("sizerule");
+            try
+            {
+                Func<string, long, MobileOriginalMods.ArchiveEntry> E = (n, z) => new MobileOriginalMods.ArchiveEntry { Name = n, Size = z };
+                var idx16 = new Dictionary<string, long> { { "x.dfmod", 16 } };
+                // (a) FilterKnownOurs is pure and size-exact.
+                Check(MobileOriginalMods.FilterKnownOurs(new[] { E("Mods/x.dfmod", 16) }, idx16).Count == 0,
+                      "archive size rule: an entry at our pack-index size is dropped");
+                Check(MobileOriginalMods.FilterKnownOurs(new[] { E("Mods/x.dfmod", 17) }, idx16).Count == 1,
+                      "archive size rule: the same name at another size is kept");
+                Check(MobileOriginalMods.FilterKnownOurs(new[] { E("Mods/x.dfmod", 16) }, null).Count == 1,
+                      "archive size rule: no pack index keeps an unknown entry");
+                var k0 = MobileOriginalMods.KnownOurs[0];
+                Check(MobileOriginalMods.FilterKnownOurs(new[] { E("Mods/" + k0.Key, k0.Value) }, null).Count == 0,
+                      "archive size rule: an entry matching KnownOurs (name + size) is dropped", k0.Key);
+
+                // (b) scan with a fixture row.
+                var row = new MobileOriginalMods.Row
+                {
+                    Key = "X", DisplayName = "X", Url = "https://example.invalid/x",
+                    ArchiveMarkers = new[] { "x" }, ArchiveThreshold = 1, DfmodMarkers = new string[0], DfmodMinBytes = 1,
+                    Unlocks = new[] { "x-ios.dfmod" }, OldNames = new string[0],
+                };
+                Func<string, Dictionary<string, long>, List<string>> listF = (p, ix) =>
+                {
+                    List<MobileOriginalMods.ArchiveEntry> e; string err;
+                    return MobileOriginalMods.TryListEntries(p, out e, out err) ? MobileOriginalMods.FilterKnownOurs(e, ix) : null;
+                };
+                Func<string, string> mods = name => { string d = Path.Combine(root, name, "Mods"); Directory.CreateDirectory(d); return d; };
+                Func<string, string> rcpt = name => Path.Combine(root, name, "Mods", "GameData", MobileOriginalMods.ReceiptFileName);
+                string b1 = mods("b1"), b2 = mods("b2");
+                WriteOrigModZip(Path.Combine(b1, "ours.zip"), "Mods/x.dfmod");
+                WriteOrigModZip(Path.Combine(b2, "orig.zip"), "Mods/x.dfmod");
+                var idx99 = new Dictionary<string, long> { { "x.dfmod", 99 } };
+                var r1 = MobileOriginalMods.ScanOnce(b1, rcpt("b1"), new[] { row }, p => listF(p, idx16), null, idx16);
+                var r2 = MobileOriginalMods.ScanOnce(b2, rcpt("b2"), new[] { row }, p => listF(p, idx99), null, idx99);
+                Check(r1.Receipts.Count == 0, "archive size rule: our own zip (entry at our size) writes no receipt");
+                Check(MobileOriginalMods.ReceiptKeys(r2).Contains("X"), "archive size rule: the same entry at another size writes a receipt");
+
+                // (c) the real negative case: our v0.2.0 MIT zip's 10 colliding names at their KnownOurs sizes, real Rows.
+                string[] colliding = { "ublamf - building overrides.dfmod", "ublamf - dungeon blocks.dfmod", "ublamf - locations.dfmod",
+                                       "ublamf - map blocks.dfmod", "ublamf - models.dfmod", "ublamf - textures.dfmod",
+                                       "vanilla enhanced - base.dfmod", "vanilla enhanced - masked roads.dfmod",
+                                       "vanilla enhanced - snowless swamps and jungles.dfmod", "daggerfall expanded textures.dfmod" };
+                var ours = new List<KeyValuePair<string, long>>();
+                var plus = new List<KeyValuePair<string, long>>();
+                foreach (string n in colliding)
+                {
+                    long size = -1;
+                    foreach (var k in MobileOriginalMods.KnownOurs) if (k.Key == n) { size = k.Value; break; }
+                    if (size < 0) { Check(false, "archive size rule: KnownOurs has " + n); continue; }
+                    ours.Add(new KeyValuePair<string, long>("Mods/" + n, size));
+                    plus.Add(new KeyValuePair<string, long>("Mods/" + n, size + 1));
+                }
+                string c = mods("c"), d = mods("d");
+                WriteOrigModZipSized(Path.Combine(c, "MIT-ModPack-ios.zip"), ours.ToArray());
+                WriteOrigModZipSized(Path.Combine(d, "other.zip"), plus.ToArray());
+                var rc = MobileOriginalMods.ReceiptKeys(MobileOriginalMods.ScanOnce(c, rcpt("c"), MobileOriginalMods.Rows, p => listF(p, null), null));
+                Check(!rc.Contains("UBLAMF") && !rc.Contains("VE") && !rc.Contains("DET") && rc.Count == 0,
+                      "archive size rule: our v0.2.0 MIT zip's 10 colliding names at our sizes unlock nothing", string.Join(",", new List<string>(rc).ToArray()));
+                // (d) the same names at other sizes: only DET (UBLaMF / VE archive markers never name what we ship).
+                var rd = MobileOriginalMods.ReceiptKeys(MobileOriginalMods.ScanOnce(d, rcpt("d"), MobileOriginalMods.Rows, p => listF(p, null), null));
+                Check(rd.Contains("DET") && rd.Count == 1, "archive size rule: the same names at other sizes unlock DET only",
+                      string.Join(",", new List<string>(rd).ToArray()));
+
+                // (e) the ArchiveEntry listing reports the uncompressed size.
+                List<MobileOriginalMods.ArchiveEntry> le; string lerr;
+                bool ok = MobileOriginalMods.TryListEntries(Path.Combine(b1, "ours.zip"), out le, out lerr);
+                Check(ok && le.Count == 1 && le[0].Size == 16 && le[0].Name == "Mods/x.dfmod", "archive size rule: listing reports the 16-byte size",
+                      ok ? le.Count.ToString() : lerr);
+            }
+            finally { Directory.Delete(root, true); }
         }
 
         static void TestNonMitPackNames()

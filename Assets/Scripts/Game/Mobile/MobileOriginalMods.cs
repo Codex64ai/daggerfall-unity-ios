@@ -234,9 +234,10 @@ namespace DaggerfallWorkshop.Game.Mobile
             PackRow("VE", "Vanilla Enhanced", "https://www.nexusmods.com/daggerfallunity/mods/273", new[] { "vanilla enhanced - base", "vanilla enhanced - masked roads", "vanilla enhanced - snowless swamps and jungles", "vanilla enhanced - winter tracks", "kokey's temperate" },
                     new[] { "vanilla enhanced - animated people", "vanilla enhanced - villagers", "vanilla enhanced - villains & monsters", "Vanilla Enhanced - Base.dfmod.json", "Vanilla Enhanced - Winter Tracks.dfmod.json", "Kokey's Temperate.dfmod.json" },
                     new[] { "vanilla enhanced - animated people", "vanilla enhanced - base", "vanilla enhanced - masked roads", "vanilla enhanced - snowless swamps and jungles", "vanilla enhanced - villagers", "vanilla enhanced - villains & monsters" }, 64L << 10),
-            // DET: the main archive entry has our v0.2.0 name; the (name, size) rule tells them apart.
+            // DET: the real archive's only entry has our v0.2.0 name, so the main name IS an archive marker here; the
+            // (name, size) rule (FilterKnownOurs) drops our own file at its exact size before matching.
             PackRow("DET", "Daggerfall Expanded Textures", "https://www.nexusmods.com/daggerfallunity/mods/307", new[] { "daggerfall expanded textures" },
-                    new[] { "daggerfall expanded textures legacy" },
+                    new[] { "daggerfall expanded textures", "daggerfall expanded textures legacy" },
                     new[] { "daggerfall expanded textures", "daggerfall expanded textures legacy" }, 1L << 20),
         };
 
@@ -676,19 +677,16 @@ namespace DaggerfallWorkshop.Game.Mobile
             if (mode != null) UnityEngine.Debug.Log(mode);
             try
             {
-                ScanOnce(modsDir, Path.Combine(modDataDir, ReceiptFileName), Rows, ListOrNull, UnityEngine.Debug.Log,
-                         LoadPackIndex(modsDir));
+                Dictionary<string, long> index = LoadPackIndex(modsDir);
+                // Archive entries that are our own pack files (leaf name + exact size) never count as an original.
+                ScanOnce(modsDir, Path.Combine(modDataDir, ReceiptFileName), Rows,
+                         p => { List<ArchiveEntry> e; string err; return TryListEntries(p, out e, out err) ? FilterKnownOurs(e, index) : null; },
+                         UnityEngine.Debug.Log, index);
             }
             catch (Exception e)
             {
                 UnityEngine.Debug.Log("[OriginalMods] scan failed: " + e.Message);
             }
-        }
-
-        static List<string> ListOrNull(string path)
-        {
-            List<string> entries; string error;
-            return TryListEntries(path, out entries, out error) ? entries : null;
         }
 
         /// <summary>Records a non-Load verdict: one "Needs ..." locked row per Key, one log line per skipped file.</summary>
@@ -734,14 +732,42 @@ namespace DaggerfallWorkshop.Game.Mobile
 
         #endregion
 
+        /// <summary>One archive entry: full path inside the archive and its uncompressed size.</summary>
+        public struct ArchiveEntry
+        {
+            public string Name;
+            public long Size;
+        }
+
+        /// <summary>Entry names minus every entry whose (leaf name, size) is one of our own pack files (IsKnownOurs).
+        /// An entry with our name at another size is kept (a desktop original). Pure.</summary>
+        public static List<string> FilterKnownOurs(IEnumerable<ArchiveEntry> entries, Dictionary<string, long> packIndex)
+        {
+            var kept = new List<string>();
+            if (entries == null) return kept;
+            foreach (ArchiveEntry e in entries)
+                if (!IsKnownOurs(e.Name, e.Size, packIndex)) kept.Add(e.Name);
+            return kept;
+        }
+
+        /// <summary>The entry names of TryListEntries(archivePath, out List&lt;ArchiveEntry&gt;, ...).</summary>
+        public static bool TryListEntries(string archivePath, out List<string> entries, out string error)
+        {
+            List<ArchiveEntry> full;
+            bool ok = TryListEntries(archivePath, out full, out error);
+            entries = new List<string>(full.Count);
+            foreach (ArchiveEntry e in full) entries.Add(e.Name);
+            return ok;
+        }
+
         /// <summary>
-        /// Lists the entry names (full paths inside the archive, directories excluded) of a zip/7z/rar.
+        /// Lists the entries (full paths inside the archive and uncompressed sizes, directories excluded) of a zip/7z/rar.
         /// Header-only (ArchiveFactory + Entries, never ReaderFactory). Any exception -> false with
         /// error = the message; nothing escapes. Logs nothing (callers log once).
         /// </summary>
-        public static bool TryListEntries(string archivePath, out List<string> entries, out string error)
+        public static bool TryListEntries(string archivePath, out List<ArchiveEntry> entries, out string error)
         {
-            entries = new List<string>();
+            entries = new List<ArchiveEntry>();
             error = null;
             try
             {
@@ -750,13 +776,13 @@ namespace DaggerfallWorkshop.Game.Mobile
                 {
                     foreach (var en in a.Entries)
                         if (!en.IsDirectory)
-                            entries.Add(en.Key);
+                            entries.Add(new ArchiveEntry { Name = en.Key, Size = en.Size });
                 }
                 return true;
             }
             catch (Exception e)
             {
-                entries = new List<string>();
+                entries = new List<ArchiveEntry>();
                 error = string.IsNullOrEmpty(e.Message) ? e.GetType().Name : e.Message;
                 return false;
             }
