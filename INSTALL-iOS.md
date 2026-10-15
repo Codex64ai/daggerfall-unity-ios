@@ -112,37 +112,24 @@ You can play now: tap **Play**. Mods are optional (Parts C to F).
    - **You should see:** the 15 mods in the list.
    - Not there? Close the app fully (swipe up from the bottom and hold, then swipe the app away; with a Home button, press it twice and swipe up) and open it again.
 
-## Part D. Add the Non-MIT Mod Pack (optional)
+## Part D. Add the Non-MIT Pack (optional)
 
-These mods are by permission, CC BY-NC-SA, or have no license. Each one stays locked until you
-add its original (Part E). The files are big: use Wi-Fi.
+Each file stays locked until you add its original (Part E). The files are big: use Wi-Fi.
 
-1. In Safari, download `NonMIT-ModPack-ios-part1.zip` and `NonMIT-ModPack-ios-part2.zip` from **Assets**.
-2. In **Files** (**Recents** or **Downloads**), tap `NonMIT-ModPack-ios-part1.zip` **once**.
-   - **You should see:** a folder **NonMIT-ModPack-ios-part1**.
-3. Open it, then its **Mods** folder.
-4. **Select > Select All > Move > On My iPad > Daggerfall Unity > Mods > Move**.
-5. Go back to **NonMIT-ModPack-ios-part1**. Long-press `pack-index.json`, tap **Move**, choose **On My iPad > Daggerfall Unity > Mods**, tap **Move**.
-6. Do steps 2 to 5 again for **part2**. If Files says `pack-index.json` exists, tap **Replace**.
-7. Delete the zips and unpacked folders from **Downloads** to get the space back.
-8. Open the app, tap **Mods**, tap **Refresh**.
-   - **You should see:** grey rows at the bottom: **Needs <mod name> - tap for the download page**. That is normal.
-
-**Only if you use DREAM** (these three are our zips, so unpacking them is right):
-
-9. Download `DREAM-music-ios.zip`, `DREAM-movies-ios.zip` and `DREAM-extras-ios.zip` from **Assets**.
-10. Tap `DREAM-music-ios.zip` **once** and open the **dream-music-ogg** folder it makes. **Select > Select All > Move > On My iPad > Daggerfall Unity > Sound > Move**.
-11. Tap `DREAM-movies-ios.zip` **once** and open **dream-movies-ios**. Move everything to **Daggerfall Unity > Movies**.
-12. Tap `DREAM-extras-ios.zip` **once** and open **SpellIcons**. Move everything to **Daggerfall Unity > SpellIcons**.
-13. Go back one folder, open **Presets**, and move everything to **Daggerfall Unity > Presets**.
-
-They stay unused until your DREAM original is seen (Part E).
+1. In Safari, download `NonMIT-Pack-part1.zip`, `-part2.zip` and `-part3.zip` from **Assets**.
+2. In **Files** (**Downloads**), tap `NonMIT-Pack-part1.zip` **once**, then open the **NonMIT-Pack-part1** folder it makes.
+3. For **each folder** in it (**Mods**, **Sound**, **Movies**, ...): open it, tap **Select > Select All > Move**, pick the folder **with the same name** in **On My iPad > Daggerfall Unity**, tap **Move**. If asked about `pack-index.json`, tap **Replace**.
+   - Move the files, never the folder itself: moving a folder onto one with the same name can replace it and delete your other mods.
+4. Do steps 2 and 3 for **part2** and **part3**.
+5. Delete the zips and unpacked folders from **Downloads** to get the space back.
+6. Open the app, tap **Mods**, tap **Refresh**.
+   - **You should see:** grey rows: **Needs <mod name> - tap for the download page**. That is normal.
 
 ## Part E. Unlock a Non-MIT mod
 
 Do this once for each mod you want.
 
-1. Find the mod in the Non-MIT table of the [latest release](https://github.com/Codex64ai/daggerfall-unity-ios/releases) notes and tap its link. (Or in **Mods**, tap a grey **Needs ...** row, then tap it again.)
+1. Find the mod in **How to unlock the Non-MIT Pack** in the [latest release](https://github.com/Codex64ai/daggerfall-unity-ios/releases) notes and tap its link. (Or in **Mods**, tap a grey **Needs ...** row, then tap it again.)
 2. Download the original:
    - **Nexus:** sign in (free account), tap **Files**, find the main file, tap **Manual download**, then **Slow download**.
    - **GitHub:** tap the green **Code** button, then **Download ZIP**.

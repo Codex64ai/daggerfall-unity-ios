@@ -281,7 +281,8 @@ class NonMitPack(unittest.TestCase):
 
     def test_private_readme_wording(self):
         txt = pack.private_readme_text([("Mods/jh-questpack1-ios.dfmod", 1, "JH_QP1")])
-        self.assertIn("author's permission", txt)
+        self.assertTrue(txt.startswith("Non-MIT Pack: iOS conversions, locked until you add each original."))
+        self.assertIn("Do not move the folders", txt)
         self.assertNotIn("have not (yet) given a redistribution licence", txt)
 
     def test_shipped_private_entries_all_have_keys(self):
@@ -317,12 +318,12 @@ class NonMitPack(unittest.TestCase):
             self.assertEqual(pack.main(["--private", "--dream-dir", dream, "--out", z]), 0)
             with zipfile.ZipFile(z) as zf:
                 names = sorted(zf.namelist())
-                index = json.loads(zf.read("pack-index.json"))
+                index = json.loads(zf.read("Mods/pack-index.json"))
                 readme = zf.read("README.txt").decode("utf-8")
         finally:
             pack.MODS_DIR, pack.MODS_JSON = old
         self.assertEqual(names, sorted(["Mods/dex-ios.dfmod", "Mods/dream-sky-ios.dfmod",
-                                        "Mods/dream-mobs_1_of_2-ios.dfmod", "pack-index.json", "README.txt"]))
+                                        "Mods/dream-mobs_1_of_2-ios.dfmod", "Mods/pack-index.json", "README.txt"]))
         self.assertEqual({r["file"]: (r["size"], r["key"]) for r in index},
                          {"Mods/dex-ios.dfmod": (11, "DEX"), "Mods/dream-sky-ios.dfmod": (22, "DREAMSKY"),
                           "Mods/dream-mobs_1_of_2-ios.dfmod": (33, "DREAM")})
@@ -366,7 +367,7 @@ class NonMitPack(unittest.TestCase):
             z = os.path.join(root, "out.zip")
             self.assertEqual(pack.main(["--private", "--mods-dir", mods, "--out", z]), 0)
             with zipfile.ZipFile(z) as zf:
-                index = json.loads(zf.read("pack-index.json"))
+                index = json.loads(zf.read("Mods/pack-index.json"))
             self.assertEqual(index, [{"file": "Mods/dex-ios.dfmod", "size": 44, "key": "DEX"}])
         finally:
             pack.MODS_DIR, pack.MODS_JSON = old
@@ -386,7 +387,7 @@ class NonMitPack(unittest.TestCase):
             z = os.path.join(root, "out.zip")
             self.assertEqual(pack.main(["--private", "--dream-dir", d1, "--dream-dir", d2, "--out", z]), 0)
             with zipfile.ZipFile(z) as zf:
-                index = {r["file"]: r["key"] for r in json.loads(zf.read("pack-index.json"))}
+                index = {r["file"]: r["key"] for r in json.loads(zf.read("Mods/pack-index.json"))}
             self.assertEqual(index, {"Mods/dex-ios.dfmod": "DEX", "Mods/dream-mobs_1_of_6-ios.dfmod": "DREAM",
                                      "Mods/dream-textures_3_of_10-ios.dfmod": "DREAM", "Mods/dream-sky-ios.dfmod": "DREAMSKY"})
             # the same -ios name from two folders is refused
@@ -406,6 +407,33 @@ class NonMitPack(unittest.TestCase):
             z = os.path.join(root, "out.zip")
             self.assertNotEqual(pack.main(["--private", "--out", z]), 0)
             self.assertFalse(os.path.exists(z))
+        finally:
+            pack.MODS_DIR, pack.MODS_JSON = old
+
+    def test_private_zip_ships_loose_files_byte_for_byte(self):
+        import zipfile
+        root, mods, cfgp = self._private_fixture()
+        snd, pre = os.path.join(root, "music"), os.path.join(root, "extras", "Presets")
+        os.makedirs(os.path.join(pre, "dream-backgrounds-ios"))
+        os.makedirs(snd)
+        files = {os.path.join(snd, "song_30.ogg"): b"\x00ogg" * 9,
+                 os.path.join(snd, "README.txt"): b"skip me",
+                 os.path.join(pre, "dream-backgrounds-ios", "DREAM 2026.json"): b"{}"}
+        for path, data in files.items():
+            with open(path, "wb") as fh:
+                fh.write(data)
+        old = (pack.MODS_DIR, pack.MODS_JSON)
+        pack.MODS_DIR, pack.MODS_JSON = mods, cfgp
+        try:
+            z = os.path.join(root, "NonMIT-Pack.zip")
+            self.assertEqual(pack.main(["--private", "--out", z, "--loose", "Sound=" + snd,
+                                        "--loose", "Presets=" + pre]), 0)
+            with zipfile.ZipFile(z) as zf:
+                names = sorted(zf.namelist())
+                self.assertEqual(zf.read("Sound/song_30.ogg"), b"\x00ogg" * 9)
+            self.assertEqual(names, ["Mods/dex-ios.dfmod", "Mods/pack-index.json",
+                                     "Presets/dream-backgrounds-ios/DREAM 2026.json", "README.txt", "Sound/song_30.ogg"])
+            self.assertNotEqual(pack.main(["--private", "--out", z, "--loose", "Sound"]), 0)
         finally:
             pack.MODS_DIR, pack.MODS_JSON = old
 
@@ -432,8 +460,8 @@ class NonMitPack(unittest.TestCase):
                 with zipfile.ZipFile(p) as zf:
                     names = zf.namelist()
                     self.assertIn("README.txt", names)
-                    self.assertEqual(len(json.loads(zf.read("pack-index.json"))), 3)  # every part carries the full index
-                    shipped += [n for n in names if n.startswith("Mods/")]
+                    self.assertEqual(len(json.loads(zf.read("Mods/pack-index.json"))), 3)  # every part carries the full index
+                    shipped += [n for n in names if n.startswith("Mods/") and not n.endswith("pack-index.json")]
                 self.assertLess(os.path.getsize(p), (1 << 20) + 4096)
             self.assertEqual(sorted(shipped), ["Mods/dex-ios.dfmod", "Mods/dream-mobs_1_of_2-ios.dfmod",
                                                "Mods/dream-mobs_2_of_2-ios.dfmod"])

@@ -1015,10 +1015,10 @@ also on.
 ## Non-MIT Mod Pack
 
 Mods by permission, CC BY-NC-SA, or with no license. Locked until you add the original from the author's page.
-Files are `NonMIT-ModPack-ios-part1.zip` / `-part2.zip`, each `<stem>-ios.dfmod` listed in `pack-index.json` with
+Files are `NonMIT-Pack-part1.zip` / `-part2.zip` / `-part3.zip`, each `<stem>-ios.dfmod` listed in `pack-index.json` with
 its unlock key. The app records the player's original in `Documents/Mods/GameData/OriginalReceipts.json`; until
 then MODS shows a greyed `Needs <mod>` row linking to the original's page.
-DREAM's loose files (`DREAM-music-ios.zip`, `DREAM-movies-ios.zip`, `DREAM-extras-ios.zip`: music `.ogg`, HD cinematics
+DREAM's loose files (in the same pack: music `.ogg`, HD cinematics
 `.mp4`, Daedra `.FLC`, spell icon atlases, settings presets) are gated by the same DREAM receipt: each is listed by name
 and exact size in `KnownOursLoose` (`tools/known_ours_loose.py`), and without the receipt the app treats it as absent
 and uses the vanilla content.

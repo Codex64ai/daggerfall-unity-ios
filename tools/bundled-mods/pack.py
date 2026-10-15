@@ -2,15 +2,16 @@
 """Zip the built MIT mod bundles into the release asset MIT-ModPack-ios.zip.
 
     python3 tools/bundled-mods/pack.py [--out ~/Desktop/MIT-ModPack-ios.zip]
-    python3 tools/bundled-mods/pack.py --private [--mods-dir DIR] [--dream-dir DIR ...] [--out ~/Desktop/NonMIT-ModPack-ios.zip]
+    python3 tools/bundled-mods/pack.py --private [--mods-dir DIR] [--dream-dir DIR ...] [--loose FOLDER=DIR ...] [--out ~/Desktop/NonMIT-Pack.zip]
 
 --private builds the Non-MIT pack instead: every private_only bundle (plus the converted DREAM files in
-every --dream-dir) as <stem>-ios.dfmod, and pack-index.json (file, size, unlock key) that the app's
-MobileOriginalMods gate reads. Those files load only once the player's own original mod is in Documents/Mods.
+every --dream-dir) as Mods/<stem>-ios.dfmod, Mods/pack-index.json (file, size, unlock key) that the app's
+MobileOriginalMods gate reads, and the loose files of every --loose FOLDER=DIR as FOLDER/... (the zip mirrors
+the app's Documents folder). Those files load only once the player's own original mod is in Documents/Mods.
 --mods-dir reads the private_only bundles from DIR instead of Assets/StreamingAssets/Mods. --private first runs
 tools/known_ours.py --check and refuses to pack while MobileOriginalModsKnownOurs.cs is stale. A private pack
 bigger than --split-mb (default 1900 MiB; GitHub release assets must be under 2 GiB) is written as
-<out>-part1.zip, <out>-part2.zip, ... - each with the README and the whole pack-index.json.
+<out>-part1.zip, <out>-part2.zip, ... - each with the README and the whole Mods/pack-index.json.
 
 Reads Assets/StreamingAssets/Mods/*.dfmod and Licenses/ (produced by MobileBuildSetup.BuildBundledMods)
 and tools/bundled-mods/mods.json (the pin list), and refuses to pack unless every pinned mod has a
@@ -285,16 +286,13 @@ def original_authors(cfg, key):
 
 def private_readme_text(entries, cfg=None):
     lines = [
-        "Daggerfall Unity iOS - Non-MIT mod pack",
+        "Non-MIT Pack: iOS conversions, locked until you add each original.",
+        "See the release notes for where to get them.",
         "",
-        "These mods are not under an open licence: some are redistributed with the author's permission,",
-        "some are non-commercial (CC BY-NC-SA), some are pending the author's answer. To respect every",
-        "author, each file loads only once the app has seen your own copy of the original mod in",
-        "Documents/Mods (the download as-is, the desktop .dfmod, or an extracted quest-pack folder);",
-        "until then it shows as a greyed row in MODS.",
-        "",
-        "INSTALL: copy Mods/*.dfmod and pack-index.json into Documents/Mods with the Files app, add the",
-        "original mods you own beside them, then restart the app.",
+        "INSTALL: in the Files app, open each folder here (Mods, Sound, ...), Select All, and Move the",
+        "files into the folder of the same name in On My iPad > Daggerfall Unity. Do not move the folders",
+        "themselves: that can replace your Mods folder. Then put each original in Daggerfall Unity > Mods",
+        "and tap Refresh in MODS.",
         "",
     ]
     for f, _, key in sorted(entries):
@@ -346,6 +344,8 @@ def main_private(args, cfg):
                 if leaf.lower().endswith(".dfmod") and leaf.lower().startswith("dream"):
                     stem = leaf[:-len(".dfmod")]
                     files.append((os.path.join(dream_dir, leaf), ios_name(stem), dream_key(stem)))
+    loose, problems2 = loose_files(args.loose or [])
+    problems += problems2
     seen = set()
     for _, name, _ in files:
         if name in seen:
@@ -358,7 +358,9 @@ def main_private(args, cfg):
 
     entries = [("Mods/" + name, os.path.getsize(src), key) for src, name, key in files]
     limit = int(args.split_mb * (1 << 20)) if args.split_mb else None
-    parts = split_parts([((src, name), os.path.getsize(src)) for src, name, _ in files], limit)
+    items = [((src, "Mods/" + name), os.path.getsize(src)) for src, name, _ in files]
+    items += [((src, arc), os.path.getsize(src)) for src, arc in loose]
+    parts = split_parts(items, limit)
     if len(parts) == 1:
         outs = [args.out]
     else:
@@ -370,11 +372,30 @@ def main_private(args, cfg):
             os.remove(out)
         with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
             z.writestr("README.txt", readme)
-            z.writestr("pack-index.json", index)  # every part carries the whole index
-            for src, name in part:
-                z.write(src, "Mods/" + name)
+            z.writestr("Mods/pack-index.json", index)  # every part carries the whole index
+            for src, arc in part:
+                z.write(src, arc)
         print("wrote %s (%d files, %.1f MB)" % (out, len(part), os.path.getsize(out) / 1e6))
     return 0
+
+
+def loose_files(specs):
+    """["Sound=DIR", ...] -> ([(path, "Sound/<path under DIR>")], problems). Every file under DIR ships byte for
+    byte under the app's Documents folder of that name (README* notes are skipped)."""
+    out, problems = [], []
+    for spec in specs:
+        folder, _, src = spec.partition("=")
+        if not folder or not os.path.isdir(src):
+            problems.append("--loose needs FOLDER=DIR with an existing DIR: %s" % spec)
+            continue
+        for dirpath, dirnames, leaves in os.walk(src):
+            dirnames.sort()
+            for leaf in sorted(leaves):
+                if leaf.startswith(".") or leaf.upper().startswith("README"):
+                    continue
+                path = os.path.join(dirpath, leaf)
+                out.append((path, folder + "/" + os.path.relpath(path, src).replace(os.sep, "/")))
+    return out, problems
 
 
 def split_parts(items, limit):
@@ -398,6 +419,8 @@ def main(argv=None):
     ap.add_argument("--private", action="store_true", help="build the Non-MIT pack (-ios names + pack-index.json)")
     ap.add_argument("--dream-dir", action="append", default=None,
                     help="folder of converted DREAM .dfmod files (with --private; repeat for several folders)")
+    ap.add_argument("--loose", action="append", default=None, metavar="FOLDER=DIR",
+                    help="with --private: also ship every file under DIR as FOLDER/... (an app Documents folder: Sound, Movies, SpellIcons, Presets)")
     ap.add_argument("--split-mb", type=float, default=1900,
                     help="with --private: split into <out>-partN.zip of at most this many MiB (GitHub assets must be < 2 GiB; 0 = one zip)")
     ap.add_argument("--mods-dir", default=None, help="folder of the private_only bundles (with --private; default StreamingAssets/Mods)")
@@ -406,7 +429,7 @@ def main(argv=None):
         cfg = json.load(fh)
     if args.private:
         if not args.out:
-            args.out = os.path.expanduser("~/Desktop/NonMIT-ModPack-ios.zip")
+            args.out = os.path.expanduser("~/Desktop/NonMIT-Pack.zip")
         return main_private(args, cfg)
     if not args.out:
         args.out = os.path.expanduser("~/Desktop/MIT-ModPack-ios.zip")
