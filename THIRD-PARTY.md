@@ -18,7 +18,7 @@ this use is welcome.
 
 ## Tedious Travel
 
-Copyright (c) 2018 TheNewBob (Jedidia). MIT License. https://github.com/Jedidia/TediousTravel
+Copyright (c) 2018 TheNewBob (Jedidia). MIT License. https://github.com/TheNewBob/TediousTravel
 
 Used for: the design and portions of the implementation of real travel
 (`Assets/Scripts/Game/Mobile/MobileJourneyController.cs`, `MobileJourneyPilot.cs`,
@@ -31,15 +31,9 @@ with this repository; players supply their own `arena2` folder.
 
 ## Bundled mods
 
-Forty-four Daggerfall Unity mods are built into iOS `.dfmod` bundles and published as a mod pack
-alongside each release (and may ship inside the app), each switchable in the launcher's MODS window.
-Eleven are by **Cliffworms** (MIT); twenty-one are by **Jay_H** (redistributed with his permission);
-five are Vanilla Enhanced modules by **drcarademono and Kokey** (permission pending); six are UBLaMF
-modules by **XJDHDR** (CC BY-NC-SA 4.0); one is **Daggerfall Expanded Textures** by Ninelan
-(converted from the macOS release with the author's permission). All are MIT licensed (`Copyright (c) 2025
-Cliffworms`); the licence text ships in the app at `StreamingAssets/Mods/Licenses/`. They are
-fetched at the pinned commits by `tools/bundled-mods/fetch.py` and are not part of this
-repository's history.
+15 MIT mods ship in the MIT Mod Pack. Licenses are in `Mods/Licenses/`.
+Authors: Cliffworms (11 mods, with RebornZA and Deepfighter), Josh Steinhauer (Better Ambience),
+Kirk.O (Immersive Footsteps), numidium (Dynamic Music), DunnyOfPenwick (First-Person Lighting).
 
 | Mod | Repository | Commit | Manifest |
 |---|---|---|---|
@@ -100,9 +94,7 @@ Those quests load and do nothing until the port provides that action.
 
 Five modules built from https://github.com/drcarademono/vanilla-enhanced at `c0c9041c` using the
 authors' own manifests: Base (1,246 textures at 256 px plus materials), Masked Roads, Snowless
-Swamps and Jungles, Winter Tracks, and Kokey's Temperate. **No licence is declared and the authors
-have not yet been asked**; included at the port owner's request with a "permission pending" record
-in each bundle. Remove on request.
+Swamps and Jungles, Winter Tracks, and Kokey's Temperate. No license declared; permission pending.
 
 ### UBLaMF (XJDHDR)
 
@@ -146,18 +138,16 @@ Climates & Calories talks to Hazelnut's Travel Options; here a built-in entry ti
 answers those messages from this port's Real travel (`MobileTravelOptionsBridge`). No Travel Options code
 is included.
 
-## Dynamic Skies (compiled in, private draft only)
+## Dynamic Skies (compiled in)
 
 | Mod | Author, licence | Source | What is NOT shipped |
 |---|---|---|---|
-| Dynamic Skies 2.3.4 | BadLuckBurt & carademono, NO LICENCE DECLARED (permission being sought by Ikram; not in any public release) | github.com/drcarademono/dynamic-skies @ 04506e2 | `SunShafts.cs`, `PostEffectsBase.cs`, `SunShaftsComposite.shader`, `SimpleClear.shader`, `BLBProceduralSkyboxOriginal.shader` (Unity Standard Assets terms / dead code); the skybox shader is compiled into the app with its keyword set pinned |
+| Dynamic Skies 2.3.4 | BadLuckBurt & carademono, NO LICENCE DECLARED (permission pending) | github.com/drcarademono/dynamic-skies @ 04506e2 | `SunShafts.cs`, `PostEffectsBase.cs`, `SunShaftsComposite.shader`, `SimpleClear.shader`, `BLBProceduralSkyboxOriginal.shader` (Unity Standard Assets terms / dead code); the skybox shader is compiled into the app with its keyword set pinned |
 
-Because no licence has ever been declared upstream, this mod ships on the private test draft only -
-never in a public release, and `private_only` in `tools/bundled-mods/mods.json` keeps it out of the
-public MIT mod pack build. DREAM SKY 1.2 (King of Worms, Nexus mods/664) is a preset for it - textures
-and weather JSON, no code - converted to `dream-sky.dfmod` for the same private draft.
+Its code is compiled into the app but only runs once you add the original. DREAM SKY 1.2 (King of Worms, Nexus mods/664) is a preset for it - textures
+and weather JSON, no code - converted to `dream-sky.dfmod` in the Non-MIT Mod Pack.
 
-## World of Daggerfall (compiled in, private draft only)
+## World of Daggerfall (compiled in)
 
 Two mods, one feature. Location Loader is pure code - it has no content of its own and does nothing
 alone - and World of Daggerfall is the location mod it reads. Both follow the Dynamic Skies pattern:
@@ -174,11 +164,10 @@ that branch.
 
 | Mod | Author, licence | Source | What is NOT shipped |
 |---|---|---|---|
-| Location Loader 0.3 plus the type-5 backport | KABoissonneault, a fork of Uncanny_Valley's loader; NO LICENCE DECLARED (permission being sought by Ikram; not in any public release). The type-5 backport below is carademono's, from a fork which declares no licence either | github.com/KABoissonneault/DFU-LocationLoader @ a5e7a18, plus object type 5 (RMB blocks) backported from github.com/drcarademono/DFU-LocationLoader @ 896a574 (branch `rmb-object`) | the 3 editor scripts (`Scripts/Editor/`) - authoring tools, useless on a device. The 11 runtime files are compiled in under `Ports/LocationLoader/` (12 since WoD Biomes added `BiomesClimateSwap.cs`, off the same fork - see that section); upstream's manifest carries no data, so there is no bundle at all - the launcher entry is registered in code |
-| World of Daggerfall 0.4.0 | World of Daggerfall Team (KABoissonneault, Cliffworms, Kamer, carademono); NO LICENCE DECLARED (permission being sought by Ikram; not in any public release) | github.com/drcarademono/world-of-daggerfall @ 3bf8837 | WoD Terrain and Distant Terrain (separate mods, each shipped in its own right since 2026-09-09 - see their sections below), and the three optional dependencies Wilderness Overhaul, RMB Resource Pack and Beautiful Villages. WoD Biomes is a separate mod too, and is now shipped - see its own section below. Its one script, `WODRocksMaterials.cs`, is compiled in under `Ports/WorldOfDaggerfall/`; its data is the bundle |
+| Location Loader 0.3 plus the type-5 backport | KABoissonneault, a fork of Uncanny_Valley's loader; NO LICENCE DECLARED (permission pending). The type-5 backport below is carademono's, from a fork which declares no licence either | github.com/KABoissonneault/DFU-LocationLoader @ a5e7a18, plus object type 5 (RMB blocks) backported from github.com/drcarademono/DFU-LocationLoader @ 896a574 (branch `rmb-object`) | the 3 editor scripts (`Scripts/Editor/`) - authoring tools, useless on a device. The 11 runtime files are compiled in under `Ports/LocationLoader/` (12 since WoD Biomes added `BiomesClimateSwap.cs`, off the same fork - see that section); upstream's manifest carries no data, so there is no bundle at all - the launcher entry is registered in code |
+| World of Daggerfall 0.4.0 | World of Daggerfall Team (KABoissonneault, Cliffworms, Kamer, carademono); NO LICENCE DECLARED (permission pending) | github.com/drcarademono/world-of-daggerfall @ 3bf8837 | WoD Terrain and Distant Terrain (separate mods, each shipped in its own right since 2026-09-09 - see their sections below), and the three optional dependencies Wilderness Overhaul, RMB Resource Pack and Beautiful Villages. WoD Biomes is a separate mod too, and is now shipped - see its own section below. Its one script, `WODRocksMaterials.cs`, is compiled in under `Ports/WorldOfDaggerfall/`; its data is the bundle |
 
-Because no licence has ever been declared upstream for either repo, this ships on the private test
-draft only - never in a public release. Location Loader adds only code, so it is in every build: a
+Its code is compiled into the app but only runs once you add the original. Location Loader adds only code, so it is in every build: a
 built-in launcher entry titled `Location Loader` (upstream's own GUID `fc5c0fa6-...`), off by default,
 inert until switched on. World of Daggerfall's data is the downloadable bundle
 `worldofdaggerfall.dfmod`, marked `private_only` in `tools/bundled-mods/mods.json` so `pack.py` keeps
@@ -203,7 +192,7 @@ folders wholesale (files and their `.meta`) into the mod folder, leaving the man
 Unity resolves the references when it builds the bundle. Without it every WoD rock ships as a prefab
 with no model.
 
-## World of Daggerfall - Biomes (compiled in, private draft only)
+## World of Daggerfall - Biomes (compiled in)
 
 A third mod from the same team, and independent of the two above: it re-skins terrain and swaps
 nature billboards by itself, so it needs neither Location Loader nor World of Daggerfall - only
@@ -214,7 +203,7 @@ binds these scripts, so their `.meta` files carry fresh GUIDs rather than upstre
 
 | Mod | Author, licence | Source | What is NOT shipped |
 |---|---|---|---|
-| World of Daggerfall - Biomes 0.4.0 | carademono and Kab the Bird Ranger (World of Daggerfall Team); NO LICENCE DECLARED (permission being sought by Ikram; not in any public release) | github.com/drcarademono/wod-biomes @ 40449fc5fc55c85c8089b068acefe1db4b61534c | the repo's `.7z` and `.xcf` authoring files (`exclude_globs`), and nothing else - the manifest names every asset, and there are no prefabs, meshes, materials or shaders, so no `extra_dirs` flag was needed. The three scripts (`WODBiomes.cs`, `WODClimates.cs`, `WODTerrainMaterialProvider.cs`, 712 lines as ported) are compiled in under `Ports/WorldOfDaggerfallBiomes/`; the 225 PNGs are the bundle |
+| World of Daggerfall - Biomes 0.4.0 | carademono and Kab the Bird Ranger (World of Daggerfall Team); NO LICENCE DECLARED (permission pending) | github.com/drcarademono/wod-biomes @ 40449fc5fc55c85c8089b068acefe1db4b61534c | the repo's `.7z` and `.xcf` authoring files (`exclude_globs`), and nothing else - the manifest names every asset, and there are no prefabs, meshes, materials or shaders, so no `extra_dirs` flag was needed. The three scripts (`WODBiomes.cs`, `WODClimates.cs`, `WODTerrainMaterialProvider.cs`, 712 lines as ported) are compiled in under `Ports/WorldOfDaggerfallBiomes/`; the 225 PNGs are the bundle |
 
 What it does, in two parts. `WODTerrainMaterialProvider` takes DFU's `ITerrainMaterialProvider` slot
 and re-routes four climates to different ground archives - Subtropical to 4, the Dak'fron desert to 3,
@@ -236,8 +225,7 @@ that module enabled the swapped nature records are used at their own size; with 
 are scaled 2x, which is the mod's own no-VE path. It is not a dependency and the manifest does not
 declare one - either way the swap happens.
 
-Because no licence has ever been declared upstream, this ships on the private test draft only - never
-in a public release. The `tools/bundled-mods/mods.json` entry `WorldOfDaggerfallBiomes` is
+Its code is compiled into the app but only runs once you add the original. The `tools/bundled-mods/mods.json` entry `WorldOfDaggerfallBiomes` is
 `private_only` with a `pending:` licence, the combination `fetch.py` requires and `pack.py` hard-refuses
 in the public MIT mod pack; the fetched `LICENSE` record beside the mod is that pending text, not an
 upstream licence. The builder writes the bundle as `world of daggerfall - biomes.dfmod` (the lower-cased
@@ -307,7 +295,7 @@ body is wrapped so a failure logs once per distinct message rather than once per
 `[PortedMods] started World of Daggerfall - Biomes` and, once terrain has streamed in,
 `[Biomes] swapped N nature batches to archive 10030`.
 
-## World of Daggerfall - Terrain (compiled in, private draft only)
+## World of Daggerfall - Terrain (compiled in)
 
 The fourth mod of the set and much the most invasive: it does not decorate the world, it *replaces*
 it. `Monobelisk.InterestingTerrainSampler` takes DFU's `DaggerfallUnity.TerrainSampler` slot and
@@ -323,11 +311,11 @@ The lineage is long - monobelisk's Interesting Terrains, by way of
 Freak2121, carademono and Ninelan - and nowhere in it is a licence declared, so the same rule as the
 three sections above applies: the C# is compiled in under
 `Assets/Scripts/Game/Mobile/Ports/WorldOfDaggerfallTerrain/`, the data is an off-by-default entry in
-the launcher's MODS window fed by a bundle, and the bundle ships only on the private test draft.
+the launcher's MODS window fed by a bundle, and the bundle is in the Non-MIT Mod Pack.
 
 | Mod | Author, licence | Source | What is NOT shipped |
 |---|---|---|---|
-| World of Daggerfall - Terrain 1.5.0 | monobelisk, Freak2121, carademono, Ninelan (from monobelisk's Interesting Terrains); NO LICENCE DECLARED anywhere in the lineage (permission being sought by Ikram; not in any public release) | github.com/drcarademono/wod-terrain @ 9aeb1bcc5de5343ccb7a6b09062559ad871e9d40 | the repo's 212 MB of `.xcf` and `WOODS.WLD` authoring files (they are not in the manifest, and the fetch is manifest-only); the editor scripts and `Scripts/Models/Editor/`; `Helpers/ConsoleHandler.cs` (dev console commands, useless on a device) and the `ClearNoonRoutine` that existed only for its `clearnoon` command; the dead `MainHeightmapSmoother.compute`. The 20 remaining runtime files (+2,530 lines as ported) are compiled in under `Ports/WorldOfDaggerfallTerrain/`; the two live compute shaders and their four `.cginc` (6 files, +2,557 lines) are compiled into the app under `Assets/Resources/WoDTerrain/`; the five PNG world maps and the noise-parameter INI are the bundle |
+| World of Daggerfall - Terrain 1.5.0 | monobelisk, Freak2121, carademono, Ninelan (from monobelisk's Interesting Terrains); NO LICENCE DECLARED anywhere in the lineage (permission pending) | github.com/drcarademono/wod-terrain @ 9aeb1bcc5de5343ccb7a6b09062559ad871e9d40 | the repo's 212 MB of `.xcf` and `WOODS.WLD` authoring files (they are not in the manifest, and the fetch is manifest-only); the editor scripts and `Scripts/Models/Editor/`; `Helpers/ConsoleHandler.cs` (dev console commands, useless on a device) and the `ClearNoonRoutine` that existed only for its `clearnoon` command; the dead `MainHeightmapSmoother.compute`. The 20 remaining runtime files (+2,530 lines as ported) are compiled in under `Ports/WorldOfDaggerfallTerrain/`; the two live compute shaders and their four `.cginc` (6 files, +2,557 lines) are compiled into the app under `Assets/Resources/WoDTerrain/`; the five PNG world maps and the noise-parameter INI are the bundle |
 
 What it does, in two passes. At start-up `MainHeightmapComputer` is dispatched over the whole
 1000x500 world and the result replaces `ContentReader.WoodsFileReader.Buffer` - the small world
@@ -542,7 +530,7 @@ where upstream had CRLF - `InterestingTerrains.cs`, `Models/TerrainComputer.cs`,
 are exactly the five CRLF files that carry substantive `MOBILE` edits. A plain diff shows every line
 of them as changed; `diff <(tr -d '\r' < upstream/file) ported/file` shows what actually changed.
 
-## Distant Terrain of the World of Daggerfall (compiled in, private draft only)
+## Distant Terrain of the World of Daggerfall (compiled in)
 
 The fifth of the set, and the only one you look *at* rather than walk on. It draws a second, coarse
 Unity `Terrain` covering the whole province on a camera stacked behind the main one, so the horizon
@@ -558,11 +546,11 @@ versioned copy of them in existence is a vendored drop inside somestupidgirl's b
 So the same rule as the three sections above applies to the whole of it: the C# is compiled in under
 `Assets/Scripts/Game/Mobile/Ports/DistantTerrain/`, the rewritten shader under
 `Assets/Shaders/DistantTerrain/`, the data is an off-by-default entry in the launcher's MODS window
-fed by a bundle, and the bundle ships only on the private test draft.
+fed by a bundle, and the bundle is in the Non-MIT Mod Pack.
 
 | Mod | Author, licence | Source | What is NOT shipped |
 |---|---|---|---|
-| Distant Terrain of the World of Daggerfall | Base: Nystul-the-Magician, **MIT, 2017** (header preserved). WoD-flavour additions: MaoDeVaca (Nexus 1284), **NO LICENCE DECLARED** (permission being sought by Ikram; not in any public release) | Additions: github.com/somestupidgirl/Distant-Terrain-of-the-World-of-Daggerfall @ `d454b30af12c9f22c9ab5ef8ad5dbd9171d1cf1f` - the **only** versioned copy, and it is a vendored drop of upstream `a722b337935dd8a57a913eb413c918c351e68e67`; her own commits add build scripts, which are not used. MIT base: github.com/Nystul-the-Magician/dfunity-mods `DistantTerrain/` @ `fc58546c3eae964babfdfeea51e97a47ba57cdce` | `DistantTerrainFlyMap.cs` (930 lines - a keyboard/mouse/IMGUI free-camera teleporter, and a phone has neither) and `ThirteenthPassageEffect.cs` (144 lines - the "13th Passage" Mysticism teleport spell and its `passage` console command), with the spell registration, the console registration, the fly-map creation and the `KeyCode` settings that drove them. Excluded from the fetch as well: `*.shader`, `*.cginc` (the shader is compiled into the app, rewritten - see below), `*.prefab`, `*.png~`, `DaggerfallBillboardBatchFaded.shader`, and the three `*.bin.txt` blobs (`mapLocationRangeX`, `mapLocationRangeY`, `mapTreeCoverage`) nothing in the runtime reads. The five remaining runtime files (+3,918 lines as ported) are compiled in; the two shader files (+1,081) are compiled into the app; the three `Mountains*.csv` and `daggerfall_deriv_map.png` are the bundle, fetched into `ModResources/` rather than upstream's `Resources/` (a folder of that name is baked into every player build by Unity, which would ship this pending-licence data in a public IPA) |
+| Distant Terrain of the World of Daggerfall | Base: Nystul-the-Magician, **MIT, 2017** (header preserved). WoD-flavour additions: MaoDeVaca (Nexus 1284), **NO LICENCE DECLARED** (permission pending) | Additions: github.com/somestupidgirl/Distant-Terrain-of-the-World-of-Daggerfall @ `d454b30af12c9f22c9ab5ef8ad5dbd9171d1cf1f` - the **only** versioned copy, and it is a vendored drop of upstream `a722b337935dd8a57a913eb413c918c351e68e67`; her own commits add build scripts, which are not used. MIT base: github.com/Nystul-the-Magician/dfunity-mods `DistantTerrain/` @ `fc58546c3eae964babfdfeea51e97a47ba57cdce` | `DistantTerrainFlyMap.cs` (930 lines - a keyboard/mouse/IMGUI free-camera teleporter, and a phone has neither) and `ThirteenthPassageEffect.cs` (144 lines - the "13th Passage" Mysticism teleport spell and its `passage` console command), with the spell registration, the console registration, the fly-map creation and the `KeyCode` settings that drove them. Excluded from the fetch as well: `*.shader`, `*.cginc` (the shader is compiled into the app, rewritten - see below), `*.prefab`, `*.png~`, `DaggerfallBillboardBatchFaded.shader`, and the three `*.bin.txt` blobs (`mapLocationRangeX`, `mapLocationRangeY`, `mapTreeCoverage`) nothing in the runtime reads. The five remaining runtime files (+3,918 lines as ported) are compiled in; the two shader files (+1,081) are compiled into the app; the three `Mountains*.csv` and `daggerfall_deriv_map.png` are the bundle, fetched into `ModResources/` rather than upstream's `Resources/` (a folder of that name is baked into every player build by Unity, which would ship this pending-licence data in a public IPA) |
 
 The manifest is `distantterrain.dfmod.json`, so the bundle builds as `distantterrain.dfmod`, and the
 launcher entry keys on the manifest `ModTitle`, which is the full
@@ -846,7 +834,7 @@ the world-entry peak the thing to watch, because Distant Terrain's build lands o
 World of Daggerfall's location loading. **Watch memory at world entry with all three WoD mods on** is
 therefore a named item of the device hand-off, not a general caution.
 
-## Real Grass (compiled in, private draft only)
+## Real Grass (compiled in)
 
 The only mod in this build that uses Unity's terrain **detail** renderer - the grass billboards
 themselves, rather than the ground they stand on. It takes none of DFU's four terrain slots, so it is
@@ -881,8 +869,7 @@ set, and they are VMblast's:
 > [RealGrass for Daggerfall Unity].
 
 That is a positive permission, and it is scoped. Whether "this project" reaches an iOS port of the
-same mod is a reading that needs TheLacus's word, so the bundle ships **on the private test draft
-only and never in the public mod pack**: `private_only: true` with a `pending:` record in
+same mod is a reading that needs TheLacus's word, so the bundle stays out of the MIT pack: `private_only: true` with a `pending:` record in
 `tools/bundled-mods/mods.json`, and `pack.py` refuses a pending licence in the public pack as a hard
 error (`tools/bundled-mods/test_pack.py`, `RealGrassIsPrivateOnly`, asserts all of that against the
 shipped entry rather than a synthetic one).
@@ -894,7 +881,7 @@ fallback and nothing in the shipped configuration loads it. Neither appears in V
 the history says they predate his contribution - both were added in 2017 and last touched in 2018,
 where the changelog dates VMblast's textures to 2.3 and 2.11, and the green one has a changelog line
 in the original author's own voice ("Improved the green grass texture (I'm no artist but I try)").
-That is a strong lead and it is not a licence, so they ride the same private-only rule. One line
+That is a strong lead and it is not a licence, so they follow the same rule. One line
 from TheLacus or Uncanny_Valley would flip the whole entry; so would replacing the art with our own.
 The evidence is in the `licence` string so a future reader need not redo the archaeology.
 
@@ -1025,17 +1012,12 @@ streaming, and the cost is logged rather than asserted: `[RealGrass] detail data
 live terrains, so the measurement to take is after fast travel with Distant Terrain and WoD Terrain
 also on.
 
-## Non-MIT Mod Pack (private draft only, gated on the player's own original)
+## Non-MIT Mod Pack
 
-The mods above marked "private draft only" (and DREAM / DREAM SKY) have no redistribution licence. Their
-iOS conversions are published only on the private test draft as `NonMIT-ModPack-ios-part1.zip` /
-`-part2.zip`, every file renamed `<stem>-ios.dfmod` and listed in `pack-index.json` with its unlock key.
-**No file in that pack loads on its own:** the app loads it only after it has seen the player's own copy
-of the original mod (the downloaded archive or the desktop `.dfmod`) in `Documents/Mods` and recorded a
-receipt (`Documents/Mods/GameData/OriginalReceipts.json`); until then the MODS window shows a greyed
-`Needs <mod>` row linking to the original's own page. Each upload's release notes name the original and
-the version it was built from (DREAM: built from DREAM 2026, Nexus daggerfallunity mods/5, Mac OSX build
-5-2-0). The pack never goes into a public release.
+Mods by permission, CC BY-NC-SA, or with no license. Locked until you add the original from the author's page.
+Files are `NonMIT-ModPack-ios-part1.zip` / `-part2.zip`, each `<stem>-ios.dfmod` listed in `pack-index.json` with
+its unlock key. The app records the player's original in `Documents/Mods/GameData/OriginalReceipts.json`; until
+then MODS shows a greyed `Needs <mod>` row linking to the original's page.
 DREAM's loose files (`DREAM-music-ios.zip`, `DREAM-movies-ios.zip`, `DREAM-extras-ios.zip`: music `.ogg`, HD cinematics
 `.mp4`, Daedra `.FLC`, spell icon atlases, settings presets) are gated by the same DREAM receipt: each is listed by name
 and exact size in `KnownOursLoose` (`tools/known_ours_loose.py`), and without the receipt the app treats it as absent
@@ -1077,7 +1059,7 @@ everything outside the warped rectangle black), raised-cosine scanlines evaluate
 raster, a three-band phosphor grille taken from the destination pixel's own x coordinate, and a
 radial vignette. One texture fetch, one sampler, no dependent read.
 
-## Daggerfall Enemy Expansion (compiled in, private draft only)
+## Daggerfall Enemy Expansion (compiled in)
 
 Fifty new enemies — 35 monsters (ids 256–290) and 15 class enemies (384–398) — plus 43 career
 templates, 16 re-statted vanilla monsters, 2 re-statted vanilla class enemies and a rewrite of all
@@ -1093,7 +1075,7 @@ be read. Everything below is therefore a record of what we do not have.
 
 | Mod | Author, licence | Source | What is NOT shipped |
 |---|---|---|---|
-| Daggerfall Enemy Expansion 1.3.4 | Kamer & Kab. **No licence declared anywhere** — no `LICENSE`, no source header, Nexus permissions unreadable. Permission is being sought from Kab (code) and Kamer (art); until both are given, private test draft only | github.com/SquidKamer/DaggerfallBestiaryProject @ `fa21b07331e914d9e622aeaef65a4d8ab9496872` ("Added Pirate Sprite Archive (1529)", default-branch head 2026-09-14); manifest `DaggerfallBestiaryProject.dfmod.json`, GUID `76557441-7025-402e-a145-e3e1a28a093d` | `Scripts/Editor/` — `BestiaryModManager.cs` and `BestiaryEncounterTablesEditor.cs`, the authoring windows for the CSV databases, which open Unity editor windows and write the repo's own files and are not in the author's manifest either; the 45 `KAMER - Witches` frames (archive 1516, records 5–9, frames 15–23) the manifest still lists but the repository no longer contains |
+| Daggerfall Enemy Expansion 1.3.4 | Kamer & Kab. **No licence declared anywhere** — no `LICENSE`, no source header, Nexus permissions unreadable. Permission is being sought from Kab (code) and Kamer (art); permission pending | github.com/SquidKamer/DaggerfallBestiaryProject @ `fa21b07331e914d9e622aeaef65a4d8ab9496872` ("Added Pirate Sprite Archive (1529)", default-branch head 2026-09-14); manifest `DaggerfallBestiaryProject.dfmod.json`, GUID `76557441-7025-402e-a145-e3e1a28a093d` | `Scripts/Editor/` — `BestiaryModManager.cs` and `BestiaryEncounterTablesEditor.cs`, the authoring windows for the CSV databases, which open Unity editor windows and write the repo's own files and are not in the author's manifest either; the 45 `KAMER - Witches` frames (archive 1516, records 5–9, frames 15–23) the manifest still lists but the repository no longer contains |
 
 **The art needs a second grant, and it may need one nobody in this mod's lineage can give.** The 56
 sprite folders are named after the game each set came from: 18 `ARENA - `, 7 `OBLIVION - `, 3
@@ -1102,7 +1084,7 @@ sprite folders are named after the game each set came from: 18 `ARENA - `, 7 `OB
 from other Bethesda titles rather than authored for Daggerfall. Kamer's own folders are a minority
 of the set. A grant from Kamer covers Kamer's frames; it cannot cover Arena's or Oblivion's.
 
-So the bundle ships **on the private test draft only and never in the public mod pack** —
+Its code is compiled into the app but only runs once you add the original. The bundle stays out of the MIT pack —
 `private_only: true` with a `pending:` record in `tools/bundled-mods/mods.json`, which `pack.py`
 refuses to put in the public zip. The switch is off by default in the launcher.
 
@@ -1123,7 +1105,7 @@ references still resolve through the upstream script GUIDs the port preserves.
 ## Atmosphere round: four optional audio and light mods (compiled in, all MIT)
 
 Added 2026-09-14. Unlike most of the entries above, **all four of these are plain MIT with no pending
-question**, so they ship in the public mod pack as well as the private draft. Each one's C# is
+question**, so they ship in the MIT Mod Pack. Each one's C# is
 compiled into the app under `Assets/Scripts/Game/Mobile/Ports/<Mod>/` with its `[Invoke]` attribute
 removed (iOS compiles ahead of time; there is no mod assembly for DFU to scan) and every edit marked
 `// MOBILE:`; each one's DATA ships as its own bundle; each one's launcher entry is **off by
@@ -1205,7 +1187,7 @@ that repository and the README says nothing about licensing. The whole of the gr
 The mod's other source file, `Scripts/ImmersiveFootstepsObject.cs`, carries no header at all — but
 both files are by the same sole author, and the mod that header names is this one. All 210 audio
 clips are the author's own work. On that basis it ships in the public pack; if Kirk.O asks otherwise
-it moves to the private draft.
+it moves to the Non-MIT Mod Pack.
 
 **What is compiled in.** Both source files, under `Ports/ImmersiveFootsteps/`. The one substantive
 change is the Travel Options check: upstream finds that mod by Hazelnut's GUID, and this app has no

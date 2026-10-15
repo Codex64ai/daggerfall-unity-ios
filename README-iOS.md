@@ -10,6 +10,8 @@ making the game playable on iPhone and iPad without a keyboard or mouse.
 
 **You must supply your own Daggerfall game data. It is not included** - see below.
 
+**New here?** Follow the step-by-step [install guide](INSTALL-iOS.md) for the game and mods.
+
 ## What this adds
 
 - **Twin-stick controls** - left stick moves, right stick looks; drag anywhere on empty
@@ -751,10 +753,9 @@ there is no way to tap a button in a headless simulator run.
 
 ### Non-MIT Mod Pack and the original-mod unlock
 
-Some of the mods this port converts have no redistribution licence (DREAM, DREAM SKY, Daggerfall
-Enemy Expansion, Real Grass, Dynamic Skies, the World of Daggerfall family, Distant Terrain). Their iOS
-conversions ship on the private test draft only, as the **Non-MIT Mod Pack**, and each file loads
-only once the app has seen **your own copy of the original mod**. Three downloads:
+Mods by permission, CC BY-NC-SA, or with no license (DREAM, DREAM SKY, Daggerfall Enemy Expansion,
+Real Grass, Dynamic Skies, the World of Daggerfall family, Distant Terrain). Locked until you add the
+original from the author's page. Three downloads:
 
 Since 2026-10-15 the same lock also covers the 33 mods moved out of the MIT pack: the 21 Jay_H quest
 packs, the 6 UBLaMF modules, Vanilla Enhanced (Base, Masked Roads, Snowless Swamps and Jungles, Winter
@@ -821,7 +822,7 @@ is gated: your own music or movie replacements, other loose mods, or a DREAM-nam
 (default 1900 MiB). Release-notes template for each Non-MIT upload - name the original and the
 version it was built from:
 
-    Non-MIT Mod Pack (private draft): needs your own originals in Documents/Mods.
+    Non-MIT Mod Pack: needs your own originals in Documents/Mods.
     DREAM: built from DREAM 2026 (Nexus daggerfallunity mods/5, Mac OSX build 5-2-0) - https://www.nexusmods.com/daggerfallunity/mods/5
     <Mod>: built from <version> - <original URL>
 
